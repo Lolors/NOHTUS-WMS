@@ -2892,82 +2892,11 @@ document.querySelectorAll('[data-inbound-loc]').forEach(el => {{
 def page_inbound():
     _apply_inbound_location_pending()
     st.title("입고 등록")
-    st.markdown("""
-    <style>
-    .st-key-_inbound_js_loc_buffer, .st-key-_inbound_apply_btn {
-        position:absolute !important;
-        left:-9999px !important;
-        top:-9999px !important;
-        width:1px !important;
-        height:1px !important;
-        overflow:hidden !important;
-        opacity:0 !important;
-        pointer-events:none !important;
-    }
-    div[data-testid="stTextInput"]:has(input[aria-label="__입고도면선택값"]) {
-        position:absolute !important;
-        left:-9999px !important;
-        width:1px !important;
-        height:1px !important;
-        overflow:hidden !important;
-        opacity:0 !important;
-        pointer-events:none !important;
-    }
-    div[data-testid="stButton"]:has(button[data-testid="baseButton-secondary"] p) button:has(p) {
-        /* 일반 버튼에는 영향 없음. 아래 JS는 버튼 텍스트로만 숨김 적용한다. */
-    }
-    div[data-testid="stButton"]:has(button p) {
-        --noop: 1;
-    }
-    </style>
-    <script>
-    // Streamlit CSS :has 지원이 브라우저마다 조금 달라서, 숨김 적용은 JS에서도 한 번 더 한다.
-    setTimeout(() => {
-      try {
-        window.parent.document.querySelectorAll('button').forEach(btn => {
-          if ((btn.innerText || '').trim() === '__입고도면적용') {
-            const wrap = btn.closest('[data-testid="stButton"]') || btn.parentElement;
-            if (wrap) {
-              wrap.style.position = 'absolute';
-              wrap.style.left = '-9999px';
-              wrap.style.width = '1px';
-              wrap.style.height = '1px';
-              wrap.style.overflow = 'hidden';
-              wrap.style.opacity = '0';
-            }
-          }
-        });
-      } catch(e) {}
-    }, 100);
-    </script>
-    """, unsafe_allow_html=True)
-    st.text_input("__입고도면선택값", key="_inbound_js_loc_buffer", label_visibility="collapsed")
-    st.button("__입고도면적용", key="_inbound_apply_btn", on_click=_inbound_js_loc_changed)
-    components.html("""
-    <script>
-    function hideInboundApply(){
-      try{
-        const doc = window.parent.document;
-        doc.querySelectorAll('button').forEach(btn => {
-          if ((btn.innerText || '').trim() === '__입고도면적용') {
-            const wrap = btn.closest('[data-testid="stButton"]') || btn.parentElement;
-            if (wrap) {
-              wrap.style.position = 'absolute';
-              wrap.style.left = '-10000px';
-              wrap.style.top = '-10000px';
-              wrap.style.width = '1px';
-              wrap.style.height = '1px';
-              wrap.style.overflow = 'hidden';
-              wrap.style.opacity = '0';
-              wrap.style.pointerEvents = 'none';
-            }
-          }
-        });
-      }catch(e){}
-    }
-    hideInboundApply(); setTimeout(hideInboundApply, 50); setTimeout(hideInboundApply, 250); setTimeout(hideInboundApply, 800);
-    </script>
-    """, height=0)
+    
+    # 입고 도면 클릭값은 query parameter(inbound_loc)로 직접 처리한다.
+    # "__입고도면적용" 버튼/숨김 입력창은 생성하지 않는다.
+    # 버튼을 만들면 Streamlit이 먼저 렌더링해서 화면에 순간 노출된다.
+    
     _apply_inbound_location_pending()
     products = q("SELECT standard_name, warehouse_name FROM products ORDER BY standard_name")
     product_list = products["standard_name"].dropna().astype(str).tolist() if not products.empty else []
