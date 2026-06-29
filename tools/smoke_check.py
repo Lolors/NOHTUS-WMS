@@ -38,6 +38,7 @@ OPTIONAL_FILES_TO_COMPILE = [
     ROOT / "nohtus" / "services" / "products.py",
     ROOT / "nohtus" / "services" / "history.py",
     ROOT / "nohtus" / "pages" / "history.py",
+    ROOT / "nohtus" / "pages" / "move.py",
 ]
 
 
@@ -68,6 +69,8 @@ def main() -> None:
         import nohtus.services.history
     if (ROOT / "nohtus" / "pages" / "history.py").exists():
         import nohtus.pages.history
+    if (ROOT / "nohtus" / "pages" / "move.py").exists():
+        import nohtus.pages.move
 
     assert APP_TITLE == "NOHTUS WMS"
     assert "노투스팜" in COMPANIES
