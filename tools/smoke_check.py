@@ -35,6 +35,7 @@ FILES_TO_COMPILE = [
 
 OPTIONAL_FILES_TO_COMPILE = [
     ROOT / "nohtus" / "services" / "inventory.py",
+    ROOT / "nohtus" / "services" / "products.py",
 ]
 
 
@@ -59,6 +60,8 @@ def main() -> None:
 
     if (ROOT / "nohtus" / "services" / "inventory.py").exists():
         import nohtus.services.inventory
+    if (ROOT / "nohtus" / "services" / "products.py").exists():
+        import nohtus.services.products
 
     assert APP_TITLE == "NOHTUS WMS"
     assert "노투스팜" in COMPANIES
