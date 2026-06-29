@@ -3906,7 +3906,7 @@ def page_stocktake():
 def page_history():
     st.title("이력 조회")
     company = st.selectbox("사업장", ["전체"] + COMPANIES, index=0)
-    tx_label = st.selectbox("이력유형", ["전체", "입고", "출고지시", "출고지시취소", "이동", "재고조정", "전산재고"], index=0)
+    tx_label = st.selectbox("이력유형", ["전체", "입고", "출고지시", "출고지시취소", "이동", "재고조정", "재고정보수정", "전산재고"], index=0)
 
     today = date.today()
     default_start = today.replace(day=1)
@@ -3916,20 +3916,25 @@ def page_history():
     with date_col2:
         end_date = st.date_input("종료일", value=today, key="history_end_date")
 
+    if start_date and end_date and start_date > end_date:
+        st.error("시작일은 종료일보다 늦을 수 없습니다.")
+        return
+
     term = st.text_input("제품명/로케이션 검색", placeholder="제품명, LOT, 로케이션 일부 입력")
+
+    filter_key = f"{company}|{tx_label}|{start_date}|{end_date}|{term.strip()}"
+    if st.session_state.get("history_filter_key") != filter_key:
+        st.session_state["history_filter_key"] = filter_key
+        st.session_state["history_visible_limit"] = 500
+    visible_limit = int(st.session_state.get("history_visible_limit", 500) or 500)
+    visible_limit = max(500, visible_limit)
 
     conditions = []
     params = []
-    if start_date and end_date:
-        if start_date > end_date:
-            st.error("시작일은 종료일보다 늦을 수 없습니다.")
-            return
-        conditions.append("date(created_at) BETWEEN ? AND ?")
-        params.extend([str(start_date), str(end_date)])
-    elif start_date:
+    if start_date:
         conditions.append("date(created_at) >= ?")
         params.append(str(start_date))
-    elif end_date:
+    if end_date:
         conditions.append("date(created_at) <= ?")
         params.append(str(end_date))
     if company != "전체":
@@ -3937,7 +3942,7 @@ def page_history():
         params.extend([company, company])
     if tx_label != "전체":
         if tx_label == "이동":
-            conditions.append("tx_type IN ('위치이동','사업장이동','사업장+위치이동','비자료전환')")
+            conditions.append("tx_type IN ('위치이동','사업장이동','사업장+위치이동','비자료전환','이동')")
         elif tx_label == "전산재고":
             conditions.append("tx_type IN ('기준재고','전산재고')")
         else:
@@ -3947,18 +3952,25 @@ def page_history():
         conditions.append("tx_type NOT IN ('재고조사불러오기','ERP비교','출고','출고확정')")
     if term.strip():
         like = f"%{term.strip()}%"
-        conditions.append("(product_name LIKE ? OR lot LIKE ? OR from_location LIKE ? OR to_location LIKE ?)")
-        params.extend([like, like, like, like])
+        conditions.append("(product_name LIKE ? OR lot LIKE ? OR from_location LIKE ? OR to_location LIKE ? OR memo LIKE ?)")
+        params.extend([like, like, like, like, like])
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    total_df = q(f"SELECT COUNT(*) AS cnt FROM transactions {where}", tuple(params))
+    total_count = int(total_df.iloc[0]["cnt"] or 0) if not total_df.empty else 0
+    if total_count == 0:
+        st.info("조회된 이력이 없습니다.")
+        return
+
     df = q(f"""
         SELECT * FROM transactions
         {where}
         ORDER BY id DESC
-        LIMIT 2000
-    """, tuple(params))
-    if df.empty:
-        st.info("조회된 이력이 없습니다.")
-        return
+        LIMIT ? OFFSET 0
+    """, tuple(params + [visible_limit]))
+
+    st.caption(f"총 {total_count:,}건 중 {min(len(df), total_count):,}건 표시 중 (한 번에 500건씩 추가 로딩)")
+
     # warehouse_name은 화면에서 제외하고, 재고조정/재고실사는 +/-와 현재 최종재고를 표시한다.
     final_values = []
     qty_values = []
@@ -3979,6 +3991,8 @@ def page_history():
     show = df.copy()
     show["수량"] = qty_values
     show["최종재고"] = final_values
+    if "exp_date" in show.columns:
+        show["exp_date"] = show["exp_date"].apply(display_date_only)
     rename_cols = {
         "created_at":"일시", "tx_type":"이력유형", "product_name":"제품명",
         "lot":"LOT", "exp_date":"유통기한", "from_company":"출발사업장", "from_location":"출발위치",
@@ -3988,6 +4002,11 @@ def page_history():
     wanted = ["일시","이력유형","제품명","LOT","유통기한","출발사업장","출발위치","도착사업장","도착위치","수량","최종재고","메모"]
     show = show[[c for c in wanted if c in show.columns]]
     st.dataframe(show, use_container_width=True, hide_index=True)
+
+    if visible_limit < total_count:
+        if st.button("500건 더 보기", use_container_width=True):
+            st.session_state["history_visible_limit"] = visible_limit + 500
+            st.rerun()
 
 def page_master():
     st.title("제품 마스터")
