@@ -43,6 +43,7 @@ tools/
   apply_refactor_step4.py
   apply_refactor_step5.py
   apply_refactor_step6.py
+  apply_refactor_step7.py
 ```
 
 ## 현재 브랜치의 변경
@@ -61,6 +62,7 @@ tools/
 - `tools/apply_refactor_step4.py` 추가
 - `tools/apply_refactor_step5.py` 추가
 - `tools/apply_refactor_step6.py` 추가
+- `tools/apply_refactor_step7.py` 추가
 
 ## 리팩토링 원칙
 
@@ -133,9 +135,19 @@ streamlit run app.py
 
 문제가 없으면 `app.py`와 `nohtus/pages/history.py` 변경분을 함께 커밋한다.
 
+### Step 7: 이동 등록 화면 분리
+
+```bash
+python tools/apply_refactor_step7.py
+python tools/smoke_check.py
+streamlit run app.py
+```
+
+문제가 없으면 `app.py`와 `nohtus/pages/move.py` 변경분을 함께 커밋한다.
+
 ## 다음 단계
 
-1. 메뉴 렌더링을 `nohtus.navigation.MENU_SECTIONS` 기준으로 바꾼다.
+1. 재고 실사 화면을 `nohtus/pages/stocktake.py`로 이동한다.
 2. 출고/마감 로직을 서비스 모듈로 이동한다.
 3. 나머지 화면 함수는 한 번에 하나씩 `nohtus/pages/`로 이동한다.
 
