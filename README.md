@@ -51,3 +51,5 @@ scripts\run_wms.bat
 ## 개발 주의
 
 `__입고도면적용` 문제는 별도 버그 브랜치에서 단독 해결합니다. 이 문제를 고치면서 사진, 출고, UI, DB 로직을 같이 수정하지 않습니다.
+
+GitHub Connector write test line.
