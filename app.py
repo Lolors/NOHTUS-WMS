@@ -3905,22 +3905,29 @@ def page_stocktake():
 
 def page_history():
     st.title("이력 조회")
-    company = st.selectbox("사업장", ["전체"] + COMPANIES, index=0)
-    tx_label = st.selectbox("이력유형", ["전체", "입고", "출고지시", "출고지시취소", "이동", "재고조정", "재고정보수정", "전산재고"], index=0)
 
     today = date.today()
     default_start = today.replace(day=1)
-    date_col1, date_col2 = st.columns(2)
-    with date_col1:
+
+    filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
+    with filter_col1:
+        company = st.selectbox("사업장", ["전체"] + COMPANIES, index=0, key="history_company")
+    with filter_col2:
+        tx_label = st.selectbox("이력유형", ["전체", "입고", "출고지시", "출고지시취소", "이동", "재고조정", "재고정보수정", "전산재고"], index=0, key="history_tx_label")
+    with filter_col3:
         start_date = st.date_input("시작일", value=default_start, key="history_start_date")
-    with date_col2:
+    with filter_col4:
         end_date = st.date_input("종료일", value=today, key="history_end_date")
 
     if start_date and end_date and start_date > end_date:
         st.error("시작일은 종료일보다 늦을 수 없습니다.")
         return
 
-    term = st.text_input("제품명/로케이션 검색", placeholder="제품명, LOT, 로케이션 일부 입력")
+    search_col, blank_col = st.columns(2)
+    with search_col:
+        term = st.text_input("제품명/로케이션 검색", placeholder="제품명, LOT, 로케이션 일부 입력", key="history_search_term")
+    with blank_col:
+        st.markdown("&nbsp;", unsafe_allow_html=True)
 
     filter_key = f"{company}|{tx_label}|{start_date}|{end_date}|{term.strip()}"
     if st.session_state.get("history_filter_key") != filter_key:
