@@ -22,6 +22,7 @@ FILES_TO_COMPILE = [
     ROOT / "app.py",
     ROOT / "styles.py",
     ROOT / "inbound_map.py",
+    ROOT / "tools" / "refactor.py",
     ROOT / "nohtus" / "__init__.py",
     ROOT / "nohtus" / "config.py",
     ROOT / "nohtus" / "db.py",
