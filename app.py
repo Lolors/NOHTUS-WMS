@@ -2958,23 +2958,11 @@ def page_inbound():
     product_list = products["standard_name"].dropna().astype(str).tolist() if not products.empty else []
 
     def inbound_product_label(value):
+        # 검색은 표준제품명/ERP명/비자료명/별칭 전체를 대상으로 하되,
+        # 콤보박스에는 현장 혼선을 줄이기 위해 표준제품명만 표시한다.
         if value == "":
             return "제품명을 입력하거나 선택하세요"
-        try:
-            row = products[products["standard_name"].astype(str) == str(value)]
-            if row.empty:
-                return str(value)
-            r = row.iloc[0]
-            extras = []
-            seen = {str(value)}
-            for c in ["warehouse_name", "aliases", "erp_nohtuspharm_name", "erp_nohtus_name", "erp_noh_name", "bidata_name"]:
-                v = str(r.get(c) or "").strip()
-                if v and v.lower() != "nan" and v not in seen:
-                    extras.append(v)
-                    seen.add(v)
-            return f"{value} / {' / '.join(extras)}" if extras else str(value)
-        except Exception:
-            return str(value)
+        return str(value)
 
     top_left, top_right = st.columns(2, gap="large")
     with top_left:
@@ -4211,6 +4199,12 @@ def customer_export_excel_bytes():
     df = q("SELECT customer_code AS 거래처코드, customer_name AS 거래처명, company AS 사업장, customer_type AS 유형, manager AS 담당자, phone AS 연락처, address AS 주소, memo AS 메모 FROM customers ORDER BY customer_name")
     return dataframe_to_excel_bytes(df, "거래처관리")
 
+def page_inventory_metadata_edit():
+    st.title("재고정보 수정")
+    st.caption("기존 재고의 제조번호/유통기한이 잘못 입력된 경우에만 사용합니다. 수량은 변경하지 않습니다.")
+    render_inventory_metadata_editor()
+
+
 def page_customer_master():
     st.title("거래처 관리")
     st.caption("거래처 엑셀을 업로드하면 출고지시와 업무일지에서 매출처/담당자 정보를 재사용할 수 있습니다.")
@@ -5397,6 +5391,7 @@ def main():
     st.sidebar.markdown("### 재고")
     nav_button("입고 등록")
     nav_button("이동 등록")
+    nav_button("재고정보 수정")
     nav_button("이력 조회")
     nav_button("재고 실사")
 
@@ -5411,6 +5406,7 @@ def main():
     elif menu == "마감": page_closing()
     elif menu == "입고 등록": page_inbound()
     elif menu == "이동 등록": page_move()
+    elif menu == "재고정보 수정": page_inventory_metadata_edit()
     elif menu == "재고 실사": page_stocktake()
     elif menu == "제품 매칭 관리": page_product_matching()
     elif menu == "거래처 관리": page_customer_master()
