@@ -198,6 +198,20 @@ def init_db():
         PRIMARY KEY(company, source_name)
     )
     """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS mobile_favorites(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT,
+        UNIQUE(username, product_name)
+    )
+    """)
+    fav_cols = {r[1] for r in cur.execute("PRAGMA table_info(mobile_favorites)").fetchall()}
+    if "sort_order" not in fav_cols:
+        cur.execute("ALTER TABLE mobile_favorites ADD COLUMN sort_order INTEGER DEFAULT 0")
+
     # v3.8: 더미데이터 자동 생성 중단.
     # 처음 실행 시 제품/재고는 비어 있으며, 제품마스터 엑셀 또는 재고조사 엑셀 업로드로 채웁니다.
     con.commit(); con.close()
@@ -487,6 +501,45 @@ def ensure_standard_product_only(name):
     return name
 
 
+
+def ensure_inbound_first_product_mapping(standard_name, company, erp_name, product_code=""):
+    """입고 최초 등록용: 표준제품명과 선택 사업장의 ERP명/제품코드를 제품매칭표에 저장한다."""
+    standard_name = (standard_name or "").strip()
+    company = (company or "").strip()
+    erp_name = (erp_name or "").strip()
+    product_code = (product_code or "").strip()
+    if not standard_name:
+        raise ValueError("표준제품명을 입력하세요.")
+    if not erp_name:
+        raise ValueError("ERP명/비자료명을 입력하세요.")
+
+    with connect() as con:
+        cur = con.cursor()
+        row = cur.execute("SELECT id FROM products WHERE TRIM(standard_name)=?", (standard_name,)).fetchone()
+        if row:
+            pid = int(row[0])
+        else:
+            cur.execute("""
+                INSERT INTO products(
+                    product_code, standard_name, warehouse_name, aliases,
+                    erp_nohtuspharm_name, erp_nohtus_name, erp_noh_name, erp_noh_code, bidata_name
+                ) VALUES(?,?,?,?,?,?,?,?,?)
+            """, ("", standard_name, standard_name, "", "", "", "", "", ""))
+            pid = int(cur.lastrowid)
+
+        if company == "노투스팜":
+            cur.execute("UPDATE products SET erp_nohtuspharm_name=?, product_code=? WHERE id=?", (erp_name, product_code, pid))
+        elif company == "NOH":
+            cur.execute("UPDATE products SET erp_noh_name=?, erp_noh_code=? WHERE id=?", (erp_name, product_code, pid))
+        elif company == "노투스":
+            cur.execute("UPDATE products SET erp_nohtus_name=? WHERE id=?", (erp_name, pid))
+        elif company == "비자료":
+            cur.execute("UPDATE products SET bidata_name=? WHERE id=?", (erp_name, pid))
+        else:
+            raise ValueError("최초 등록은 사업장을 먼저 선택해야 합니다.")
+        con.commit()
+    return standard_name, erp_name
+
 def apply_standard_name_change(old_name, new_name):
     """제품 매칭표에서 표준제품명이 바뀌면 이미 올라간 재고/이력에도 즉시 반영한다."""
     old_name = (old_name or "").strip()
@@ -686,11 +739,40 @@ def full_inventory_excel_bytes(exclude_zero=True):
     return bio.getvalue()
 
 
+def _baseline_stock_excel_bytes_from_dataframe(df):
+    """기준재고 업로드 양식 형태로 DataFrame을 엑셀로 변환한다."""
+    bio = BytesIO()
+    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="기준재고업로드")
+        ws = writer.book["기준재고업로드"]
+        from openpyxl.styles import Border, Side, Font, PatternFill, Alignment
+        thin = Side(style="thin", color="000000")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        header_fill = PatternFill("solid", fgColor="E5E7EB")
+        optional_fill = PatternFill("solid", fgColor="EEF2FF")
+        widths = {"A":14,"B":18,"C":34,"D":30,"E":18,"F":16,"G":18,"H":10}
+        for col, width in widths.items():
+            ws.column_dimensions[col].width = width
+        ws.freeze_panes = "A2"
+        max_row = max(1, len(df) + 1)
+        ws.auto_filter.ref = f"A1:H{max_row}"
+        for row in ws.iter_rows():
+            for cell in row:
+                cell.border = border
+                cell.alignment = Alignment(vertical="center", wrap_text=True)
+                if cell.column_letter == "B":
+                    cell.number_format = "@"
+                    if cell.value is not None:
+                        cell.value = str(cell.value)
+                if cell.row == 1:
+                    cell.font = Font(bold=True)
+                    cell.fill = optional_fill if cell.value == "표준제품명" else header_fill
+    bio.seek(0)
+    return bio.getvalue()
+
+
 def baseline_stock_template_excel_bytes():
-    """기준재고 업로드용 샘플 양식.
-    사용자가 ERP/비자료 내용을 가공해 만든 초기 재고자료를 WMS DB에 넣기 위한 최소 양식이다.
-    표준제품명은 비워서 올려도 제품매칭표 기준으로 자동 보완한다.
-    """
+    """기준재고 업로드용 빈 샘플 양식."""
     sample = pd.DataFrame([
         {
             "사업장": "노투스팜",
@@ -713,33 +795,69 @@ def baseline_stock_template_excel_bytes():
             "수량": 20,
         },
     ])
-    bio = BytesIO()
-    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-        sample.to_excel(writer, index=False, sheet_name="기준재고업로드")
-        ws = writer.book["기준재고업로드"]
-        from openpyxl.styles import Border, Side, Font, PatternFill, Alignment
-        thin = Side(style="thin", color="000000")
-        border = Border(left=thin, right=thin, top=thin, bottom=thin)
-        header_fill = PatternFill("solid", fgColor="E5E7EB")
-        optional_fill = PatternFill("solid", fgColor="EEF2FF")
-        widths = {"A":14,"B":18,"C":34,"D":30,"E":18,"F":16,"G":18,"H":10}
-        for col, width in widths.items():
-            ws.column_dimensions[col].width = width
-        ws.freeze_panes = "A2"
-        ws.auto_filter.ref = f"A1:H{len(sample)+1}"
-        for row in ws.iter_rows():
-            for cell in row:
-                cell.border = border
-                cell.alignment = Alignment(vertical="center", wrap_text=True)
-                if cell.column_letter == "B":
-                    cell.number_format = "@"
-                    if cell.value is not None:
-                        cell.value = str(cell.value)
-                if cell.row == 1:
-                    cell.font = Font(bold=True)
-                    cell.fill = optional_fill if cell.value == "표준제품명" else header_fill
-    bio.seek(0)
-    return bio.getvalue()
+    return _baseline_stock_excel_bytes_from_dataframe(sample)
+
+
+def current_baseline_stock_excel_bytes(exclude_zero=False):
+    """현재 WMS 재고를 기준재고 업로드 양식에 채워서 내려받는다."""
+    where_sql = "WHERE qty > 0" if exclude_zero else ""
+    inv = q(f"""
+        SELECT company, product_name, warehouse_name, lot, exp_date, location, qty
+        FROM inventory
+        {where_sql}
+        ORDER BY company, product_name, lot, exp_date, location
+    """)
+    cols = ["사업장", "ERP제품코드", "ERP제품명", "표준제품명", "LOT/제조번호", "유통기한", "로케이션", "수량"]
+    if inv.empty:
+        return _baseline_stock_excel_bytes_from_dataframe(pd.DataFrame(columns=cols))
+
+    product_df = q("""
+        SELECT standard_name, product_code, erp_noh_code,
+               erp_nohtuspharm_name, erp_noh_name, erp_nohtus_name, bidata_name
+        FROM products
+    """)
+    product_map = {}
+    if not product_df.empty:
+        for r in product_df.itertuples(index=False):
+            product_map[str(getattr(r, "standard_name") or "").strip()] = {
+                "product_code": str(getattr(r, "product_code") or "").strip(),
+                "erp_noh_code": str(getattr(r, "erp_noh_code") or "").strip(),
+                "erp_nohtuspharm_name": str(getattr(r, "erp_nohtuspharm_name") or "").strip(),
+                "erp_noh_name": str(getattr(r, "erp_noh_name") or "").strip(),
+                "erp_nohtus_name": str(getattr(r, "erp_nohtus_name") or "").strip(),
+                "bidata_name": str(getattr(r, "bidata_name") or "").strip(),
+            }
+
+    rows = []
+    for r in inv.itertuples(index=False):
+        company = str(getattr(r, "company") or "").strip()
+        standard = str(getattr(r, "product_name") or "").strip()
+        warehouse = str(getattr(r, "warehouse_name") or "").strip()
+        info = product_map.get(standard, {})
+        code = ""
+        erp_name = warehouse or standard
+        if company == "노투스팜":
+            code = info.get("product_code", "")
+            erp_name = info.get("erp_nohtuspharm_name", "") or warehouse or standard
+        elif company == "NOH":
+            code = info.get("erp_noh_code", "")
+            erp_name = info.get("erp_noh_name", "") or warehouse or standard
+        elif company == "노투스":
+            erp_name = info.get("erp_nohtus_name", "") or warehouse or standard
+        elif company == "비자료":
+            erp_name = info.get("bidata_name", "") or warehouse or standard
+
+        rows.append({
+            "사업장": company,
+            "ERP제품코드": code,
+            "ERP제품명": erp_name,
+            "표준제품명": standard,
+            "LOT/제조번호": str(getattr(r, "lot") or "-").strip() or "-",
+            "유통기한": display_date_only(getattr(r, "exp_date") or "-"),
+            "로케이션": str(getattr(r, "location") or "").strip(),
+            "수량": int(getattr(r, "qty") or 0),
+        })
+    return _baseline_stock_excel_bytes_from_dataframe(pd.DataFrame(rows, columns=cols))
 
 
 def _baseline_get_product_raw(row):
@@ -1145,9 +1263,9 @@ def location_picker(prefix, default_area="A1", stock_only=False):
     picker_defaults = st.session_state.get(f"_{prefix}_picker_defaults", {}) or {}
     widget_suffix = ""
     if picker_defaults:
-        # 외부 도면 클릭으로 key 재생성이 필요한 입고 화면에만 토큰 suffix를 붙인다.
-        # 이동 등록은 사용자가 콤보박스에서 직접 타이핑/선택한 값을 안정적으로 유지하기 위해 고정 key를 사용한다.
-        if prefix == "inbound":
+        # 외부 값으로 기본 위치를 바꿔야 하는 화면은 token suffix로 위젯을 재생성한다.
+        # inbound: 도면 클릭값 반영 / move: 도착 사업장의 기존 재고 위치 자동 반영
+        if prefix in ["inbound", "move"]:
             widget_suffix = f"_{st.session_state.get(f'_{prefix}_picker_token', 0)}"
         default_area = picker_defaults.get("area") or default_area
 
@@ -1329,6 +1447,130 @@ def inbound_company_options_for(product_name):
                     stock[c] = int(getattr(r, "qty", 0) or 0)
     return [f"{c} ({stock.get(c, 0)} EA)" for c in COMPANIES] + ["등록대기"]
 
+
+
+# ---------------- mobile stock finder helpers ----------------
+def mobile_favorite_users():
+    """모바일 재고찾기 즐겨찾기 사용자 목록."""
+    try:
+        df = q("SELECT DISTINCT username FROM mobile_favorites ORDER BY username")
+        users = [str(x).strip() for x in df["username"].dropna().tolist() if str(x).strip()]
+    except Exception:
+        users = []
+    return users
+
+
+def mobile_favorites_for_user(username):
+    username = (username or "").strip() or "기본"
+    try:
+        return q("""
+            SELECT product_name, COALESCE(sort_order, 0) AS sort_order
+            FROM mobile_favorites
+            WHERE username=?
+            ORDER BY sort_order, product_name
+        """, (username,))
+    except Exception:
+        return pd.DataFrame(columns=["product_name", "sort_order"])
+
+
+def mobile_is_favorite(username, product_name):
+    username = (username or "").strip() or "기본"
+    product_name = (product_name or "").strip()
+    if not product_name:
+        return False
+    try:
+        df = q("SELECT 1 FROM mobile_favorites WHERE username=? AND product_name=? LIMIT 1", (username, product_name))
+        return not df.empty
+    except Exception:
+        return False
+
+
+def mobile_add_favorite(username, product_name):
+    username = (username or "").strip() or "기본"
+    product_name = (product_name or "").strip()
+    if not product_name:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with connect() as con:
+        cur = con.cursor()
+        row = cur.execute("SELECT COALESCE(MAX(sort_order), -1) FROM mobile_favorites WHERE username=?", (username,)).fetchone()
+        next_order = int((row[0] if row else -1) or -1) + 1
+        cur.execute("""
+            INSERT OR IGNORE INTO mobile_favorites(username, product_name, sort_order, created_at)
+            VALUES(?,?,?,?)
+        """, (username, product_name, next_order, now))
+        con.commit()
+
+
+def mobile_remove_favorite(username, product_name):
+    username = (username or "").strip() or "기본"
+    product_name = (product_name or "").strip()
+    with connect() as con:
+        con.execute("DELETE FROM mobile_favorites WHERE username=? AND product_name=?", (username, product_name))
+        con.commit()
+    mobile_reindex_favorites(username)
+
+
+def mobile_reindex_favorites(username):
+    username = (username or "").strip() or "기본"
+    df = mobile_favorites_for_user(username)
+    with connect() as con:
+        cur = con.cursor()
+        for i, r in enumerate(df.itertuples(index=False)):
+            cur.execute("UPDATE mobile_favorites SET sort_order=? WHERE username=? AND product_name=?", (i, username, getattr(r, "product_name")))
+        con.commit()
+
+
+def mobile_move_favorite(username, product_name, direction):
+    username = (username or "").strip() or "기본"
+    product_name = (product_name or "").strip()
+    df = mobile_favorites_for_user(username)
+    names = df["product_name"].astype(str).tolist() if not df.empty else []
+    if product_name not in names:
+        return
+    idx = names.index(product_name)
+    new_idx = idx - 1 if direction == "up" else idx + 1
+    if new_idx < 0 or new_idx >= len(names):
+        return
+    names[idx], names[new_idx] = names[new_idx], names[idx]
+    with connect() as con:
+        cur = con.cursor()
+        for i, name in enumerate(names):
+            cur.execute("UPDATE mobile_favorites SET sort_order=? WHERE username=? AND product_name=?", (i, username, name))
+        con.commit()
+
+
+def mobile_product_candidates(term="", limit=30):
+    """표준제품명/ERP명/비자료명/별칭으로 검색하되 표시값은 표준제품명만 반환."""
+    df = product_options(term)
+    if df.empty:
+        return []
+    return df["standard_name"].dropna().astype(str).drop_duplicates().head(limit).tolist()
+
+
+def mobile_stock_rows(product_name, company_filter="전체", expiry_filter="전체"):
+    product_name = (product_name or "").strip()
+    if not product_name:
+        return pd.DataFrame()
+    conditions = ["product_name=?", "qty>0"]
+    params = [product_name]
+    if company_filter and company_filter != "전체":
+        conditions.append("company=?")
+        params.append(company_filter)
+    where = " AND ".join(conditions)
+    df = q(f"""
+        SELECT company, location, lot, exp_date, qty
+        FROM inventory
+        WHERE {where}
+        ORDER BY company, exp_date, location, lot
+    """, tuple(params))
+    if df.empty:
+        return df
+    df["상태"] = df["exp_date"].apply(expiry_status)
+    if expiry_filter and expiry_filter != "전체":
+        df = df[df["상태"] == expiry_filter]
+    return df
+
 # ---------------- inventory operations ----------------
 def add_inventory(company, product, warehouse, lot, exp, location, qty, memo="입고 등록"):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1381,6 +1623,14 @@ def move_inventory(src_id, to_company, to_location, qty, memo=""):
         if str(old_warehouse or "").strip() != str(dest_warehouse or "").strip():
             erp_note = f"전산상명칭 변경: {old_warehouse or '-'} → {dest_warehouse or '-'}"
             move_memo = f"{move_memo} / {erp_note}" if move_memo else erp_note
+        if src["company"] != to_company:
+            dest_company_qty_row = cur.execute(
+                "SELECT COALESCE(SUM(qty), 0) FROM inventory WHERE company=? AND product_name=?",
+                (to_company, product_name),
+            ).fetchone()
+            dest_company_qty = int((dest_company_qty_row[0] if dest_company_qty_row else 0) or 0)
+            stock_note = f"이동 후 {to_company} 해당 제품 재고: {dest_company_qty}EA"
+            move_memo = f"{move_memo} / {stock_note}" if move_memo else stock_note
 
         insert_transaction_log(cur, created_at=now, tx_type=tx_type, product_name=product_name, warehouse_name=dest_warehouse,
                                lot=src["lot"], exp_date=src["exp_date"], from_company=src["company"], from_location=src["location"],
@@ -2947,15 +3197,12 @@ document.querySelectorAll('[data-inbound-loc]').forEach(el => {{
 def page_inbound():
     _apply_inbound_location_pending()
     st.title("입고 등록")
-    
+
     # 입고 도면 클릭값은 query parameter(inbound_loc)로 직접 처리한다.
     # "__입고도면적용" 버튼/숨김 입력창은 생성하지 않는다.
     # 버튼을 만들면 Streamlit이 먼저 렌더링해서 화면에 순간 노출된다.
-    
+
     _apply_inbound_location_pending()
-    inbound_product_term = st.text_input("제품 검색", placeholder="제품명, ERP명, 비자료명, 별칭 일부 입력", key="inbound_product_term")
-    products = product_options(inbound_product_term)
-    product_list = products["standard_name"].dropna().astype(str).tolist() if not products.empty else []
 
     def inbound_product_label(value):
         # 검색은 표준제품명/ERP명/비자료명/별칭 전체를 대상으로 하되,
@@ -2973,21 +3220,35 @@ def page_inbound():
             _inbound_selected_product_for_stock = st.session_state.get("inbound_product", "")
             company_label = st.selectbox("사업장", inbound_company_options_for(_inbound_selected_product_for_stock), key="inbound_company")
             company = strip_company_stock_label(company_label)
-        first_product_state = bool(st.session_state.get("inbound_first_product", False))
-        selected_product = st.selectbox(
-            "제품",
-            [""] + product_list,
-            index=0,
-            key="inbound_product",
-            format_func=inbound_product_label,
-            disabled=first_product_state,
-        )
+
+        inbound_product_term = st.text_input("제품 검색", placeholder="제품명, ERP명, 비자료명, 별칭 일부 입력", key="inbound_product_term")
+        products = product_options(inbound_product_term)
+        product_list = products["standard_name"].dropna().astype(str).drop_duplicates().tolist() if not products.empty else []
+
         first_product = st.checkbox("최초 등록", key="inbound_first_product")
         if first_product:
-            product = st.text_input("제품명 직접 입력", value="", placeholder="신규 표준제품명 입력", key="inbound_new_product_name").strip()
+            st.markdown("##### 최초 제품 등록")
+            product = st.text_input("표준제품명", value="", placeholder="WMS 표준제품명", key="inbound_new_product_name").strip()
+            first_erp_name = st.text_input(
+                "ERP명" if company != "비자료" else "비자료명",
+                value="",
+                placeholder="선택한 사업장의 ERP명/비자료명",
+                key="inbound_new_erp_name",
+            ).strip()
+            first_product_code = st.text_input("제품코드", value="", placeholder="노투스팜/NOH ERP 제품코드", key="inbound_new_product_code").strip()
+            wh = first_erp_name or product
         else:
+            selected_product = st.selectbox(
+                "제품",
+                [""] + product_list,
+                index=0,
+                key="inbound_product",
+                format_func=inbound_product_label,
+            )
             product = selected_product
-        wh = product_mapping_name_for(company, product) or product
+            first_erp_name = ""
+            first_product_code = ""
+            wh = product_mapping_name_for(company, product) or product
     with top_right:
         lot = st.text_input("LOT/제조번호", value="", placeholder="미입력 시 '-' 저장", key="inbound_lot")
         exp = st.text_input("유통기한", value="", placeholder="예: 28/3/2, 28.3.2, 2028-03-02 / 미입력 시 '-' 저장", key="inbound_exp")
@@ -3009,20 +3270,21 @@ def page_inbound():
         save_msg = st.empty()
         if save_clicked:
             if not product:
-                save_msg.error("제품을 선택하세요.")
+                save_msg.error("제품을 선택하거나 표준제품명을 입력하세요.")
             else:
-                if first_product:
-                    product = ensure_standard_product_only(product)
-                    wh = product
-                memo_parts = []
-                if inbound_source:
-                    memo_parts.append(f"매입처: {inbound_source}")
-                if memo:
-                    memo_parts.append(memo)
-                inbound_memo = " / ".join(memo_parts) if memo_parts else "입고 등록"
-                add_inventory(company, product, wh, normalize_blank(lot), normalize_exp_date(exp), loc, int(qty), inbound_memo)
-                save_msg.success(f"입고 저장 완료: {company} / {product} / {loc} / {qty}EA")
-
+                try:
+                    if first_product:
+                        product, wh = ensure_inbound_first_product_mapping(product, company, first_erp_name, first_product_code)
+                    memo_parts = []
+                    if inbound_source:
+                        memo_parts.append(f"매입처: {inbound_source}")
+                    if memo:
+                        memo_parts.append(memo)
+                    inbound_memo = " / ".join(memo_parts) if memo_parts else "입고 등록"
+                    add_inventory(company, product, wh, normalize_blank(lot), normalize_exp_date(exp), loc, int(qty), inbound_memo)
+                    save_msg.success(f"입고 저장 완료: {company} / {product} / {loc} / {qty}EA")
+                except Exception as e:
+                    save_msg.error(str(e))
 
 def page_move():
     st.title("이동 등록")
@@ -3064,6 +3326,27 @@ def page_move():
         to_company = st.selectbox("도착 사업장", COMPANIES, index=default_idx, key=f"move_company_{src_id}")
         if to_company != src_company:
             st.warning("정말로 다른 사업장으로 재고를 이동하시겠습니까?")
+
+        # 도착 사업장에 같은 제품 재고가 이미 있으면 그 재고의 기존 로케이션을 기본 도착 위치로 잡는다.
+        # 여러 위치에 있으면 수량이 가장 많은 위치를 우선한다.
+        existing_loc_df = q("""SELECT location, SUM(qty) AS qty
+                              FROM inventory
+                              WHERE company=? AND product_name=? AND qty>0
+                              GROUP BY location
+                              ORDER BY qty DESC, location
+                              LIMIT 1""", (to_company, product))
+        if not existing_loc_df.empty:
+            preferred_loc = str(existing_loc_df.iloc[0]["location"] or "").strip()
+            preferred_qty = int(existing_loc_df.iloc[0]["qty"] or 0)
+            if preferred_loc:
+                auto_key = f"{src_id}|{to_company}|{product}|{preferred_loc}"
+                if st.session_state.get("_move_auto_loc_key") != auto_key:
+                    area, line, level = parse_location(preferred_loc)
+                    st.session_state["_move_picker_defaults"] = {"area": area, "line": line, "level": level}
+                    st.session_state["_move_picker_token"] = int(st.session_state.get("_move_picker_token", 0) or 0) + 1
+                    st.session_state["_move_auto_loc_key"] = auto_key
+                st.caption(f"도착 사업장 기존 재고 위치 자동 선택: {preferred_loc} ({preferred_qty}EA)")
+
         to_location = location_picker("move", "A1")
         qty = st.number_input("이동 수량", min_value=1, max_value=max_qty, value=min(1,max_qty), step=1)
         memo = st.text_input("메모", value="")
@@ -3257,9 +3540,9 @@ def page_outbound():
         cust_df = pd.DataFrame()
         if cust_term.strip():
             like = f"%{cust_term.strip()}%"
-            cust_df = q("""SELECT * FROM customers WHERE customer_name LIKE ? ORDER BY customer_name LIMIT 30""", (like,))
+            cust_df = q("""SELECT * FROM customers WHERE customer_name LIKE ? ORDER BY customer_name, company, id LIMIT 50""", (like,))
         else:
-            cust_df = q("""SELECT * FROM customers ORDER BY customer_name LIMIT 30""")
+            cust_df = q("""SELECT * FROM customers ORDER BY customer_name, company, id LIMIT 50""")
         if not cust_df.empty:
             labels = [f"{r.customer_name} | {r.company or '-'}" for r in cust_df.itertuples()]
             label = st.selectbox("거래처 선택", labels, key="out_customer_select")
@@ -3752,6 +4035,123 @@ def page_saved_outbound():
             _show_cancel_order_confirm(int(order_id))
 
 
+
+def page_mobile_stock_finder():
+    st.title("재고 찾기")
+    st.caption("모바일 조회 전용 화면입니다. 표준제품명, ERP명, 비자료명, 별칭으로 제품을 찾아 현재 재고 위치를 확인합니다.")
+
+    users = mobile_favorite_users()
+    user_options = users + ["새 사용자 입력"] if users else ["기본", "새 사용자 입력"]
+    default_user = st.session_state.get("mobile_stock_user", users[0] if users else "기본")
+    default_idx = user_options.index(default_user) if default_user in user_options else 0
+    user_choice = st.selectbox("사용자", user_options, index=default_idx, key="mobile_user_select")
+    if user_choice == "새 사용자 입력":
+        username = st.text_input("사용자명", value=st.session_state.get("mobile_stock_user", ""), placeholder="예: 김대리", key="mobile_user_new").strip() or "기본"
+    else:
+        username = user_choice
+    st.session_state["mobile_stock_user"] = username
+
+    fav_df = mobile_favorites_for_user(username)
+    with st.expander("❤️ 즐겨찾기", expanded=not fav_df.empty):
+        if fav_df.empty:
+            st.caption("아직 즐겨찾기가 없습니다. 제품 검색 후 즐겨찾기에 추가하세요.")
+        else:
+            for i, r in enumerate(fav_df.itertuples(index=False)):
+                fav_name = str(getattr(r, "product_name") or "")
+                c1, c2, c3, c4 = st.columns([5, 1, 1, 1])
+                with c1:
+                    if st.button(fav_name, key=f"mobile_fav_pick_{username}_{fav_name}", use_container_width=True):
+                        st.session_state["mobile_selected_product"] = fav_name
+                        st.session_state["mobile_product_term"] = fav_name
+                        st.rerun()
+                with c2:
+                    if st.button("▲", key=f"mobile_fav_up_{username}_{fav_name}", disabled=(i == 0), use_container_width=True):
+                        mobile_move_favorite(username, fav_name, "up")
+                        st.rerun()
+                with c3:
+                    if st.button("▼", key=f"mobile_fav_down_{username}_{fav_name}", disabled=(i == len(fav_df)-1), use_container_width=True):
+                        mobile_move_favorite(username, fav_name, "down")
+                        st.rerun()
+                with c4:
+                    if st.button("삭제", key=f"mobile_fav_del_{username}_{fav_name}", use_container_width=True):
+                        mobile_remove_favorite(username, fav_name)
+                        st.rerun()
+
+    term = st.text_input("제품 검색", placeholder="표준제품명 또는 ERP명 입력", key="mobile_product_term")
+    filter_c1, filter_c2 = st.columns(2)
+    with filter_c1:
+        company_filter = st.selectbox("사업장", ["전체"] + COMPANIES, key="mobile_company_filter")
+    with filter_c2:
+        expiry_filter = st.selectbox("유통기한", ["전체", "정상", "임박(6개월)", "만료"], key="mobile_expiry_filter")
+
+    candidates = mobile_product_candidates(term, limit=30) if term.strip() else []
+    selected_product = st.session_state.get("mobile_selected_product", "")
+    if candidates:
+        if selected_product not in candidates:
+            selected_product = candidates[0]
+        selected_product = st.selectbox(
+            "제품 선택",
+            candidates,
+            index=candidates.index(selected_product) if selected_product in candidates else 0,
+            key="mobile_product_select",
+        )
+        st.session_state["mobile_selected_product"] = selected_product
+    elif term.strip():
+        st.info("검색 결과가 없습니다. ERP명이나 표준제품명을 다시 확인해주세요.")
+        return
+    elif not selected_product:
+        st.info("제품명을 검색하거나 즐겨찾기를 선택하세요.")
+        return
+
+    if not selected_product:
+        return
+
+    rows = mobile_stock_rows(selected_product, company_filter=company_filter, expiry_filter=expiry_filter)
+    total_qty = int(rows["qty"].sum()) if not rows.empty else 0
+
+    st.markdown("---")
+    fav = mobile_is_favorite(username, selected_product)
+    title_col, fav_col = st.columns([4, 2])
+    with title_col:
+        st.subheader(selected_product)
+        st.markdown(f"### 총재고 {total_qty:,}EA")
+    with fav_col:
+        if fav:
+            if st.button("★ 즐겨찾기 해제", use_container_width=True, key=f"mobile_unfav_{username}_{selected_product}"):
+                mobile_remove_favorite(username, selected_product)
+                st.rerun()
+        else:
+            if st.button("☆ 즐겨찾기 추가", use_container_width=True, key=f"mobile_addfav_{username}_{selected_product}"):
+                mobile_add_favorite(username, selected_product)
+                st.rerun()
+
+    if rows.empty or total_qty <= 0:
+        st.warning("조건에 맞는 현재 재고가 없습니다.")
+        return
+
+    company_totals = rows.groupby("company")["qty"].sum().sort_index()
+    summary = " · ".join([f"{company} {int(qty):,}EA" for company, qty in company_totals.items() if int(qty or 0) > 0])
+    if summary:
+        st.caption(summary)
+
+    for company, cdf in rows.groupby("company", sort=True):
+        ctotal = int(cdf["qty"].sum())
+        if ctotal <= 0:
+            continue
+        with st.expander(f"{company} ({ctotal:,}EA)", expanded=True):
+            cdf = cdf.copy()
+            cdf["_exp_sort"] = pd.to_datetime(cdf["exp_date"], errors="coerce")
+            cdf["_exp_sort"] = cdf["_exp_sort"].fillna(pd.Timestamp.max)
+            cdf = cdf.sort_values(["_exp_sort", "location", "qty"])
+            for r in cdf.itertuples(index=False):
+                loc = str(getattr(r, "location") or "-")
+                exp = display_date_only(getattr(r, "exp_date") or "-")
+                qty = int(getattr(r, "qty") or 0)
+                status = expiry_status(getattr(r, "exp_date") or "-")
+                badge = "🟢" if status == "정상" else ("🟡" if status.startswith("임박") else "🔴")
+                st.markdown(f"{badge} **{loc}** &nbsp;&nbsp; {exp} &nbsp;&nbsp; **{qty:,}EA**", unsafe_allow_html=True)
+
+
 def page_search():
     st.title("제품 검색")
     term = st.text_input("검색어")
@@ -3760,12 +4160,87 @@ def page_search():
 
 def page_stocktake():
     st.title("재고 실사")
-    st.caption("재고 실사용 엑셀을 내려받고, 기준재고를 업로드하거나 제품명/LOT/유통기한/로케이션 단위로 필요한 재고만 조정합니다.")
+    st.caption("제품명/LOT/유통기한/로케이션 단위로 필요한 재고를 먼저 조정하고, 실사용 엑셀과 기준재고 양식을 내려받거나 업로드합니다.")
 
-    file_col, empty_col = st.columns([3, 7], gap="large")
-    with file_col:
-        st.subheader("실사 파일")
-        excel_data = full_inventory_excel_bytes(exclude_zero=st.session_state.get("stocktake_exclude_zero", True))
+    st.subheader("재고조정")
+    adj_df = q("""
+        SELECT id, location, company, product_name, warehouse_name, lot, exp_date, qty
+        FROM inventory
+        WHERE qty > 0
+        ORDER BY product_name, lot, exp_date, location
+    """)
+    if adj_df.empty:
+        st.info("조정할 현재 재고가 없습니다.")
+    else:
+        adjust_left, adjust_right = st.columns([4, 6], gap="large")
+        with adjust_left:
+            search = st.text_input("조정 대상 제품 검색", placeholder="제품명/전산상 명칭/LOT/로케이션 일부를 입력하세요", key="stock_adjust_search")
+            filtered = adj_df.copy()
+            if search.strip():
+                term = search.strip().lower()
+                filtered = filtered[
+                    filtered["product_name"].fillna("").str.lower().str.contains(term, regex=False)
+                    | filtered["warehouse_name"].fillna("").str.lower().str.contains(term, regex=False)
+                    | filtered["lot"].fillna("").str.lower().str.contains(term, regex=False)
+                    | filtered["location"].fillna("").str.lower().str.contains(term, regex=False)
+                ]
+            if filtered.empty:
+                st.warning("검색어와 일치하는 재고가 없습니다.")
+            else:
+                products = filtered["product_name"].dropna().astype(str).drop_duplicates().tolist()
+                product = st.selectbox("제품명", products, key="stock_adjust_product")
+                lot_df = filtered[filtered["product_name"] == product].copy()
+                lots = lot_df["lot"].fillna("-").astype(str).drop_duplicates().tolist()
+                lot = st.selectbox("LOT/제조번호", lots, key=f"stock_adjust_lot_{product}")
+                exp_df = lot_df[lot_df["lot"].fillna("-").astype(str) == lot].copy()
+                exps = exp_df["exp_date"].fillna("-").astype(str).drop_duplicates().tolist()
+                exp = st.selectbox("유통기한", exps, key=f"stock_adjust_exp_{product}_{lot}", format_func=display_date_only)
+                target_df = exp_df[exp_df["exp_date"].fillna("-").astype(str) == exp].copy()
+
+                with adjust_right:
+                    st.markdown("#### 선택 재고")
+                    show = target_df[["id", "location", "company", "product_name", "warehouse_name", "lot", "exp_date", "qty"]].copy()
+                    show = show.rename(columns={
+                        "id": "ID", "location": "로케이션", "company": "사업장", "product_name": "표준제품명",
+                        "warehouse_name": "전산상명칭", "lot": "제조번호", "exp_date": "유통기한", "qty": "수량"
+                    })
+                    show["유통기한"] = show["유통기한"].apply(display_date_only)
+                    st.dataframe(show, hide_index=True, use_container_width=True)
+
+                    labels = []
+                    id_by_label = {}
+                    for r in target_df.itertuples():
+                        label = f"{r.location} / {r.company} / 현재 {int(r.qty)}EA"
+                        labels.append(label)
+                        id_by_label[label] = int(r.id)
+                    selected = st.selectbox("조정 대상 로케이션", labels, key=f"stock_adjust_inv_{product}_{lot}_{exp}")
+                    inv_id = id_by_label[selected]
+                    row = target_df[target_df["id"] == inv_id].iloc[0]
+                    actual = st.number_input("실물수량", min_value=0, value=int(row["qty"]), step=1, key=f"stock_adjust_actual_{inv_id}")
+                    reason = st.selectbox("사유", ["실사차이", "파손", "유통기한만료", "오출고", "기타"], key=f"stock_adjust_reason_{inv_id}")
+                    memo = st.text_input("메모", placeholder="필요 시 입력", key=f"stock_adjust_memo_{inv_id}")
+                    if st.button("재고조정 저장", type="primary", use_container_width=True, key=f"stock_adjust_submit_{inv_id}"):
+                        try:
+                            before, after, diff = adjust_inventory(int(inv_id), int(actual), reason, memo)
+                            st.session_state["_stock_adjust_success_msg"] = f"재고조정 완료: {before}EA → {after}EA ({diff:+d}EA)"
+                            st.rerun()
+                        except Exception as e:
+                            st.error(str(e))
+        stock_adjust_msg = st.session_state.pop("_stock_adjust_success_msg", None)
+        if stock_adjust_msg:
+            st.success(stock_adjust_msg)
+
+    st.markdown("---")
+    st.subheader("실사/기준재고 파일")
+    file_left, file_right = st.columns(2, gap="large")
+    with file_left:
+        st.markdown("#### 재고 실사용 엑셀")
+        exclude_zero = st.checkbox(
+            "재고가 0인 경우는 포함하지 않기",
+            value=st.session_state.get("stocktake_exclude_zero", True),
+            key="stocktake_exclude_zero",
+        )
+        excel_data = full_inventory_excel_bytes(exclude_zero=exclude_zero)
         st.download_button(
             "재고 실사용 엑셀 내려받기",
             data=excel_data,
@@ -3773,18 +4248,18 @@ def page_stocktake():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-        exclude_zero = st.checkbox("재고가 0인 경우는 포함하지 않기", value=st.session_state.get("stocktake_exclude_zero", True), key="stocktake_exclude_zero")
 
-        st.markdown("<div style='text-align:center;font-size:1.02rem;font-weight:900;margin:18px 0 6px;'>기준재고 업로드</div>", unsafe_allow_html=True)
+    with file_right:
+        st.markdown("#### 기준재고")
         st.download_button(
-            "기준재고 업로드 샘플 양식 다운로드",
-            data=baseline_stock_template_excel_bytes(),
-            file_name="NOHTUS_기준재고_업로드_샘플양식.xlsx",
+            "현재 기준 재고 양식 다운로드",
+            data=current_baseline_stock_excel_bytes(exclude_zero=False),
+            file_name=f"NOHTUS_현재기준재고양식_{date.today().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
         survey_file = st.file_uploader("기준재고 엑셀 선택", type=["xlsx"], key="stock_survey_upload")
-        replace_current = st.checkbox("기존 현재재고를 삭제하고 업로드 파일로 교체", value=True)
+        replace_current = st.checkbox("기존 현재재고를 삭제하고 업로드 파일로 교체", value=True, key="stock_survey_replace_current")
         if survey_file is not None:
             st.warning("업로드 실행 시 현재재고가 바뀔 수 있습니다. 운영 DB에서는 파일을 한 번 더 확인하세요.")
             if st.button("기준재고 DB 반영", type="primary", use_container_width=True):
@@ -3795,79 +4270,6 @@ def page_stocktake():
                     st.rerun()
                 except Exception as e:
                     st.error(f"반영 실패: {e}")
-    with empty_col:
-        st.empty()
-
-    st.markdown("---")
-    st.subheader("재고조정")
-    adj_df = q("""
-        SELECT id, location, company, product_name, warehouse_name, lot, exp_date, qty
-        FROM inventory
-        WHERE qty > 0
-        ORDER BY product_name, lot, exp_date, location
-    """)
-    if adj_df.empty:
-        st.info("조정할 현재 재고가 없습니다.")
-        return
-
-    adjust_left, adjust_right = st.columns([4, 6], gap="large")
-    with adjust_left:
-        search = st.text_input("조정 대상 제품 검색", placeholder="제품명/전산상 명칭/LOT/로케이션 일부를 입력하세요", key="stock_adjust_search")
-        filtered = adj_df.copy()
-        if search.strip():
-            term = search.strip().lower()
-            filtered = filtered[
-                filtered["product_name"].fillna("").str.lower().str.contains(term, regex=False)
-                | filtered["warehouse_name"].fillna("").str.lower().str.contains(term, regex=False)
-                | filtered["lot"].fillna("").str.lower().str.contains(term, regex=False)
-                | filtered["location"].fillna("").str.lower().str.contains(term, regex=False)
-            ]
-        if filtered.empty:
-            st.warning("검색어와 일치하는 재고가 없습니다.")
-            return
-
-        products = filtered["product_name"].dropna().astype(str).drop_duplicates().tolist()
-        product = st.selectbox("제품명", products, key="stock_adjust_product")
-        lot_df = filtered[filtered["product_name"] == product].copy()
-        lots = lot_df["lot"].fillna("-").astype(str).drop_duplicates().tolist()
-        lot = st.selectbox("LOT/제조번호", lots, key=f"stock_adjust_lot_{product}")
-        exp_df = lot_df[lot_df["lot"].fillna("-").astype(str) == lot].copy()
-        exps = exp_df["exp_date"].fillna("-").astype(str).drop_duplicates().tolist()
-        exp = st.selectbox("유통기한", exps, key=f"stock_adjust_exp_{product}_{lot}", format_func=display_date_only)
-        target_df = exp_df[exp_df["exp_date"].fillna("-").astype(str) == exp].copy()
-
-    with adjust_right:
-        st.markdown("#### 선택 재고")
-        show = target_df[["id", "location", "company", "product_name", "warehouse_name", "lot", "exp_date", "qty"]].copy()
-        show = show.rename(columns={
-            "id": "ID", "location": "로케이션", "company": "사업장", "product_name": "표준제품명",
-            "warehouse_name": "전산상명칭", "lot": "제조번호", "exp_date": "유통기한", "qty": "수량"
-        })
-        show["유통기한"] = show["유통기한"].apply(display_date_only)
-        st.dataframe(show, hide_index=True, use_container_width=True)
-
-        labels = []
-        id_by_label = {}
-        for r in target_df.itertuples():
-            label = f"{r.location} / {r.company} / 현재 {int(r.qty)}EA"
-            labels.append(label)
-            id_by_label[label] = int(r.id)
-        selected = st.selectbox("조정 대상 로케이션", labels, key=f"stock_adjust_inv_{product}_{lot}_{exp}")
-        inv_id = id_by_label[selected]
-        row = target_df[target_df["id"] == inv_id].iloc[0]
-        actual = st.number_input("실물수량", min_value=0, value=int(row["qty"]), step=1, key=f"stock_adjust_actual_{inv_id}")
-        reason = st.selectbox("사유", ["실사차이", "파손", "유통기한만료", "오출고", "기타"], key=f"stock_adjust_reason_{inv_id}")
-        memo = st.text_input("메모", placeholder="필요 시 입력", key=f"stock_adjust_memo_{inv_id}")
-        if st.button("재고조정 저장", type="primary", use_container_width=True, key=f"stock_adjust_submit_{inv_id}"):
-            try:
-                before, after, diff = adjust_inventory(int(inv_id), int(actual), reason, memo)
-                st.session_state["_stock_adjust_success_msg"] = f"재고조정 완료: {before}EA → {after}EA ({diff:+d}EA)"
-                st.rerun()
-            except Exception as e:
-                st.error(str(e))
-        stock_adjust_msg = st.session_state.pop("_stock_adjust_success_msg", None)
-        if stock_adjust_msg:
-            st.success(stock_adjust_msg)
 
 def page_history():
     st.title("이력 조회")
@@ -3889,13 +4291,13 @@ def page_history():
         st.error("시작일은 종료일보다 늦을 수 없습니다.")
         return
 
-    search_col, blank_col = st.columns(2)
+    search_col, customer_col = st.columns(2)
     with search_col:
         term = st.text_input("제품명/로케이션 검색", placeholder="제품명, LOT, 로케이션 일부 입력", key="history_search_term")
-    with blank_col:
-        st.markdown("&nbsp;", unsafe_allow_html=True)
+    with customer_col:
+        customer_term = st.text_input("매출처 검색", placeholder="매출처명 일부 입력", key="history_customer_term")
 
-    filter_key = f"{company}|{tx_label}|{start_date}|{end_date}|{term.strip()}"
+    filter_key = f"{company}|{tx_label}|{start_date}|{end_date}|{term.strip()}|{customer_term.strip()}"
     if st.session_state.get("history_filter_key") != filter_key:
         st.session_state["history_filter_key"] = filter_key
         st.session_state["history_visible_limit"] = 500
@@ -3927,6 +4329,28 @@ def page_history():
         like = f"%{term.strip()}%"
         conditions.append("(product_name LIKE ? OR lot LIKE ? OR from_location LIKE ? OR to_location LIKE ? OR memo LIKE ?)")
         params.extend([like, like, like, like, like])
+    if customer_term.strip():
+        matched_order_ids = []
+        try:
+            orders_for_customer = q("SELECT id, COALESCE(title, '') AS title FROM outbound_orders ORDER BY id DESC")
+            customers_for_infer = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
+            needle = customer_term.strip().lower()
+            for r in orders_for_customer.itertuples(index=False):
+                title = str(getattr(r, "title", "") or "")
+                inferred_customer, _manager = _infer_customer_from_title(title, customers_for_infer)
+                if needle in title.lower() or needle in str(inferred_customer or "").lower():
+                    matched_order_ids.append(int(getattr(r, "id")))
+        except Exception:
+            matched_order_ids = []
+        matched_order_ids = sorted(set(matched_order_ids))
+        if matched_order_ids:
+            order_clauses = []
+            for oid in matched_order_ids:
+                order_clauses.append("memo LIKE ?")
+                params.append(f"%출고지시서 #{oid}%")
+            conditions.append("(" + " OR ".join(order_clauses) + ")")
+        else:
+            conditions.append("1=0")
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     total_df = q(f"SELECT COUNT(*) AS cnt FROM transactions {where}", tuple(params))
@@ -3964,6 +4388,36 @@ def page_history():
     show = df.copy()
     show["수량"] = qty_values
     show["최종재고"] = final_values
+
+    # 출고 관련 이력은 memo의 "출고지시서 #번호"를 기준으로 outbound_orders 제목을 찾고,
+    # 제목에서 매출처를 추정해 이력조회 화면에 함께 표시한다.
+    order_customer_map = {}
+    try:
+        order_ids = []
+        if "memo" in show.columns:
+            for memo_text in show["memo"].fillna("").astype(str).tolist():
+                m = re.search(r"출고지시서\s*#(\d+)", memo_text)
+                if m:
+                    order_ids.append(int(m.group(1)))
+        order_ids = sorted(set(order_ids))
+        if order_ids:
+            placeholders = ",".join(["?"] * len(order_ids))
+            orders_df = q(f"SELECT id, COALESCE(title, '') AS title FROM outbound_orders WHERE id IN ({placeholders})", tuple(order_ids))
+            customers_df = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
+            for r in orders_df.itertuples(index=False):
+                customer, _manager = _infer_customer_from_title(getattr(r, "title", ""), customers_df)
+                order_customer_map[int(getattr(r, "id"))] = customer
+    except Exception:
+        order_customer_map = {}
+
+    def _history_customer_from_memo(memo_text):
+        m = re.search(r"출고지시서\s*#(\d+)", str(memo_text or ""))
+        if not m:
+            return ""
+        return order_customer_map.get(int(m.group(1)), "")
+
+    show["매출처"] = show["memo"].apply(_history_customer_from_memo) if "memo" in show.columns else ""
+
     if "exp_date" in show.columns:
         show["exp_date"] = show["exp_date"].apply(display_date_only)
     rename_cols = {
@@ -3972,7 +4426,7 @@ def page_history():
         "to_company":"도착사업장", "to_location":"도착위치", "memo":"메모"
     }
     show = show.rename(columns=rename_cols)
-    wanted = ["일시","이력유형","제품명","LOT","유통기한","출발사업장","출발위치","도착사업장","도착위치","수량","최종재고","메모"]
+    wanted = ["일시","이력유형","매출처","제품명","LOT","유통기한","출발사업장","출발위치","도착사업장","도착위치","수량","최종재고","메모"]
     show = show[[c for c in wanted if c in show.columns]]
     st.dataframe(show, use_container_width=True, hide_index=True)
 
@@ -4191,11 +4645,21 @@ def import_customer_master_excel(uploaded_file):
             vals = []
             for c in ["company", "customer_type", "manager", "phone", "address", "memo"]:
                 vals.append("" if pd.isna(r.get(c)) else str(r.get(c)).strip())
+            company = vals[0]
+
+            # 거래처명만으로 중복 판단하면 같은 매출처가 노투스팜/NOH 등 여러 사업장에
+            # 존재할 때 한쪽 행이 다른 행을 덮어쓴다.
+            # 따라서 중복 기준은 우선 거래처코드+사업장, 없으면 거래처명+사업장으로 본다.
             existing = None
-            if code:
-                existing = cur.execute("SELECT id FROM customers WHERE customer_code=?", (code,)).fetchone()
-            if not existing:
-                existing = cur.execute("SELECT id FROM customers WHERE customer_name=?", (name,)).fetchone()
+            if code and company:
+                existing = cur.execute("SELECT id FROM customers WHERE customer_code=? AND IFNULL(company,'')=?", (code, company)).fetchone()
+            if not existing and code and not company:
+                existing = cur.execute("SELECT id FROM customers WHERE customer_code=? AND IFNULL(company,'')=''", (code,)).fetchone()
+            if not existing and company:
+                existing = cur.execute("SELECT id FROM customers WHERE customer_name=? AND IFNULL(company,'')=?", (name, company)).fetchone()
+            if not existing and not company:
+                existing = cur.execute("SELECT id FROM customers WHERE customer_name=? AND IFNULL(company,'')=''", (name,)).fetchone()
+
             if existing:
                 cur.execute("UPDATE customers SET customer_code=?, customer_name=?, company=?, customer_type=?, manager=?, phone=?, address=?, memo=?, updated_at=? WHERE id=?", (code, name, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], now, int(existing[0])))
                 updated += 1
@@ -4209,7 +4673,7 @@ def import_customer_master_excel(uploaded_file):
 
 
 def customer_export_excel_bytes():
-    df = q("SELECT customer_code AS 거래처코드, customer_name AS 거래처명, company AS 사업장, customer_type AS 유형, manager AS 담당자, phone AS 연락처, address AS 주소, memo AS 메모 FROM customers ORDER BY customer_name")
+    df = q("SELECT customer_code AS 거래처코드, customer_name AS 거래처명, company AS 사업장, customer_type AS 유형, manager AS 담당자, phone AS 연락처, address AS 주소, memo AS 메모 FROM customers ORDER BY customer_name, company")
     return dataframe_to_excel_bytes(df, "거래처관리")
 
 def page_inventory_metadata_edit():
@@ -4233,7 +4697,7 @@ def page_customer_master():
                 st.rerun()
             except Exception as e:
                 st.error(f"업로드 실패: {e}")
-    df = q("SELECT customer_code AS 거래처코드, customer_name AS 거래처명, company AS 사업장, customer_type AS 유형, manager AS 담당자, phone AS 연락처, address AS 주소, memo AS 메모 FROM customers ORDER BY customer_name")
+    df = q("SELECT customer_code AS 거래처코드, customer_name AS 거래처명, company AS 사업장, customer_type AS 유형, manager AS 담당자, phone AS 연락처, address AS 주소, memo AS 메모 FROM customers ORDER BY customer_name, company")
     st.markdown("### 등록된 거래처")
     if df.empty:
         st.info("등록된 거래처가 없습니다.")
@@ -5402,6 +5866,7 @@ def main():
     nav_button("마감")
 
     st.sidebar.markdown("### 재고")
+    nav_button("재고 찾기")
     nav_button("입고 등록")
     nav_button("이동 등록")
     nav_button("이력 조회")
@@ -5416,6 +5881,7 @@ def main():
     elif menu == "출고지시": page_outbound()
     elif menu == "저장된 출고지시": page_saved_outbound()
     elif menu == "마감": page_closing()
+    elif menu == "재고 찾기": page_mobile_stock_finder()
     elif menu == "입고 등록": page_inbound()
     elif menu == "이동 등록": page_move()
     elif menu == "재고 실사": page_stocktake()
