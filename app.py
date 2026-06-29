@@ -5391,7 +5391,6 @@ def main():
     st.sidebar.markdown("### 재고")
     nav_button("입고 등록")
     nav_button("이동 등록")
-    nav_button("재고정보 수정")
     nav_button("이력 조회")
     nav_button("재고 실사")
 
@@ -5406,7 +5405,6 @@ def main():
     elif menu == "마감": page_closing()
     elif menu == "입고 등록": page_inbound()
     elif menu == "이동 등록": page_move()
-    elif menu == "재고정보 수정": page_inventory_metadata_edit()
     elif menu == "재고 실사": page_stocktake()
     elif menu == "제품 매칭 관리": page_product_matching()
     elif menu == "거래처 관리": page_customer_master()
