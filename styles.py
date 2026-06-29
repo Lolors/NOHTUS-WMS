@@ -35,9 +35,9 @@ section.main > div.block-container {
    Sidebar Layout / Color
    =========================== */
 section[data-testid="stSidebar"] {
-    width: 15vw !important;
-    min-width: 150px !important;
-    max-width: 200px !important;
+    width: 12vw !important;
+    min-width: 240px !important;
+    max-width: 280px !important;
     background: linear-gradient(180deg, var(--nohtus-sidebar) 0%, var(--nohtus-sidebar-2) 100%) !important;
 }
 
