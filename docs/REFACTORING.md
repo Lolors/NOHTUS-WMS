@@ -37,6 +37,7 @@ docs/
   REFACTORING.md
 tools/
   smoke_check.py
+  apply_refactor_step1.py
 ```
 
 ## 현재 브랜치의 변경
@@ -49,6 +50,7 @@ tools/
 - 로케이션 helper 후보를 `nohtus/locations.py`로 분리
 - `MASTER_MEMORY.md` 추가
 - `tools/smoke_check.py` 추가
+- `tools/apply_refactor_step1.py` 추가
 
 ## 리팩토링 원칙
 
@@ -61,13 +63,15 @@ tools/
 
 ## 다음 단계
 
-1. `app.py`에서 상단 설정/상수 import를 `nohtus.config`로 교체한다.
-2. `connect`, `q`, `exec_sql`를 `nohtus.db` import로 교체한다.
-3. `normalize_exp_date`, `display_date_only`, `expiry_status`를 `nohtus.dates` import로 교체한다.
-4. `make_location`, `parse_location`, `_location_picking_key`를 `nohtus.locations` import로 교체한다.
-5. 메뉴 렌더링을 `nohtus.navigation.MENU_SECTIONS` 기준으로 바꾼다.
-6. 업무 로직 함수는 화면 함수보다 먼저 `nohtus/services/`로 이동한다.
-7. 화면 함수는 한 번에 하나씩 `nohtus/pages/`로 이동한다.
+1. 로컬에서 `python tools/apply_refactor_step1.py`를 실행한다.
+2. 생성된 `app.py.bak_refactor_step1` 백업과 `git diff`를 확인한다.
+3. `python tools/smoke_check.py`를 다시 실행한다.
+4. `streamlit run app.py`로 주요 화면을 확인한다.
+5. 문제가 없으면 `app.py` 변경만 별도 커밋한다.
+6. 그 다음 `connect`, `q`, `exec_sql`를 `nohtus.db` import로 교체한다.
+7. 메뉴 렌더링을 `nohtus.navigation.MENU_SECTIONS` 기준으로 바꾼다.
+8. 업무 로직 함수는 화면 함수보다 먼저 `nohtus/services/`로 이동한다.
+9. 화면 함수는 한 번에 하나씩 `nohtus/pages/`로 이동한다.
 
 ## 검증 방법
 
