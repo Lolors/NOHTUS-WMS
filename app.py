@@ -10,6 +10,8 @@ from urllib.parse import quote
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+from styles import apply_style, apply_inbound_bridge_style
+from inbound_map import render_inbound_quick_location_map
 
 APP_TITLE = "NOHTUS WMS"
 
@@ -26,7 +28,7 @@ APP_TITLE = "NOHTUS WMS"
 # 이후 기능 추가는 이 코어를 직접 수정하지 않고,
 # CSS/UI/서비스 함수 레이어에서만 확장하는 방식으로 진행합니다.
 ############################################################
-VERSION = "v4.9 RC3.0 Stable Base"
+VERSION = "v4.9 RC3.3 UI Stable"
 DB_PATH = Path(__file__).parent / "data" / "nohtus.db"
 COMPANIES = ["노투스팜", "노투스", "NOH", "비자료"]
 INBOUND_COMPANIES = COMPANIES + ["등록대기"]
@@ -198,6 +200,20 @@ def init_db():
         PRIMARY KEY(company, source_name)
     )
     """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS mobile_favorites(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT,
+        UNIQUE(username, product_name)
+    )
+    """)
+    fav_cols = {r[1] for r in cur.execute("PRAGMA table_info(mobile_favorites)").fetchall()}
+    if "sort_order" not in fav_cols:
+        cur.execute("ALTER TABLE mobile_favorites ADD COLUMN sort_order INTEGER DEFAULT 0")
+
     # v3.8: 더미데이터 자동 생성 중단.
     # 처음 실행 시 제품/재고는 비어 있으며, 제품마스터 엑셀 또는 재고조사 엑셀 업로드로 채웁니다.
     con.commit(); con.close()
@@ -487,6 +503,45 @@ def ensure_standard_product_only(name):
     return name
 
 
+
+def ensure_inbound_first_product_mapping(standard_name, company, erp_name, product_code=""):
+    """입고 최초 등록용: 표준제품명과 선택 사업장의 ERP명/제품코드를 제품매칭표에 저장한다."""
+    standard_name = (standard_name or "").strip()
+    company = (company or "").strip()
+    erp_name = (erp_name or "").strip()
+    product_code = (product_code or "").strip()
+    if not standard_name:
+        raise ValueError("표준제품명을 입력하세요.")
+    if not erp_name:
+        raise ValueError("ERP명/비자료명을 입력하세요.")
+
+    with connect() as con:
+        cur = con.cursor()
+        row = cur.execute("SELECT id FROM products WHERE TRIM(standard_name)=?", (standard_name,)).fetchone()
+        if row:
+            pid = int(row[0])
+        else:
+            cur.execute("""
+                INSERT INTO products(
+                    product_code, standard_name, warehouse_name, aliases,
+                    erp_nohtuspharm_name, erp_nohtus_name, erp_noh_name, erp_noh_code, bidata_name
+                ) VALUES(?,?,?,?,?,?,?,?,?)
+            """, ("", standard_name, standard_name, "", "", "", "", "", ""))
+            pid = int(cur.lastrowid)
+
+        if company == "노투스팜":
+            cur.execute("UPDATE products SET erp_nohtuspharm_name=?, product_code=? WHERE id=?", (erp_name, product_code, pid))
+        elif company == "NOH":
+            cur.execute("UPDATE products SET erp_noh_name=?, erp_noh_code=? WHERE id=?", (erp_name, product_code, pid))
+        elif company == "노투스":
+            cur.execute("UPDATE products SET erp_nohtus_name=? WHERE id=?", (erp_name, pid))
+        elif company == "비자료":
+            cur.execute("UPDATE products SET bidata_name=? WHERE id=?", (erp_name, pid))
+        else:
+            raise ValueError("최초 등록은 사업장을 먼저 선택해야 합니다.")
+        con.commit()
+    return standard_name, erp_name
+
 def apply_standard_name_change(old_name, new_name):
     """제품 매칭표에서 표준제품명이 바뀌면 이미 올라간 재고/이력에도 즉시 반영한다."""
     old_name = (old_name or "").strip()
@@ -686,11 +741,40 @@ def full_inventory_excel_bytes(exclude_zero=True):
     return bio.getvalue()
 
 
+def _baseline_stock_excel_bytes_from_dataframe(df):
+    """기준재고 업로드 양식 형태로 DataFrame을 엑셀로 변환한다."""
+    bio = BytesIO()
+    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="기준재고업로드")
+        ws = writer.book["기준재고업로드"]
+        from openpyxl.styles import Border, Side, Font, PatternFill, Alignment
+        thin = Side(style="thin", color="000000")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        header_fill = PatternFill("solid", fgColor="E5E7EB")
+        optional_fill = PatternFill("solid", fgColor="EEF2FF")
+        widths = {"A":14,"B":18,"C":34,"D":30,"E":18,"F":16,"G":18,"H":10}
+        for col, width in widths.items():
+            ws.column_dimensions[col].width = width
+        ws.freeze_panes = "A2"
+        max_row = max(1, len(df) + 1)
+        ws.auto_filter.ref = f"A1:H{max_row}"
+        for row in ws.iter_rows():
+            for cell in row:
+                cell.border = border
+                cell.alignment = Alignment(vertical="center", wrap_text=True)
+                if cell.column_letter == "B":
+                    cell.number_format = "@"
+                    if cell.value is not None:
+                        cell.value = str(cell.value)
+                if cell.row == 1:
+                    cell.font = Font(bold=True)
+                    cell.fill = optional_fill if cell.value == "표준제품명" else header_fill
+    bio.seek(0)
+    return bio.getvalue()
+
+
 def baseline_stock_template_excel_bytes():
-    """기준재고 업로드용 샘플 양식.
-    사용자가 ERP/비자료 내용을 가공해 만든 초기 재고자료를 WMS DB에 넣기 위한 최소 양식이다.
-    표준제품명은 비워서 올려도 제품매칭표 기준으로 자동 보완한다.
-    """
+    """기준재고 업로드용 빈 샘플 양식."""
     sample = pd.DataFrame([
         {
             "사업장": "노투스팜",
@@ -713,33 +797,69 @@ def baseline_stock_template_excel_bytes():
             "수량": 20,
         },
     ])
-    bio = BytesIO()
-    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-        sample.to_excel(writer, index=False, sheet_name="기준재고업로드")
-        ws = writer.book["기준재고업로드"]
-        from openpyxl.styles import Border, Side, Font, PatternFill, Alignment
-        thin = Side(style="thin", color="000000")
-        border = Border(left=thin, right=thin, top=thin, bottom=thin)
-        header_fill = PatternFill("solid", fgColor="E5E7EB")
-        optional_fill = PatternFill("solid", fgColor="EEF2FF")
-        widths = {"A":14,"B":18,"C":34,"D":30,"E":18,"F":16,"G":18,"H":10}
-        for col, width in widths.items():
-            ws.column_dimensions[col].width = width
-        ws.freeze_panes = "A2"
-        ws.auto_filter.ref = f"A1:H{len(sample)+1}"
-        for row in ws.iter_rows():
-            for cell in row:
-                cell.border = border
-                cell.alignment = Alignment(vertical="center", wrap_text=True)
-                if cell.column_letter == "B":
-                    cell.number_format = "@"
-                    if cell.value is not None:
-                        cell.value = str(cell.value)
-                if cell.row == 1:
-                    cell.font = Font(bold=True)
-                    cell.fill = optional_fill if cell.value == "표준제품명" else header_fill
-    bio.seek(0)
-    return bio.getvalue()
+    return _baseline_stock_excel_bytes_from_dataframe(sample)
+
+
+def current_baseline_stock_excel_bytes(exclude_zero=False):
+    """현재 WMS 재고를 기준재고 업로드 양식에 채워서 내려받는다."""
+    where_sql = "WHERE qty > 0" if exclude_zero else ""
+    inv = q(f"""
+        SELECT company, product_name, warehouse_name, lot, exp_date, location, qty
+        FROM inventory
+        {where_sql}
+        ORDER BY company, product_name, lot, exp_date, location
+    """)
+    cols = ["사업장", "ERP제품코드", "ERP제품명", "표준제품명", "LOT/제조번호", "유통기한", "로케이션", "수량"]
+    if inv.empty:
+        return _baseline_stock_excel_bytes_from_dataframe(pd.DataFrame(columns=cols))
+
+    product_df = q("""
+        SELECT standard_name, product_code, erp_noh_code,
+               erp_nohtuspharm_name, erp_noh_name, erp_nohtus_name, bidata_name
+        FROM products
+    """)
+    product_map = {}
+    if not product_df.empty:
+        for r in product_df.itertuples(index=False):
+            product_map[str(getattr(r, "standard_name") or "").strip()] = {
+                "product_code": str(getattr(r, "product_code") or "").strip(),
+                "erp_noh_code": str(getattr(r, "erp_noh_code") or "").strip(),
+                "erp_nohtuspharm_name": str(getattr(r, "erp_nohtuspharm_name") or "").strip(),
+                "erp_noh_name": str(getattr(r, "erp_noh_name") or "").strip(),
+                "erp_nohtus_name": str(getattr(r, "erp_nohtus_name") or "").strip(),
+                "bidata_name": str(getattr(r, "bidata_name") or "").strip(),
+            }
+
+    rows = []
+    for r in inv.itertuples(index=False):
+        company = str(getattr(r, "company") or "").strip()
+        standard = str(getattr(r, "product_name") or "").strip()
+        warehouse = str(getattr(r, "warehouse_name") or "").strip()
+        info = product_map.get(standard, {})
+        code = ""
+        erp_name = warehouse or standard
+        if company == "노투스팜":
+            code = info.get("product_code", "")
+            erp_name = info.get("erp_nohtuspharm_name", "") or warehouse or standard
+        elif company == "NOH":
+            code = info.get("erp_noh_code", "")
+            erp_name = info.get("erp_noh_name", "") or warehouse or standard
+        elif company == "노투스":
+            erp_name = info.get("erp_nohtus_name", "") or warehouse or standard
+        elif company == "비자료":
+            erp_name = info.get("bidata_name", "") or warehouse or standard
+
+        rows.append({
+            "사업장": company,
+            "ERP제품코드": code,
+            "ERP제품명": erp_name,
+            "표준제품명": standard,
+            "LOT/제조번호": str(getattr(r, "lot") or "-").strip() or "-",
+            "유통기한": display_date_only(getattr(r, "exp_date") or "-"),
+            "로케이션": str(getattr(r, "location") or "").strip(),
+            "수량": int(getattr(r, "qty") or 0),
+        })
+    return _baseline_stock_excel_bytes_from_dataframe(pd.DataFrame(rows, columns=cols))
 
 
 def _baseline_get_product_raw(row):
@@ -1145,9 +1265,9 @@ def location_picker(prefix, default_area="A1", stock_only=False):
     picker_defaults = st.session_state.get(f"_{prefix}_picker_defaults", {}) or {}
     widget_suffix = ""
     if picker_defaults:
-        # 외부 도면 클릭으로 key 재생성이 필요한 입고 화면에만 토큰 suffix를 붙인다.
-        # 이동 등록은 사용자가 콤보박스에서 직접 타이핑/선택한 값을 안정적으로 유지하기 위해 고정 key를 사용한다.
-        if prefix == "inbound":
+        # 외부 값으로 기본 위치를 바꿔야 하는 화면은 token suffix로 위젯을 재생성한다.
+        # inbound: 도면 클릭값 반영 / move: 도착 사업장의 기존 재고 위치 자동 반영
+        if prefix in ["inbound", "move"]:
             widget_suffix = f"_{st.session_state.get(f'_{prefix}_picker_token', 0)}"
         default_area = picker_defaults.get("area") or default_area
 
@@ -1329,6 +1449,130 @@ def inbound_company_options_for(product_name):
                     stock[c] = int(getattr(r, "qty", 0) or 0)
     return [f"{c} ({stock.get(c, 0)} EA)" for c in COMPANIES] + ["등록대기"]
 
+
+
+# ---------------- mobile stock finder helpers ----------------
+def mobile_favorite_users():
+    """모바일 재고찾기 즐겨찾기 사용자 목록."""
+    try:
+        df = q("SELECT DISTINCT username FROM mobile_favorites ORDER BY username")
+        users = [str(x).strip() for x in df["username"].dropna().tolist() if str(x).strip()]
+    except Exception:
+        users = []
+    return users
+
+
+def mobile_favorites_for_user(username):
+    username = (username or "").strip() or "기본"
+    try:
+        return q("""
+            SELECT product_name, COALESCE(sort_order, 0) AS sort_order
+            FROM mobile_favorites
+            WHERE username=?
+            ORDER BY sort_order, product_name
+        """, (username,))
+    except Exception:
+        return pd.DataFrame(columns=["product_name", "sort_order"])
+
+
+def mobile_is_favorite(username, product_name):
+    username = (username or "").strip() or "기본"
+    product_name = (product_name or "").strip()
+    if not product_name:
+        return False
+    try:
+        df = q("SELECT 1 FROM mobile_favorites WHERE username=? AND product_name=? LIMIT 1", (username, product_name))
+        return not df.empty
+    except Exception:
+        return False
+
+
+def mobile_add_favorite(username, product_name):
+    username = (username or "").strip() or "기본"
+    product_name = (product_name or "").strip()
+    if not product_name:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with connect() as con:
+        cur = con.cursor()
+        row = cur.execute("SELECT COALESCE(MAX(sort_order), -1) FROM mobile_favorites WHERE username=?", (username,)).fetchone()
+        next_order = int((row[0] if row else -1) or -1) + 1
+        cur.execute("""
+            INSERT OR IGNORE INTO mobile_favorites(username, product_name, sort_order, created_at)
+            VALUES(?,?,?,?)
+        """, (username, product_name, next_order, now))
+        con.commit()
+
+
+def mobile_remove_favorite(username, product_name):
+    username = (username or "").strip() or "기본"
+    product_name = (product_name or "").strip()
+    with connect() as con:
+        con.execute("DELETE FROM mobile_favorites WHERE username=? AND product_name=?", (username, product_name))
+        con.commit()
+    mobile_reindex_favorites(username)
+
+
+def mobile_reindex_favorites(username):
+    username = (username or "").strip() or "기본"
+    df = mobile_favorites_for_user(username)
+    with connect() as con:
+        cur = con.cursor()
+        for i, r in enumerate(df.itertuples(index=False)):
+            cur.execute("UPDATE mobile_favorites SET sort_order=? WHERE username=? AND product_name=?", (i, username, getattr(r, "product_name")))
+        con.commit()
+
+
+def mobile_move_favorite(username, product_name, direction):
+    username = (username or "").strip() or "기본"
+    product_name = (product_name or "").strip()
+    df = mobile_favorites_for_user(username)
+    names = df["product_name"].astype(str).tolist() if not df.empty else []
+    if product_name not in names:
+        return
+    idx = names.index(product_name)
+    new_idx = idx - 1 if direction == "up" else idx + 1
+    if new_idx < 0 or new_idx >= len(names):
+        return
+    names[idx], names[new_idx] = names[new_idx], names[idx]
+    with connect() as con:
+        cur = con.cursor()
+        for i, name in enumerate(names):
+            cur.execute("UPDATE mobile_favorites SET sort_order=? WHERE username=? AND product_name=?", (i, username, name))
+        con.commit()
+
+
+def mobile_product_candidates(term="", limit=30):
+    """표준제품명/ERP명/비자료명/별칭으로 검색하되 표시값은 표준제품명만 반환."""
+    df = product_options(term)
+    if df.empty:
+        return []
+    return df["standard_name"].dropna().astype(str).drop_duplicates().head(limit).tolist()
+
+
+def mobile_stock_rows(product_name, company_filter="전체", expiry_filter="전체"):
+    product_name = (product_name or "").strip()
+    if not product_name:
+        return pd.DataFrame()
+    conditions = ["product_name=?", "qty>0"]
+    params = [product_name]
+    if company_filter and company_filter != "전체":
+        conditions.append("company=?")
+        params.append(company_filter)
+    where = " AND ".join(conditions)
+    df = q(f"""
+        SELECT company, location, lot, exp_date, qty
+        FROM inventory
+        WHERE {where}
+        ORDER BY company, exp_date, location, lot
+    """, tuple(params))
+    if df.empty:
+        return df
+    df["상태"] = df["exp_date"].apply(expiry_status)
+    if expiry_filter and expiry_filter != "전체":
+        df = df[df["상태"] == expiry_filter]
+    return df
+
 # ---------------- inventory operations ----------------
 def add_inventory(company, product, warehouse, lot, exp, location, qty, memo="입고 등록"):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1381,6 +1625,14 @@ def move_inventory(src_id, to_company, to_location, qty, memo=""):
         if str(old_warehouse or "").strip() != str(dest_warehouse or "").strip():
             erp_note = f"전산상명칭 변경: {old_warehouse or '-'} → {dest_warehouse or '-'}"
             move_memo = f"{move_memo} / {erp_note}" if move_memo else erp_note
+        if src["company"] != to_company:
+            dest_company_qty_row = cur.execute(
+                "SELECT COALESCE(SUM(qty), 0) FROM inventory WHERE company=? AND product_name=?",
+                (to_company, product_name),
+            ).fetchone()
+            dest_company_qty = int((dest_company_qty_row[0] if dest_company_qty_row else 0) or 0)
+            stock_note = f"이동 후 {to_company} 해당 제품 재고: {dest_company_qty}EA"
+            move_memo = f"{move_memo} / {stock_note}" if move_memo else stock_note
 
         insert_transaction_log(cur, created_at=now, tx_type=tx_type, product_name=product_name, warehouse_name=dest_warehouse,
                                lot=src["lot"], exp_date=src["exp_date"], from_company=src["company"], from_location=src["location"],
@@ -1964,8 +2216,8 @@ def render_location_map():
 .legend-chip{{display:flex;align-items:center;gap:8px;border:1px solid #dbe4f0;background:#fff;border-radius:12px;padding:9px 14px;font-weight:800;color:#111827;font-size:14px;}}
 .swatch{{width:18px;height:18px;border-radius:5px;border:1px solid rgba(15,23,42,.12);display:inline-block;}}
 .swatch.y{{background:#fff39b}} .swatch.b{{background:#68d2e7}} .swatch.p{{background:#f0a7e6}} .swatch.g{{background:#f3f4f6}}
-.map-scroll{{overflow:hidden;padding-bottom:0;height:654px;}}
-.map-stage{{position:relative;width:1064px;height:618px;min-width:1064px;background:#fff;border-radius:14px;transform:scale(0.982);transform-origin:top left;}}
+.map-scroll{{overflow:hidden;padding-bottom:0;height:565px;}}
+.map-stage{{position:relative;width:1064px;height:618px;min-width:1064px;background:#fff;border-radius:14px;transform:scale(0.90);transform-origin:top left;}}
 .rack{{position:absolute;width:116px;height:154px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr 1fr;border:1px solid #334155;border-radius:9px;overflow:hidden;box-shadow:0 6px 14px rgba(15,23,42,.06);}}
 .map-cell,.zone{{appearance:none;position:relative;display:flex;align-items:center;justify-content:center;text-decoration:none;color:#0f172a;font-weight:900;font-size:14px;border:0;border-right:1px solid rgba(51,65,85,.38);border-bottom:1px solid rgba(51,65,85,.38);cursor:pointer;font-family:inherit;}}
 .map-cell:hover,.zone:hover{{outline:3px solid rgba(37,99,235,.22);z-index:2;}}
@@ -2542,7 +2794,7 @@ def page_map_search_results(term):
     .dist-row-streamlit{margin:0 0 1px;}
     .dist-cell-text{display:flex;align-items:center;height:28px;font-size:14px;font-weight:400;color:#111827;white-space:nowrap;}
     .dist-cell-qty{display:flex;align-items:center;justify-content:flex-end;height:28px;font-size:14px;font-weight:400;color:#4f6fff;white-space:nowrap;}
-    div[data-testid="stButton"] > button[kind="secondary"]{text-decoration:none;min-height:28px;height:28px;padding:0 10px;border-radius:8px;font-size:13px;}
+    .dist-row-streamlit div[data-testid="stButton"] > button[kind="secondary"]{text-decoration:none;min-height:28px;height:28px;padding:0 10px;border-radius:8px;font-size:13px;}
     section[data-testid="stSidebar"] div[data-testid="stButton"] > button, section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="secondary"], section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="primary"]{background:transparent!important;color:white!important;border:0!important;min-height:auto!important;height:auto!important;padding:8px 10px!important;border-radius:10px!important;font-weight:800!important;font-size:123%!important;text-align:left!important;justify-content:flex-start!important;}
     section[data-testid="stSidebar"] div[data-testid="stButton"] > button p{color:white!important;text-align:left!important;width:100%!important;}
     /* 제품검색 결과 전용 CSS가 사이드바/상단 타이틀 카드까지 침범하지 않도록
@@ -2636,7 +2888,15 @@ def page_map():
         try { window.parent.scrollTo({top:0,left:0,behavior:'auto'}); } catch(e) {}
         try { window.parent.document.documentElement.scrollTop = 0; window.parent.document.body.scrollTop = 0; } catch(e) {}
         </script>""", height=0, scrolling=False)
-    st.markdown("<div id='wms-top-anchor'></div>", unsafe_allow_html=True)
+    st.markdown("""
+<style>
+/* RC3.3: 로케이션맵 타이틀/도면/상세영역 전체를 살짝 위로 이동 */
+div[data-testid="stVerticalBlock"]:has(#wms-top-anchor) {
+    margin-top: -15px !important;
+}
+</style>
+<div id='wms-top-anchor'></div>
+""", unsafe_allow_html=True)
     forced_search_term = ""
     try:
         qprod = st.session_state.pop("_map_forced_search_term", "") or st.session_state.pop("_pending_map_search_product", "") or st.query_params.get("map_search_product", "")
@@ -2737,225 +2997,24 @@ def _apply_inbound_location_pending():
     st.session_state["_inbound_picker_token"] = int(st.session_state.get("_inbound_picker_token", 0) or 0) + 1
 
 
-def render_inbound_quick_location_map():
-    """입고 등록용 로케이션 도면.
-    로케이션맵과 같은 components.html 기반 도면을 유지하되,
-    클릭은 target="_top" 링크로 부모 Streamlit 앱에 inbound_loc 파라미터를 넘긴다.
-    """
-    selected = st.session_state.get("_inbound_selected_loc", "") or "REC"
-
-    def is_selected(loc):
-        return selected == loc or (selected and selected.startswith(loc + "-"))
-
-    def href(loc):
-        return f"?inbound_loc={quote(loc)}"
-
-    def cell(loc, text=None):
-        text = text or loc
-        cls = " selected" if is_selected(loc) else ""
-        return f'<a class="map-cell{cls}" href="{href(loc)}" target="_top" data-inbound-loc="{escape(loc)}" data-loc="{escape(loc)}">{escape(text)}</a>'
-
-    def rack(labels, left, top, cls):
-        cells = ''.join(cell(x) for x in labels)
-        return f'<div class="rack {cls}" style="left:{left}px;top:{top}px;">{cells}</div>'
-
-    def zone(loc, text, left, top, w, h, cls="white", extra=""):
-        selected_cls = " selected" if is_selected(loc) else ""
-        return f'<a class="zone {cls}{selected_cls}" href="{href(loc)}" target="_top" data-inbound-loc="{escape(loc)}" data-loc="{escape(loc)}" style="left:{left}px;top:{top}px;width:{w}px;height:{h}px;{extra}">{text}</a>'
-
-    html = f"""
-<!doctype html><html><head><meta charset="utf-8">
-<style>
-*{{box-sizing:border-box}} body{{margin:0;background:#f8fafc;font-family:Inter,Segoe UI,Arial,'Noto Sans KR',sans-serif;color:#0f172a;}}
-.inbound-map-card{{background:#fff;border:1px solid #dbe4f0;border-radius:18px;padding:14px 14px 18px;box-shadow:0 8px 24px rgba(15,23,42,.05);width:100%;}}
-.title{{font-weight:900;font-size:18px;margin:0 0 10px;color:#111827;}}
-.map-scroll{{overflow:visible;height:760px;padding:0;}}
-.map-stage{{position:relative;width:1160px;height:704px;min-width:1160px;background:#fff;border-radius:14px;transform:scale(.98);transform-origin:top left;}}
-.rack{{position:absolute;width:126px;height:168px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr 1fr;border:1px solid #334155;border-radius:9px;overflow:hidden;box-shadow:0 6px 14px rgba(15,23,42,.06);}}
-.map-cell,.zone{{appearance:none;position:relative;display:flex;align-items:center;justify-content:center;text-decoration:none;color:#0f172a;font-weight:900;font-size:14px;border:0;border-right:1px solid rgba(51,65,85,.38);border-bottom:1px solid rgba(51,65,85,.38);cursor:pointer;font-family:inherit;}}
-.map-cell:hover,.zone:hover{{outline:3px solid rgba(37,99,235,.22);z-index:2;}}
-.map-cell:nth-child(2n){{border-right:none;}}
-.map-cell:nth-child(n+5){{border-bottom:none;}}
-
-.special-menu{{position:absolute;display:none;z-index:30;background:#fff;border:1px solid #cbd5e1;border-radius:12px;box-shadow:0 12px 28px rgba(15,23,42,.18);padding:6px;}}
-.special-menu.open{{display:grid;gap:5px;}}
-.special-menu button,.special-menu a{{appearance:none;border:1px solid #e2e8f0;background:#f8fafc;border-radius:9px;padding:8px 7px;font-size:12px;font-weight:900;color:#0f172a;cursor:pointer;font-family:inherit;text-align:center;text-decoration:none;}}
-.special-menu button:hover,.special-menu button.selected,.special-menu a:hover,.special-menu a.selected{{background:#22c55e;color:#fff;border-color:#16a34a;}}
-.map-cell.selected,.zone.selected{{background:#22c55e!important;color:#ffffff!important;outline:3px solid rgba(34,197,94,.35)!important;box-shadow:0 0 0 3px rgba(255,255,255,.8),0 0 18px rgba(34,197,94,.75)!important;border-color:#16a34a!important;z-index:4;}}
-.yellow{{background:#fff39b;}} .blue{{background:#68d2e7;}} .pink{{background:#f0a7e6;}} .gray{{background:#f7f8fa;}} .bidata{{background:#d1d5db;}} .white{{background:#fff;}}
-.yellow .map-cell,.zone.yellow{{background:#fff39b;}} .blue .map-cell,.zone.blue{{background:#68d2e7;}} .pink .map-cell,.zone.pink{{background:#f0a7e6;}} .gray .map-cell,.zone.gray{{background:#f7f8fa;}} .bidata .map-cell,.zone.bidata{{background:#d1d5db;}} .white .map-cell,.zone.white{{background:#fff;}}
-.zone{{position:absolute;border:1px solid #334155;border-radius:9px;box-shadow:0 6px 14px rgba(15,23,42,.04);}}
-.big-left{{position:absolute;left:0;top:0;width:185px;height:282px;border:1px solid #334155;border-radius:10px;overflow:hidden;background:#fff;}}
-.big-left a{{appearance:none;position:relative;display:flex;align-items:center;justify-content:center;width:100%;border:0;border-bottom:1px solid #cbd5e1;background:#f7f8fa;color:#0f172a;font-weight:900;cursor:pointer;font-family:inherit;text-decoration:none;}}
-.big-left a:hover{{outline:3px solid rgba(37,99,235,.22);z-index:2;}}
-.big-left a.selected{{background:#22c55e!important;color:#fff!important;outline:3px solid rgba(34,197,94,.35)!important;box-shadow:0 0 0 3px rgba(255,255,255,.8),0 0 18px rgba(34,197,94,.75)!important;z-index:4;}}
-.g2{{height:225px;background:#f7f8fa;}} .g1row{{height:57px;display:grid;grid-template-columns:1fr 1fr 1fr;}}
-.g1row a{{height:57px;border-right:1px solid #cbd5e1;border-bottom:none;}} .g1row a:last-child{{border-right:none;}}
-.label{{position:absolute;text-align:center;font-weight:900;color:#111827;font-size:14px;}}
-.memo{{position:absolute;color:#334155;font-size:15px;line-height:1.65;}}
-.qp{{position:absolute;left:0;top:525px;width:165px;height:148px;border:1px solid #cbd5e1;border-radius:10px;overflow:hidden;background:#fff;}}
-.qp a{{position:relative;display:grid;grid-template-columns:58px 1fr;align-items:center;width:100%;height:74px;border:0;border-bottom:1px solid #e2e8f0;background:#fff;color:#111827;font-weight:900;cursor:pointer;text-align:left;font-family:inherit;text-decoration:none;}}
-.qp a:last-child{{border-bottom:none;}}
-.qp a.selected{{background:#22c55e!important;color:#ffffff!important;outline:3px solid rgba(34,197,94,.35)!important;box-shadow:0 0 0 3px rgba(255,255,255,.8),0 0 18px rgba(34,197,94,.75)!important;border-color:#16a34a!important;z-index:4;}}
-.qp-key{{height:100%;display:flex;align-items:center;justify-content:center;color:#ff221a;font-weight:900;font-size:18px;border-right:1px solid #e2e8f0;}}
-.qp .qkey{{background:#f186ca;color:#ff0d0d;}}
-.rec-red{{color:#ff1e12;font-weight:900;}}
-.small-title{{position:absolute;font-size:14px;font-weight:900;color:#111827;text-align:center;}}
-</style></head><body>
-<div class="inbound-map-card">
-  <div class="title">도면에서 입고 위치 선택</div>
-  <div class="map-scroll"><div class="map-stage">
-    <div class="big-left">
-      <a class="g2 gray{' selected' if is_selected('G2') else ''}" href="?inbound_loc=G2" target="_top" data-inbound-loc="G2">G2</a>
-      <div class="g1row">
-        {cell('G1-01')}{cell('G1-02')}{cell('G1-03')}
-      </div>
-    </div>
-    {rack(['A2-03','A2-04','A2-02','A2-05','A2-01','A2-06'],230,0,'yellow')}
-    {rack(['B2-03','B2-04','B2-02','B2-05','B2-01','B2-06'],372,0,'yellow')}
-    {rack(['C2-03','C2-04','C2-02','C2-05','C2-01','C2-06'],514,0,'blue')}
-    {rack(['D1-03','D1-04','D1-02','D1-05','D1-01','D1-06'],656,0,'blue')}
-    {zone('T1','T1',656,168,126,52,'white')}
-    {rack(['E1-03','E1-04','E1-02','E1-05','E1-01','E1-06'],798,0,'pink')}
-    {zone('T2','T2',798,168,126,52,'white')}
-    {zone('F1-01','F1-01',955,0,64,52,'bidata')}
-    {zone('F1-02','F1-02',1019,0,64,52,'bidata')}
-    {zone('F1-03','F1-03',1083,0,64,52,'bidata')}
-    <div class="small-title" style="left:996px;top:72px;width:110px;">비자료</div>
-    {zone('X2','X2',1070,78,70,52,'gray')}
-    {rack(['A1-03','A1-04','A1-02','A1-05','A1-01','A1-06'],230,268,'yellow')}
-    {rack(['B1-03','B1-04','B1-02','B1-05','B1-01','B1-06'],372,268,'yellow')}
-    {rack(['C1-03','C1-04','C1-02','C1-05','C1-01','C1-06'],514,268,'yellow')}
-    <div class="memo" style="left:800px;top:292px;">X1-01~03 : 폐기<br>X1-01-01 : 대표님 시술용</div>
-    {zone('X1-01','X1-01',1090,268,64,56,'gray')}
-    {zone('X1-02','X1-02',1090,324,64,56,'gray')}
-    {zone('X1-03','X1-03',1090,380,64,56,'gray')}
-    <div class="qp">
-      <a class="{'selected' if is_selected('Q1') or is_selected('Q2') else ''}" href="?inbound_loc=Q" target="_top" data-inbound-loc="Q"><span class="qp-key qkey">Q</span><span>유통기간임박</span></a>
-      <a class="{'selected' if is_selected('P') else ''}" href="?inbound_loc=P" target="_top" data-inbound-loc="P"><span class="qp-key">P</span><span>수출대기</span></a>
-    </div>
-    {zone('REC','<span><span class="rec-red">REC</span>eiving</span>',372,568,142,56,'white')}
-    <div class="label" style="left:372px;top:635px;width:142px;">매입등록대기</div>
-    {zone('R2','R2',790,460,64,56,'white')}
-    {zone('R1','R1',854,460,64,56,'white')}
-    <div class="label" style="left:770px;top:526px;width:190px;">R2 비자료 / R1 자료</div>
-    {zone('N','기타 위치',975,628,168,60,'white')}
-    <div class="special-menu" id="inboundSpecialMenu" style="left:975px;top:492px;width:168px;"><a href="?inbound_loc=홍보물랙" target="_top" data-inbound-loc="홍보물랙">홍보물랙</a><a href="?inbound_loc=회색 카트" target="_top" data-inbound-loc="회색 카트">회색 카트</a><a href="?inbound_loc=오른쪽 창고" target="_top" data-inbound-loc="오른쪽 창고">오른쪽 창고</a><a href="?inbound_loc=사무실(4층)" target="_top" data-inbound-loc="사무실(4층)">사무실(4층)</a></div>
-  </div></div>
-</div>
-<script>
-function parentBaseHref(){{
-  try {{ return window.top.location.href; }} catch(e) {{}}
-  try {{ return window.parent.location.href; }} catch(e) {{}}
-  return document.referrer || window.location.href;
-}}
-function buildParentUrl(key, value){{
-  const url = new URL(parentBaseHref());
-  url.searchParams.set(key, value);
-  url.searchParams.delete('map_search_product');
-  return url.toString();
-}}
-function navigateTop(href){{
-  try {{ window.top.location.assign(href); return; }} catch(e) {{}}
-  try {{ window.parent.location.assign(href); return; }} catch(e) {{}}
-  try {{ window.open(href, '_top'); return; }} catch(e) {{}}
-  const a = document.createElement('a');
-  a.href = href;
-  a.target = '_top';
-  document.body.appendChild(a);
-  a.click();
-}}
-function markSelected(loc){{
-  document.querySelectorAll('[data-inbound-loc]').forEach(x => {{
-    const v = x.getAttribute('data-inbound-loc') || '';
-    x.classList.toggle('selected', v === loc || (loc && loc.startsWith(v + '-')) || (v === 'N' && ['홍보물랙','회색 카트','오른쪽 창고','사무실(4층)'].includes(loc)));
-  }});
-}}
-function tryParentInbound(loc){{
-  try {{
-    const doc = window.parent.document;
-    // 핵심: Streamlit text_input 값 확정 타이밍에 의존하지 않는다.
-    // 먼저 부모 URL의 query parameter에 클릭 위치를 심고, 숨김 버튼은 rerun 트리거로만 사용한다.
-    try {{
-      const url = new URL(parentBaseHref());
-      url.searchParams.set('inbound_loc', loc);
-      url.searchParams.delete('map_search_product');
-      if (window.parent && window.parent.history && window.parent.history.replaceState) {{
-        window.parent.history.replaceState(null, '', url.toString());
-      }} else if (window.top && window.top.history && window.top.history.replaceState) {{
-        window.top.history.replaceState(null, '', url.toString());
-      }}
-    }} catch(e) {{}}
-
-    const input = doc.querySelector('input[aria-label="__입고도면선택값"]');
-    if (input) {{
-      try {{
-        const setter = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value').set;
-        setter.call(input, loc);
-      }} catch(e) {{
-        input.value = loc;
-      }}
-      input.dispatchEvent(new InputEvent('input', {{bubbles:true, inputType:'insertText', data:loc}}));
-      input.dispatchEvent(new Event('change', {{bubbles:true}}));
-    }}
-
-    let applied = false;
-    doc.querySelectorAll('button').forEach(btn => {{
-      if ((btn.innerText || '').trim() === '__입고도면적용') {{
-        setTimeout(() => btn.click(), 30);
-        applied = true;
-      }}
-    }});
-    return applied;
-  }} catch(e) {{
-    return false;
-  }}
-}}
-function toggleInboundSpecialMenu(forceClose=false){{
-  const menu=document.getElementById('inboundSpecialMenu');
-  if(!menu) return;
-  if(forceClose){{menu.classList.remove('open'); return;}}
-  menu.classList.toggle('open');
-}}
-document.querySelectorAll('[data-inbound-loc]').forEach(el => {{
-  el.addEventListener('click', (ev) => {{
-    ev.preventDefault();
-    ev.stopPropagation();
-    const loc = el.getAttribute('data-inbound-loc') || '';
-    if(!loc) return;
-    if(loc === 'N'){{
-      markSelected('N');
-      toggleInboundSpecialMenu(false);
-      return;
-    }}
-    toggleInboundSpecialMenu(true);
-    markSelected(loc);
-    if(tryParentInbound(loc)) return;
-    const href = buildParentUrl('inbound_loc', loc);
-    el.setAttribute('href', href);
-    el.setAttribute('target', '_top');
-    navigateTop(href);
-  }});
-}});
-</script>
-</body></html>
-"""
-    components.html(html, height=780, scrolling=False)
-
-
 
 def page_inbound():
     _apply_inbound_location_pending()
     st.title("입고 등록")
-    
-    # 입고 도면 클릭값은 query parameter(inbound_loc)로 직접 처리한다.
-    # "__입고도면적용" 버튼/숨김 입력창은 생성하지 않는다.
-    # 버튼을 만들면 Streamlit이 먼저 렌더링해서 화면에 순간 노출된다.
-    
+
+    apply_inbound_bridge_style()
+    st.text_input(
+        "__입고도면선택값",
+        key="_inbound_js_loc_buffer",
+        label_visibility="collapsed",
+        on_change=_inbound_js_loc_changed,
+    )
+    if st.button("__입고도면적용", key="_inbound_apply_btn"):
+        _inbound_js_loc_changed()
+        _apply_inbound_location_pending()
+        st.rerun()
+
     _apply_inbound_location_pending()
-    inbound_product_term = st.text_input("제품 검색", placeholder="제품명, ERP명, 비자료명, 별칭 일부 입력", key="inbound_product_term")
-    products = product_options(inbound_product_term)
-    product_list = products["standard_name"].dropna().astype(str).tolist() if not products.empty else []
 
     def inbound_product_label(value):
         # 검색은 표준제품명/ERP명/비자료명/별칭 전체를 대상으로 하되,
@@ -2973,27 +3032,41 @@ def page_inbound():
             _inbound_selected_product_for_stock = st.session_state.get("inbound_product", "")
             company_label = st.selectbox("사업장", inbound_company_options_for(_inbound_selected_product_for_stock), key="inbound_company")
             company = strip_company_stock_label(company_label)
-        first_product_state = bool(st.session_state.get("inbound_first_product", False))
-        selected_product = st.selectbox(
-            "제품",
-            [""] + product_list,
-            index=0,
-            key="inbound_product",
-            format_func=inbound_product_label,
-            disabled=first_product_state,
-        )
+
+        inbound_product_term = st.text_input("제품 검색", placeholder="제품명, ERP명, 비자료명, 별칭 일부 입력", key="inbound_product_term")
+        products = product_options(inbound_product_term)
+        product_list = products["standard_name"].dropna().astype(str).drop_duplicates().tolist() if not products.empty else []
+
         first_product = st.checkbox("최초 등록", key="inbound_first_product")
         if first_product:
-            product = st.text_input("제품명 직접 입력", value="", placeholder="신규 표준제품명 입력", key="inbound_new_product_name").strip()
+            st.markdown("##### 최초 제품 등록")
+            product = st.text_input("표준제품명", value="", placeholder="WMS 표준제품명", key="inbound_new_product_name").strip()
+            first_erp_name = st.text_input(
+                "ERP명" if company != "비자료" else "비자료명",
+                value="",
+                placeholder="선택한 사업장의 ERP명/비자료명",
+                key="inbound_new_erp_name",
+            ).strip()
+            first_product_code = st.text_input("제품코드", value="", placeholder="노투스팜/NOH ERP 제품코드", key="inbound_new_product_code").strip()
+            wh = first_erp_name or product
         else:
+            selected_product = st.selectbox(
+                "제품",
+                [""] + product_list,
+                index=0,
+                key="inbound_product",
+                format_func=inbound_product_label,
+            )
             product = selected_product
-        wh = product_mapping_name_for(company, product) or product
+            first_erp_name = ""
+            first_product_code = ""
+            wh = product_mapping_name_for(company, product) or product
     with top_right:
         lot = st.text_input("LOT/제조번호", value="", placeholder="미입력 시 '-' 저장", key="inbound_lot")
         exp = st.text_input("유통기한", value="", placeholder="예: 28/3/2, 28.3.2, 2028-03-02 / 미입력 시 '-' 저장", key="inbound_exp")
 
     st.markdown("---")
-    map_col, pos_col = st.columns([7.9, 2.1], gap="large")
+    map_col, pos_col = st.columns([7.3, 2.7], gap="large")
     with map_col:
         render_inbound_quick_location_map()
     with pos_col:
@@ -3009,43 +3082,67 @@ def page_inbound():
         save_msg = st.empty()
         if save_clicked:
             if not product:
-                save_msg.error("제품을 선택하세요.")
+                save_msg.error("제품을 선택하거나 표준제품명을 입력하세요.")
             else:
-                if first_product:
-                    product = ensure_standard_product_only(product)
-                    wh = product
-                memo_parts = []
-                if inbound_source:
-                    memo_parts.append(f"매입처: {inbound_source}")
-                if memo:
-                    memo_parts.append(memo)
-                inbound_memo = " / ".join(memo_parts) if memo_parts else "입고 등록"
-                add_inventory(company, product, wh, normalize_blank(lot), normalize_exp_date(exp), loc, int(qty), inbound_memo)
-                save_msg.success(f"입고 저장 완료: {company} / {product} / {loc} / {qty}EA")
+                try:
+                    if first_product:
+                        product, wh = ensure_inbound_first_product_mapping(product, company, first_erp_name, first_product_code)
+                    memo_parts = []
+                    if inbound_source:
+                        memo_parts.append(f"매입처: {inbound_source}")
+                    if memo:
+                        memo_parts.append(memo)
+                    inbound_memo = " / ".join(memo_parts) if memo_parts else "입고 등록"
+                    add_inventory(company, product, wh, normalize_blank(lot), normalize_exp_date(exp), loc, int(qty), inbound_memo)
+                    save_msg.success(f"입고 저장 완료: {company} / {product} / {loc} / {qty}EA")
+                except Exception as e:
+                    save_msg.error(str(e))
 
 
 def page_move():
     st.title("이동 등록")
     st.caption("제품 → LOT/유통기한을 선택하면 출발 재고가 자동 표시됩니다.")
-    term = st.text_input("제품 검색", placeholder="제품명, 전산상 명칭, 별칭 일부 입력")
-    opts = product_options(term)
-    if opts.empty:
-        st.warning("일치하는 제품이 없습니다."); return
-    product = st.selectbox("추천 제품", [""] + opts["standard_name"].tolist(), index=0, format_func=lambda x: "제품명을 입력하거나 선택하세요" if x == "" else x)
-    if not product:
-        st.info("이동할 제품을 선택하세요.")
-        return
-    lot_df = q("SELECT DISTINCT lot FROM inventory WHERE product_name=? AND qty>0 ORDER BY lot", (product,))
-    if lot_df.empty:
-        st.info("현재 재고가 0이 아닌 LOT/제조번호가 없습니다."); return
-    lot = st.selectbox("LOT/제조번호", lot_df["lot"].tolist())
-    exp_df = q("SELECT DISTINCT exp_date FROM inventory WHERE product_name=? AND lot=? AND qty>0 ORDER BY exp_date", (product, lot))
-    exp = st.selectbox("유통기한", exp_df["exp_date"].tolist())
+
+    input_col, src_col, dest_col = st.columns([4, 4, 2], gap="large")
+
+    with input_col:
+        st.markdown("#### 이동 제품")
+        term = st.text_input("제품 검색", placeholder="제품명, 전산상 명칭, 별칭 일부 입력")
+        opts = product_options(term)
+        if opts.empty:
+            st.warning("일치하는 제품이 없습니다.")
+            return
+
+        product = st.selectbox(
+            "추천 제품",
+            [""] + opts["standard_name"].tolist(),
+            index=0,
+            format_func=lambda x: "제품명을 입력하거나 선택하세요" if x == "" else x
+        )
+        if not product:
+            st.info("이동할 제품을 선택하세요.")
+            return
+
+        lot_df = q("SELECT DISTINCT lot FROM inventory WHERE product_name=? AND qty>0 ORDER BY lot", (product,))
+        if lot_df.empty:
+            st.info("현재 재고가 0이 아닌 LOT/제조번호가 없습니다.")
+            return
+        lot = st.selectbox("LOT/제조번호", lot_df["lot"].tolist())
+
+        exp_df = q("SELECT DISTINCT exp_date FROM inventory WHERE product_name=? AND lot=? AND qty>0 ORDER BY exp_date", (product, lot))
+        exp = st.selectbox("유통기한", exp_df["exp_date"].tolist(), format_func=display_date_only)
+
     src_df = q("""SELECT id, company AS 출발사업장, location AS 출발위치, qty AS 현재수량, warehouse_name AS 전산상명칭
-                  FROM inventory WHERE product_name=? AND lot=? AND exp_date=? AND qty>0 ORDER BY company, location""", (product, lot, exp))
-    left, right = st.columns(2, gap="large")
-    with left:
+                  FROM inventory
+                  WHERE product_name=? AND lot=? AND exp_date=? AND qty>0
+                  ORDER BY company, location""", (product, lot, exp))
+
+    with src_col:
         st.markdown("#### 출발 재고")
+        if src_df.empty:
+            st.info("선택한 조건의 출발 재고가 없습니다.")
+            return
+
         if len(src_df) == 1:
             src_id = int(src_df.iloc[0]["id"])
             r = src_df.iloc[0]
@@ -3054,20 +3151,42 @@ def page_move():
             labels = [f"{r.출발사업장} / {r.출발위치} / {r.현재수량}EA" for r in src_df.itertuples()]
             selected = st.selectbox("출발 재고 선택", labels)
             src_id = int(src_df.iloc[labels.index(selected)]["id"])
-        src_row = src_df[src_df["id"]==src_id].iloc[0]
+
+        src_row = src_df[src_df["id"] == src_id].iloc[0]
         src_company = str(src_row["출발사업장"])
         max_qty = int(src_row["현재수량"])
         st.dataframe(src_df.drop(columns=["id"]), use_container_width=True, hide_index=True)
-    with right:
+
+    with dest_col:
         st.markdown("#### 도착 재고")
         default_idx = COMPANIES.index(src_company) if src_company in COMPANIES else 0
         to_company = st.selectbox("도착 사업장", COMPANIES, index=default_idx, key=f"move_company_{src_id}")
         if to_company != src_company:
             st.warning("정말로 다른 사업장으로 재고를 이동하시겠습니까?")
+
+        existing_loc_df = q("""SELECT location, SUM(qty) AS qty
+                              FROM inventory
+                              WHERE company=? AND product_name=? AND qty>0
+                              GROUP BY location
+                              ORDER BY qty DESC, location
+                              LIMIT 1""", (to_company, product))
+        if not existing_loc_df.empty:
+            preferred_loc = str(existing_loc_df.iloc[0]["location"] or "").strip()
+            preferred_qty = int(existing_loc_df.iloc[0]["qty"] or 0)
+            if preferred_loc:
+                auto_key = f"{src_id}|{to_company}|{product}|{preferred_loc}"
+                if st.session_state.get("_move_auto_loc_key") != auto_key:
+                    area, line, level = parse_location(preferred_loc)
+                    st.session_state["_move_picker_defaults"] = {"area": area, "line": line, "level": level}
+                    st.session_state["_move_picker_token"] = int(st.session_state.get("_move_picker_token", 0) or 0) + 1
+                    st.session_state["_move_auto_loc_key"] = auto_key
+                st.caption(f"기존 위치 자동 선택: {preferred_loc} ({preferred_qty}EA)")
+
         to_location = location_picker("move", "A1")
-        qty = st.number_input("이동 수량", min_value=1, max_value=max_qty, value=min(1,max_qty), step=1)
+        qty = st.number_input("이동 수량", min_value=1, max_value=max_qty, value=min(1, max_qty), step=1)
         memo = st.text_input("메모", value="")
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
         if st.button("이동 저장", type="primary", use_container_width=True):
             try:
                 move_inventory(src_id, to_company, to_location, int(qty), memo)
@@ -3075,7 +3194,6 @@ def page_move():
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
-
 
 
 def recommend_picks(pick_df, request_qty, expiry_short_first=True):
@@ -3257,9 +3375,9 @@ def page_outbound():
         cust_df = pd.DataFrame()
         if cust_term.strip():
             like = f"%{cust_term.strip()}%"
-            cust_df = q("""SELECT * FROM customers WHERE customer_name LIKE ? ORDER BY customer_name LIMIT 30""", (like,))
+            cust_df = q("""SELECT * FROM customers WHERE customer_name LIKE ? ORDER BY customer_name, company, id LIMIT 50""", (like,))
         else:
-            cust_df = q("""SELECT * FROM customers ORDER BY customer_name LIMIT 30""")
+            cust_df = q("""SELECT * FROM customers ORDER BY customer_name, company, id LIMIT 50""")
         if not cust_df.empty:
             labels = [f"{r.customer_name} | {r.company or '-'}" for r in cust_df.itertuples()]
             label = st.selectbox("거래처 선택", labels, key="out_customer_select")
@@ -3752,53 +3870,135 @@ def page_saved_outbound():
             _show_cancel_order_confirm(int(order_id))
 
 
+
+def page_mobile_stock_finder():
+    st.title("재고 찾기")
+    st.caption("모바일 조회 전용 화면입니다. 표준제품명, ERP명, 비자료명, 별칭으로 제품을 찾아 현재 재고 위치를 확인합니다.")
+
+    users = mobile_favorite_users()
+    user_options = users + ["새 사용자 입력"] if users else ["기본", "새 사용자 입력"]
+    default_user = st.session_state.get("mobile_stock_user", users[0] if users else "기본")
+    default_idx = user_options.index(default_user) if default_user in user_options else 0
+    user_choice = st.selectbox("사용자", user_options, index=default_idx, key="mobile_user_select")
+    if user_choice == "새 사용자 입력":
+        username = st.text_input("사용자명", value=st.session_state.get("mobile_stock_user", ""), placeholder="예: 김대리", key="mobile_user_new").strip() or "기본"
+    else:
+        username = user_choice
+    st.session_state["mobile_stock_user"] = username
+
+    fav_df = mobile_favorites_for_user(username)
+    with st.expander("❤️ 즐겨찾기", expanded=not fav_df.empty):
+        if fav_df.empty:
+            st.caption("아직 즐겨찾기가 없습니다. 제품 검색 후 즐겨찾기에 추가하세요.")
+        else:
+            for i, r in enumerate(fav_df.itertuples(index=False)):
+                fav_name = str(getattr(r, "product_name") or "")
+                c1, c2, c3, c4 = st.columns([5, 1, 1, 1])
+                with c1:
+                    if st.button(fav_name, key=f"mobile_fav_pick_{username}_{fav_name}", use_container_width=True):
+                        st.session_state["mobile_selected_product"] = fav_name
+                        st.session_state["mobile_product_term"] = fav_name
+                        st.rerun()
+                with c2:
+                    if st.button("▲", key=f"mobile_fav_up_{username}_{fav_name}", disabled=(i == 0), use_container_width=True):
+                        mobile_move_favorite(username, fav_name, "up")
+                        st.rerun()
+                with c3:
+                    if st.button("▼", key=f"mobile_fav_down_{username}_{fav_name}", disabled=(i == len(fav_df)-1), use_container_width=True):
+                        mobile_move_favorite(username, fav_name, "down")
+                        st.rerun()
+                with c4:
+                    if st.button("삭제", key=f"mobile_fav_del_{username}_{fav_name}", use_container_width=True):
+                        mobile_remove_favorite(username, fav_name)
+                        st.rerun()
+
+    term = st.text_input("제품 검색", placeholder="표준제품명 또는 ERP명 입력", key="mobile_product_term")
+    filter_c1, filter_c2 = st.columns(2)
+    with filter_c1:
+        company_filter = st.selectbox("사업장", ["전체"] + COMPANIES, key="mobile_company_filter")
+    with filter_c2:
+        expiry_filter = st.selectbox("유통기한", ["전체", "정상", "임박(6개월)", "만료"], key="mobile_expiry_filter")
+
+    candidates = mobile_product_candidates(term, limit=30) if term.strip() else []
+    selected_product = st.session_state.get("mobile_selected_product", "")
+    if candidates:
+        if selected_product not in candidates:
+            selected_product = candidates[0]
+        selected_product = st.selectbox(
+            "제품 선택",
+            candidates,
+            index=candidates.index(selected_product) if selected_product in candidates else 0,
+            key="mobile_product_select",
+        )
+        st.session_state["mobile_selected_product"] = selected_product
+    elif term.strip():
+        st.info("검색 결과가 없습니다. ERP명이나 표준제품명을 다시 확인해주세요.")
+        return
+    elif not selected_product:
+        st.info("제품명을 검색하거나 즐겨찾기를 선택하세요.")
+        return
+
+    if not selected_product:
+        return
+
+    rows = mobile_stock_rows(selected_product, company_filter=company_filter, expiry_filter=expiry_filter)
+    total_qty = int(rows["qty"].sum()) if not rows.empty else 0
+
+    st.markdown("---")
+    fav = mobile_is_favorite(username, selected_product)
+    title_col, fav_col = st.columns([4, 2])
+    with title_col:
+        st.subheader(selected_product)
+        st.markdown(f"### 총재고 {total_qty:,}EA")
+    with fav_col:
+        if fav:
+            if st.button("★ 즐겨찾기 해제", use_container_width=True, key=f"mobile_unfav_{username}_{selected_product}"):
+                mobile_remove_favorite(username, selected_product)
+                st.rerun()
+        else:
+            if st.button("☆ 즐겨찾기 추가", use_container_width=True, key=f"mobile_addfav_{username}_{selected_product}"):
+                mobile_add_favorite(username, selected_product)
+                st.rerun()
+
+    if rows.empty or total_qty <= 0:
+        st.warning("조건에 맞는 현재 재고가 없습니다.")
+        return
+
+    company_totals = rows.groupby("company")["qty"].sum().sort_index()
+    summary = " · ".join([f"{company} {int(qty):,}EA" for company, qty in company_totals.items() if int(qty or 0) > 0])
+    if summary:
+        st.caption(summary)
+
+    for company, cdf in rows.groupby("company", sort=True):
+        ctotal = int(cdf["qty"].sum())
+        if ctotal <= 0:
+            continue
+        with st.expander(f"{company} ({ctotal:,}EA)", expanded=True):
+            cdf = cdf.copy()
+            cdf["_exp_sort"] = pd.to_datetime(cdf["exp_date"], errors="coerce")
+            cdf["_exp_sort"] = cdf["_exp_sort"].fillna(pd.Timestamp.max)
+            cdf = cdf.sort_values(["_exp_sort", "location", "qty"])
+            for r in cdf.itertuples(index=False):
+                loc = str(getattr(r, "location") or "-")
+                exp = display_date_only(getattr(r, "exp_date") or "-")
+                qty = int(getattr(r, "qty") or 0)
+                status = expiry_status(getattr(r, "exp_date") or "-")
+                badge = "🟢" if status == "정상" else ("🟡" if status.startswith("임박") else "🔴")
+                st.markdown(f"{badge} **{loc}** &nbsp;&nbsp; {exp} &nbsp;&nbsp; **{qty:,}EA**", unsafe_allow_html=True)
+
+
 def page_search():
     st.title("제품 검색")
     term = st.text_input("검색어")
     opts = product_options(term)
     st.dataframe(opts.rename(columns={"standard_name":"표준제품명","warehouse_name":"전산상 명칭","aliases":"별칭"}), hide_index=True, use_container_width=True)
 
+
+
 def page_stocktake():
     st.title("재고 실사")
-    st.caption("재고 실사용 엑셀을 내려받고, 기준재고를 업로드하거나 제품명/LOT/유통기한/로케이션 단위로 필요한 재고만 조정합니다.")
+    st.caption("제품명/LOT/유통기한/로케이션 단위로 필요한 재고를 먼저 조정하고, 실사용 엑셀과 기준재고 양식을 내려받거나 업로드합니다.")
 
-    file_col, empty_col = st.columns([3, 7], gap="large")
-    with file_col:
-        st.subheader("실사 파일")
-        excel_data = full_inventory_excel_bytes(exclude_zero=st.session_state.get("stocktake_exclude_zero", True))
-        st.download_button(
-            "재고 실사용 엑셀 내려받기",
-            data=excel_data,
-            file_name=f"NOHTUS_전체재고실사_{date.today().strftime('%Y%m%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-        exclude_zero = st.checkbox("재고가 0인 경우는 포함하지 않기", value=st.session_state.get("stocktake_exclude_zero", True), key="stocktake_exclude_zero")
-
-        st.markdown("<div style='text-align:center;font-size:1.02rem;font-weight:900;margin:18px 0 6px;'>기준재고 업로드</div>", unsafe_allow_html=True)
-        st.download_button(
-            "기준재고 업로드 샘플 양식 다운로드",
-            data=baseline_stock_template_excel_bytes(),
-            file_name="NOHTUS_기준재고_업로드_샘플양식.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-        survey_file = st.file_uploader("기준재고 엑셀 선택", type=["xlsx"], key="stock_survey_upload")
-        replace_current = st.checkbox("기존 현재재고를 삭제하고 업로드 파일로 교체", value=True)
-        if survey_file is not None:
-            st.warning("업로드 실행 시 현재재고가 바뀔 수 있습니다. 운영 DB에서는 파일을 한 번 더 확인하세요.")
-            if st.button("기준재고 DB 반영", type="primary", use_container_width=True):
-                try:
-                    survey_file.seek(0)
-                    inserted, skipped, prod_inserted, ambiguous_skipped = import_stock_survey_excel(survey_file, replace_current=replace_current)
-                    st.success(f"반영 완료: 재고 {inserted}건 / 제품매칭표 신규 {prod_inserted}건 / 제외 {skipped}건")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"반영 실패: {e}")
-    with empty_col:
-        st.empty()
-
-    st.markdown("---")
     st.subheader("재고조정")
     adj_df = q("""
         SELECT id, location, company, product_name, warehouse_name, lot, exp_date, qty
@@ -3808,66 +4008,123 @@ def page_stocktake():
     """)
     if adj_df.empty:
         st.info("조정할 현재 재고가 없습니다.")
-        return
+    else:
+        adjust_area, _adjust_blank = st.columns([7, 3], gap="large")
+        with adjust_area:
+            form_left, form_right = st.columns(2, gap="large")
 
-    adjust_left, adjust_right = st.columns([4, 6], gap="large")
-    with adjust_left:
-        search = st.text_input("조정 대상 제품 검색", placeholder="제품명/전산상 명칭/LOT/로케이션 일부를 입력하세요", key="stock_adjust_search")
-        filtered = adj_df.copy()
-        if search.strip():
-            term = search.strip().lower()
-            filtered = filtered[
-                filtered["product_name"].fillna("").str.lower().str.contains(term, regex=False)
-                | filtered["warehouse_name"].fillna("").str.lower().str.contains(term, regex=False)
-                | filtered["lot"].fillna("").str.lower().str.contains(term, regex=False)
-                | filtered["location"].fillna("").str.lower().str.contains(term, regex=False)
-            ]
-        if filtered.empty:
-            st.warning("검색어와 일치하는 재고가 없습니다.")
-            return
+            with form_left:
+                search = st.text_input("조정 대상 제품 검색", placeholder="제품명/전산상 명칭/LOT/로케이션 일부를 입력하세요", key="stock_adjust_search")
+                filtered = adj_df.copy()
+                if search.strip():
+                    term = search.strip().lower()
+                    filtered = filtered[
+                        filtered["product_name"].fillna("").str.lower().str.contains(term, regex=False)
+                        | filtered["warehouse_name"].fillna("").str.lower().str.contains(term, regex=False)
+                        | filtered["lot"].fillna("").str.lower().str.contains(term, regex=False)
+                        | filtered["location"].fillna("").str.lower().str.contains(term, regex=False)
+                    ]
 
-        products = filtered["product_name"].dropna().astype(str).drop_duplicates().tolist()
-        product = st.selectbox("제품명", products, key="stock_adjust_product")
-        lot_df = filtered[filtered["product_name"] == product].copy()
-        lots = lot_df["lot"].fillna("-").astype(str).drop_duplicates().tolist()
-        lot = st.selectbox("LOT/제조번호", lots, key=f"stock_adjust_lot_{product}")
-        exp_df = lot_df[lot_df["lot"].fillna("-").astype(str) == lot].copy()
-        exps = exp_df["exp_date"].fillna("-").astype(str).drop_duplicates().tolist()
-        exp = st.selectbox("유통기한", exps, key=f"stock_adjust_exp_{product}_{lot}", format_func=display_date_only)
-        target_df = exp_df[exp_df["exp_date"].fillna("-").astype(str) == exp].copy()
+                if filtered.empty:
+                    st.warning("검색어와 일치하는 재고가 없습니다.")
+                    return
 
-    with adjust_right:
-        st.markdown("#### 선택 재고")
-        show = target_df[["id", "location", "company", "product_name", "warehouse_name", "lot", "exp_date", "qty"]].copy()
-        show = show.rename(columns={
-            "id": "ID", "location": "로케이션", "company": "사업장", "product_name": "표준제품명",
-            "warehouse_name": "전산상명칭", "lot": "제조번호", "exp_date": "유통기한", "qty": "수량"
-        })
-        show["유통기한"] = show["유통기한"].apply(display_date_only)
-        st.dataframe(show, hide_index=True, use_container_width=True)
+                products = filtered["product_name"].dropna().astype(str).drop_duplicates().tolist()
+                product = st.selectbox("제품명", products, key="stock_adjust_product")
+                lot_df = filtered[filtered["product_name"] == product].copy()
 
-        labels = []
-        id_by_label = {}
-        for r in target_df.itertuples():
-            label = f"{r.location} / {r.company} / 현재 {int(r.qty)}EA"
-            labels.append(label)
-            id_by_label[label] = int(r.id)
-        selected = st.selectbox("조정 대상 로케이션", labels, key=f"stock_adjust_inv_{product}_{lot}_{exp}")
-        inv_id = id_by_label[selected]
-        row = target_df[target_df["id"] == inv_id].iloc[0]
-        actual = st.number_input("실물수량", min_value=0, value=int(row["qty"]), step=1, key=f"stock_adjust_actual_{inv_id}")
-        reason = st.selectbox("사유", ["실사차이", "파손", "유통기한만료", "오출고", "기타"], key=f"stock_adjust_reason_{inv_id}")
-        memo = st.text_input("메모", placeholder="필요 시 입력", key=f"stock_adjust_memo_{inv_id}")
-        if st.button("재고조정 저장", type="primary", use_container_width=True, key=f"stock_adjust_submit_{inv_id}"):
-            try:
-                before, after, diff = adjust_inventory(int(inv_id), int(actual), reason, memo)
-                st.session_state["_stock_adjust_success_msg"] = f"재고조정 완료: {before}EA → {after}EA ({diff:+d}EA)"
-                st.rerun()
-            except Exception as e:
-                st.error(str(e))
+                lots = lot_df["lot"].fillna("-").astype(str).drop_duplicates().tolist()
+                lot = st.selectbox("LOT/제조번호", lots, key=f"stock_adjust_lot_{product}")
+
+                exp_df = lot_df[lot_df["lot"].fillna("-").astype(str) == lot].copy()
+                exps = exp_df["exp_date"].fillna("-").astype(str).drop_duplicates().tolist()
+                exp = st.selectbox("유통기한", exps, key=f"stock_adjust_exp_{product}_{lot}", format_func=display_date_only)
+
+            target_df = exp_df[exp_df["exp_date"].fillna("-").astype(str) == exp].copy()
+            labels = []
+            id_by_label = {}
+            for r in target_df.itertuples():
+                label = f"{r.location} / {r.company} / 현재 {int(r.qty)}EA"
+                labels.append(label)
+                id_by_label[label] = int(r.id)
+
+            with form_right:
+                selected = st.selectbox("조정 대상 로케이션", labels, key=f"stock_adjust_inv_{product}_{lot}_{exp}")
+                inv_id = id_by_label[selected]
+                row = target_df[target_df["id"] == inv_id].iloc[0]
+
+                actual = st.number_input("실물수량", min_value=0, value=int(row["qty"]), step=1, key=f"stock_adjust_actual_{inv_id}")
+                reason = st.selectbox("사유", ["실사차이", "파손", "유통기한만료", "오출고", "기타"], key=f"stock_adjust_reason_{inv_id}")
+                memo = st.text_input("메모", placeholder="필요 시 입력", key=f"stock_adjust_memo_{inv_id}")
+
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+            btn_left, btn_mid, btn_right = st.columns([1, 1, 1])
+            with btn_mid:
+                if st.button("재고조정 저장", type="primary", use_container_width=False, key=f"stock_adjust_submit_{inv_id}"):
+                    try:
+                        before, after, diff = adjust_inventory(int(inv_id), int(actual), reason, memo)
+                        st.session_state["_stock_adjust_success_msg"] = f"재고조정 완료: {before}EA → {after}EA ({diff:+d}EA)"
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
+
+            st.markdown("#### 선택 재고")
+            show = target_df[["id", "location", "company", "product_name", "warehouse_name", "lot", "exp_date", "qty"]].copy()
+            show = show.rename(columns={
+                "id": "ID", "location": "로케이션", "company": "사업장", "product_name": "표준제품명",
+                "warehouse_name": "전산상명칭", "lot": "제조번호", "exp_date": "유통기한", "qty": "수량"
+            })
+            show["유통기한"] = show["유통기한"].apply(display_date_only)
+            st.dataframe(show, hide_index=True, use_container_width=True)
+
         stock_adjust_msg = st.session_state.pop("_stock_adjust_success_msg", None)
         if stock_adjust_msg:
             st.success(stock_adjust_msg)
+
+    st.markdown("---")
+    st.subheader("실사/기준재고 파일")
+    file_area, _file_blank = st.columns([6, 4], gap="large")
+    with file_area:
+        file_left, file_right = st.columns(2, gap="large")
+        with file_left:
+            st.markdown("#### 재고 실사용 엑셀")
+            exclude_zero = bool(st.session_state.get("stocktake_exclude_zero", True))
+            excel_data = full_inventory_excel_bytes(exclude_zero=exclude_zero)
+            st.download_button(
+                "재고 실사용 엑셀 내려받기",
+                data=excel_data,
+                file_name=f"NOHTUS_전체재고실사_{date.today().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+            st.checkbox(
+                "재고가 0인 경우는 포함하지 않기",
+                value=exclude_zero,
+                key="stocktake_exclude_zero",
+            )
+
+        with file_right:
+            st.markdown("#### 기준재고")
+            st.download_button(
+                "현재 기준 재고 양식 다운로드",
+                data=current_baseline_stock_excel_bytes(exclude_zero=False),
+                file_name=f"NOHTUS_현재기준재고양식_{date.today().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+            survey_file = st.file_uploader("기준재고 엑셀 선택", type=["xlsx"], key="stock_survey_upload")
+            replace_current = st.checkbox("기존 현재재고를 삭제하고 업로드 파일로 교체", value=True, key="stock_survey_replace_current")
+            if survey_file is not None:
+                st.warning("업로드 실행 시 현재재고가 바뀔 수 있습니다. 운영 DB에서는 파일을 한 번 더 확인하세요.")
+                if st.button("기준재고 DB 반영", type="primary", use_container_width=True):
+                    try:
+                        survey_file.seek(0)
+                        inserted, skipped, prod_inserted, ambiguous_skipped = import_stock_survey_excel(survey_file, replace_current=replace_current)
+                        st.success(f"반영 완료: 재고 {inserted}건 / 제품매칭표 신규 {prod_inserted}건 / 제외 {skipped}건")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"반영 실패: {e}")
+
 
 def page_history():
     st.title("이력 조회")
@@ -3889,18 +4146,16 @@ def page_history():
         st.error("시작일은 종료일보다 늦을 수 없습니다.")
         return
 
-    search_col, blank_col = st.columns(2)
+    search_col, customer_col = st.columns(2)
     with search_col:
         term = st.text_input("제품명/로케이션 검색", placeholder="제품명, LOT, 로케이션 일부 입력", key="history_search_term")
-    with blank_col:
-        st.markdown("&nbsp;", unsafe_allow_html=True)
+    with customer_col:
+        customer_term = st.text_input("매출처 검색", placeholder="매출처명 일부 입력", key="history_customer_term")
 
-    filter_key = f"{company}|{tx_label}|{start_date}|{end_date}|{term.strip()}"
+    filter_key = f"{company}|{tx_label}|{start_date}|{end_date}|{term.strip()}|{customer_term.strip()}"
     if st.session_state.get("history_filter_key") != filter_key:
         st.session_state["history_filter_key"] = filter_key
-        st.session_state["history_visible_limit"] = 500
-    visible_limit = int(st.session_state.get("history_visible_limit", 500) or 500)
-    visible_limit = max(500, visible_limit)
+        st.session_state["history_page"] = 1
 
     conditions = []
     params = []
@@ -3927,6 +4182,28 @@ def page_history():
         like = f"%{term.strip()}%"
         conditions.append("(product_name LIKE ? OR lot LIKE ? OR from_location LIKE ? OR to_location LIKE ? OR memo LIKE ?)")
         params.extend([like, like, like, like, like])
+    if customer_term.strip():
+        matched_order_ids = []
+        try:
+            orders_for_customer = q("SELECT id, COALESCE(title, '') AS title FROM outbound_orders ORDER BY id DESC")
+            customers_for_infer = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
+            needle = customer_term.strip().lower()
+            for r in orders_for_customer.itertuples(index=False):
+                title = str(getattr(r, "title", "") or "")
+                inferred_customer, _manager = _infer_customer_from_title(title, customers_for_infer)
+                if needle in title.lower() or needle in str(inferred_customer or "").lower():
+                    matched_order_ids.append(int(getattr(r, "id")))
+        except Exception:
+            matched_order_ids = []
+        matched_order_ids = sorted(set(matched_order_ids))
+        if matched_order_ids:
+            order_clauses = []
+            for oid in matched_order_ids:
+                order_clauses.append("memo LIKE ?")
+                params.append(f"%출고지시서 #{oid}%")
+            conditions.append("(" + " OR ".join(order_clauses) + ")")
+        else:
+            conditions.append("1=0")
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     total_df = q(f"SELECT COUNT(*) AS cnt FROM transactions {where}", tuple(params))
@@ -3935,14 +4212,45 @@ def page_history():
         st.info("조회된 이력이 없습니다.")
         return
 
+    page_size = 20
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+    current_page = int(st.session_state.get("history_page", 1) or 1)
+    current_page = max(1, min(current_page, total_pages))
+    st.session_state["history_page"] = current_page
+    offset = (current_page - 1) * page_size
+
     df = q(f"""
         SELECT * FROM transactions
         {where}
         ORDER BY id DESC
-        LIMIT ? OFFSET 0
-    """, tuple(params + [visible_limit]))
+        LIMIT ? OFFSET ?
+    """, tuple(params + [page_size, offset]))
 
-    st.caption(f"총 {total_count:,}건 중 {min(len(df), total_count):,}건 표시 중 (한 번에 500건씩 추가 로딩)")
+    page_left, page_mid, page_right = st.columns([1, 2, 1])
+    with page_left:
+        if st.button("이전", disabled=current_page <= 1, key="history_prev_page", use_container_width=True):
+            st.session_state["history_page"] = max(1, current_page - 1)
+            st.rerun()
+    with page_mid:
+        selected_page = st.number_input(
+            "페이지",
+            min_value=1,
+            max_value=total_pages,
+            value=current_page,
+            step=1,
+            key="history_page_input",
+        )
+        if int(selected_page) != current_page:
+            st.session_state["history_page"] = int(selected_page)
+            st.rerun()
+    with page_right:
+        if st.button("다음", disabled=current_page >= total_pages, key="history_next_page", use_container_width=True):
+            st.session_state["history_page"] = min(total_pages, current_page + 1)
+            st.rerun()
+
+    start_no = offset + 1
+    end_no = min(offset + len(df), total_count)
+    st.caption(f"총 {total_count:,}건 / {current_page:,}페이지/{total_pages:,}페이지 / 현재 {start_no:,}~{end_no:,}건 표시")
 
     # warehouse_name은 화면에서 제외하고, 재고조정/재고실사는 +/-와 현재 최종재고를 표시한다.
     final_values = []
@@ -3964,6 +4272,36 @@ def page_history():
     show = df.copy()
     show["수량"] = qty_values
     show["최종재고"] = final_values
+
+    # 출고 관련 이력은 memo의 "출고지시서 #번호"를 기준으로 outbound_orders 제목을 찾고,
+    # 제목에서 매출처를 추정해 이력조회 화면에 함께 표시한다.
+    order_customer_map = {}
+    try:
+        order_ids = []
+        if "memo" in show.columns:
+            for memo_text in show["memo"].fillna("").astype(str).tolist():
+                m = re.search(r"출고지시서\s*#(\d+)", memo_text)
+                if m:
+                    order_ids.append(int(m.group(1)))
+        order_ids = sorted(set(order_ids))
+        if order_ids:
+            placeholders = ",".join(["?"] * len(order_ids))
+            orders_df = q(f"SELECT id, COALESCE(title, '') AS title FROM outbound_orders WHERE id IN ({placeholders})", tuple(order_ids))
+            customers_df = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
+            for r in orders_df.itertuples(index=False):
+                customer, _manager = _infer_customer_from_title(getattr(r, "title", ""), customers_df)
+                order_customer_map[int(getattr(r, "id"))] = customer
+    except Exception:
+        order_customer_map = {}
+
+    def _history_customer_from_memo(memo_text):
+        m = re.search(r"출고지시서\s*#(\d+)", str(memo_text or ""))
+        if not m:
+            return ""
+        return order_customer_map.get(int(m.group(1)), "")
+
+    show["매출처"] = show["memo"].apply(_history_customer_from_memo) if "memo" in show.columns else ""
+
     if "exp_date" in show.columns:
         show["exp_date"] = show["exp_date"].apply(display_date_only)
     rename_cols = {
@@ -3972,14 +4310,10 @@ def page_history():
         "to_company":"도착사업장", "to_location":"도착위치", "memo":"메모"
     }
     show = show.rename(columns=rename_cols)
-    wanted = ["일시","이력유형","제품명","LOT","유통기한","출발사업장","출발위치","도착사업장","도착위치","수량","최종재고","메모"]
+    wanted = ["일시","이력유형","매출처","제품명","LOT","유통기한","출발사업장","출발위치","도착사업장","도착위치","수량","최종재고","메모"]
     show = show[[c for c in wanted if c in show.columns]]
     st.dataframe(show, use_container_width=True, hide_index=True)
 
-    if visible_limit < total_count:
-        if st.button("500건 더 보기", use_container_width=True):
-            st.session_state["history_visible_limit"] = visible_limit + 500
-            st.rerun()
 
 def page_master():
     st.title("제품 마스터")
@@ -4191,11 +4525,21 @@ def import_customer_master_excel(uploaded_file):
             vals = []
             for c in ["company", "customer_type", "manager", "phone", "address", "memo"]:
                 vals.append("" if pd.isna(r.get(c)) else str(r.get(c)).strip())
+            company = vals[0]
+
+            # 거래처명만으로 중복 판단하면 같은 매출처가 노투스팜/NOH 등 여러 사업장에
+            # 존재할 때 한쪽 행이 다른 행을 덮어쓴다.
+            # 따라서 중복 기준은 우선 거래처코드+사업장, 없으면 거래처명+사업장으로 본다.
             existing = None
-            if code:
-                existing = cur.execute("SELECT id FROM customers WHERE customer_code=?", (code,)).fetchone()
-            if not existing:
-                existing = cur.execute("SELECT id FROM customers WHERE customer_name=?", (name,)).fetchone()
+            if code and company:
+                existing = cur.execute("SELECT id FROM customers WHERE customer_code=? AND IFNULL(company,'')=?", (code, company)).fetchone()
+            if not existing and code and not company:
+                existing = cur.execute("SELECT id FROM customers WHERE customer_code=? AND IFNULL(company,'')=''", (code,)).fetchone()
+            if not existing and company:
+                existing = cur.execute("SELECT id FROM customers WHERE customer_name=? AND IFNULL(company,'')=?", (name, company)).fetchone()
+            if not existing and not company:
+                existing = cur.execute("SELECT id FROM customers WHERE customer_name=? AND IFNULL(company,'')=''", (name,)).fetchone()
+
             if existing:
                 cur.execute("UPDATE customers SET customer_code=?, customer_name=?, company=?, customer_type=?, manager=?, phone=?, address=?, memo=?, updated_at=? WHERE id=?", (code, name, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], now, int(existing[0])))
                 updated += 1
@@ -4209,7 +4553,7 @@ def import_customer_master_excel(uploaded_file):
 
 
 def customer_export_excel_bytes():
-    df = q("SELECT customer_code AS 거래처코드, customer_name AS 거래처명, company AS 사업장, customer_type AS 유형, manager AS 담당자, phone AS 연락처, address AS 주소, memo AS 메모 FROM customers ORDER BY customer_name")
+    df = q("SELECT customer_code AS 거래처코드, customer_name AS 거래처명, company AS 사업장, customer_type AS 유형, manager AS 담당자, phone AS 연락처, address AS 주소, memo AS 메모 FROM customers ORDER BY customer_name, company")
     return dataframe_to_excel_bytes(df, "거래처관리")
 
 def page_inventory_metadata_edit():
@@ -4233,7 +4577,7 @@ def page_customer_master():
                 st.rerun()
             except Exception as e:
                 st.error(f"업로드 실패: {e}")
-    df = q("SELECT customer_code AS 거래처코드, customer_name AS 거래처명, company AS 사업장, customer_type AS 유형, manager AS 담당자, phone AS 연락처, address AS 주소, memo AS 메모 FROM customers ORDER BY customer_name")
+    df = q("SELECT customer_code AS 거래처코드, customer_name AS 거래처명, company AS 사업장, customer_type AS 유형, manager AS 담당자, phone AS 연락처, address AS 주소, memo AS 메모 FROM customers ORDER BY customer_name, company")
     st.markdown("### 등록된 거래처")
     if df.empty:
         st.info("등록된 거래처가 없습니다.")
@@ -4887,8 +5231,13 @@ def page_closing():
             # 기존수량은 오늘 해당 재고ID의 출고수량을 되돌려 계산한 출고 전 수량이다.
             items["기존수량"] = items["현재수량"] + items["동일재고출고합계"]
             items["실물수량"] = ""
-            show_cols = ["지시서번호", "사업장", "로케이션", "표준제품명", "제조번호", "유통기한", "기존수량", "출고수량", "현재수량", "실물수량"]
-            st.dataframe(items[show_cols], hide_index=True, use_container_width=True, column_config={"지시서번호": st.column_config.NumberColumn(width="small"), "사업장": st.column_config.TextColumn(width="small"), "로케이션": st.column_config.TextColumn(width="small"), "표준제품명": st.column_config.TextColumn(width="large"), "제조번호": st.column_config.TextColumn(width="medium"), "유통기한": st.column_config.TextColumn(width="small"), "기존수량": st.column_config.NumberColumn(width="small"), "출고수량": st.column_config.NumberColumn(width="small"), "현재수량": st.column_config.NumberColumn(width="small"), "실물수량": st.column_config.TextColumn(width="small")})
+            try:
+                customers_for_close = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
+                items["매출처"] = items["출고지시서제목"].apply(lambda x: _infer_customer_from_title(x, customers_for_close)[0])
+            except Exception:
+                items["매출처"] = ""
+            show_cols = ["지시서번호", "매출처", "사업장", "로케이션", "표준제품명", "제조번호", "유통기한", "기존수량", "출고수량", "현재수량", "실물수량"]
+            st.dataframe(items[show_cols], hide_index=True, use_container_width=True, column_config={"지시서번호": st.column_config.NumberColumn(width="small"), "매출처": st.column_config.TextColumn(width="medium"), "사업장": st.column_config.TextColumn(width="small"), "로케이션": st.column_config.TextColumn(width="small"), "표준제품명": st.column_config.TextColumn(width="large"), "제조번호": st.column_config.TextColumn(width="medium"), "유통기한": st.column_config.TextColumn(width="small"), "기존수량": st.column_config.NumberColumn(width="small"), "출고수량": st.column_config.NumberColumn(width="small"), "현재수량": st.column_config.NumberColumn(width="small"), "실물수량": st.column_config.TextColumn(width="small")})
             st.download_button("마감 체크리스트 엑셀 다운로드", data=dataframe_to_excel_bytes(items[show_cols], "마감체크"), file_name=f"NOHTUS_마감체크_{ds}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     else:
         st.markdown("### 출고")
@@ -4941,51 +5290,6 @@ def page_closing():
 
 
 # ---------------- style/nav ----------------
-def apply_style():
-    st.markdown("""
-    <style>
-    .stApp {background:#f8fafc;}
-    h1,h2,h3 {color:#111827;}
-    section[data-testid="stSidebar"] {background:linear-gradient(180deg,#08213d,#103e69); color:white; font-size:123%; width:255px!important; min-width:255px!important;}
-    section[data-testid="stSidebar"] > div:first-child {width:255px!important; min-width:255px!important;}
-    .block-container {padding-left:2.3rem!important; padding-right:1.75rem!important;}
-    section[data-testid="stSidebar"] * {color:white;}
-    section[data-testid="stSidebar"] .stButton > button {background:transparent!important;border:0!important;color:white!important;text-align:left!important;justify-content:flex-start!important;border-radius:10px!important;padding:8px 10px!important;font-weight:800!important;font-size:123%!important;}
-    section[data-testid="stSidebar"] .stButton > button p {text-align:left!important;width:100%!important;}
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="primary"], section[data-testid="stSidebar"] div[data-testid="stButton"] > button {text-align:left!important;justify-content:flex-start!important;}
-    section[data-testid="stSidebar"] .stButton > button:hover {background:rgba(96,165,250,.35);color:white;border:0;}
-    .nav-active button {background:#2563eb!important;}
-
-    .legend-wrap {display:flex;gap:12px;flex-wrap:wrap;margin:4px 0 14px 0;}
-    .legend-chip {display:flex;align-items:center;gap:8px;border:1px solid #dbe4f0;background:#fff;border-radius:12px;padding:9px 14px;font-weight:800;color:#111827;}
-    .swatch {width:18px;height:18px;border-radius:5px;border:1px solid rgba(15,23,42,.12);display:inline-block;}
-    .swatch.y {background:#fff39b}.swatch.b{background:#68d2e7}.swatch.p{background:#f0a7e6}.swatch.g{background:#f3f4f6}
-    .map-card {background:#fff;border:1px solid #dbe4f0;border-radius:18px;padding:16px;box-shadow:0 8px 24px rgba(15,23,42,.06);}
-    .rack-title {text-align:center;font-size:11px;color:#64748b;font-weight:800;margin-top:2px;height:0;overflow:visible;}
-    .mapbtn-wrap {position:relative;margin:0;}
-    .mapbtn-wrap .stButton > button {height:42px;padding:0!important;border-radius:0!important;border:1px solid rgba(51,65,85,.34)!important;color:#0f172a!important;font-weight:900!important;font-size:13px!important;box-shadow:none!important;}
-    .mapbtn-wrap.yellow .stButton > button{background:#fff39b!important}.mapbtn-wrap.blue .stButton > button{background:#68d2e7!important}.mapbtn-wrap.pink .stButton > button{background:#f0a7e6!important}.mapbtn-wrap.gray .stButton > button{background:#f7f8fa!important}.mapbtn-wrap.bidata .stButton > button{background:#d1d5db!important}.mapbtn-wrap.white .stButton > button{background:#fff!important}
-    .mapbtn-wrap .stButton > button:hover{outline:3px solid rgba(37,99,235,.22)!important;z-index:2;position:relative;}
-    .mapbtn-wrap.selected .stButton > button{outline:3px solid #2563eb!important;}
-    .mapbtn-wrap.has-stock:after{content:'';position:absolute;right:8px;top:8px;width:9px;height:9px;border-radius:999px;background:#65d84f;border:1.5px solid #166534;z-index:4;pointer-events:none;}
-    .gbox {border:1px solid #dbe4f0;border-radius:12px;overflow:hidden;background:#fff;}
-    .blank-g{height:78px;border-bottom:1px solid #dbe4f0}.box-label{text-align:center;padding:10px;font-weight:900;}
-    .center-label{text-align:center;font-weight:900;font-size:13px;margin-top:8px;color:#111827}.memo{padding:46px 8px 8px 8px;line-height:2.8;color:#334155;font-size:14px;white-space:nowrap}.qptext{height:42px;display:flex;align-items:center;font-weight:900;border:1px solid #e2e8f0;border-left:0;padding-left:8px;background:#fff;}
-
-    .map-detail-title-wrap div[data-testid="stButton"] > button {font-size:12pt!important;font-weight:400!important;text-align:center!important;justify-content:center!important;border:0!important;background:transparent!important;color:#111827!important;box-shadow:none!important;padding:0.15rem 0!important;}
-    .detail-total-text {display:flex;gap:8px;align-items:baseline;justify-content:center;color:#334155;font-size:13px;margin:2px auto 10px;}
-    .detail-total-text strong {font-weight:600;color:#111827;}
-    .popup-box{background:#ffffff;border:1px solid #bfdbfe;border-radius:16px;padding:14px;margin:8px 0 18px 0;box-shadow:0 10px 28px rgba(37,99,235,.08)}
-    .zone-pill {display:inline-block;background:#e8f5ee;color:#15803d;font-weight:800;border-radius:10px;padding:6px 10px;margin-bottom:10px;}
-    .detail-card {background:white;border:1px solid #dbe4f0;border-radius:14px;padding:12px;margin:8px 0;box-shadow:0 5px 16px rgba(15,23,42,.05);}
-    .card-top {display:flex;justify-content:space-between;align-items:center;gap:8px;}.company-badge {display:inline-block;background:#eff6ff;color:#1d4ed8;font-weight:800;border-radius:999px;padding:3px 8px;font-size:12px;}.product-title {font-weight:400;font-size:14px;margin-top:8px;color:#111827;}.muted {color:#64748b;font-size:12px;line-height:1.6;}.qty-text {font-weight:900;color:#111827;white-space:nowrap;}.photo-box{width:250px;height:250px;margin-left:auto;margin-right:auto;border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:800;margin-bottom:10px;}
-    div[data-testid="stMetric"] {background:white;border:1px solid #dbe4f0;border-radius:16px;padding:16px;box-shadow:0 8px 20px rgba(15,23,42,.05)}
-    .mini-cal {background:#fff;border:1px solid #dbe4f0;border-radius:16px;padding:14px;margin:8px 0 16px 0;box-shadow:0 8px 20px rgba(15,23,42,.05)}
-    .mini-cal-head {font-weight:900;margin-bottom:10px;color:#111827}.mini-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}.mini-week span{text-align:center;color:#64748b;font-size:12px;font-weight:900}.cal-day{height:34px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:#f8fafc;color:#334155;font-weight:800;position:relative}.cal-day.on{background:#2563eb;color:white;box-shadow:0 0 0 3px rgba(37,99,235,.15)}.cal-day small{position:absolute;right:4px;top:3px;font-size:10px;background:white;color:#2563eb;border-radius:999px;min-width:15px;height:15px;line-height:15px;text-align:center}.cal-day.empty{background:transparent}
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button, section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="secondary"], section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="primary"]{background:transparent!important;color:white!important;border:0!important;}
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button p{color:white!important;}
-    </style>
-    """, unsafe_allow_html=True)
 
 def nav_button(name):
     if st.sidebar.button(name, key=f"nav_{name}", use_container_width=True):
@@ -5316,8 +5620,13 @@ def page_closing():
             # 기존수량은 오늘 해당 재고ID의 출고수량을 되돌려 계산한 출고 전 수량이다.
             items["기존수량"] = items["현재수량"] + items["동일재고출고합계"]
             items["실물수량"] = ""
-            show_cols = ["지시서번호", "사업장", "로케이션", "표준제품명", "제조번호", "유통기한", "기존수량", "출고수량", "현재수량", "실물수량"]
-            st.dataframe(items[show_cols], hide_index=True, use_container_width=True, column_config={"지시서번호": st.column_config.NumberColumn(width="small"), "사업장": st.column_config.TextColumn(width="small"), "로케이션": st.column_config.TextColumn(width="small"), "표준제품명": st.column_config.TextColumn(width="large"), "제조번호": st.column_config.TextColumn(width="medium"), "유통기한": st.column_config.TextColumn(width="small"), "기존수량": st.column_config.NumberColumn(width="small"), "출고수량": st.column_config.NumberColumn(width="small"), "현재수량": st.column_config.NumberColumn(width="small"), "실물수량": st.column_config.TextColumn(width="small")})
+            try:
+                customers_for_close = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
+                items["매출처"] = items["출고지시서제목"].apply(lambda x: _infer_customer_from_title(x, customers_for_close)[0])
+            except Exception:
+                items["매출처"] = ""
+            show_cols = ["지시서번호", "매출처", "사업장", "로케이션", "표준제품명", "제조번호", "유통기한", "기존수량", "출고수량", "현재수량", "실물수량"]
+            st.dataframe(items[show_cols], hide_index=True, use_container_width=True, column_config={"지시서번호": st.column_config.NumberColumn(width="small"), "매출처": st.column_config.TextColumn(width="medium"), "사업장": st.column_config.TextColumn(width="small"), "로케이션": st.column_config.TextColumn(width="small"), "표준제품명": st.column_config.TextColumn(width="large"), "제조번호": st.column_config.TextColumn(width="medium"), "유통기한": st.column_config.TextColumn(width="small"), "기존수량": st.column_config.NumberColumn(width="small"), "출고수량": st.column_config.NumberColumn(width="small"), "현재수량": st.column_config.NumberColumn(width="small"), "실물수량": st.column_config.TextColumn(width="small")})
             st.download_button("마감 체크리스트 엑셀 다운로드", data=dataframe_to_excel_bytes(items[show_cols], "마감체크"), file_name=f"NOHTUS_마감체크_{ds}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     else:
         st.markdown("### 출고")
@@ -5402,6 +5711,7 @@ def main():
     nav_button("마감")
 
     st.sidebar.markdown("### 재고")
+    # nav_button("재고 찾기")  # RC3.3: 재고 찾기 메뉴 임시 숨김
     nav_button("입고 등록")
     nav_button("이동 등록")
     nav_button("이력 조회")
@@ -5416,6 +5726,7 @@ def main():
     elif menu == "출고지시": page_outbound()
     elif menu == "저장된 출고지시": page_saved_outbound()
     elif menu == "마감": page_closing()
+    elif menu == "재고 찾기": page_mobile_stock_finder()
     elif menu == "입고 등록": page_inbound()
     elif menu == "이동 등록": page_move()
     elif menu == "재고 실사": page_stocktake()
