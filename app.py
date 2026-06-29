@@ -10,6 +10,8 @@ from urllib.parse import quote
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+from styles import apply_style, apply_inbound_bridge_style
+from inbound_map import render_inbound_quick_location_map
 
 APP_TITLE = "NOHTUS WMS"
 
@@ -26,7 +28,7 @@ APP_TITLE = "NOHTUS WMS"
 # 이후 기능 추가는 이 코어를 직접 수정하지 않고,
 # CSS/UI/서비스 함수 레이어에서만 확장하는 방식으로 진행합니다.
 ############################################################
-VERSION = "v4.9 RC3.0 Stable Base"
+VERSION = "v4.9 RC3.2 Refactor"
 DB_PATH = Path(__file__).parent / "data" / "nohtus.db"
 COMPANIES = ["노투스팜", "노투스", "NOH", "비자료"]
 INBOUND_COMPANIES = COMPANIES + ["등록대기"]
@@ -2792,7 +2794,7 @@ def page_map_search_results(term):
     .dist-row-streamlit{margin:0 0 1px;}
     .dist-cell-text{display:flex;align-items:center;height:28px;font-size:14px;font-weight:400;color:#111827;white-space:nowrap;}
     .dist-cell-qty{display:flex;align-items:center;justify-content:flex-end;height:28px;font-size:14px;font-weight:400;color:#4f6fff;white-space:nowrap;}
-    div[data-testid="stButton"] > button[kind="secondary"]{text-decoration:none;min-height:28px;height:28px;padding:0 10px;border-radius:8px;font-size:13px;}
+    .dist-row-streamlit div[data-testid="stButton"] > button[kind="secondary"]{text-decoration:none;min-height:28px;height:28px;padding:0 10px;border-radius:8px;font-size:13px;}
     section[data-testid="stSidebar"] div[data-testid="stButton"] > button, section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="secondary"], section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="primary"]{background:transparent!important;color:white!important;border:0!important;min-height:auto!important;height:auto!important;padding:8px 10px!important;border-radius:10px!important;font-weight:800!important;font-size:123%!important;text-align:left!important;justify-content:flex-start!important;}
     section[data-testid="stSidebar"] div[data-testid="stButton"] > button p{color:white!important;text-align:left!important;width:100%!important;}
     /* 제품검색 결과 전용 CSS가 사이드바/상단 타이틀 카드까지 침범하지 않도록
@@ -2987,220 +2989,22 @@ def _apply_inbound_location_pending():
     st.session_state["_inbound_picker_token"] = int(st.session_state.get("_inbound_picker_token", 0) or 0) + 1
 
 
-def render_inbound_quick_location_map():
-    """입고 등록용 로케이션 도면.
-    로케이션맵과 같은 components.html 기반 도면을 유지하되,
-    클릭은 target="_top" 링크로 부모 Streamlit 앱에 inbound_loc 파라미터를 넘긴다.
-    """
-    selected = st.session_state.get("_inbound_selected_loc", "") or "REC"
-
-    def is_selected(loc):
-        return selected == loc or (selected and selected.startswith(loc + "-"))
-
-    def href(loc):
-        return f"?inbound_loc={quote(loc)}"
-
-    def cell(loc, text=None):
-        text = text or loc
-        cls = " selected" if is_selected(loc) else ""
-        return f'<a class="map-cell{cls}" href="{href(loc)}" target="_top" data-inbound-loc="{escape(loc)}" data-loc="{escape(loc)}">{escape(text)}</a>'
-
-    def rack(labels, left, top, cls):
-        cells = ''.join(cell(x) for x in labels)
-        return f'<div class="rack {cls}" style="left:{left}px;top:{top}px;">{cells}</div>'
-
-    def zone(loc, text, left, top, w, h, cls="white", extra=""):
-        selected_cls = " selected" if is_selected(loc) else ""
-        return f'<a class="zone {cls}{selected_cls}" href="{href(loc)}" target="_top" data-inbound-loc="{escape(loc)}" data-loc="{escape(loc)}" style="left:{left}px;top:{top}px;width:{w}px;height:{h}px;{extra}">{text}</a>'
-
-    html = f"""
-<!doctype html><html><head><meta charset="utf-8">
-<style>
-*{{box-sizing:border-box}} body{{margin:0;background:#f8fafc;font-family:Inter,Segoe UI,Arial,'Noto Sans KR',sans-serif;color:#0f172a;}}
-.inbound-map-card{{background:#fff;border:1px solid #dbe4f0;border-radius:18px;padding:14px 14px 18px;box-shadow:0 8px 24px rgba(15,23,42,.05);width:100%;}}
-.title{{font-weight:900;font-size:18px;margin:0 0 10px;color:#111827;}}
-.map-scroll{{overflow:visible;height:760px;padding:0;}}
-.map-stage{{position:relative;width:1160px;height:704px;min-width:1160px;background:#fff;border-radius:14px;transform:scale(.98);transform-origin:top left;}}
-.rack{{position:absolute;width:126px;height:168px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr 1fr;border:1px solid #334155;border-radius:9px;overflow:hidden;box-shadow:0 6px 14px rgba(15,23,42,.06);}}
-.map-cell,.zone{{appearance:none;position:relative;display:flex;align-items:center;justify-content:center;text-decoration:none;color:#0f172a;font-weight:900;font-size:14px;border:0;border-right:1px solid rgba(51,65,85,.38);border-bottom:1px solid rgba(51,65,85,.38);cursor:pointer;font-family:inherit;}}
-.map-cell:hover,.zone:hover{{outline:3px solid rgba(37,99,235,.22);z-index:2;}}
-.map-cell:nth-child(2n){{border-right:none;}}
-.map-cell:nth-child(n+5){{border-bottom:none;}}
-
-.special-menu{{position:absolute;display:none;z-index:30;background:#fff;border:1px solid #cbd5e1;border-radius:12px;box-shadow:0 12px 28px rgba(15,23,42,.18);padding:6px;}}
-.special-menu.open{{display:grid;gap:5px;}}
-.special-menu button,.special-menu a{{appearance:none;border:1px solid #e2e8f0;background:#f8fafc;border-radius:9px;padding:8px 7px;font-size:12px;font-weight:900;color:#0f172a;cursor:pointer;font-family:inherit;text-align:center;text-decoration:none;}}
-.special-menu button:hover,.special-menu button.selected,.special-menu a:hover,.special-menu a.selected{{background:#22c55e;color:#fff;border-color:#16a34a;}}
-.map-cell.selected,.zone.selected{{background:#22c55e!important;color:#ffffff!important;outline:3px solid rgba(34,197,94,.35)!important;box-shadow:0 0 0 3px rgba(255,255,255,.8),0 0 18px rgba(34,197,94,.75)!important;border-color:#16a34a!important;z-index:4;}}
-.yellow{{background:#fff39b;}} .blue{{background:#68d2e7;}} .pink{{background:#f0a7e6;}} .gray{{background:#f7f8fa;}} .bidata{{background:#d1d5db;}} .white{{background:#fff;}}
-.yellow .map-cell,.zone.yellow{{background:#fff39b;}} .blue .map-cell,.zone.blue{{background:#68d2e7;}} .pink .map-cell,.zone.pink{{background:#f0a7e6;}} .gray .map-cell,.zone.gray{{background:#f7f8fa;}} .bidata .map-cell,.zone.bidata{{background:#d1d5db;}} .white .map-cell,.zone.white{{background:#fff;}}
-.zone{{position:absolute;border:1px solid #334155;border-radius:9px;box-shadow:0 6px 14px rgba(15,23,42,.04);}}
-.big-left{{position:absolute;left:0;top:0;width:185px;height:282px;border:1px solid #334155;border-radius:10px;overflow:hidden;background:#fff;}}
-.big-left a{{appearance:none;position:relative;display:flex;align-items:center;justify-content:center;width:100%;border:0;border-bottom:1px solid #cbd5e1;background:#f7f8fa;color:#0f172a;font-weight:900;cursor:pointer;font-family:inherit;text-decoration:none;}}
-.big-left a:hover{{outline:3px solid rgba(37,99,235,.22);z-index:2;}}
-.big-left a.selected{{background:#22c55e!important;color:#fff!important;outline:3px solid rgba(34,197,94,.35)!important;box-shadow:0 0 0 3px rgba(255,255,255,.8),0 0 18px rgba(34,197,94,.75)!important;z-index:4;}}
-.g2{{height:225px;background:#f7f8fa;}} .g1row{{height:57px;display:grid;grid-template-columns:1fr 1fr 1fr;}}
-.g1row a{{height:57px;border-right:1px solid #cbd5e1;border-bottom:none;}} .g1row a:last-child{{border-right:none;}}
-.label{{position:absolute;text-align:center;font-weight:900;color:#111827;font-size:14px;}}
-.memo{{position:absolute;color:#334155;font-size:15px;line-height:1.65;}}
-.qp{{position:absolute;left:0;top:525px;width:165px;height:148px;border:1px solid #cbd5e1;border-radius:10px;overflow:hidden;background:#fff;}}
-.qp a{{position:relative;display:grid;grid-template-columns:58px 1fr;align-items:center;width:100%;height:74px;border:0;border-bottom:1px solid #e2e8f0;background:#fff;color:#111827;font-weight:900;cursor:pointer;text-align:left;font-family:inherit;text-decoration:none;}}
-.qp a:last-child{{border-bottom:none;}}
-.qp a.selected{{background:#22c55e!important;color:#ffffff!important;outline:3px solid rgba(34,197,94,.35)!important;box-shadow:0 0 0 3px rgba(255,255,255,.8),0 0 18px rgba(34,197,94,.75)!important;border-color:#16a34a!important;z-index:4;}}
-.qp-key{{height:100%;display:flex;align-items:center;justify-content:center;color:#ff221a;font-weight:900;font-size:18px;border-right:1px solid #e2e8f0;}}
-.qp .qkey{{background:#f186ca;color:#ff0d0d;}}
-.rec-red{{color:#ff1e12;font-weight:900;}}
-.small-title{{position:absolute;font-size:14px;font-weight:900;color:#111827;text-align:center;}}
-</style></head><body>
-<div class="inbound-map-card">
-  <div class="title">도면에서 입고 위치 선택</div>
-  <div class="map-scroll"><div class="map-stage">
-    <div class="big-left">
-      <a class="g2 gray{' selected' if is_selected('G2') else ''}" href="?inbound_loc=G2" target="_top" data-inbound-loc="G2">G2</a>
-      <div class="g1row">
-        {cell('G1-01')}{cell('G1-02')}{cell('G1-03')}
-      </div>
-    </div>
-    {rack(['A2-03','A2-04','A2-02','A2-05','A2-01','A2-06'],230,0,'yellow')}
-    {rack(['B2-03','B2-04','B2-02','B2-05','B2-01','B2-06'],372,0,'yellow')}
-    {rack(['C2-03','C2-04','C2-02','C2-05','C2-01','C2-06'],514,0,'blue')}
-    {rack(['D1-03','D1-04','D1-02','D1-05','D1-01','D1-06'],656,0,'blue')}
-    {zone('T1','T1',656,168,126,52,'white')}
-    {rack(['E1-03','E1-04','E1-02','E1-05','E1-01','E1-06'],798,0,'pink')}
-    {zone('T2','T2',798,168,126,52,'white')}
-    {zone('F1-01','F1-01',955,0,64,52,'bidata')}
-    {zone('F1-02','F1-02',1019,0,64,52,'bidata')}
-    {zone('F1-03','F1-03',1083,0,64,52,'bidata')}
-    <div class="small-title" style="left:996px;top:72px;width:110px;">비자료</div>
-    {zone('X2','X2',1070,78,70,52,'gray')}
-    {rack(['A1-03','A1-04','A1-02','A1-05','A1-01','A1-06'],230,268,'yellow')}
-    {rack(['B1-03','B1-04','B1-02','B1-05','B1-01','B1-06'],372,268,'yellow')}
-    {rack(['C1-03','C1-04','C1-02','C1-05','C1-01','C1-06'],514,268,'yellow')}
-    <div class="memo" style="left:800px;top:292px;">X1-01~03 : 폐기<br>X1-01-01 : 대표님 시술용</div>
-    {zone('X1-01','X1-01',1090,268,64,56,'gray')}
-    {zone('X1-02','X1-02',1090,324,64,56,'gray')}
-    {zone('X1-03','X1-03',1090,380,64,56,'gray')}
-    <div class="qp">
-      <a class="{'selected' if is_selected('Q1') or is_selected('Q2') else ''}" href="?inbound_loc=Q" target="_top" data-inbound-loc="Q"><span class="qp-key qkey">Q</span><span>유통기간임박</span></a>
-      <a class="{'selected' if is_selected('P') else ''}" href="?inbound_loc=P" target="_top" data-inbound-loc="P"><span class="qp-key">P</span><span>수출대기</span></a>
-    </div>
-    {zone('REC','<span><span class="rec-red">REC</span>eiving</span>',372,568,142,56,'white')}
-    <div class="label" style="left:372px;top:635px;width:142px;">매입등록대기</div>
-    {zone('R2','R2',790,460,64,56,'white')}
-    {zone('R1','R1',854,460,64,56,'white')}
-    <div class="label" style="left:770px;top:526px;width:190px;">R2 비자료 / R1 자료</div>
-    {zone('N','기타 위치',975,628,168,60,'white')}
-    <div class="special-menu" id="inboundSpecialMenu" style="left:975px;top:492px;width:168px;"><a href="?inbound_loc=홍보물랙" target="_top" data-inbound-loc="홍보물랙">홍보물랙</a><a href="?inbound_loc=회색 카트" target="_top" data-inbound-loc="회색 카트">회색 카트</a><a href="?inbound_loc=오른쪽 창고" target="_top" data-inbound-loc="오른쪽 창고">오른쪽 창고</a><a href="?inbound_loc=사무실(4층)" target="_top" data-inbound-loc="사무실(4층)">사무실(4층)</a></div>
-  </div></div>
-</div>
-<script>
-function parentBaseHref(){{
-  try {{ return window.top.location.href; }} catch(e) {{}}
-  try {{ return window.parent.location.href; }} catch(e) {{}}
-  return document.referrer || window.location.href;
-}}
-function buildParentUrl(key, value){{
-  const url = new URL(parentBaseHref());
-  url.searchParams.set(key, value);
-  url.searchParams.delete('map_search_product');
-  return url.toString();
-}}
-function navigateTop(href){{
-  try {{ window.top.location.assign(href); return; }} catch(e) {{}}
-  try {{ window.parent.location.assign(href); return; }} catch(e) {{}}
-  try {{ window.open(href, '_top'); return; }} catch(e) {{}}
-  const a = document.createElement('a');
-  a.href = href;
-  a.target = '_top';
-  document.body.appendChild(a);
-  a.click();
-}}
-function markSelected(loc){{
-  document.querySelectorAll('[data-inbound-loc]').forEach(x => {{
-    const v = x.getAttribute('data-inbound-loc') || '';
-    x.classList.toggle('selected', v === loc || (loc && loc.startsWith(v + '-')) || (v === 'N' && ['홍보물랙','회색 카트','오른쪽 창고','사무실(4층)'].includes(loc)));
-  }});
-}}
-function tryParentInbound(loc){{
-  try {{
-    const doc = window.parent.document;
-    // 핵심: Streamlit text_input 값 확정 타이밍에 의존하지 않는다.
-    // 먼저 부모 URL의 query parameter에 클릭 위치를 심고, 숨김 버튼은 rerun 트리거로만 사용한다.
-    try {{
-      const url = new URL(parentBaseHref());
-      url.searchParams.set('inbound_loc', loc);
-      url.searchParams.delete('map_search_product');
-      if (window.parent && window.parent.history && window.parent.history.replaceState) {{
-        window.parent.history.replaceState(null, '', url.toString());
-      }} else if (window.top && window.top.history && window.top.history.replaceState) {{
-        window.top.history.replaceState(null, '', url.toString());
-      }}
-    }} catch(e) {{}}
-
-    const input = doc.querySelector('input[aria-label="__입고도면선택값"]');
-    if (input) {{
-      try {{
-        const setter = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value').set;
-        setter.call(input, loc);
-      }} catch(e) {{
-        input.value = loc;
-      }}
-      input.dispatchEvent(new InputEvent('input', {{bubbles:true, inputType:'insertText', data:loc}}));
-      input.dispatchEvent(new Event('change', {{bubbles:true}}));
-    }}
-
-    let applied = false;
-    doc.querySelectorAll('button').forEach(btn => {{
-      if ((btn.innerText || '').trim() === '__입고도면적용') {{
-        setTimeout(() => btn.click(), 30);
-        applied = true;
-      }}
-    }});
-    return applied;
-  }} catch(e) {{
-    return false;
-  }}
-}}
-function toggleInboundSpecialMenu(forceClose=false){{
-  const menu=document.getElementById('inboundSpecialMenu');
-  if(!menu) return;
-  if(forceClose){{menu.classList.remove('open'); return;}}
-  menu.classList.toggle('open');
-}}
-document.querySelectorAll('[data-inbound-loc]').forEach(el => {{
-  el.addEventListener('click', (ev) => {{
-    ev.preventDefault();
-    ev.stopPropagation();
-    const loc = el.getAttribute('data-inbound-loc') || '';
-    if(!loc) return;
-    if(loc === 'N'){{
-      markSelected('N');
-      toggleInboundSpecialMenu(false);
-      return;
-    }}
-    toggleInboundSpecialMenu(true);
-    markSelected(loc);
-    if(tryParentInbound(loc)) return;
-    const href = buildParentUrl('inbound_loc', loc);
-    el.setAttribute('href', href);
-    el.setAttribute('target', '_top');
-    navigateTop(href);
-  }});
-}});
-</script>
-</body></html>
-"""
-    components.html(html, height=780, scrolling=False)
-
-
 
 def page_inbound():
     _apply_inbound_location_pending()
     st.title("입고 등록")
 
-    # 입고 도면 클릭값은 query parameter(inbound_loc)로 직접 처리한다.
-    # "__입고도면적용" 버튼/숨김 입력창은 생성하지 않는다.
-    # 버튼을 만들면 Streamlit이 먼저 렌더링해서 화면에 순간 노출된다.
+    apply_inbound_bridge_style()
+    st.text_input(
+        "__입고도면선택값",
+        key="_inbound_js_loc_buffer",
+        label_visibility="collapsed",
+        on_change=_inbound_js_loc_changed,
+    )
+    if st.button("__입고도면적용", key="_inbound_apply_btn"):
+        _inbound_js_loc_changed()
+        _apply_inbound_location_pending()
+        st.rerun()
 
     _apply_inbound_location_pending()
 
@@ -5405,51 +5209,6 @@ def page_closing():
 
 
 # ---------------- style/nav ----------------
-def apply_style():
-    st.markdown("""
-    <style>
-    .stApp {background:#f8fafc;}
-    h1,h2,h3 {color:#111827;}
-    section[data-testid="stSidebar"] {background:linear-gradient(180deg,#08213d,#103e69); color:white; font-size:123%; width:255px!important; min-width:255px!important;}
-    section[data-testid="stSidebar"] > div:first-child {width:255px!important; min-width:255px!important;}
-    .block-container {padding-left:2.3rem!important; padding-right:1.75rem!important;}
-    section[data-testid="stSidebar"] * {color:white;}
-    section[data-testid="stSidebar"] .stButton > button {background:transparent!important;border:0!important;color:white!important;text-align:left!important;justify-content:flex-start!important;border-radius:10px!important;padding:8px 10px!important;font-weight:800!important;font-size:123%!important;}
-    section[data-testid="stSidebar"] .stButton > button p {text-align:left!important;width:100%!important;}
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="primary"], section[data-testid="stSidebar"] div[data-testid="stButton"] > button {text-align:left!important;justify-content:flex-start!important;}
-    section[data-testid="stSidebar"] .stButton > button:hover {background:rgba(96,165,250,.35);color:white;border:0;}
-    .nav-active button {background:#2563eb!important;}
-
-    .legend-wrap {display:flex;gap:12px;flex-wrap:wrap;margin:4px 0 14px 0;}
-    .legend-chip {display:flex;align-items:center;gap:8px;border:1px solid #dbe4f0;background:#fff;border-radius:12px;padding:9px 14px;font-weight:800;color:#111827;}
-    .swatch {width:18px;height:18px;border-radius:5px;border:1px solid rgba(15,23,42,.12);display:inline-block;}
-    .swatch.y {background:#fff39b}.swatch.b{background:#68d2e7}.swatch.p{background:#f0a7e6}.swatch.g{background:#f3f4f6}
-    .map-card {background:#fff;border:1px solid #dbe4f0;border-radius:18px;padding:16px;box-shadow:0 8px 24px rgba(15,23,42,.06);}
-    .rack-title {text-align:center;font-size:11px;color:#64748b;font-weight:800;margin-top:2px;height:0;overflow:visible;}
-    .mapbtn-wrap {position:relative;margin:0;}
-    .mapbtn-wrap .stButton > button {height:42px;padding:0!important;border-radius:0!important;border:1px solid rgba(51,65,85,.34)!important;color:#0f172a!important;font-weight:900!important;font-size:13px!important;box-shadow:none!important;}
-    .mapbtn-wrap.yellow .stButton > button{background:#fff39b!important}.mapbtn-wrap.blue .stButton > button{background:#68d2e7!important}.mapbtn-wrap.pink .stButton > button{background:#f0a7e6!important}.mapbtn-wrap.gray .stButton > button{background:#f7f8fa!important}.mapbtn-wrap.bidata .stButton > button{background:#d1d5db!important}.mapbtn-wrap.white .stButton > button{background:#fff!important}
-    .mapbtn-wrap .stButton > button:hover{outline:3px solid rgba(37,99,235,.22)!important;z-index:2;position:relative;}
-    .mapbtn-wrap.selected .stButton > button{outline:3px solid #2563eb!important;}
-    .mapbtn-wrap.has-stock:after{content:'';position:absolute;right:8px;top:8px;width:9px;height:9px;border-radius:999px;background:#65d84f;border:1.5px solid #166534;z-index:4;pointer-events:none;}
-    .gbox {border:1px solid #dbe4f0;border-radius:12px;overflow:hidden;background:#fff;}
-    .blank-g{height:78px;border-bottom:1px solid #dbe4f0}.box-label{text-align:center;padding:10px;font-weight:900;}
-    .center-label{text-align:center;font-weight:900;font-size:13px;margin-top:8px;color:#111827}.memo{padding:46px 8px 8px 8px;line-height:2.8;color:#334155;font-size:14px;white-space:nowrap}.qptext{height:42px;display:flex;align-items:center;font-weight:900;border:1px solid #e2e8f0;border-left:0;padding-left:8px;background:#fff;}
-
-    .map-detail-title-wrap div[data-testid="stButton"] > button {font-size:12pt!important;font-weight:400!important;text-align:center!important;justify-content:center!important;border:0!important;background:transparent!important;color:#111827!important;box-shadow:none!important;padding:0.15rem 0!important;}
-    .detail-total-text {display:flex;gap:8px;align-items:baseline;justify-content:center;color:#334155;font-size:13px;margin:2px auto 10px;}
-    .detail-total-text strong {font-weight:600;color:#111827;}
-    .popup-box{background:#ffffff;border:1px solid #bfdbfe;border-radius:16px;padding:14px;margin:8px 0 18px 0;box-shadow:0 10px 28px rgba(37,99,235,.08)}
-    .zone-pill {display:inline-block;background:#e8f5ee;color:#15803d;font-weight:800;border-radius:10px;padding:6px 10px;margin-bottom:10px;}
-    .detail-card {background:white;border:1px solid #dbe4f0;border-radius:14px;padding:12px;margin:8px 0;box-shadow:0 5px 16px rgba(15,23,42,.05);}
-    .card-top {display:flex;justify-content:space-between;align-items:center;gap:8px;}.company-badge {display:inline-block;background:#eff6ff;color:#1d4ed8;font-weight:800;border-radius:999px;padding:3px 8px;font-size:12px;}.product-title {font-weight:400;font-size:14px;margin-top:8px;color:#111827;}.muted {color:#64748b;font-size:12px;line-height:1.6;}.qty-text {font-weight:900;color:#111827;white-space:nowrap;}.photo-box{width:250px;height:250px;margin-left:auto;margin-right:auto;border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:800;margin-bottom:10px;}
-    div[data-testid="stMetric"] {background:white;border:1px solid #dbe4f0;border-radius:16px;padding:16px;box-shadow:0 8px 20px rgba(15,23,42,.05)}
-    .mini-cal {background:#fff;border:1px solid #dbe4f0;border-radius:16px;padding:14px;margin:8px 0 16px 0;box-shadow:0 8px 20px rgba(15,23,42,.05)}
-    .mini-cal-head {font-weight:900;margin-bottom:10px;color:#111827}.mini-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}.mini-week span{text-align:center;color:#64748b;font-size:12px;font-weight:900}.cal-day{height:34px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:#f8fafc;color:#334155;font-weight:800;position:relative}.cal-day.on{background:#2563eb;color:white;box-shadow:0 0 0 3px rgba(37,99,235,.15)}.cal-day small{position:absolute;right:4px;top:3px;font-size:10px;background:white;color:#2563eb;border-radius:999px;min-width:15px;height:15px;line-height:15px;text-align:center}.cal-day.empty{background:transparent}
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button, section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="secondary"], section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="primary"]{background:transparent!important;color:white!important;border:0!important;}
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button p{color:white!important;}
-    </style>
-    """, unsafe_allow_html=True)
 
 def nav_button(name):
     if st.sidebar.button(name, key=f"nav_{name}", use_container_width=True):

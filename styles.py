@@ -1,0 +1,207 @@
+import streamlit as st
+
+
+def apply_style():
+    st.markdown("""
+    <style>
+    .stApp {background:#f8fafc;}
+    h1,h2,h3 {color:#111827;}
+ /* ===========================
+   Sidebar Menu Left Align
+   =========================== */
+
+section[data-testid="stSidebar"] div[data-testid="stButton"] {
+    width: 100% !important;
+}
+
+section[data-testid="stSidebar"] div[data-testid="stButton"] button {
+    display: flex !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    width: 100% !important;
+    text-align: left !important;
+    padding-left: 0.5rem !important;
+}
+
+section[data-testid="stSidebar"] div[data-testid="stButton"] button > div {
+    display: flex !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    width: 100% !important;
+}
+
+section[data-testid="stSidebar"] div[data-testid="stButton"] button p,
+section[data-testid="stSidebar"] div[data-testid="stButton"] button span {
+    width: 100% !important;
+    margin: 0 !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+}
+
+/* Sidebar nav buttons: force left align */
+section[data-testid="stSidebar"] div[data-testid="stButton"] button[kind] {
+    display: flex !important;
+    justify-content: flex-start !important;
+    text-align: left !important;
+}
+
+section[data-testid="stSidebar"] div[data-testid="stButton"] button[kind] > div {
+    width: 100% !important;
+    display: flex !important;
+    justify-content: flex-start !important;
+}
+
+section[data-testid="stSidebar"] div[data-testid="stButton"] button[kind] p {
+    width: 100% !important;
+    text-align: left !important;
+    margin: 0 !important;
+}
+
+    .legend-wrap {display:flex;gap:12px;flex-wrap:wrap;margin:4px 0 14px 0;}
+    .legend-chip {display:flex;align-items:center;gap:8px;border:1px solid #dbe4f0;background:#fff;border-radius:12px;padding:9px 14px;font-weight:800;color:#111827;}
+    .swatch {width:18px;height:18px;border-radius:5px;border:1px solid rgba(15,23,42,.12);display:inline-block;}
+    .swatch.y {background:#fff39b}.swatch.b{background:#68d2e7}.swatch.p{background:#f0a7e6}.swatch.g{background:#f3f4f6}
+    .map-card {background:#fff;border:1px solid #dbe4f0;border-radius:18px;padding:16px;box-shadow:0 8px 24px rgba(15,23,42,.06);}
+    .rack-title {text-align:center;font-size:11px;color:#64748b;font-weight:800;margin-top:2px;height:0;overflow:visible;}
+    .mapbtn-wrap {position:relative;margin:0;}
+    .mapbtn-wrap .stButton > button {height:42px;padding:0!important;border-radius:0!important;border:1px solid rgba(51,65,85,.34)!important;color:#0f172a!important;font-weight:900!important;font-size:13px!important;box-shadow:none!important;}
+    .mapbtn-wrap.yellow .stButton > button{background:#fff39b!important}.mapbtn-wrap.blue .stButton > button{background:#68d2e7!important}.mapbtn-wrap.pink .stButton > button{background:#f0a7e6!important}.mapbtn-wrap.gray .stButton > button{background:#f7f8fa!important}.mapbtn-wrap.bidata .stButton > button{background:#d1d5db!important}.mapbtn-wrap.white .stButton > button{background:#fff!important}
+    .mapbtn-wrap .stButton > button:hover{outline:3px solid rgba(37,99,235,.22)!important;z-index:2;position:relative;}
+    .mapbtn-wrap.selected .stButton > button{outline:3px solid #2563eb!important;}
+    .mapbtn-wrap.has-stock:after{content:'';position:absolute;right:8px;top:8px;width:9px;height:9px;border-radius:999px;background:#65d84f;border:1.5px solid #166534;z-index:4;pointer-events:none;}
+    .gbox {border:1px solid #dbe4f0;border-radius:12px;overflow:hidden;background:#fff;}
+    .blank-g{height:78px;border-bottom:1px solid #dbe4f0}.box-label{text-align:center;padding:10px;font-weight:900;}
+    .center-label{text-align:center;font-weight:900;font-size:13px;margin-top:8px;color:#111827}.memo{padding:46px 8px 8px 8px;line-height:2.8;color:#334155;font-size:14px;white-space:nowrap}.qptext{height:42px;display:flex;align-items:center;font-weight:900;border:1px solid #e2e8f0;border-left:0;padding-left:8px;background:#fff;}
+
+    .map-detail-title-wrap div[data-testid="stButton"] > button {font-size:12pt!important;font-weight:400!important;text-align:center!important;justify-content:center!important;border:0!important;background:transparent!important;color:#111827!important;box-shadow:none!important;padding:0.15rem 0!important;}
+    .detail-total-text {display:flex;gap:8px;align-items:baseline;justify-content:center;color:#334155;font-size:13px;margin:2px auto 10px;}
+    .detail-total-text strong {font-weight:600;color:#111827;}
+    .popup-box{background:#ffffff;border:1px solid #bfdbfe;border-radius:16px;padding:14px;margin:8px 0 18px 0;box-shadow:0 10px 28px rgba(37,99,235,.08)}
+    .zone-pill {display:inline-block;background:#e8f5ee;color:#15803d;font-weight:800;border-radius:10px;padding:6px 10px;margin-bottom:10px;}
+    .detail-card {background:white;border:1px solid #dbe4f0;border-radius:14px;padding:12px;margin:8px 0;box-shadow:0 5px 16px rgba(15,23,42,.05);}
+    .card-top {display:flex;justify-content:space-between;align-items:center;gap:8px;}.company-badge {display:inline-block;background:#eff6ff;color:#1d4ed8;font-weight:800;border-radius:999px;padding:3px 8px;font-size:12px;}.product-title {font-weight:400;font-size:14px;margin-top:8px;color:#111827;}.muted {color:#64748b;font-size:12px;line-height:1.6;}.qty-text {font-weight:900;color:#111827;white-space:nowrap;}.photo-box{width:250px;height:250px;margin-left:auto;margin-right:auto;border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:800;margin-bottom:10px;}
+    div[data-testid="stMetric"] {background:white;border:1px solid #dbe4f0;border-radius:16px;padding:16px;box-shadow:0 8px 20px rgba(15,23,42,.05)}
+    .mini-cal {background:#fff;border:1px solid #dbe4f0;border-radius:16px;padding:14px;margin:8px 0 16px 0;box-shadow:0 8px 20px rgba(15,23,42,.05)}
+    .mini-cal-head {font-weight:900;margin-bottom:10px;color:#111827}.mini-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}.mini-week span{text-align:center;color:#64748b;font-size:12px;font-weight:900}.cal-day{height:34px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:#f8fafc;color:#334155;font-weight:800;position:relative}.cal-day.on{background:#2563eb;color:white;box-shadow:0 0 0 3px rgba(37,99,235,.15)}.cal-day small{position:absolute;right:4px;top:3px;font-size:10px;background:white;color:#2563eb;border-radius:999px;min-width:15px;height:15px;line-height:15px;text-align:center}.cal-day.empty{background:transparent}
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button, section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="secondary"], section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="primary"]{background:transparent!important;color:white!important;border:0!important;}
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button p{color:white!important;}
+
+    /* 사이드바 메뉴 왼쪽 정렬 고정: 본문 버튼에는 절대 적용하지 않는다. */
+    section[data-testid="stSidebar"] div[data-testid="stButton"] {
+        text-align: left !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+        display: flex !important;
+        justify-content: flex-start !important;
+        align-items: center !important;
+        text-align: left !important;
+        width: 100% !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button > div,
+    section[data-testid="stSidebar"] div[data-testid="stButton"] div[data-testid="stMarkdownContainer"],
+    section[data-testid="stSidebar"] div[data-testid="stButton"] div[data-testid="stMarkdownContainer"] p {
+        width: 100% !important;
+        text-align: left !important;
+        justify-content: flex-start !important;
+        margin-left: 0 !important;
+        margin-right: auto !important;
+    }
+
+
+    /* RC3.2.1: 사이드바 메뉴 텍스트 왼쪽 정렬 강제.
+       Streamlit 버전에 따라 button 내부 구조가 p/div/span으로 달라져서
+       button 자체뿐 아니라 내부 텍스트 컨테이너까지 sidebar 안에서만 지정한다. */
+    section[data-testid="stSidebar"] div[data-testid="stButton"] {
+        width: 100% !important;
+        text-align: left !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button,
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"],
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="secondary"] {
+        width: 100% !important;
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+        padding-left: 12px !important;
+        padding-right: 8px !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button > div,
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button div,
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button span,
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button p,
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button [data-testid="stMarkdownContainer"],
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button [data-testid="stMarkdownContainer"] p {
+        width: 100% !important;
+        max-width: 100% !important;
+        display: block !important;
+        text-align: left !important;
+        justify-content: flex-start !important;
+        align-items: flex-start !important;
+        margin-left: 0 !important;
+        margin-right: auto !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+
+def apply_inbound_bridge_style():
+    """입고 도면 클릭 브리지용 숨김 input/button CSS.
+    사이드바 메뉴 정렬 CSS와 분리해 회귀 버그를 막는다.
+    """
+    st.markdown("""
+<style>
+/* 입고 도면 클릭 브리지: 사이드바/본문 버튼 정렬 CSS의 영향을 받지 않도록 강하게 숨긴다. */
+div.st-key-_inbound_js_loc_buffer,
+div.st-key-_inbound_apply_btn,
+.st-key-_inbound_js_loc_buffer,
+.st-key-_inbound_apply_btn {
+    position:absolute !important;
+    left:-9999px !important;
+    top:-9999px !important;
+    width:1px !important;
+    min-width:1px !important;
+    max-width:1px !important;
+    height:1px !important;
+    min-height:1px !important;
+    max-height:1px !important;
+    overflow:hidden !important;
+    opacity:0 !important;
+    pointer-events:none !important;
+    margin:0 !important;
+    padding:0 !important;
+    z-index:-1 !important;
+}
+div[data-testid="stTextInput"]:has(input[aria-label="__입고도면선택값"]),
+div[data-testid="stButton"]:has(button[kind]) .st-key-_inbound_apply_btn,
+div.st-key-_inbound_apply_btn button {
+    position:absolute !important;
+    left:-9999px !important;
+    top:-9999px !important;
+    width:1px !important;
+    height:1px !important;
+    overflow:hidden !important;
+    opacity:0 !important;
+    pointer-events:none !important;
+    margin:0 !important;
+    padding:0 !important;
+}
+
+/* Final override: Streamlit sidebar button text left align */
+section[data-testid="stSidebar"] button {
+    justify-content: flex-start !important;
+}
+
+section[data-testid="stSidebar"] button div,
+section[data-testid="stSidebar"] button div[data-testid="stMarkdownContainer"],
+section[data-testid="stSidebar"] button div[data-testid="stMarkdownContainer"] p {
+    text-align: left !important;
+    justify-content: flex-start !important;
+    align-items: flex-start !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+}
+</style>
+    """, unsafe_allow_html=True)
