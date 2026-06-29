@@ -27,7 +27,7 @@ h1, h2, h3 {
 /* 본문 폭: 로케이션맵 오른쪽 잘림 방지 */
 section.main > div.block-container {
     max-width: none !important;
-    padding-left: 2.2rem !important;
+    padding-left: 1.2rem !important;
     padding-right: 2.2rem !important;
 }
 
