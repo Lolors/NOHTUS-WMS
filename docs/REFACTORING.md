@@ -38,6 +38,7 @@ docs/
 tools/
   smoke_check.py
   apply_refactor_step1.py
+  apply_refactor_step2.py
 ```
 
 ## 현재 브랜치의 변경
@@ -51,6 +52,7 @@ tools/
 - `MASTER_MEMORY.md` 추가
 - `tools/smoke_check.py` 추가
 - `tools/apply_refactor_step1.py` 추가
+- `tools/apply_refactor_step2.py` 추가
 
 ## 리팩토링 원칙
 
@@ -61,17 +63,33 @@ tools/
 5. 입고 도면 JS Bridge는 마지막 단계까지 건드리지 않는다.
 6. 각 단계 후 `python tools/smoke_check.py`를 실행한다.
 
+## 로컬 적용 순서
+
+### Step 1: 날짜/로케이션 helper 적용
+
+```bash
+python tools/apply_refactor_step1.py
+python tools/smoke_check.py
+streamlit run app.py
+```
+
+문제가 없으면 `app.py` 변경분을 커밋한다.
+
+### Step 2: DB helper 적용
+
+```bash
+python tools/apply_refactor_step2.py
+python tools/smoke_check.py
+streamlit run app.py
+```
+
+문제가 없으면 `app.py` 변경분을 커밋한다.
+
 ## 다음 단계
 
-1. 로컬에서 `python tools/apply_refactor_step1.py`를 실행한다.
-2. 생성된 `app.py.bak_refactor_step1` 백업과 `git diff`를 확인한다.
-3. `python tools/smoke_check.py`를 다시 실행한다.
-4. `streamlit run app.py`로 주요 화면을 확인한다.
-5. 문제가 없으면 `app.py` 변경만 별도 커밋한다.
-6. 그 다음 `connect`, `q`, `exec_sql`를 `nohtus.db` import로 교체한다.
-7. 메뉴 렌더링을 `nohtus.navigation.MENU_SECTIONS` 기준으로 바꾼다.
-8. 업무 로직 함수는 화면 함수보다 먼저 `nohtus/services/`로 이동한다.
-9. 화면 함수는 한 번에 하나씩 `nohtus/pages/`로 이동한다.
+1. 메뉴 렌더링을 `nohtus.navigation.MENU_SECTIONS` 기준으로 바꾼다.
+2. 업무 로직 함수는 화면 함수보다 먼저 `nohtus/services/`로 이동한다.
+3. 화면 함수는 한 번에 하나씩 `nohtus/pages/`로 이동한다.
 
 ## 검증 방법
 
