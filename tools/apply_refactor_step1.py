@@ -17,6 +17,7 @@ Review the diff before committing.
 
 from __future__ import annotations
 
+import os
 import py_compile
 import re
 import shutil
@@ -25,6 +26,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 APP = ROOT / "app.py"
 BACKUP = ROOT / "app.py.bak_refactor_step1"
 
@@ -102,7 +106,9 @@ def main() -> None:
     try:
         py_compile.compile(str(APP), doraise=True)
         print("OK compile: app.py")
-        subprocess.run([sys.executable, "tools/smoke_check.py"], cwd=ROOT, check=True)
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+        subprocess.run([sys.executable, "tools/smoke_check.py"], cwd=ROOT, env=env, check=True)
     except Exception:
         shutil.copy2(BACKUP, APP)
         print("FAILED. Restored app.py from backup.")
