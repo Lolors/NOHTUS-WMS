@@ -40,6 +40,7 @@ tools/
   apply_refactor_step1.py
   apply_refactor_step2.py
   apply_refactor_step3.py
+  apply_refactor_step4.py
 ```
 
 ## 현재 브랜치의 변경
@@ -55,6 +56,7 @@ tools/
 - `tools/apply_refactor_step1.py` 추가
 - `tools/apply_refactor_step2.py` 추가
 - `tools/apply_refactor_step3.py` 추가
+- `tools/apply_refactor_step4.py` 추가
 
 ## 리팩토링 원칙
 
@@ -97,12 +99,21 @@ streamlit run app.py
 
 문제가 없으면 `app.py`와 `nohtus/services/inventory.py` 변경분을 함께 커밋한다.
 
+### Step 4: 제품 서비스 함수 분리
+
+```bash
+python tools/apply_refactor_step4.py
+python tools/smoke_check.py
+streamlit run app.py
+```
+
+문제가 없으면 `app.py`와 `nohtus/services/products.py` 변경분을 함께 커밋한다.
+
 ## 다음 단계
 
 1. 메뉴 렌더링을 `nohtus.navigation.MENU_SECTIONS` 기준으로 바꾼다.
-2. 제품/매칭 관련 업무 로직을 `nohtus/services/products.py`로 이동한다.
-3. 출고/이력/마감 로직을 서비스 모듈로 이동한다.
-4. 화면 함수는 한 번에 하나씩 `nohtus/pages/`로 이동한다.
+2. 출고/이력/마감 로직을 서비스 모듈로 이동한다.
+3. 화면 함수는 한 번에 하나씩 `nohtus/pages/`로 이동한다.
 
 ## 검증 방법
 
