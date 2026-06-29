@@ -33,26 +33,49 @@ inbound_map.py
 MASTER_MEMORY.md
 docs/
   REFACTORING.md
+tools/
+  smoke_check.py
 ```
 
-## 현재 브랜치의 1차 변경
+## 현재 브랜치의 변경
 
 - `nohtus/` 패키지 생성
 - 설정/상수 후보를 `nohtus/config.py`로 분리
 - DB helper 후보를 `nohtus/db.py`로 분리
 - 사이드바 메뉴 구조 후보를 `nohtus/navigation.py`로 분리
 - `MASTER_MEMORY.md` 추가
+- `tools/smoke_check.py` 추가
+
+## 리팩토링 원칙
+
+1. `main`은 항상 안정 버전으로 둔다.
+2. `app.py`를 GitHub 커넥터로 대량 교체하지 않는다.
+3. 기능 이동은 한 번에 한 화면 또는 한 서비스 단위로만 한다.
+4. 이동 후 기존 함수명 wrapper를 잠시 유지해서 회귀 위험을 낮춘다.
+5. 입고 도면 JS Bridge는 마지막 단계까지 건드리지 않는다.
+6. 각 단계 후 `python tools/smoke_check.py`를 실행한다.
 
 ## 다음 단계
 
-1. `app.py`에서 `APP_TITLE`, `VERSION`, `DB_PATH`, `COMPANIES`, `AREA_CONFIG`, `AREA_COLOR`를 `nohtus.config` import로 교체한다.
+1. `app.py`에서 상단 설정/상수 import를 `nohtus.config`로 교체한다.
 2. `connect`, `q`, `exec_sql`를 `nohtus.db` import로 교체한다.
 3. 메뉴 렌더링을 `nohtus.navigation.MENU_SECTIONS` 기준으로 바꾼다.
-4. 화면 함수는 한 번에 하나씩 `nohtus/pages/`로 이동한다.
-5. 업무 로직 함수는 화면 함수보다 먼저 `nohtus/services/`로 이동한다.
+4. 업무 로직 함수는 화면 함수보다 먼저 `nohtus/services/`로 이동한다.
+5. 화면 함수는 한 번에 하나씩 `nohtus/pages/`로 이동한다.
 
-## 주의사항
+## 검증 방법
 
-- 입고 도면 JS Bridge는 마지막 단계까지 건드리지 않는다.
-- 기능 이동 후에는 기존 함수명 wrapper를 잠시 유지해서 회귀 위험을 낮춘다.
-- `main`은 항상 안정 버전으로 둔다.
+```bash
+python tools/smoke_check.py
+streamlit run app.py
+```
+
+수동 확인 화면:
+
+- 입고 등록
+- 로케이션맵
+- 제품 검색
+- 이동 등록
+- 재고 실사
+- 이력 조회
+- 마감
