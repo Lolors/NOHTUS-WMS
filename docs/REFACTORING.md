@@ -45,6 +45,7 @@ tools/
   apply_refactor_step6.py
   apply_refactor_step7.py
   apply_refactor_step8.py
+  apply_refactor_step9.py
 ```
 
 ## 현재 브랜치의 변경
@@ -65,6 +66,7 @@ tools/
 - `tools/apply_refactor_step6.py` 추가
 - `tools/apply_refactor_step7.py` 추가
 - `tools/apply_refactor_step8.py` 추가
+- `tools/apply_refactor_step9.py` 추가
 
 ## 리팩토링 원칙
 
@@ -157,11 +159,21 @@ streamlit run app.py
 
 문제가 없으면 `app.py`와 `nohtus/pages/stocktake.py` 변경분을 함께 커밋한다.
 
+### Step 9: 로케이션맵 화면 분리
+
+```bash
+python tools/apply_refactor_step9.py
+python tools/smoke_check.py
+streamlit run app.py
+```
+
+문제가 없으면 `app.py`와 `nohtus/pages/location_map.py` 변경분을 함께 커밋한다.
+
 ## 다음 단계
 
-1. 입고 등록 화면을 마지막에 가깝게 이동한다.
-2. 출고/마감 로직을 서비스 모듈로 이동한다.
-3. 나머지 화면 함수는 한 번에 하나씩 `nohtus/pages/`로 이동한다.
+1. 출고 등록 화면을 `nohtus/pages/outbound.py`로 이동한다.
+2. 마감 로직을 서비스 모듈로 이동한다.
+3. 입고 등록 화면은 마지막에 가깝게 이동한다.
 
 ## 검증 방법
 
