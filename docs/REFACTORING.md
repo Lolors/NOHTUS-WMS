@@ -36,6 +36,7 @@ MASTER_MEMORY.md
 docs/
   REFACTORING.md
 tools/
+  refactor.py
   smoke_check.py
   apply_refactor_step1.py
   apply_refactor_step2.py
@@ -58,15 +59,8 @@ tools/
 - 로케이션 helper 후보를 `nohtus/locations.py`로 분리
 - `MASTER_MEMORY.md` 추가
 - `tools/smoke_check.py` 추가
-- `tools/apply_refactor_step1.py` 추가
-- `tools/apply_refactor_step2.py` 추가
-- `tools/apply_refactor_step3.py` 추가
-- `tools/apply_refactor_step4.py` 추가
-- `tools/apply_refactor_step5.py` 추가
-- `tools/apply_refactor_step6.py` 추가
-- `tools/apply_refactor_step7.py` 추가
-- `tools/apply_refactor_step8.py` 추가
-- `tools/apply_refactor_step9.py` 추가
+- `tools/refactor.py` 추가
+- `tools/apply_refactor_step1.py` ~ `tools/apply_refactor_step9.py` 추가
 
 ## 리팩토링 원칙
 
@@ -77,7 +71,54 @@ tools/
 5. 입고 도면 JS Bridge는 마지막 단계까지 건드리지 않는다.
 6. 각 단계 후 `python tools/smoke_check.py`를 실행한다.
 
-## 로컬 적용 순서
+## 공통 리팩토링 엔진 사용법
+
+Step별 스크립트를 계속 만들지 않아도 아래 명령으로 페이지/서비스 함수를 이동할 수 있다.
+
+### 페이지 함수 이동
+
+```bash
+python tools/refactor.py move-page page_outbound outbound
+python tools/refactor.py move-page page_closing closing
+python tools/refactor.py move-page page_product_matching product_matching
+python tools/refactor.py move-page page_customers customers
+```
+
+형식:
+
+```bash
+python tools/refactor.py move-page <app.py의 함수명> <nohtus/pages에 만들 파일명>
+```
+
+예:
+
+- `page_outbound` → `nohtus/pages/outbound.py`
+- `page_closing` → `nohtus/pages/closing.py`
+
+### 서비스 함수 이동
+
+```bash
+python tools/refactor.py move-service closing compare_erp_stock today_outbound_check
+python tools/refactor.py move-service outbound create_outbound_order save_outbound_order
+```
+
+형식:
+
+```bash
+python tools/refactor.py move-service <nohtus/services에 만들 파일명> <함수명1> <함수명2> ...
+```
+
+엔진은 자동으로 다음 작업을 수행한다.
+
+- 백업 생성
+- 함수 추출
+- 새 모듈 생성 또는 기존 모듈에 추가
+- `app.py` import 추가
+- Python compile 검사
+- `tools/smoke_check.py` 실행
+- 실패 시 백업에서 자동 복구
+
+## 기존 Step별 로컬 적용 순서
 
 ### Step 1: 날짜/로케이션 helper 적용
 
@@ -87,8 +128,6 @@ python tools/smoke_check.py
 streamlit run app.py
 ```
 
-문제가 없으면 `app.py` 변경분을 커밋한다.
-
 ### Step 2: DB helper 적용
 
 ```bash
@@ -96,8 +135,6 @@ python tools/apply_refactor_step2.py
 python tools/smoke_check.py
 streamlit run app.py
 ```
-
-문제가 없으면 `app.py` 변경분을 커밋한다.
 
 ### Step 3: 재고 서비스 함수 분리
 
@@ -107,8 +144,6 @@ python tools/smoke_check.py
 streamlit run app.py
 ```
 
-문제가 없으면 `app.py`와 `nohtus/services/inventory.py` 변경분을 함께 커밋한다.
-
 ### Step 4: 제품 서비스 함수 분리
 
 ```bash
@@ -116,8 +151,6 @@ python tools/apply_refactor_step4.py
 python tools/smoke_check.py
 streamlit run app.py
 ```
-
-문제가 없으면 `app.py`와 `nohtus/services/products.py` 변경분을 함께 커밋한다.
 
 ### Step 5: 이력 서비스 함수 분리
 
@@ -127,8 +160,6 @@ python tools/smoke_check.py
 streamlit run app.py
 ```
 
-옮길 대상 함수가 없으면 스크립트가 변경 없이 중단된다. 문제가 없으면 `app.py`와 `nohtus/services/history.py` 변경분을 함께 커밋한다.
-
 ### Step 6: 이력 조회 화면 분리
 
 ```bash
@@ -136,8 +167,6 @@ python tools/apply_refactor_step6.py
 python tools/smoke_check.py
 streamlit run app.py
 ```
-
-문제가 없으면 `app.py`와 `nohtus/pages/history.py` 변경분을 함께 커밋한다.
 
 ### Step 7: 이동 등록 화면 분리
 
@@ -147,8 +176,6 @@ python tools/smoke_check.py
 streamlit run app.py
 ```
 
-문제가 없으면 `app.py`와 `nohtus/pages/move.py` 변경분을 함께 커밋한다.
-
 ### Step 8: 재고 실사 화면 분리
 
 ```bash
@@ -156,8 +183,6 @@ python tools/apply_refactor_step8.py
 python tools/smoke_check.py
 streamlit run app.py
 ```
-
-문제가 없으면 `app.py`와 `nohtus/pages/stocktake.py` 변경분을 함께 커밋한다.
 
 ### Step 9: 로케이션맵 화면 분리
 
@@ -167,13 +192,12 @@ python tools/smoke_check.py
 streamlit run app.py
 ```
 
-문제가 없으면 `app.py`와 `nohtus/pages/location_map.py` 변경분을 함께 커밋한다.
-
 ## 다음 단계
 
-1. 출고 등록 화면을 `nohtus/pages/outbound.py`로 이동한다.
-2. 마감 로직을 서비스 모듈로 이동한다.
-3. 입고 등록 화면은 마지막에 가깝게 이동한다.
+1. 공통 엔진으로 출고 등록 화면을 `nohtus/pages/outbound.py`로 이동한다.
+2. 공통 엔진으로 제품매칭/거래처/마감 화면을 이동한다.
+3. 마감/출고 관련 서비스 함수를 `nohtus/services/`로 이동한다.
+4. 입고 등록 화면은 마지막에 가깝게 이동한다.
 
 ## 검증 방법
 
