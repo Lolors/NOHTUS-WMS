@@ -11,6 +11,8 @@ nohtus/
   config.py
   db.py
   navigation.py
+  dates.py
+  locations.py
   services/
     products.py
     inventory.py
@@ -43,6 +45,8 @@ tools/
 - 설정/상수 후보를 `nohtus/config.py`로 분리
 - DB helper 후보를 `nohtus/db.py`로 분리
 - 사이드바 메뉴 구조 후보를 `nohtus/navigation.py`로 분리
+- 날짜 helper 후보를 `nohtus/dates.py`로 분리
+- 로케이션 helper 후보를 `nohtus/locations.py`로 분리
 - `MASTER_MEMORY.md` 추가
 - `tools/smoke_check.py` 추가
 
@@ -59,9 +63,11 @@ tools/
 
 1. `app.py`에서 상단 설정/상수 import를 `nohtus.config`로 교체한다.
 2. `connect`, `q`, `exec_sql`를 `nohtus.db` import로 교체한다.
-3. 메뉴 렌더링을 `nohtus.navigation.MENU_SECTIONS` 기준으로 바꾼다.
-4. 업무 로직 함수는 화면 함수보다 먼저 `nohtus/services/`로 이동한다.
-5. 화면 함수는 한 번에 하나씩 `nohtus/pages/`로 이동한다.
+3. `normalize_exp_date`, `display_date_only`, `expiry_status`를 `nohtus.dates` import로 교체한다.
+4. `make_location`, `parse_location`, `_location_picking_key`를 `nohtus.locations` import로 교체한다.
+5. 메뉴 렌더링을 `nohtus.navigation.MENU_SECTIONS` 기준으로 바꾼다.
+6. 업무 로직 함수는 화면 함수보다 먼저 `nohtus/services/`로 이동한다.
+7. 화면 함수는 한 번에 하나씩 `nohtus/pages/`로 이동한다.
 
 ## 검증 방법
 
