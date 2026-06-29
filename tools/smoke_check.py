@@ -25,6 +25,9 @@ FILES_TO_COMPILE = [
     ROOT / "nohtus" / "navigation.py",
     ROOT / "nohtus" / "dates.py",
     ROOT / "nohtus" / "locations.py",
+    ROOT / "nohtus" / "pages" / "__init__.py",
+    ROOT / "nohtus" / "services" / "__init__.py",
+    ROOT / "nohtus" / "ui" / "__init__.py",
 ]
 
 
@@ -43,6 +46,10 @@ def main() -> None:
     from nohtus.dates import normalize_exp_date, display_date_only, expiry_status
     from nohtus.locations import make_location, parse_location, location_picking_key
 
+    import nohtus.pages
+    import nohtus.services
+    import nohtus.ui
+
     assert APP_TITLE == "NOHTUS WMS"
     assert "노투스팜" in COMPANIES
     assert "REC" in AREA_CONFIG
@@ -58,7 +65,7 @@ def main() -> None:
     assert parse_location("A1-01-02") == ("A1", "01", "02")
     assert location_picking_key("REC") < location_picking_key("A1-01-01")
 
-    print("OK imports: nohtus config/db/navigation/dates/locations")
+    print("OK imports: nohtus config/db/navigation/dates/locations/pages/services/ui")
 
 
 if __name__ == "__main__":
