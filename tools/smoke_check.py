@@ -33,13 +33,17 @@ FILES_TO_COMPILE = [
     ROOT / "nohtus" / "ui" / "__init__.py",
 ]
 
+OPTIONAL_FILES_TO_COMPILE = [
+    ROOT / "nohtus" / "services" / "inventory.py",
+]
+
 
 def main() -> None:
     missing = [path for path in FILES_TO_COMPILE if not path.exists()]
     if missing:
         raise SystemExit("Missing files:\n" + "\n".join(str(p) for p in missing))
 
-    for path in FILES_TO_COMPILE:
+    for path in FILES_TO_COMPILE + [p for p in OPTIONAL_FILES_TO_COMPILE if p.exists()]:
         py_compile.compile(str(path), doraise=True)
         print(f"OK compile: {path.relative_to(ROOT)}")
 
@@ -52,6 +56,9 @@ def main() -> None:
     import nohtus.pages
     import nohtus.services
     import nohtus.ui
+
+    if (ROOT / "nohtus" / "services" / "inventory.py").exists():
+        import nohtus.services.inventory
 
     assert APP_TITLE == "NOHTUS WMS"
     assert "노투스팜" in COMPANIES
