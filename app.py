@@ -3907,10 +3907,31 @@ def page_history():
     st.title("이력 조회")
     company = st.selectbox("사업장", ["전체"] + COMPANIES, index=0)
     tx_label = st.selectbox("이력유형", ["전체", "입고", "출고지시", "출고지시취소", "이동", "재고조정", "전산재고"], index=0)
+
+    today = date.today()
+    default_start = today.replace(day=1)
+    date_col1, date_col2 = st.columns(2)
+    with date_col1:
+        start_date = st.date_input("시작일", value=default_start, key="history_start_date")
+    with date_col2:
+        end_date = st.date_input("종료일", value=today, key="history_end_date")
+
     term = st.text_input("제품명/로케이션 검색", placeholder="제품명, LOT, 로케이션 일부 입력")
 
     conditions = []
     params = []
+    if start_date and end_date:
+        if start_date > end_date:
+            st.error("시작일은 종료일보다 늦을 수 없습니다.")
+            return
+        conditions.append("date(created_at) BETWEEN ? AND ?")
+        params.extend([str(start_date), str(end_date)])
+    elif start_date:
+        conditions.append("date(created_at) >= ?")
+        params.append(str(start_date))
+    elif end_date:
+        conditions.append("date(created_at) <= ?")
+        params.append(str(end_date))
     if company != "전체":
         conditions.append("(from_company=? OR to_company=?)")
         params.extend([company, company])
@@ -3933,7 +3954,7 @@ def page_history():
         SELECT * FROM transactions
         {where}
         ORDER BY id DESC
-        LIMIT 500
+        LIMIT 2000
     """, tuple(params))
     if df.empty:
         st.info("조회된 이력이 없습니다.")
