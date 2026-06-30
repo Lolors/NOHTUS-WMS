@@ -1,13 +1,13 @@
-"""NOHTUS WMS local refactoring engine.
+"""NOHTUS WMS local refactoring engine v3.
 
 Run from the repository root.
 
 Examples:
 
     python tools/refactor.py move-page page_outbound outbound
-    python tools/refactor.py move-page page_closing closing
     python tools/refactor.py move-service closing erp_compare today_outbound_check
     python tools/refactor.py move-group master
+    python tools/refactor.py fix-page master
 
 Commands:
 
@@ -20,10 +20,15 @@ Commands:
     move-group <group_name>
         Move a predefined group of related page functions together.
 
+    fix-page <module_name> [function_name ...]
+        Repair a migrated page module by adding common module imports and runtime
+        imports for helper functions that still live in app.py.
+
 The engine always:
 
 - creates backups
 - updates imports in app.py
+- repairs imports in migrated page modules
 - compiles changed files
 - runs tools/smoke_check.py
 - restores backups on failure
@@ -91,14 +96,17 @@ from __future__ import annotations
 import calendar
 import json
 import re
+import sqlite3
 from datetime import date, datetime
+from html import escape
 from io import BytesIO
+from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from nohtus.config import AREA_COLOR, AREA_CONFIG, COMPANIES, INBOUND_COMPANIES
+from nohtus.config import AREA_COLOR, AREA_CONFIG, COMPANIES, INBOUND_COMPANIES, SPECIAL_LOCATIONS
 from nohtus.db import connect, exec_sql, q
 from nohtus.dates import display_date_only, expiry_status, normalize_exp_date
 from nohtus.locations import location_picking_key, make_location, parse_location
@@ -112,17 +120,48 @@ Migrated from app.py. Keep functions independent from Streamlit whenever possibl
 
 from __future__ import annotations
 
+import calendar
+import json
+import re
+import sqlite3
 from datetime import date, datetime
+from html import escape
 from io import BytesIO
+from urllib.parse import quote
 
 import pandas as pd
 
-from nohtus.config import AREA_COLOR, AREA_CONFIG, COMPANIES, INBOUND_COMPANIES
+from nohtus.config import AREA_COLOR, AREA_CONFIG, COMPANIES, INBOUND_COMPANIES, SPECIAL_LOCATIONS
 from nohtus.db import connect, exec_sql, q
 from nohtus.dates import display_date_only, expiry_status, normalize_exp_date
 from nohtus.locations import location_picking_key, make_location, parse_location
 
 '''
+
+# Names that may appear as function calls in migrated code but should not be
+# imported from app.py.
+IGNORE_RUNTIME_NAMES = {
+    "abs", "all", "any", "bool", "callable", "dict", "enumerate", "filter",
+    "float", "getattr", "hasattr", "int", "isinstance", "len", "list", "map",
+    "max", "min", "open", "print", "range", "reversed", "round", "set", "setattr",
+    "sorted", "str", "sum", "tuple", "type", "zip",
+    "pd", "st", "components", "calendar", "json", "re", "sqlite3",
+    "date", "datetime", "BytesIO", "escape", "quote",
+    "connect", "q", "exec_sql",
+    "display_date_only", "expiry_status", "normalize_exp_date",
+    "location_picking_key", "make_location", "parse_location",
+}
+
+MODULE_IMPORT_RULES = [
+    ("sqlite3", "import sqlite3"),
+    ("json", "import json"),
+    ("calendar", "import calendar"),
+    ("re", "import re"),
+    ("components", "import streamlit.components.v1 as components"),
+    ("BytesIO", "from io import BytesIO"),
+    ("escape", "from html import escape"),
+    ("quote", "from urllib.parse import quote"),
+]
 
 
 @dataclass
@@ -149,6 +188,35 @@ def find_function_span(text: str, name: str) -> tuple[int, int] | None:
     else:
         end = len(text)
     return start, end
+
+
+def defined_functions(text: str) -> set[str]:
+    return set(re.findall(r"^def ([A-Za-z_][A-Za-z0-9_]*)\s*\(", text, flags=re.MULTILINE))
+
+
+def called_names(text: str) -> set[str]:
+    return set(re.findall(r"(?<![\.\w])([A-Za-z_][A-Za-z0-9_]*)\s*\(", text))
+
+
+def imported_names(text: str) -> set[str]:
+    names: set[str] = set()
+    for match in re.finditer(r"^import\s+([^\n]+)$", text, flags=re.MULTILINE):
+        for part in match.group(1).split(","):
+            raw = part.strip()
+            if " as " in raw:
+                names.add(raw.split(" as ")[-1].strip())
+            else:
+                names.add(raw.split(".")[0].strip())
+    for match in re.finditer(r"^from\s+[A-Za-z0-9_\.]+\s+import\s+([^\n]+)$", text, flags=re.MULTILINE):
+        for part in match.group(1).split(","):
+            raw = part.strip()
+            if not raw or raw == "(":
+                continue
+            if " as " in raw:
+                names.add(raw.split(" as ")[-1].strip())
+            else:
+                names.add(raw.strip())
+    return names
 
 
 def backup_file(path: Path, label: str) -> Backup:
@@ -187,6 +255,80 @@ def ensure_import(app_text: str, import_line: str) -> str:
             return app_text
 
     raise SystemExit("Import anchor not found. Stop without modifying app.py.")
+
+
+def insert_imports(text: str, imports: list[str]) -> str:
+    imports = [line for line in imports if line not in text]
+    if not imports:
+        return text
+
+    lines = text.splitlines()
+    insert_at = 0
+    for i, line in enumerate(lines):
+        if line.startswith("from __future__ import"):
+            insert_at = i + 1
+            break
+
+    while insert_at < len(lines) and lines[insert_at].strip() == "":
+        insert_at += 1
+
+    return "\n".join(lines[:insert_at] + imports + lines[insert_at:]) + "\n"
+
+
+def fix_module_imports(page_text: str) -> tuple[str, list[str]]:
+    imports_to_add: list[str] = []
+
+    for name, import_line in MODULE_IMPORT_RULES:
+        if re.search(rf"(?<![\.\w]){re.escape(name)}\b", page_text) and import_line not in page_text:
+            imports_to_add.append(import_line)
+
+    needed_datetime = []
+    for name in ["date", "datetime"]:
+        if re.search(rf"(?<![\.\w]){name}\s*\(", page_text):
+            needed_datetime.append(name)
+
+    if needed_datetime:
+        existing_match = re.search(r"^from datetime import ([^\n]+)$", page_text, flags=re.MULTILINE)
+        if existing_match:
+            existing = [x.strip() for x in existing_match.group(1).split(",")]
+            merged = sorted(set(existing + needed_datetime))
+            new_line = "from datetime import " + ", ".join(merged)
+            old_line = existing_match.group(0)
+            if new_line != old_line:
+                page_text = page_text.replace(old_line, new_line, 1)
+        else:
+            imports_to_add.append("from datetime import " + ", ".join(sorted(set(needed_datetime))))
+
+    imports_to_add = [line for line in imports_to_add if line not in page_text]
+    if imports_to_add:
+        page_text = insert_imports(page_text, imports_to_add)
+    return page_text, imports_to_add
+
+
+def inject_runtime_imports(page_text: str, app_text: str, function_names: list[str]) -> tuple[str, dict[str, list[str]]]:
+    app_defs = defined_functions(app_text)
+    page_defs = defined_functions(page_text)
+    page_imports = imported_names(page_text)
+    injected: dict[str, list[str]] = {}
+
+    for func_name in function_names:
+        span = find_function_span(page_text, func_name)
+        if not span:
+            continue
+        start, end = span
+        block = page_text[start:end]
+        calls = called_names(block)
+        helpers = sorted((calls & app_defs) - page_defs - page_imports - IGNORE_RUNTIME_NAMES)
+        if not helpers:
+            continue
+
+        marker = f"def {func_name}():\n"
+        import_line = "    from app import " + ", ".join(helpers) + "\n"
+        if import_line not in page_text and marker in page_text:
+            page_text = page_text.replace(marker, marker + import_line, 1)
+            injected[func_name] = helpers
+
+    return page_text, injected
 
 
 def extract_functions(app_text: str, names: list[str], *, require_all: bool) -> tuple[str, list[str], list[str]]:
@@ -230,7 +372,8 @@ def write_page_module(module_name: str, function_names: list[str], *, require_an
     backups = [backup_file(APP, label), backup_file(page_path, label)]
 
     try:
-        app_text = APP.read_text(encoding="utf-8")
+        original_app_text = APP.read_text(encoding="utf-8")
+        app_text = original_app_text
         page_text = page_path.read_text(encoding="utf-8") if page_path.exists() else ""
 
         app_text, blocks, moved = extract_functions(app_text, function_names, require_all=False)
@@ -248,6 +391,14 @@ def write_page_module(module_name: str, function_names: list[str], *, require_an
         if import_names:
             import_line = f"from nohtus.pages.{module_name} import {', '.join(import_names)}\n"
             app_text = ensure_import(app_text, import_line)
+
+        # Repair the migrated page before writing it.
+        page_text, added_imports = fix_module_imports(page_text)
+        page_text, injected = inject_runtime_imports(page_text, app_text, import_names)
+        if added_imports:
+            print("ADD module imports: " + "; ".join(added_imports))
+        for func_name, helpers in injected.items():
+            print(f"ADD runtime import inside {func_name}: {', '.join(helpers)}")
 
         page_path.write_text(page_text.rstrip() + "\n", encoding="utf-8")
         APP.write_text(app_text, encoding="utf-8")
@@ -271,6 +422,44 @@ def move_group(group_name: str) -> None:
     write_page_module(group["module"], group["functions"])
 
 
+def fix_page(module_name: str, function_names: list[str] | None = None) -> None:
+    if not APP.exists():
+        raise SystemExit("app.py not found. Run this script from the repository root.")
+    page_path = PAGES_DIR / f"{module_name}.py"
+    if not page_path.exists():
+        raise SystemExit(f"Page module not found: {page_path.relative_to(ROOT)}")
+
+    label = f"refactor_fix_page_{module_name}"
+    backups = [backup_file(page_path, label)]
+
+    try:
+        app_text = APP.read_text(encoding="utf-8")
+        page_text = page_path.read_text(encoding="utf-8")
+        target_functions = function_names or sorted(name for name in defined_functions(page_text) if name.startswith("page_"))
+        if not target_functions:
+            raise SystemExit(f"No page_* functions found in {page_path.relative_to(ROOT)}")
+
+        page_text, added_imports = fix_module_imports(page_text)
+        page_text, injected = inject_runtime_imports(page_text, app_text, target_functions)
+
+        if not added_imports and not injected:
+            print("No missing imports detected. No files changed.")
+            return
+
+        if added_imports:
+            print("ADD module imports: " + "; ".join(added_imports))
+        for func_name, helpers in injected.items():
+            print(f"ADD runtime import inside {func_name}: {', '.join(helpers)}")
+
+        page_path.write_text(page_text.rstrip() + "\n", encoding="utf-8")
+        compile_and_smoke([page_path])
+    except Exception:
+        restore(backups)
+        raise
+
+    print("DONE. Run: streamlit run app.py")
+
+
 def move_service(module_name: str, function_names: list[str]) -> None:
     if not APP.exists():
         raise SystemExit("app.py not found. Run this script from the repository root.")
@@ -292,6 +481,9 @@ def move_service(module_name: str, function_names: list[str]) -> None:
             service_text = SERVICE_HEADER_TEMPLATE.format(title=module_name.replace("_", " ").title()).rstrip()
 
         service_text = service_text.rstrip() + "\n\n\n" + "\n".join(blocks).rstrip() + "\n"
+        service_text, added_imports = fix_module_imports(service_text)
+        if added_imports:
+            print("ADD module imports: " + "; ".join(added_imports))
 
         import_line = f"from nohtus.services.{module_name} import {', '.join(moved)}\n"
         app_text = ensure_import(app_text, import_line)
@@ -317,6 +509,10 @@ def parse_args() -> argparse.Namespace:
     p_group = sub.add_parser("move-group", help="Move a predefined group of page functions")
     p_group.add_argument("group_name", choices=sorted(GROUPS))
 
+    p_fix_page = sub.add_parser("fix-page", help="Repair imports in a migrated page module")
+    p_fix_page.add_argument("module_name")
+    p_fix_page.add_argument("function_names", nargs="*")
+
     p_service = sub.add_parser("move-service", help="Move service/helper functions to nohtus/services/<module>.py")
     p_service.add_argument("module_name")
     p_service.add_argument("function_names", nargs="+")
@@ -330,6 +526,8 @@ def main() -> None:
         move_page(args.function_name, args.module_name)
     elif args.command == "move-group":
         move_group(args.group_name)
+    elif args.command == "fix-page":
+        fix_page(args.module_name, args.function_names or None)
     elif args.command == "move-service":
         move_service(args.module_name, args.function_names)
     else:
