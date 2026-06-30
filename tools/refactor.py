@@ -7,6 +7,7 @@ Examples:
     python tools/refactor.py move-page page_outbound outbound
     python tools/refactor.py move-page page_closing closing
     python tools/refactor.py move-service closing erp_compare today_outbound_check
+    python tools/refactor.py move-group master
 
 Commands:
 
@@ -15,6 +16,9 @@ Commands:
 
     move-service <module_name> <function_name> [function_name ...]
         Move one or more service/helper functions from app.py to nohtus/services/<module_name>.py.
+
+    move-group <group_name>
+        Move a predefined group of related page functions together.
 
 The engine always:
 
@@ -45,7 +49,27 @@ APP = ROOT / "app.py"
 PAGES_DIR = ROOT / "nohtus" / "pages"
 SERVICES_DIR = ROOT / "nohtus" / "services"
 
+GROUPS = {
+    "closing": {
+        "module": "closing",
+        "functions": ["page_closing", "page_erp_stock_compare", "page_erp_data_upload"],
+    },
+    "master": {
+        "module": "master",
+        "functions": ["page_master", "page_customer_master", "page_inventory_metadata_edit"],
+    },
+    "search": {
+        "module": "search",
+        "functions": ["page_search", "page_mobile_stock_finder"],
+    },
+}
+
 DEFAULT_IMPORT_ANCHORS = [
+    "from nohtus.pages.master import",
+    "from nohtus.pages.search import",
+    "from nohtus.pages.closing import",
+    "from nohtus.pages.product_matching import",
+    "from nohtus.pages.outbound import",
     "from nohtus.pages.location_map import",
     "from nohtus.pages.stocktake import page_stocktake\n",
     "from nohtus.pages.move import page_move\n",
@@ -64,8 +88,15 @@ contains page rendering code.
 
 from __future__ import annotations
 
+import calendar
+import json
+import re
+from datetime import date, datetime
+from io import BytesIO
+
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from nohtus.config import AREA_COLOR, AREA_CONFIG, COMPANIES, INBOUND_COMPANIES
 from nohtus.db import connect, exec_sql, q
@@ -189,7 +220,7 @@ def compile_and_smoke(paths: list[Path]) -> None:
     subprocess.run([sys.executable, "tools/smoke_check.py"], cwd=ROOT, env=env, check=True)
 
 
-def move_page(function_name: str, module_name: str) -> None:
+def write_page_module(module_name: str, function_names: list[str], *, require_any: bool = True) -> None:
     if not APP.exists():
         raise SystemExit("app.py not found. Run this script from the repository root.")
     PAGES_DIR.mkdir(parents=True, exist_ok=True)
@@ -202,20 +233,21 @@ def move_page(function_name: str, module_name: str) -> None:
         app_text = APP.read_text(encoding="utf-8")
         page_text = page_path.read_text(encoding="utf-8") if page_path.exists() else ""
 
-        app_text, blocks, moved = extract_functions(app_text, [function_name], require_all=False)
-        if not moved and f"def {function_name}(" not in page_text:
-            raise SystemExit(f"{function_name} not found in app.py and not already in {page_path}.")
+        app_text, blocks, moved = extract_functions(app_text, function_names, require_all=False)
+        already_present = [name for name in function_names if f"def {name}(" in page_text]
+        if require_any and not moved and not already_present:
+            raise SystemExit(f"None of {function_names} found in app.py or already in {page_path}.")
 
         if not page_text.strip():
             page_text = PAGE_HEADER_TEMPLATE.format(title=module_name.replace("_", " ").title()).rstrip()
 
-        if blocks and f"def {function_name}(" not in page_text:
+        if blocks:
             page_text = page_text.rstrip() + "\n\n\n" + "\n".join(blocks).rstrip() + "\n"
-        elif blocks:
-            print(f"SKIP page already contains: {function_name}")
 
-        import_line = f"from nohtus.pages.{module_name} import {function_name}\n"
-        app_text = ensure_import(app_text, import_line)
+        import_names = moved + [name for name in already_present if name not in moved]
+        if import_names:
+            import_line = f"from nohtus.pages.{module_name} import {', '.join(import_names)}\n"
+            app_text = ensure_import(app_text, import_line)
 
         page_path.write_text(page_text.rstrip() + "\n", encoding="utf-8")
         APP.write_text(app_text, encoding="utf-8")
@@ -225,6 +257,18 @@ def move_page(function_name: str, module_name: str) -> None:
         raise
 
     print("DONE. Review the diff, then commit if it looks good.")
+
+
+def move_page(function_name: str, module_name: str) -> None:
+    write_page_module(module_name, [function_name])
+
+
+def move_group(group_name: str) -> None:
+    if group_name not in GROUPS:
+        available = ", ".join(sorted(GROUPS))
+        raise SystemExit(f"Unknown group: {group_name}. Available groups: {available}")
+    group = GROUPS[group_name]
+    write_page_module(group["module"], group["functions"])
 
 
 def move_service(module_name: str, function_names: list[str]) -> None:
@@ -270,6 +314,9 @@ def parse_args() -> argparse.Namespace:
     p_page.add_argument("function_name")
     p_page.add_argument("module_name")
 
+    p_group = sub.add_parser("move-group", help="Move a predefined group of page functions")
+    p_group.add_argument("group_name", choices=sorted(GROUPS))
+
     p_service = sub.add_parser("move-service", help="Move service/helper functions to nohtus/services/<module>.py")
     p_service.add_argument("module_name")
     p_service.add_argument("function_names", nargs="+")
@@ -281,6 +328,8 @@ def main() -> None:
     args = parse_args()
     if args.command == "move-page":
         move_page(args.function_name, args.module_name)
+    elif args.command == "move-group":
+        move_group(args.group_name)
     elif args.command == "move-service":
         move_service(args.module_name, args.function_names)
     else:
