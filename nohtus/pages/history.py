@@ -1,0 +1,207 @@
+"""History page for NOHTUS WMS.
+
+Migrated from app.py. This module intentionally imports Streamlit because it
+contains page rendering code.
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import date
+
+import pandas as pd
+import streamlit as st
+
+from nohtus.config import COMPANIES
+from nohtus.db import q
+from nohtus.dates import display_date_only
+
+
+def page_history():
+    from app import _infer_customer_from_title
+    st.title("이력 조회")
+
+    today = date.today()
+    default_start = today.replace(day=1)
+
+    filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
+    with filter_col1:
+        company = st.selectbox("사업장", ["전체"] + COMPANIES, index=0, key="history_company")
+    with filter_col2:
+        tx_label = st.selectbox("이력유형", ["전체", "입고", "출고지시", "출고지시취소", "이동", "재고조정", "재고정보수정", "전산재고"], index=0, key="history_tx_label")
+    with filter_col3:
+        start_date = st.date_input("시작일", value=default_start, key="history_start_date")
+    with filter_col4:
+        end_date = st.date_input("종료일", value=today, key="history_end_date")
+
+    if start_date and end_date and start_date > end_date:
+        st.error("시작일은 종료일보다 늦을 수 없습니다.")
+        return
+
+    search_col, customer_col = st.columns(2)
+    with search_col:
+        term = st.text_input("제품명/로케이션 검색", placeholder="제품명, LOT, 로케이션 일부 입력", key="history_search_term")
+    with customer_col:
+        customer_term = st.text_input("매출처 검색", placeholder="매출처명 일부 입력", key="history_customer_term")
+
+    filter_key = f"{company}|{tx_label}|{start_date}|{end_date}|{term.strip()}|{customer_term.strip()}"
+    if st.session_state.get("history_filter_key") != filter_key:
+        st.session_state["history_filter_key"] = filter_key
+        st.session_state["history_page"] = 1
+
+    conditions = []
+    params = []
+    if start_date:
+        conditions.append("date(created_at) >= ?")
+        params.append(str(start_date))
+    if end_date:
+        conditions.append("date(created_at) <= ?")
+        params.append(str(end_date))
+    if company != "전체":
+        conditions.append("(from_company=? OR to_company=?)")
+        params.extend([company, company])
+    if tx_label != "전체":
+        if tx_label == "이동":
+            conditions.append("tx_type IN ('위치이동','사업장이동','사업장+위치이동','비자료전환','이동')")
+        elif tx_label == "전산재고":
+            conditions.append("tx_type IN ('기준재고','전산재고')")
+        else:
+            conditions.append("tx_type=?")
+            params.append(tx_label)
+    else:
+        conditions.append("tx_type NOT IN ('재고조사불러오기','ERP비교','출고','출고확정')")
+    if term.strip():
+        like = f"%{term.strip()}%"
+        conditions.append("(product_name LIKE ? OR lot LIKE ? OR from_location LIKE ? OR to_location LIKE ? OR memo LIKE ?)")
+        params.extend([like, like, like, like, like])
+    if customer_term.strip():
+        matched_order_ids = []
+        try:
+            orders_for_customer = q("SELECT id, COALESCE(title, '') AS title FROM outbound_orders ORDER BY id DESC")
+            customers_for_infer = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
+            needle = customer_term.strip().lower()
+            for r in orders_for_customer.itertuples(index=False):
+                title = str(getattr(r, "title", "") or "")
+                inferred_customer, _manager = _infer_customer_from_title(title, customers_for_infer)
+                if needle in title.lower() or needle in str(inferred_customer or "").lower():
+                    matched_order_ids.append(int(getattr(r, "id")))
+        except Exception:
+            matched_order_ids = []
+        matched_order_ids = sorted(set(matched_order_ids))
+        if matched_order_ids:
+            order_clauses = []
+            for oid in matched_order_ids:
+                order_clauses.append("memo LIKE ?")
+                params.append(f"%출고지시서 #{oid}%")
+            conditions.append("(" + " OR ".join(order_clauses) + ")")
+        else:
+            conditions.append("1=0")
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    total_df = q(f"SELECT COUNT(*) AS cnt FROM transactions {where}", tuple(params))
+    total_count = int(total_df.iloc[0]["cnt"] or 0) if not total_df.empty else 0
+    if total_count == 0:
+        st.info("조회된 이력이 없습니다.")
+        return
+
+    page_size = 20
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+    current_page = int(st.session_state.get("history_page", 1) or 1)
+    current_page = max(1, min(current_page, total_pages))
+    st.session_state["history_page"] = current_page
+    offset = (current_page - 1) * page_size
+
+    df = q(f"""
+        SELECT * FROM transactions
+        {where}
+        ORDER BY id DESC
+        LIMIT ? OFFSET ?
+    """, tuple(params + [page_size, offset]))
+
+    page_left, page_mid, page_right = st.columns([1, 2, 1])
+    with page_left:
+        if st.button("이전", disabled=current_page <= 1, key="history_prev_page", use_container_width=True):
+            st.session_state["history_page"] = max(1, current_page - 1)
+            st.rerun()
+    with page_mid:
+        selected_page = st.number_input(
+            "페이지",
+            min_value=1,
+            max_value=total_pages,
+            value=current_page,
+            step=1,
+            key="history_page_input",
+        )
+        if int(selected_page) != current_page:
+            st.session_state["history_page"] = int(selected_page)
+            st.rerun()
+    with page_right:
+        if st.button("다음", disabled=current_page >= total_pages, key="history_next_page", use_container_width=True):
+            st.session_state["history_page"] = min(total_pages, current_page + 1)
+            st.rerun()
+
+    start_no = offset + 1
+    end_no = min(offset + len(df), total_count)
+    st.caption(f"총 {total_count:,}건 / {current_page:,}페이지/{total_pages:,}페이지 / 현재 {start_no:,}~{end_no:,}건 표시")
+
+    # warehouse_name은 화면에서 제외하고, 재고조정/재고실사는 +/-와 현재 최종재고를 표시한다.
+    final_values = []
+    qty_values = []
+    for r in df.itertuples():
+        typ = str(getattr(r, "tx_type", "") or "")
+        qty = int(getattr(r, "qty", 0) or 0)
+        if typ in ["재고조정", "재고실사"]:
+            qty_values.append(f"{qty:+d}")
+        else:
+            qty_values.append(str(qty))
+        final_stock_value = getattr(r, "final_stock", None)
+        if final_stock_value is not None and not pd.isna(final_stock_value):
+            final_values.append(int(final_stock_value))
+        else:
+            # 구버전 이력처럼 final_stock 스냅샷이 없는 기록은 현재 재고로 다시 계산하지 않는다.
+            # 이력의 최종재고는 작업 당시 값이어야 하므로, 저장값이 없으면 빈칸으로 둔다.
+            final_values.append("")
+    show = df.copy()
+    show["수량"] = qty_values
+    show["최종재고"] = final_values
+
+    # 출고 관련 이력은 memo의 "출고지시서 #번호"를 기준으로 outbound_orders 제목을 찾고,
+    # 제목에서 매출처를 추정해 이력조회 화면에 함께 표시한다.
+    order_customer_map = {}
+    try:
+        order_ids = []
+        if "memo" in show.columns:
+            for memo_text in show["memo"].fillna("").astype(str).tolist():
+                m = re.search(r"출고지시서\s*#(\d+)", memo_text)
+                if m:
+                    order_ids.append(int(m.group(1)))
+        order_ids = sorted(set(order_ids))
+        if order_ids:
+            placeholders = ",".join(["?"] * len(order_ids))
+            orders_df = q(f"SELECT id, COALESCE(title, '') AS title FROM outbound_orders WHERE id IN ({placeholders})", tuple(order_ids))
+            customers_df = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
+            for r in orders_df.itertuples(index=False):
+                customer, _manager = _infer_customer_from_title(getattr(r, "title", ""), customers_df)
+                order_customer_map[int(getattr(r, "id"))] = customer
+    except Exception:
+        order_customer_map = {}
+
+    def _history_customer_from_memo(memo_text):
+        m = re.search(r"출고지시서\s*#(\d+)", str(memo_text or ""))
+        if not m:
+            return ""
+        return order_customer_map.get(int(m.group(1)), "")
+
+    show["매출처"] = show["memo"].apply(_history_customer_from_memo) if "memo" in show.columns else ""
+
+    if "exp_date" in show.columns:
+        show["exp_date"] = show["exp_date"].apply(display_date_only)
+    rename_cols = {
+        "created_at":"일시", "tx_type":"이력유형", "product_name":"제품명",
+        "lot":"LOT", "exp_date":"유통기한", "from_company":"출발사업장", "from_location":"출발위치",
+        "to_company":"도착사업장", "to_location":"도착위치", "memo":"메모"
+    }
+    show = show.rename(columns=rename_cols)
+    wanted = ["일시","이력유형","매출처","제품명","LOT","유통기한","출발사업장","출발위치","도착사업장","도착위치","수량","최종재고","메모"]
+    show = show[[c for c in wanted if c in show.columns]]
+    st.dataframe(show, use_container_width=True, hide_index=True)
