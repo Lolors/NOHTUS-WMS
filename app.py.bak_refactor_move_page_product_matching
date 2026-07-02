@@ -21,9 +21,7 @@ from nohtus.pages.history import page_history
 from nohtus.pages.move import page_move
 from nohtus.pages.stocktake import page_stocktake
 from nohtus.pages.location_map import page_map
-from nohtus.pages.product_matching import page_product_matching
 from nohtus.pages.closing import page_closing
-from nohtus.pages.master import page_master, page_customer_master, page_inventory_metadata_edit
 from nohtus.pages.outbound import page_outbound
 
 _location_picking_key = location_picking_key
@@ -527,7 +525,7 @@ def outbound_pdf_bytes(rows, title="출고지시서"):
     return bio.getvalue()
 
 def full_inventory_excel_bytes(exclude_zero=True):
-    where_sql = "WHERE 1=1" if exclude_zero else ""
+    where_sql = "WHERE qty > 0" if exclude_zero else ""
     df = q(f"""
         SELECT location, product_name, warehouse_name, lot, exp_date, qty
         FROM inventory
@@ -626,7 +624,7 @@ def baseline_stock_template_excel_bytes():
 
 def current_baseline_stock_excel_bytes(exclude_zero=False):
     """현재 WMS 재고를 기준재고 업로드 양식에 채워서 내려받는다."""
-    where_sql = "WHERE 1=1" if exclude_zero else ""
+    where_sql = "WHERE qty > 0" if exclude_zero else ""
     inv = q(f"""
         SELECT company, product_name, warehouse_name, lot, exp_date, location, qty
         FROM inventory
@@ -3220,6 +3218,159 @@ def page_search():
 
 
 
+def page_master():
+    st.title("제품 마스터")
+    st.caption("제품 자체의 기준명은 표준제품명으로 관리하고, ERP별 이름은 별도 매핑으로 관리합니다. 노투스팜/NOH ERP 제품코드는 각 ERP명 바로 뒤에서 관리하고, 노투스 ERP명 오른쪽에는 비자료명을 관리합니다.")
+    df = q("SELECT id, product_code, standard_name, aliases, erp_nohtuspharm_name, erp_noh_name, erp_noh_code, erp_nohtus_name, bidata_name FROM products ORDER BY standard_name")
+
+    top1, top2 = st.columns(2, gap="large")
+    with top1:
+        st.download_button(
+            "제품 마스터 엑셀 양식 다운로드",
+            data=product_master_excel_bytes(),
+            file_name=f"NOHTUS_제품마스터_{date.today().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+    with top2:
+        uploaded = st.file_uploader("수정한 제품 마스터 엑셀 업로드", type=["xlsx"], key="product_master_upload")
+        if uploaded is not None:
+            if st.button("업로드 파일로 제품 마스터 업데이트", type="primary", use_container_width=True):
+                try:
+                    updated, inserted, skipped = import_product_master_excel(uploaded)
+                    st.success(f"업데이트 완료: 수정 {updated}건 / 추가 {inserted}건 / 건너뜀 {skipped}건")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"업로드 실패: {e}")
+
+    st.markdown("### 제품 목록")
+    view = df[["standard_name", "erp_nohtuspharm_name", "product_code", "erp_noh_name", "erp_noh_code", "erp_nohtus_name", "bidata_name", "aliases"]].rename(columns={
+        "standard_name":"표준제품명",
+        "erp_nohtuspharm_name":"노투스팜 ERP명",
+        "product_code":"노투스팜 ERP 제품코드",
+        "erp_noh_name":"NOH ERP명",
+        "erp_noh_code":"NOH ERP 제품코드",
+        "erp_nohtus_name":"노투스 ERP명",
+        "bidata_name":"비자료명",
+        "aliases":"별칭",
+    })
+    st.dataframe(view, use_container_width=True, hide_index=True)
+
+    with st.expander("기존 제품 수정", expanded=False):
+        if df.empty:
+            st.info("수정할 제품이 없습니다.")
+        else:
+            edit_term = st.text_input("수정할 제품 검색", placeholder="표준제품명/ERP명/별칭 일부 입력")
+            edit_df = df.copy()
+            if edit_term.strip():
+                term = edit_term.strip().lower()
+                edit_df = edit_df[
+                    edit_df["standard_name"].fillna("").str.lower().str.contains(term, regex=False)
+                    | edit_df["aliases"].fillna("").str.lower().str.contains(term, regex=False)
+                    | edit_df["product_code"].fillna("").str.lower().str.contains(term, regex=False)
+                    | edit_df["erp_nohtuspharm_name"].fillna("").str.lower().str.contains(term, regex=False)
+                    | edit_df["erp_noh_name"].fillna("").str.lower().str.contains(term, regex=False)
+                    | edit_df["erp_noh_code"].fillna("").str.lower().str.contains(term, regex=False)
+                    | edit_df["erp_nohtus_name"].fillna("").str.lower().str.contains(term, regex=False)
+                    | edit_df["bidata_name"].fillna("").str.lower().str.contains(term, regex=False)
+                ]
+            if edit_df.empty:
+                st.warning("일치하는 제품이 없습니다.")
+            else:
+                options = [f"{r.standard_name} / 노투스팜:{r.erp_nohtuspharm_name or '-'} / NOH:{r.erp_noh_name or '-'} / 노투스:{r.erp_nohtus_name or '-'}" for r in edit_df.itertuples()]
+                selected = st.selectbox("수정할 제품 선택", options)
+                row = edit_df.iloc[options.index(selected)]
+                with st.form("edit_product"):
+                    name = st.text_input("표준제품명", value=str(row["standard_name"] or ""))
+                    erp_np = st.text_input("노투스팜 ERP명", value=str(row.get("erp_nohtuspharm_name", "") or ""))
+                    code = st.text_input("노투스팜 ERP 제품코드", value=str(row["product_code"] or ""))
+                    erp_noh = st.text_input("NOH ERP명", value=str(row.get("erp_noh_name", "") or ""))
+                    erp_noh_code = st.text_input("NOH ERP 제품코드", value=str(row.get("erp_noh_code", "") or ""))
+                    erp_nt = st.text_input("노투스 ERP명", value=str(row.get("erp_nohtus_name", "") or ""))
+                    bidata_name = st.text_input("비자료명", value=str(row.get("bidata_name", "") or ""))
+                    aliases = st.text_input("별칭", value=str(row["aliases"] or ""))
+                    if st.form_submit_button("수정 저장", use_container_width=True):
+                        if not name.strip():
+                            st.error("표준제품명은 필수입니다.")
+                        else:
+                            exec_sql("UPDATE products SET product_code=?, standard_name=?, warehouse_name=?, aliases=?, erp_nohtuspharm_name=?, erp_noh_name=?, erp_noh_code=?, erp_nohtus_name=?, bidata_name=? WHERE id=?", (code.strip(), name.strip(), name.strip(), aliases.strip(), erp_np.strip(), erp_noh.strip(), erp_noh_code.strip(), erp_nt.strip(), bidata_name.strip(), int(row["id"])))
+                            st.success("제품 수정 완료")
+                            st.rerun()
+
+    with st.expander("제품 추가"):
+        with st.form("add_product"):
+            name=st.text_input("표준제품명")
+            erp_np=st.text_input("노투스팜 ERP명")
+            code=st.text_input("노투스팜 ERP 제품코드")
+            erp_noh=st.text_input("NOH ERP명")
+            erp_noh_code=st.text_input("NOH ERP 제품코드")
+            erp_nt=st.text_input("노투스 ERP명")
+            bidata_name=st.text_input("비자료명")
+            aliases=st.text_input("별칭")
+            if st.form_submit_button("추가", use_container_width=True) and name:
+                exec_sql("INSERT INTO products(product_code,standard_name,warehouse_name,aliases,erp_nohtuspharm_name,erp_noh_name,erp_noh_code,erp_nohtus_name,bidata_name) VALUES(?,?,?,?,?,?,?,?,?)", (code.strip(),name.strip(),name.strip(),aliases.strip(),erp_np.strip(),erp_noh.strip(),erp_noh_code.strip(),erp_nt.strip(),bidata_name.strip()))
+                st.success("제품 추가 완료"); st.rerun()
+
+    with st.expander("ERP 확인 필요 후보 관리", expanded=True):
+        st.caption("같은 ERP명칭이 실제 여러 제품일 수 있는 경우 후보를 등록합니다. ERP 업로드 시 후보가 2개 이상이면 사람이 선택해야 합니다.")
+        c1, c2, c3 = st.columns([1,1.4,1.6], gap="medium")
+        with c1:
+            erp_company = st.selectbox("ERP구분", ["노투스팜", "NOH", "노투스"], key="amb_erp_company")
+        with c2:
+            erp_name = st.text_input("ERP명칭", placeholder="예: JS TOX", key="amb_erp_name")
+        with c3:
+            products = q("SELECT standard_name FROM products ORDER BY standard_name")
+            cand = st.selectbox("후보 표준제품", products["standard_name"].tolist() if not products.empty else [], key="amb_candidate")
+        memo = st.text_input("메모", placeholder="예: ERP명만으로 실제 출고제품 판단 불가", key="amb_memo")
+        if st.button("확인 필요 후보 추가", type="primary", use_container_width=True):
+            if not erp_name.strip() or not cand:
+                st.error("ERP명칭과 후보 제품을 입력하세요.")
+            else:
+                exec_sql("INSERT INTO erp_ambiguous_candidates(erp_company, erp_name, candidate_product, memo) VALUES(?,?,?,?)", (erp_company, erp_name.strip(), cand, memo.strip()))
+                st.success("후보 추가 완료")
+                st.rerun()
+        amb = q("SELECT id, erp_company AS ERP구분, erp_name AS ERP명칭, candidate_product AS 후보제품, memo AS 메모 FROM erp_ambiguous_candidates ORDER BY ERP구분, ERP명칭, 후보제품")
+        if amb.empty:
+            st.info("등록된 확인 필요 후보가 없습니다.")
+        else:
+            st.caption("삭제할 후보만 체크한 뒤 삭제 버튼을 누르세요.")
+            amb_edit = amb.copy()
+            amb_edit.insert(0, "삭제", False)
+            edited_amb = st.data_editor(
+                amb_edit,
+                hide_index=True,
+                use_container_width=True,
+                disabled=["id", "ERP구분", "ERP명칭", "후보제품", "메모"],
+                column_config={"id": None, "삭제": st.column_config.CheckboxColumn("삭제")},
+                key="amb_delete_editor",
+            )
+            delete_ids = edited_amb.loc[edited_amb["삭제"] == True, "id"].astype(int).tolist()
+            if st.button("체크한 후보 삭제", disabled=(len(delete_ids) == 0), use_container_width=True):
+                with connect() as con:
+                    con.executemany("DELETE FROM erp_ambiguous_candidates WHERE id=?", [(i,) for i in delete_ids])
+                    con.commit()
+                st.success(f"{len(delete_ids)}건 삭제 완료")
+                st.rerun()
+
+    with st.expander("ERP명칭 매칭 테스트"):
+        t1, t2 = st.columns([1,2], gap="medium")
+        with t1:
+            test_company = st.selectbox("테스트 ERP구분", ["노투스팜", "NOH", "노투스"], key="test_erp_company")
+        with t2:
+            test_name = st.text_input("테스트 ERP명칭", placeholder="ERP 매입/매출 엑셀에 나온 제품명", key="test_erp_name")
+        if st.button("매칭 확인", use_container_width=True):
+            res = match_erp_name(test_company, test_name)
+            if res["status"] == "auto":
+                st.success(res["message"])
+            elif res["status"] == "ambiguous":
+                st.warning(res["message"])
+                st.write("후보제품")
+                st.write(res["candidates"])
+            else:
+                st.error(res["message"])
+
+
+# ---------------- ERP / customer master ----------------
 def customer_master_template_bytes():
     df = pd.DataFrame(columns=["거래처코드", "거래처명", "사업장", "유형", "담당자", "연락처", "주소", "메모"])
     bio = BytesIO()
@@ -3307,6 +3458,42 @@ def import_customer_master_excel(uploaded_file):
 def customer_export_excel_bytes():
     df = q("SELECT customer_code AS 거래처코드, customer_name AS 거래처명, company AS 사업장, customer_type AS 유형, manager AS 담당자, phone AS 연락처, address AS 주소, memo AS 메모 FROM customers ORDER BY customer_name, company")
     return dataframe_to_excel_bytes(df, "거래처관리")
+
+def page_inventory_metadata_edit():
+    st.title("재고정보 수정")
+    st.caption("기존 재고의 제조번호/유통기한이 잘못 입력된 경우에만 사용합니다. 수량은 변경하지 않습니다.")
+    render_inventory_metadata_editor()
+
+
+def page_customer_master():
+    st.title("거래처 관리")
+    st.caption("거래처 엑셀을 업로드하면 출고지시와 업무일지에서 매출처/담당자 정보를 재사용할 수 있습니다.")
+    c1, c2 = st.columns(2, gap="large")
+    with c1:
+        st.download_button("등록된 거래처 내려받기", data=customer_export_excel_bytes(), file_name=f"NOHTUS_등록거래처_{date.today().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+    with c2:
+        up = st.file_uploader("거래처 관리 엑셀 업로드", type=["xlsx"], key="customer_master_upload")
+        if up is not None and st.button("거래처 관리 업데이트", type="primary", use_container_width=True):
+            try:
+                updated, inserted, skipped = import_customer_master_excel(up)
+                st.success(f"업데이트 완료: 수정 {updated}건 / 추가 {inserted}건 / 건너뜀 {skipped}건")
+                st.rerun()
+            except Exception as e:
+                st.error(f"업로드 실패: {e}")
+    df = q("SELECT customer_code AS 거래처코드, customer_name AS 거래처명, company AS 사업장, customer_type AS 유형, manager AS 담당자, phone AS 연락처, address AS 주소, memo AS 메모 FROM customers ORDER BY customer_name, company")
+    st.markdown("### 등록된 거래처")
+    if df.empty:
+        st.info("등록된 거래처가 없습니다.")
+    else:
+        term = st.text_input("거래처 검색", placeholder="거래처명/담당자/주소 일부 입력")
+        if term.strip():
+            low = term.strip().lower()
+            mask = False
+            for col in df.columns:
+                mask = mask | df[col].fillna("").astype(str).str.lower().str.contains(low, regex=False)
+            df = df[mask]
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
 
 def detect_column(columns, candidates):
     cols = [str(c).strip() for c in columns]
@@ -3604,7 +3791,7 @@ def find_mapping_conflicts_from_inventory():
         FROM inventory
         WHERE TRIM(COALESCE(company,''))<>''
           AND TRIM(COALESCE(product_name,''))<>''
-          
+          AND qty > 0
         GROUP BY company, product_name, COALESCE(warehouse_name, '')
         ORDER BY company, source_name, product_name
     """)
@@ -3640,13 +3827,157 @@ def find_mapping_conflicts_from_inventory():
             })
     return pd.DataFrame(rows)
 
+def page_product_matching():
+    st.title("제품 매칭 관리")
+    st.caption("표준제품명과 사업장별 ERP명/비자료명을 관리합니다.")
+
+    action_col, _spacer = st.columns([4, 6], gap="large")
+    with action_col:
+        st.download_button(
+            "제품 매칭표 엑셀 파일 내려받기",
+            data=product_master_excel_bytes(),
+            file_name=f"NOHTUS_제품매칭표_{date.today().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+        uploaded = st.file_uploader("수정한 제품 매칭표 엑셀 업로드", type=["xlsx"], key="product_matching_upload")
+        if uploaded is not None and st.button("업로드 파일로 제품 매칭표 업데이트", type="primary", use_container_width=True):
+            try:
+                u, i, sk = import_product_master_excel(uploaded)
+                total = u + i + sk
+                st.success("✅ 제품 매칭표 업데이트 완료")
+                st.markdown(f"""
+                - 총 처리 : **{total}건**
+                - 업로드 파일 기준 반영 : **{i}건**
+                - 건너뜀 : **{sk}건**
+                - 반영 방식 : **기존 제품매칭표 완전 교체**
+                """)
+                st.rerun()
+            except Exception as e:
+                st.error(f"업로드 실패: {e}")
+
+    st.markdown("### 🔍 매칭 이상 검사")
+    conflict_df = find_mapping_conflicts_from_inventory()
+    if conflict_df.empty:
+        st.success("확인이 필요한 ERP명/비자료명 공유 충돌이 없습니다.")
+    else:
+        st.warning("같은 ERP명/비자료명이 기존 다른 표준제품명에도 등록되어 있습니다. 실제 충돌인지, 여러 표준제품명이 함께 쓰는 것이 맞는지 확인하세요.")
+        edit_df = conflict_df.copy()
+        edit_df.insert(0, "문제없음", False)
+        edited_conflict = st.data_editor(
+            edit_df,
+            hide_index=True,
+            use_container_width=True,
+            disabled=[c for c in edit_df.columns if c != "문제없음"],
+            column_config={"문제없음": st.column_config.CheckboxColumn("문제없음", help="이 공유 매칭이 의도된 것이면 체크하세요.")},
+            key="pm_conflict_editor",
+        )
+        st.caption("문제없음으로 확인한 ERP명/비자료명은 시스템이 기억하며, 이후 같은 원본명으로는 다시 묻지 않습니다.")
+        if st.button("체크한 공유 매칭 확인 완료", type="primary", use_container_width=True):
+            checked = edited_conflict[edited_conflict["문제없음"] == True]
+            if checked.empty:
+                st.info("체크된 행이 없습니다.")
+            else:
+                for _, rr in checked.iterrows():
+                    approve_mapping_conflict(str(rr.get("사업장", "")), str(rr.get("ERP명/비자료명", "")))
+                st.success(f"{len(checked)}건을 문제없음으로 확인했습니다.")
+                st.rerun()
+
+    st.markdown("### 제품 매칭표 보완용 파일")
+    st.caption("제품매칭표 전체를 내려받아 누락된 ERP명/비자료명 정보를 보완한 뒤 다시 업로드할 수 있습니다.")
+    st.download_button(
+        "제품 매칭표 보완용 파일 내려받기",
+        data=product_master_excel_bytes(highlight_missing=True),
+        file_name=f"NOHTUS_제품매칭표_보완용_{date.today().strftime('%Y%m%d')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+
+    st.markdown("### 제품 매칭표 수정")
+    df = q("""SELECT id, standard_name AS 표준제품명, erp_nohtuspharm_name AS '노투스팜 ERP명', product_code AS '노투스팜 ERP 제품코드', erp_noh_name AS 'NOH ERP명', erp_noh_code AS 'NOH ERP 제품코드', erp_nohtus_name AS '노투스 ERP명', bidata_name AS '비자료명', aliases AS 별칭
+              FROM products ORDER BY standard_name""")
+    if df.empty:
+        st.info("등록된 제품이 없습니다.")
+        return
+
+    term = st.text_input("수정할 제품 검색", placeholder="표준제품명/ERP명/별칭 일부 입력", key="pm_edit_term")
+    shown = df.copy()
+    if term.strip():
+        mask = False
+        for col in ["표준제품명","노투스팜 ERP명","노투스팜 ERP 제품코드","NOH ERP명","NOH ERP 제품코드","노투스 ERP명","비자료명","별칭"]:
+            mask = mask | shown[col].fillna("").astype(str).str.contains(term.strip(), case=False, regex=False)
+        shown = shown[mask]
+    if shown.empty:
+        st.info("검색 결과가 없습니다.")
+        return
+
+    choice_options = [""] + [f"{int(r.id)} | {r.표준제품명}" for r in shown.itertuples()]
+    choice_label = st.selectbox("수정할 제품 선택", choice_options, index=0, key="pm_edit_choice", format_func=lambda x: "제품명을 입력하거나 선택하세요" if x == "" else x)
+    if not choice_label:
+        return
+
+    pid = int(choice_label.split(" | ")[0])
+    row = df[df["id"] == pid].iloc[0]
+    edit_key = f"pm_edit_{pid}"
+    ec1, ec2, ec3, ec4 = st.columns(4)
+    with ec1:
+        e_std = st.text_input("표준제품명", value=str(row["표준제품명"] or ""), key=f"{edit_key}_std")
+        e_alias = st.text_input("별칭", value=str(row["별칭"] or ""), key=f"{edit_key}_alias")
+    with ec2:
+        e_np = st.text_input("노투스팜 ERP명", value=str(row["노투스팜 ERP명"] or ""), key=f"{edit_key}_np")
+        e_code = st.text_input("노투스팜 ERP 제품코드", value=str(row["노투스팜 ERP 제품코드"] or ""), key=f"{edit_key}_code")
+    with ec3:
+        e_noh = st.text_input("NOH ERP명", value=str(row["NOH ERP명"] or ""), key=f"{edit_key}_noh")
+        e_noh_code = st.text_input("NOH ERP 제품코드", value=str(row["NOH ERP 제품코드"] or ""), key=f"{edit_key}_noh_code")
+    with ec4:
+        e_nt = st.text_input("노투스 ERP명", value=str(row["노투스 ERP명"] or ""), key=f"{edit_key}_nt")
+        e_bidata = st.text_input("비자료명", value=str(row["비자료명"] or ""), key=f"{edit_key}_bidata")
+
+    save_col, delete_col = st.columns(2)
+    with save_col:
+        if st.button("제품명 수정", type="primary", use_container_width=True, key=f"{edit_key}_save"):
+            old_std = str(row["표준제품명"] or "").strip()
+            new_std = e_std.strip()
+            if not new_std:
+                st.error("표준제품명은 비워둘 수 없습니다.")
+            else:
+                exec_sql("""UPDATE products SET standard_name=?, warehouse_name=?, aliases=?, product_code=?, erp_nohtuspharm_name=?, erp_noh_name=?, erp_noh_code=?, erp_nohtus_name=?, bidata_name=? WHERE id=?""",
+                         (new_std, new_std, e_alias.strip(), str(e_code).strip(), e_np.strip(), e_noh.strip(), str(e_noh_code).strip(), e_nt.strip(), e_bidata.strip(), pid))
+                apply_standard_name_change(old_std, new_std)
+                st.success("수정했습니다. 이미 등록된 재고/이력 화면에도 변경된 표준제품명을 반영했습니다.")
+                st.rerun()
+    with delete_col:
+        if st.button("제품명 삭제", type="secondary", use_container_width=True, key=f"{edit_key}_delete"):
+            st.session_state["confirm_delete_product_id"] = pid
+            st.rerun()
+
+    if st.session_state.get("confirm_delete_product_id") == pid:
+        st.warning("정말로 삭제하시겠습니까?")
+        dc1, dc2 = st.columns(2)
+        with dc1:
+            if st.button("취소", use_container_width=True):
+                st.session_state.pop("confirm_delete_product_id", None)
+                st.rerun()
+        with dc2:
+            if st.button("삭제", type="primary", use_container_width=True):
+                try:
+                    delete_product(pid)
+                    st.session_state.pop("confirm_delete_product_id", None)
+                    st.success("제품을 삭제했습니다.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
+
+    render_inventory_metadata_editor()
+
+
 def render_inventory_metadata_editor():
     st.markdown("---")
     st.markdown("### 재고정보 수정")
     st.caption("기존 재고 정보 자체가 잘못된 경우 제조번호/유통기한만 정정합니다. 수량은 변경하지 않습니다.")
 
     term = st.text_input("재고 검색", placeholder="제품명, ERP명, 제조번호, 유통기한, 로케이션 일부 입력", key="inv_meta_edit_term")
-    where = "WHERE 1=1"
+    where = "WHERE qty <> 0"
     params = []
     if term.strip():
         like = f"%{term.strip()}%"

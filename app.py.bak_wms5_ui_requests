@@ -527,7 +527,7 @@ def outbound_pdf_bytes(rows, title="출고지시서"):
     return bio.getvalue()
 
 def full_inventory_excel_bytes(exclude_zero=True):
-    where_sql = "WHERE 1=1" if exclude_zero else ""
+    where_sql = "WHERE qty > 0" if exclude_zero else ""
     df = q(f"""
         SELECT location, product_name, warehouse_name, lot, exp_date, qty
         FROM inventory
@@ -626,7 +626,7 @@ def baseline_stock_template_excel_bytes():
 
 def current_baseline_stock_excel_bytes(exclude_zero=False):
     """현재 WMS 재고를 기준재고 업로드 양식에 채워서 내려받는다."""
-    where_sql = "WHERE 1=1" if exclude_zero else ""
+    where_sql = "WHERE qty > 0" if exclude_zero else ""
     inv = q(f"""
         SELECT company, product_name, warehouse_name, lot, exp_date, location, qty
         FROM inventory
@@ -3604,7 +3604,7 @@ def find_mapping_conflicts_from_inventory():
         FROM inventory
         WHERE TRIM(COALESCE(company,''))<>''
           AND TRIM(COALESCE(product_name,''))<>''
-          
+          AND qty > 0
         GROUP BY company, product_name, COALESCE(warehouse_name, '')
         ORDER BY company, source_name, product_name
     """)
@@ -3646,7 +3646,7 @@ def render_inventory_metadata_editor():
     st.caption("기존 재고 정보 자체가 잘못된 경우 제조번호/유통기한만 정정합니다. 수량은 변경하지 않습니다.")
 
     term = st.text_input("재고 검색", placeholder="제품명, ERP명, 제조번호, 유통기한, 로케이션 일부 입력", key="inv_meta_edit_term")
-    where = "WHERE 1=1"
+    where = "WHERE qty <> 0"
     params = []
     if term.strip():
         like = f"%{term.strip()}%"
