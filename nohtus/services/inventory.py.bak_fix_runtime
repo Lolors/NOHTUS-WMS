@@ -12,46 +12,6 @@ from datetime import date, datetime
 from nohtus.db import connect, q
 
 
-def first_nonblank(*values):
-    for v in values:
-        if v is None:
-            continue
-        text = str(v).strip()
-        if text and text.lower() != "nan" and text != "-":
-            return text
-    return ""
-
-
-def product_mapping_name_for(company, standard_name):
-    if not standard_name:
-        return ""
-    col = {
-        "노투스팜": "erp_nohtuspharm_name",
-        "NOH": "erp_noh_name",
-        "노투스": "erp_nohtus_name",
-        "비자료": "bidata_name",
-    }.get(company)
-    if not col:
-        return ""
-    df = q(f"SELECT {col} AS nm FROM products WHERE standard_name=?", (standard_name,))
-    if df.empty:
-        return ""
-    return first_nonblank(df.iloc[0].get("nm"))
-
-
-def insert_transaction_log(cur, *, created_at, tx_type, product_name, warehouse_name=None,
-                           lot=None, exp_date=None, from_company=None, from_location=None,
-                           to_company=None, to_location=None, qty=0, memo="", final_stock=None):
-    cur.execute(
-        """INSERT INTO transactions(
-               created_at, tx_type, product_name, warehouse_name, lot, exp_date,
-               from_company, from_location, to_company, to_location, qty, memo, final_stock
-           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (created_at, tx_type, product_name, warehouse_name, lot, exp_date,
-         from_company, from_location, to_company, to_location, int(qty or 0), memo, final_stock),
-    )
-
-
 def add_inventory(company, product, warehouse, lot, exp, location, qty, memo="입고 등록"):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with connect() as con:
@@ -85,6 +45,7 @@ def move_inventory(src_id, to_company, to_location, qty, memo=""):
 
         product_name = src["product_name"]
         old_warehouse = src.get("warehouse_name") or ""
+        from app import product_mapping_name_for
         dest_warehouse = product_mapping_name_for(to_company, product_name) or product_name
 
         cur.execute("UPDATE inventory SET qty=?, updated_at=? WHERE id=?", (int(src["qty"] or 0)-qty, now, src_id))
@@ -123,8 +84,7 @@ def adjust_inventory(inv_id, actual_qty, reason, memo=""):
     """실사 결과 기준으로 해당 재고 행의 수량을 실제 수량으로 조정한다."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with connect() as con:
-        import sqlite3 as _sqlite3
-        con.row_factory = _sqlite3.Row
+        con.row_factory = sqlite3.Row
         cur = con.cursor()
         src = cur.execute("SELECT * FROM inventory WHERE id=?", (inv_id,)).fetchone()
         if not src:
@@ -138,6 +98,6 @@ def adjust_inventory(inv_id, actual_qty, reason, memo=""):
         reason_memo = reason if not memo else f"{reason} / {memo}"
         insert_transaction_log(cur, created_at=now, tx_type="재고조정", product_name=src["product_name"], warehouse_name=src["warehouse_name"],
                                lot=src["lot"], exp_date=src["exp_date"], from_company=src["company"], from_location=src["location"],
-                               to_company=src["company"], to_location=src["location"], qty=diff, memo=reason_memo, final_stock=actual_qty)
+                               to_company=src["company"], to_location=src["location"], qty=diff, memo=reason_memo)
         con.commit()
         return before, actual_qty, diff
