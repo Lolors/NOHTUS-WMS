@@ -5,14 +5,14 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from html import escape
 
-import pandas as pd
 import streamlit as st
 
 from nohtus.db import q
 from nohtus.dates import display_date_only
+from nohtus.services.outbound import cancel_saved_order, load_outbound_order, outbound_excel_bytes, outbound_pdf_bytes
 
 
 def _ensure_outbound_customer_columns():
@@ -25,6 +25,71 @@ def _ensure_outbound_customer_columns():
         if "customer_company" not in cols:
             cur.execute("ALTER TABLE outbound_orders ADD COLUMN customer_company TEXT")
         con.commit()
+
+
+def _run_cancel_order(order_id):
+    item_count, restored_count = cancel_saved_order(int(order_id))
+    st.session_state.pop("confirm_cancel_order_id", None)
+    st.session_state.pop("selected_saved_order_id", None)
+    st.session_state["cancel_order_done_msg"] = f"출고지시서 #{int(order_id)} 취소 완료: {item_count}개 품목 / 원복 {restored_count}건"
+
+
+def _show_cancel_order_confirm_inline(order_id):
+    st.markdown("""
+    <div style='border:1px solid #e5e7eb;background:#ffffff;border-radius:16px;padding:18px 20px;margin:12px auto;max-width:560px;box-shadow:0 18px 40px rgba(15,23,42,.12);'>
+      <div style='font-weight:900;color:#111827;font-size:19px;margin-bottom:10px;'>⚠ 출고지시 취소 확인</div>
+      <div style='color:#334155;font-weight:400;line-height:1.7;'>정말로 취소하시겠습니까?<br>제품의 수량은 출고지시 이전으로 복원됩니다.</div>
+    </div>
+    """, unsafe_allow_html=True)
+    _left, c1, c2, _right = st.columns([1.2, 1, 1.7, 1.2])
+    with c1:
+        if st.button("아니오", use_container_width=True, key=f"cancel_no_{int(order_id)}"):
+            st.session_state.pop("confirm_cancel_order_id", None)
+            st.rerun()
+    with c2:
+        if st.button("예, 취소합니다", type="primary", use_container_width=True, key=f"cancel_yes_{int(order_id)}"):
+            try:
+                _run_cancel_order(int(order_id))
+                st.rerun()
+            except Exception as e:
+                st.error(str(e))
+
+
+def _show_cancel_order_confirm(order_id):
+    dialog_api = getattr(st, "dialog", None) or getattr(st, "experimental_dialog", None)
+    if not dialog_api:
+        _show_cancel_order_confirm_inline(order_id)
+        return
+
+    @dialog_api("⚠ 출고지시 취소 확인")
+    def _dialog():
+        st.markdown("""
+        <style>
+        div[data-testid="stDialog"] div[data-testid="stMarkdownContainer"] p,
+        div[data-testid="stDialog"] div[data-testid="stMarkdownContainer"] div {font-weight:400!important;}
+        div[data-testid="stDialog"] div[data-testid="stHorizontalBlock"]{justify-content:center!important;}
+        div[data-testid="stDialog"] div[data-testid="stButton"] > button{
+            min-height:46px!important;min-width:180px!important;border-radius:10px!important;font-weight:800!important;white-space:nowrap!important;
+        }
+        </style>
+        <div style='font-size:16px;line-height:1.7;color:#334155;margin:6px 0 18px 0;font-weight:400;'>
+            정말로 취소하시겠습니까?<br>
+            제품의 수량은 출고지시 이전으로 복원됩니다.
+        </div>
+        """, unsafe_allow_html=True)
+        _left, c1, c2, _right = st.columns([1.0, 1.0, 1.7, 1.0], gap="medium")
+        with c1:
+            if st.button("아니오", use_container_width=True, key=f"cancel_no_{int(order_id)}"):
+                st.session_state.pop("confirm_cancel_order_id", None)
+                st.rerun()
+        with c2:
+            if st.button("예, 취소합니다", type="primary", use_container_width=True, key=f"cancel_yes_{int(order_id)}"):
+                try:
+                    _run_cancel_order(int(order_id))
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
+    _dialog()
 
 
 def _status_text_html(status):
@@ -97,13 +162,6 @@ def _render_saved_orders(orders_df, selected_order_id):
 
 
 def page_saved_outbound():
-    from app import (
-        _show_cancel_order_confirm,
-        load_outbound_order,
-        outbound_excel_bytes,
-        outbound_pdf_bytes,
-    )
-
     _ensure_outbound_customer_columns()
     st.markdown("<h1 style='text-align:left;margin-bottom:0.2em;'>저장된 출고지시</h1>", unsafe_allow_html=True)
     if st.session_state.get("cancel_order_done_msg"):
@@ -148,9 +206,8 @@ def page_saved_outbound():
         needle = customer_term.strip().lower()
         filtered = filtered[filtered["customer_name"].fillna("").astype(str).str.lower().str.contains(needle, regex=False)]
     if search_term.strip() and not filtered.empty:
-        needle = search_term.strip().lower()
-        matched_ids = []
         ids = filtered["id"].astype(int).tolist()
+        matched_ids = []
         if ids:
             placeholders = ",".join(["?"] * len(ids))
             items_df = q(f"""
@@ -177,7 +234,7 @@ def page_saved_outbound():
     list_col, _ = st.columns([7, 3], gap="large")
     with list_col:
         selected_id = st.session_state.get("selected_saved_order_id")
-        selected_id = _render_saved_orders(orders, selected_id)
+        _render_saved_orders(orders, selected_id)
         if max_page > 1:
             nav_cols = st.columns([1, 3, 1])
             with nav_cols[0]:
