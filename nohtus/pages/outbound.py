@@ -67,7 +67,7 @@ def _prefill_customer_from_saved_order():
     """
     if not st.session_state.get("editing_order_id"):
         return
-    if str(st.session_state.get("out_customer_term") or "").strip():
+    if str(st.session_state.get("out_customer_term") or "").strip() or str(st.session_state.get("out_customer_manual_name") or "").strip():
         return
 
     stored = _stored_customer_for_editing_order()
@@ -80,6 +80,7 @@ def _prefill_customer_from_saved_order():
 
     if customer:
         st.session_state["out_customer_term"] = customer
+        st.session_state["out_customer_manual_name"] = customer
     if customer or company:
         st.session_state["out_selected_customer"] = {
             "customer_name": customer,
@@ -89,6 +90,11 @@ def _prefill_customer_from_saved_order():
 
 def _current_customer_payload(selected_customer=None):
     """현재 화면 또는 수정 저장 시 유지할 매출처 정보를 만든다."""
+    if bool(st.session_state.get("out_customer_direct")):
+        return {
+            "customer_name": str(st.session_state.get("out_customer_manual_name") or "").strip(),
+            "company": "",
+        }
     if selected_customer is not None:
         return {
             "customer_name": str(selected_customer.get("customer_name") or "").strip(),
@@ -136,9 +142,10 @@ def _save_outbound_cart_with_customer(cart, title, customer_payload):
 
     for k in [
         "outbound_cart", "out_customer_term", "out_customer_select", "_out_customer_label",
-        "out_selected_customer", "out_product_term", "out_req_qty", "out_rec_editor",
-        "out_manual_editor", "out_ignore_company", "out_manual_pick",
-        "pending_outbound_save", "pending_outbound_expiry_warnings",
+        "out_selected_customer", "out_customer_direct", "out_customer_manual_name",
+        "out_product_term", "out_req_qty", "out_rec_editor", "out_manual_editor",
+        "out_ignore_company", "out_manual_pick", "pending_outbound_save",
+        "pending_outbound_expiry_warnings",
     ]:
         st.session_state.pop(k, None)
     st.session_state["outbound_cart"] = []
@@ -241,33 +248,47 @@ def page_outbound():
 
     with top_left:
         st.markdown("### 매출처")
-        cust_term = st.text_input("매출처", placeholder="거래처명을 입력하세요", key="out_customer_term")
+        cust_term = st.text_input("매출처 검색", placeholder="거래처명을 입력하세요", key="out_customer_term")
+        direct_customer = st.checkbox("직접입력", value=False, key="out_customer_direct")
         cust_df = pd.DataFrame()
-        if cust_term.strip():
-            like = f"%{cust_term.strip()}%"
-            cust_df = q("""SELECT * FROM customers WHERE customer_name LIKE ? ORDER BY customer_name, company, id LIMIT 50""", (like,))
-        else:
-            cust_df = q("""SELECT * FROM customers ORDER BY customer_name, company, id LIMIT 50""")
-        if not cust_df.empty:
-            labels = [f"{r.customer_name} | {r.company or '-'}" for r in cust_df.itertuples()]
-            default_label = st.session_state.get("_out_customer_label")
-            default_idx = labels.index(default_label) if default_label in labels else 0
-            label = st.selectbox("거래처 선택", labels, index=default_idx, key="out_customer_select")
-            st.session_state["_out_customer_label"] = label
-            selected_customer = cust_df.iloc[labels.index(label)]
-            st.session_state["out_selected_customer"] = selected_customer.to_dict()
-            selected_company = str(selected_customer.get("company") or "").strip()
-            st.markdown(f"**사업장 :** {selected_company or '-'} &nbsp;&nbsp;&nbsp; **유형 :** {selected_customer.get('customer_type') or '-'} &nbsp;&nbsp;&nbsp; **담당자 :** {selected_customer.get('manager') or '-'}")
-            with st.expander("거래처 상세정보", expanded=False):
-                st.write(f"주소 : {selected_customer.get('address') or '-'}")
-                st.write(f"연락처 : {selected_customer.get('phone') or '-'}")
-        else:
-            stored_customer = _current_customer_payload()
-            if stored_customer.get("customer_name"):
-                selected_company = stored_customer.get("company", "")
-                st.info(f"저장된 매출처: {stored_customer.get('customer_name')} | {selected_company or '-'}")
+
+        if direct_customer:
+            manual_name = st.text_input(
+                "직접입력 매출처명",
+                placeholder="매출처명을 직접 입력하세요",
+                key="out_customer_manual_name",
+            ).strip()
+            if manual_name:
+                st.session_state["out_selected_customer"] = {"customer_name": manual_name, "company": ""}
+                st.info(f"직접입력 매출처: {manual_name}")
             else:
-                st.info("거래처를 검색하거나 거래처 관리에서 먼저 등록하세요.")
+                st.info("매출처명을 직접 입력하세요.")
+        else:
+            if cust_term.strip():
+                like = f"%{cust_term.strip()}%"
+                cust_df = q("""SELECT * FROM customers WHERE customer_name LIKE ? ORDER BY customer_name, company, id LIMIT 50""", (like,))
+            else:
+                cust_df = q("""SELECT * FROM customers ORDER BY customer_name, company, id LIMIT 50""")
+            if not cust_df.empty:
+                labels = [f"{r.customer_name} | {r.company or '-'}" for r in cust_df.itertuples()]
+                default_label = st.session_state.get("_out_customer_label")
+                default_idx = labels.index(default_label) if default_label in labels else 0
+                label = st.selectbox("거래처 선택", labels, index=default_idx, key="out_customer_select")
+                st.session_state["_out_customer_label"] = label
+                selected_customer = cust_df.iloc[labels.index(label)]
+                st.session_state["out_selected_customer"] = selected_customer.to_dict()
+                selected_company = str(selected_customer.get("company") or "").strip()
+                st.markdown(f"**사업장 :** {selected_company or '-'} &nbsp;&nbsp;&nbsp; **유형 :** {selected_customer.get('customer_type') or '-'} &nbsp;&nbsp;&nbsp; **담당자 :** {selected_customer.get('manager') or '-'}")
+                with st.expander("거래처 상세정보", expanded=False):
+                    st.write(f"주소 : {selected_customer.get('address') or '-'}")
+                    st.write(f"연락처 : {selected_customer.get('phone') or '-'}")
+            else:
+                stored_customer = _current_customer_payload()
+                if stored_customer.get("customer_name"):
+                    selected_company = stored_customer.get("company", "")
+                    st.info(f"저장된 매출처: {stored_customer.get('customer_name')} | {selected_company or '-'}")
+                else:
+                    st.info("거래처를 검색하거나 직접입력을 체크하세요.")
 
         st.markdown("### 재고 선택 옵션")
         ignore_company = st.checkbox("사업장 구분 없이", value=False, key="out_ignore_company")
@@ -314,7 +335,7 @@ def page_outbound():
                 elif selected_company:
                     st.warning(f"{selected_company}에 출고 지시 가능한 재고가 없습니다.")
                 else:
-                    st.info("매출처를 선택하면 해당 사업장 재고가 표시됩니다.")
+                    st.info("매출처를 선택하면 해당 사업장 재고가 표시됩니다. 직접입력 매출처는 사업장 정보가 없으므로 필요한 경우 '사업장 구분 없이'를 체크하세요.")
             else:
                 view = pick_df[["company", "lot", "exp_date", "location", "qty"]].copy()
                 view = view.rename(columns={"company":"사업장", "lot":"LOT", "exp_date":"유통기한", "location":"로케이션", "qty":"수량"})
