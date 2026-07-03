@@ -77,13 +77,14 @@ def page_history():
     if customer_term.strip():
         matched_order_ids = []
         try:
-            orders_for_customer = q("SELECT id, COALESCE(title, '') AS title FROM outbound_orders ORDER BY id DESC")
+            orders_for_customer = q("SELECT id, COALESCE(title, '') AS title, COALESCE(customer_name, '') AS customer_name FROM outbound_orders ORDER BY id DESC")
             customers_for_infer = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
             needle = customer_term.strip().lower()
             for r in orders_for_customer.itertuples(index=False):
                 title = str(getattr(r, "title", "") or "")
+                saved_customer = str(getattr(r, "customer_name", "") or "")
                 inferred_customer, _manager = _infer_customer_from_title(title, customers_for_infer)
-                if needle in title.lower() or needle in str(inferred_customer or "").lower():
+                if needle in title.lower() or needle in saved_customer.lower() or needle in str(inferred_customer or "").lower():
                     matched_order_ids.append(int(getattr(r, "id")))
         except Exception:
             matched_order_ids = []
@@ -104,7 +105,7 @@ def page_history():
         st.info("조회된 이력이 없습니다.")
         return
 
-    page_size = 20
+    page_size = 10
     total_pages = max(1, (total_count + page_size - 1) // page_size)
     current_page = int(st.session_state.get("history_page", 1) or 1)
     current_page = max(1, min(current_page, total_pages))
@@ -118,33 +119,10 @@ def page_history():
         LIMIT ? OFFSET ?
     """, tuple(params + [page_size, offset]))
 
-    page_left, page_mid, page_right = st.columns([1, 2, 1])
-    with page_left:
-        if st.button("이전", disabled=current_page <= 1, key="history_prev_page", use_container_width=True):
-            st.session_state["history_page"] = max(1, current_page - 1)
-            st.rerun()
-    with page_mid:
-        selected_page = st.number_input(
-            "페이지",
-            min_value=1,
-            max_value=total_pages,
-            value=current_page,
-            step=1,
-            key="history_page_input",
-        )
-        if int(selected_page) != current_page:
-            st.session_state["history_page"] = int(selected_page)
-            st.rerun()
-    with page_right:
-        if st.button("다음", disabled=current_page >= total_pages, key="history_next_page", use_container_width=True):
-            st.session_state["history_page"] = min(total_pages, current_page + 1)
-            st.rerun()
-
     start_no = offset + 1
     end_no = min(offset + len(df), total_count)
     st.caption(f"총 {total_count:,}건 / {current_page:,}페이지/{total_pages:,}페이지 / 현재 {start_no:,}~{end_no:,}건 표시")
 
-    # warehouse_name은 화면에서 제외하고, 재고조정/재고실사는 +/-와 현재 최종재고를 표시한다.
     final_values = []
     qty_values = []
     for r in df.itertuples():
@@ -158,15 +136,11 @@ def page_history():
         if final_stock_value is not None and not pd.isna(final_stock_value):
             final_values.append(int(final_stock_value))
         else:
-            # 구버전 이력처럼 final_stock 스냅샷이 없는 기록은 현재 재고로 다시 계산하지 않는다.
-            # 이력의 최종재고는 작업 당시 값이어야 하므로, 저장값이 없으면 빈칸으로 둔다.
             final_values.append("")
     show = df.copy()
     show["수량"] = qty_values
     show["최종재고"] = final_values
 
-    # 출고 관련 이력은 memo의 "출고지시서 #번호"를 기준으로 outbound_orders 제목을 찾고,
-    # 제목에서 매출처를 추정해 이력조회 화면에 함께 표시한다.
     order_customer_map = {}
     try:
         order_ids = []
@@ -178,10 +152,14 @@ def page_history():
         order_ids = sorted(set(order_ids))
         if order_ids:
             placeholders = ",".join(["?"] * len(order_ids))
-            orders_df = q(f"SELECT id, COALESCE(title, '') AS title FROM outbound_orders WHERE id IN ({placeholders})", tuple(order_ids))
+            orders_df = q(f"SELECT id, COALESCE(title, '') AS title, COALESCE(customer_name, '') AS customer_name FROM outbound_orders WHERE id IN ({placeholders})", tuple(order_ids))
             customers_df = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
             for r in orders_df.itertuples(index=False):
-                customer, _manager = _infer_customer_from_title(getattr(r, "title", ""), customers_df)
+                saved_customer = str(getattr(r, "customer_name", "") or "")
+                if saved_customer:
+                    customer = saved_customer
+                else:
+                    customer, _manager = _infer_customer_from_title(getattr(r, "title", ""), customers_df)
                 order_customer_map[int(getattr(r, "id"))] = customer
     except Exception:
         order_customer_map = {}
@@ -205,3 +183,25 @@ def page_history():
     wanted = ["일시","이력유형","매출처","제품명","LOT","유통기한","출발사업장","출발위치","도착사업장","도착위치","수량","최종재고","메모"]
     show = show[[c for c in wanted if c in show.columns]]
     st.dataframe(show, use_container_width=True, hide_index=True)
+
+    page_left, page_mid, page_right = st.columns([1, 2, 1])
+    with page_left:
+        if st.button("이전", disabled=current_page <= 1, key="history_prev_page", use_container_width=True):
+            st.session_state["history_page"] = max(1, current_page - 1)
+            st.rerun()
+    with page_mid:
+        selected_page = st.number_input(
+            "페이지",
+            min_value=1,
+            max_value=total_pages,
+            value=current_page,
+            step=1,
+            key="history_page_input",
+        )
+        if int(selected_page) != current_page:
+            st.session_state["history_page"] = int(selected_page)
+            st.rerun()
+    with page_right:
+        if st.button("다음", disabled=current_page >= total_pages, key="history_next_page", use_container_width=True):
+            st.session_state["history_page"] = min(total_pages, current_page + 1)
+            st.rerun()
