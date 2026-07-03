@@ -29,6 +29,7 @@ from nohtus.services.inbound import strip_company_stock_label, inbound_company_o
 from nohtus.pages.outbound import page_outbound
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.saved_outbound import page_saved_outbound as page_saved_outbound_refactored
+from nohtus.navigation import render_sidebar
 
 _location_picking_key = location_picking_key
 
@@ -3920,45 +3921,8 @@ def main():
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     init_db()
     apply_style()
-    st.sidebar.markdown(f"# {APP_TITLE}")
-    st.sidebar.caption(VERSION)
-    if "page" not in st.session_state:
-        st.session_state["page"] = "로케이션 맵"
+    menu = render_sidebar(APP_TITLE, VERSION)
 
-    try:
-        if st.query_params.get("map_search_product", ""):
-            st.session_state["page"] = "로케이션 맵"
-        elif st.query_params.get("inbound_loc", ""):
-            st.session_state["page"] = "입고 등록"
-    except Exception:
-        pass
-
-    def nav_button(label):
-        active = st.session_state.get("page") == label
-        if st.sidebar.button(label, use_container_width=True, type="primary" if active else "secondary"):
-            st.session_state["page"] = label
-            if label == "로케이션 맵":
-                st.session_state["_scroll_map_top"] = True
-            st.rerun()
-
-    nav_button("로케이션 맵")
-    st.sidebar.markdown("### 출고")
-    nav_button("출고지시")
-    nav_button("저장된 출고지시")
-    nav_button("마감")
-
-    st.sidebar.markdown("### 재고")
-    # nav_button("재고 찾기")  # RC3.3: 재고 찾기 메뉴 임시 숨김
-    nav_button("입고 등록")
-    nav_button("이동 등록")
-    nav_button("이력 조회")
-    nav_button("재고 실사")
-
-    st.sidebar.markdown("### 기초")
-    nav_button("제품 매칭 관리")
-    nav_button("거래처 관리")
-
-    menu = st.session_state["page"]
     if menu == "로케이션 맵": page_map()
     elif menu == "출고지시": page_outbound()
     elif menu == "저장된 출고지시": page_saved_outbound_refactored()
