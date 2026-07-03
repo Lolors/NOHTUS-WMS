@@ -20,7 +20,8 @@ from nohtus.services.products import product_options
 
 
 def page_move():
-    from app import location_picker, product_mapping_name_for
+    from nohtus.ui.location_picker import location_picker
+    from nohtus.services.inbound import product_mapping_name_for
     st.title("이동 등록")
     st.caption("제품 → LOT/유통기한을 선택하면 출발 재고가 자동 표시됩니다.")
 

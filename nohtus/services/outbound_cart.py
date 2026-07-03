@@ -15,6 +15,7 @@ from io import BytesIO
 from urllib.parse import quote
 
 import pandas as pd
+import streamlit as st
 
 from nohtus.config import AREA_COLOR, AREA_CONFIG, COMPANIES, INBOUND_COMPANIES, SPECIAL_LOCATIONS
 from nohtus.db import connect, exec_sql, q
