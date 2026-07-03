@@ -36,6 +36,26 @@ def _ensure_outbound_customer_columns():
         con.commit()
 
 
+def _ensure_customer_last_sales_table():
+    """거래처별 최근거래일 저장 테이블을 자동 보강한다."""
+    with connect() as con:
+        cur = con.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS customer_last_sales(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_name TEXT NOT NULL,
+                company TEXT NOT NULL DEFAULT '',
+                last_sale_date TEXT NOT NULL,
+                source_company TEXT,
+                updated_at TEXT,
+                UNIQUE(customer_name, company)
+            )
+            """
+        )
+        con.commit()
+
+
 def _stored_customer_for_editing_order():
     """수정 중인 출고지시서에 저장된 매출처 정보를 가져온다."""
     order_id = st.session_state.get("editing_order_id")
@@ -155,6 +175,156 @@ def _save_outbound_cart_with_customer(cart, title, customer_payload):
     st.rerun()
 
 
+def _normalize_customer_name(value):
+    return str(value or "").strip()
+
+
+def _parse_sales_excel(uploaded_file, *, company, header_row, date_col, customer_col):
+    """매출 엑셀에서 거래처별 최근거래일을 추출한다."""
+    if uploaded_file is None:
+        return pd.DataFrame(columns=["customer_name", "company", "last_sale_date"])
+    df = pd.read_excel(uploaded_file, header=header_row, dtype=object)
+    df.columns = [str(c).strip() for c in df.columns]
+    if date_col not in df.columns or customer_col not in df.columns:
+        raise ValueError(f"{company} 매출 파일에서 '{date_col}', '{customer_col}' 컬럼을 찾을 수 없습니다. 현재 컬럼: {', '.join(df.columns)}")
+
+    work = df[[date_col, customer_col]].copy()
+    work[customer_col] = work[customer_col].apply(_normalize_customer_name)
+    work = work[work[customer_col] != ""]
+    work[date_col] = pd.to_datetime(work[date_col], errors="coerce")
+    work = work.dropna(subset=[date_col])
+    if work.empty:
+        return pd.DataFrame(columns=["customer_name", "company", "last_sale_date"])
+
+    result = (
+        work.groupby(customer_col, as_index=False)[date_col]
+            .max()
+            .rename(columns={customer_col: "customer_name", date_col: "last_sale_date"})
+    )
+    result["company"] = company
+    result["last_sale_date"] = result["last_sale_date"].dt.strftime("%Y-%m-%d")
+    return result[["customer_name", "company", "last_sale_date"]]
+
+
+def _upsert_customer_last_sales(rows_df):
+    _ensure_customer_last_sales_table()
+    if rows_df is None or rows_df.empty:
+        return 0
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    count = 0
+    with connect() as con:
+        cur = con.cursor()
+        for r in rows_df.itertuples(index=False):
+            customer_name = _normalize_customer_name(getattr(r, "customer_name", ""))
+            company = str(getattr(r, "company", "") or "").strip()
+            last_sale_date = str(getattr(r, "last_sale_date", "") or "").strip()
+            if not customer_name or not last_sale_date:
+                continue
+            old = cur.execute(
+                "SELECT id, last_sale_date FROM customer_last_sales WHERE customer_name=? AND company=?",
+                (customer_name, company),
+            ).fetchone()
+            if old:
+                old_date = str(old[1] or "")
+                final_date = max(old_date, last_sale_date) if old_date else last_sale_date
+                cur.execute(
+                    """
+                    UPDATE customer_last_sales
+                    SET last_sale_date=?, source_company=?, updated_at=?
+                    WHERE id=?
+                    """,
+                    (final_date, company, now, int(old[0])),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO customer_last_sales(customer_name, company, last_sale_date, source_company, updated_at)
+                    VALUES(?,?,?,?,?)
+                    """,
+                    (customer_name, company, last_sale_date, company, now),
+                )
+            count += 1
+        con.commit()
+    return count
+
+
+def _customer_last_sale_maps():
+    _ensure_customer_last_sales_table()
+    df = q(
+        """
+        SELECT customer_name, company, last_sale_date
+        FROM customer_last_sales
+        WHERE TRIM(COALESCE(customer_name,''))<>''
+          AND TRIM(COALESCE(last_sale_date,''))<>''
+        """
+    )
+    exact = {}
+    by_name = {}
+    if df.empty:
+        return exact, by_name
+    for r in df.itertuples(index=False):
+        customer = _normalize_customer_name(getattr(r, "customer_name", ""))
+        company = str(getattr(r, "company", "") or "").strip()
+        last_date = str(getattr(r, "last_sale_date", "") or "").strip()
+        if not customer or not last_date:
+            continue
+        exact[(customer, company)] = max(exact.get((customer, company), ""), last_date)
+        by_name[customer] = max(by_name.get(customer, ""), last_date)
+    return exact, by_name
+
+
+def _days_ago_label(date_text):
+    try:
+        d = datetime.strptime(str(date_text), "%Y-%m-%d").date()
+    except Exception:
+        return ""
+    days = (date.today() - d).days
+    if days < 0:
+        return "예정"
+    if days == 0:
+        return "오늘"
+    return f"{days}일 전"
+
+
+def _last_sale_text(customer_name, company, exact_map, name_map):
+    customer = _normalize_customer_name(customer_name)
+    company = str(company or "").strip()
+    last_date = exact_map.get((customer, company)) or name_map.get(customer) or ""
+    if not last_date:
+        return "최근거래 없음"
+    ago = _days_ago_label(last_date)
+    return f"최근거래 {last_date} ({ago})" if ago else f"최근거래 {last_date}"
+
+
+def _customer_select_label(row, exact_map, name_map):
+    customer = str(getattr(row, "customer_name", "") or "").strip()
+    company = str(getattr(row, "company", "") or "").strip()
+    return f"{customer} | {company or '-'} | {_last_sale_text(customer, company, exact_map, name_map)}"
+
+
+def _render_last_sale_importer():
+    with st.expander("최근거래일 갱신", expanded=False):
+        st.caption("노투스팜 매출은 1행 헤더, 노투스 매출은 7행 헤더 기준으로 거래처별 마지막 거래일만 저장합니다.")
+        np_file = st.file_uploader("노투스팜 매출 파일", type=["xls", "xlsx"], key="last_sale_np_file")
+        nt_file = st.file_uploader("노투스 매출 파일", type=["xls", "xlsx"], key="last_sale_nt_file")
+        if st.button("최근거래일 갱신", use_container_width=True, key="last_sale_import_btn"):
+            try:
+                frames = []
+                if np_file is not None:
+                    frames.append(_parse_sales_excel(np_file, company="노투스팜", header_row=0, date_col="매출일자", customer_col="거래처명"))
+                if nt_file is not None:
+                    frames.append(_parse_sales_excel(nt_file, company="노투스", header_row=6, date_col="거래일자", customer_col="거래처명"))
+                if not frames:
+                    st.warning("갱신할 매출 파일을 업로드하세요.")
+                else:
+                    merged = pd.concat(frames, ignore_index=True)
+                    count = _upsert_customer_last_sales(merged)
+                    st.success(f"최근거래일 갱신 완료: {count}개 거래처 반영")
+                    st.rerun()
+            except Exception as e:
+                st.error(str(e))
+
+
 def _inventory_query_for_outbound(selected_product, selected_company, ignore_company=False):
     selected_product = str(selected_product or "").strip()
     selected_company = str(selected_company or "").strip()
@@ -215,6 +385,7 @@ def page_outbound():
     from app import _add_rows_to_outbound_cart, _cart_expiry_warnings, _clear_outbound_inputs_before_render, build_outbound_order_title, get_cart, outbound_excel_bytes, outbound_pdf_bytes, recommend_picks
 
     _ensure_outbound_customer_columns()
+    _ensure_customer_last_sales_table()
     _clear_outbound_inputs_before_render()
     _prefill_customer_from_saved_order()
 
@@ -245,9 +416,11 @@ def page_outbound():
     expiry_short_first = True
     ignore_company = False
     manual_pick = False
+    exact_sales_map, name_sales_map = _customer_last_sale_maps()
 
     with top_left:
         st.markdown("### 매출처")
+        _render_last_sale_importer()
         cust_term = st.text_input("매출처 검색", placeholder="거래처명을 입력하세요", key="out_customer_term")
         direct_customer = st.checkbox("직접입력", value=False, key="out_customer_direct")
         cust_df = pd.DataFrame()
@@ -270,7 +443,7 @@ def page_outbound():
             else:
                 cust_df = q("""SELECT * FROM customers ORDER BY customer_name, company, id LIMIT 50""")
             if not cust_df.empty:
-                labels = [f"{r.customer_name} | {r.company or '-'}" for r in cust_df.itertuples()]
+                labels = [_customer_select_label(r, exact_sales_map, name_sales_map) for r in cust_df.itertuples()]
                 default_label = st.session_state.get("_out_customer_label")
                 default_idx = labels.index(default_label) if default_label in labels else 0
                 label = st.selectbox("거래처 선택", labels, index=default_idx, key="out_customer_select")
@@ -278,7 +451,8 @@ def page_outbound():
                 selected_customer = cust_df.iloc[labels.index(label)]
                 st.session_state["out_selected_customer"] = selected_customer.to_dict()
                 selected_company = str(selected_customer.get("company") or "").strip()
-                st.markdown(f"**사업장 :** {selected_company or '-'} &nbsp;&nbsp;&nbsp; **유형 :** {selected_customer.get('customer_type') or '-'} &nbsp;&nbsp;&nbsp; **담당자 :** {selected_customer.get('manager') or '-'}")
+                last_sale = _last_sale_text(selected_customer.get("customer_name"), selected_company, exact_sales_map, name_sales_map)
+                st.markdown(f"**사업장 :** {selected_company or '-'} &nbsp;&nbsp;&nbsp; **최근거래 :** {last_sale.replace('최근거래 ', '')} &nbsp;&nbsp;&nbsp; **유형 :** {selected_customer.get('customer_type') or '-'} &nbsp;&nbsp;&nbsp; **담당자 :** {selected_customer.get('manager') or '-'}")
                 with st.expander("거래처 상세정보", expanded=False):
                     st.write(f"주소 : {selected_customer.get('address') or '-'}")
                     st.write(f"연락처 : {selected_customer.get('phone') or '-'}")
@@ -286,7 +460,8 @@ def page_outbound():
                 stored_customer = _current_customer_payload()
                 if stored_customer.get("customer_name"):
                     selected_company = stored_customer.get("company", "")
-                    st.info(f"저장된 매출처: {stored_customer.get('customer_name')} | {selected_company or '-'}")
+                    last_sale = _last_sale_text(stored_customer.get("customer_name"), selected_company, exact_sales_map, name_sales_map)
+                    st.info(f"저장된 매출처: {stored_customer.get('customer_name')} | {selected_company or '-'} | {last_sale}")
                 else:
                     st.info("거래처를 검색하거나 직접입력을 체크하세요.")
 
