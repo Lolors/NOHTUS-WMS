@@ -1,0 +1,14 @@
+diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@
+ from nohtus.pages.master import page_master, page_customer_master, page_inventory_metadata_edit
+ from nohtus.pages.outbound import page_outbound
++from nohtus.pages.inbound import page_inbound as page_inbound_refactored
++from nohtus.pages.saved_outbound import page_saved_outbound as page_saved_outbound_refactored
+@@
+-    elif menu == "저장된 출고지시": page_saved_outbound()
++    elif menu == "저장된 출고지시": page_saved_outbound_refactored()
+@@
+-    elif menu == "입고 등록": page_inbound()
++    elif menu == "입고 등록": page_inbound_refactored()
