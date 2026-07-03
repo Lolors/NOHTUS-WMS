@@ -52,7 +52,8 @@ def _apply_inbound_location_pending():
 
 
 def page_inbound():
-        from app import apply_inbound_bridge_style, inbound_location_picker
+        from app import apply_inbound_bridge_style
+        from nohtus.ui.location_picker import inbound_location_picker
         from inbound_map import render_inbound_quick_location_map
         from nohtus.services.inbound import inbound_company_options_for, strip_company_stock_label
 
