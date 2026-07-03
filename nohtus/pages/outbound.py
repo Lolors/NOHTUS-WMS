@@ -13,7 +13,7 @@ import streamlit as st
 
 from nohtus.services.products import product_options
 from nohtus.config import COMPANIES
-from nohtus.db import q
+from nohtus.db import connect, q
 from nohtus.dates import display_date_only
 
 
@@ -24,22 +24,128 @@ def _safe_int(value, default=0):
         return default
 
 
-def _prefill_customer_from_editing_title():
-    """수정 진입 시 저장된 제목의 매출처 부분을 검색어로 복원한다.
+def _ensure_outbound_customer_columns():
+    """출고지시서에 매출처 정보를 보존하기 위한 컬럼을 자동 보강한다."""
+    with connect() as con:
+        cur = con.cursor()
+        cols = {r[1] for r in cur.execute("PRAGMA table_info(outbound_orders)").fetchall()}
+        if "customer_name" not in cols:
+            cur.execute("ALTER TABLE outbound_orders ADD COLUMN customer_name TEXT")
+        if "customer_company" not in cols:
+            cur.execute("ALTER TABLE outbound_orders ADD COLUMN customer_company TEXT")
+        con.commit()
 
-    기존 DB에는 별도 매출처 컬럼이 없으므로, 기존 제목 규칙
-    '매출처 - 제품명 외 n품목'에서 매출처명을 최대한 복원한다.
+
+def _stored_customer_for_editing_order():
+    """수정 중인 출고지시서에 저장된 매출처 정보를 가져온다."""
+    order_id = st.session_state.get("editing_order_id")
+    if not order_id:
+        return {}
+    _ensure_outbound_customer_columns()
+    df = q(
+        """
+        SELECT customer_name, customer_company
+        FROM outbound_orders
+        WHERE id=?
+        """,
+        (int(order_id),),
+    )
+    if df.empty:
+        return {}
+    row = df.iloc[0]
+    return {
+        "customer_name": str(row.get("customer_name") or "").strip(),
+        "company": str(row.get("customer_company") or "").strip(),
+    }
+
+
+def _prefill_customer_from_saved_order():
+    """수정 진입 시 저장된 매출처 정보를 화면에 복원한다.
+
+    새로 저장되는 지시서는 outbound_orders.customer_name/customer_company를 사용한다.
+    과거 저장 데이터처럼 컬럼 값이 비어 있는 경우에만 제목에서 보조 복원한다.
     """
     if not st.session_state.get("editing_order_id"):
         return
     if str(st.session_state.get("out_customer_term") or "").strip():
         return
-    title = str(st.session_state.get("editing_order_title") or "").strip()
-    if not title:
-        return
-    customer = title.split(" - ", 1)[0].strip()
+
+    stored = _stored_customer_for_editing_order()
+    customer = str(stored.get("customer_name") or "").strip()
+    company = str(stored.get("company") or "").strip()
+
+    if not customer:
+        title = str(st.session_state.get("editing_order_title") or "").strip()
+        customer = title.split(" - ", 1)[0].strip() if title else ""
+
     if customer:
         st.session_state["out_customer_term"] = customer
+    if customer or company:
+        st.session_state["out_selected_customer"] = {
+            "customer_name": customer,
+            "company": company,
+        }
+
+
+def _current_customer_payload(selected_customer=None):
+    """현재 화면 또는 수정 저장 시 유지할 매출처 정보를 만든다."""
+    if selected_customer is not None:
+        return {
+            "customer_name": str(selected_customer.get("customer_name") or "").strip(),
+            "company": str(selected_customer.get("company") or "").strip(),
+        }
+    saved = st.session_state.get("out_selected_customer", {}) or {}
+    return {
+        "customer_name": str(saved.get("customer_name") or "").strip(),
+        "company": str(saved.get("company") or "").strip(),
+    }
+
+
+def _save_outbound_customer(order_id, customer_payload):
+    _ensure_outbound_customer_columns()
+    customer_name = str((customer_payload or {}).get("customer_name") or "").strip()
+    customer_company = str((customer_payload or {}).get("company") or "").strip()
+    with connect() as con:
+        con.execute(
+            """
+            UPDATE outbound_orders
+            SET customer_name=?, customer_company=?
+            WHERE id=?
+            """,
+            (customer_name, customer_company, int(order_id)),
+        )
+        con.commit()
+
+
+def _save_outbound_cart_with_customer(cart, title, customer_payload):
+    """장바구니 저장/수정 시 매출처 정보를 출고지시서에 함께 저장한다."""
+    from app import save_outbound_order, update_outbound_order
+
+    _ensure_outbound_customer_columns()
+    editing_id = st.session_state.get("editing_order_id")
+    if editing_id:
+        update_outbound_order(int(editing_id), title, cart)
+        _save_outbound_customer(int(editing_id), customer_payload)
+        msg = f"출고지시서 #{int(editing_id)} 수정 저장 완료"
+        st.session_state.pop("editing_order_id", None)
+        st.session_state.pop("editing_order_title", None)
+    else:
+        oid = save_outbound_order(cart, title)
+        _save_outbound_customer(int(oid), customer_payload)
+        msg = f"출고지시서 #{int(oid)} 저장 완료"
+
+    for k in [
+        "outbound_cart", "out_customer_term", "out_customer_select", "_out_customer_label",
+        "out_selected_customer", "out_product_term", "out_req_qty", "out_rec_editor",
+        "out_manual_editor", "out_ignore_company", "out_manual_pick",
+        "pending_outbound_save", "pending_outbound_expiry_warnings",
+    ]:
+        st.session_state.pop(k, None)
+    st.session_state["outbound_cart"] = []
+    st.session_state["out_cart_editor_token"] = int(st.session_state.get("out_cart_editor_token", 0) or 0) + 1
+    st.session_state["_outbound_reset_inputs_pending"] = True
+    st.session_state["_outbound_last_success"] = msg
+    st.rerun()
 
 
 def _inventory_query_for_outbound(selected_product, selected_company, ignore_company=False):
@@ -99,10 +205,11 @@ def _manual_pick_rows(pick_df, editor_df):
 
 
 def page_outbound():
-    from app import _add_rows_to_outbound_cart, _cart_expiry_warnings, _clear_outbound_inputs_before_render, _save_outbound_cart_action, build_outbound_order_title, get_cart, outbound_excel_bytes, outbound_pdf_bytes, recommend_picks
+    from app import _add_rows_to_outbound_cart, _cart_expiry_warnings, _clear_outbound_inputs_before_render, build_outbound_order_title, get_cart, outbound_excel_bytes, outbound_pdf_bytes, recommend_picks
 
+    _ensure_outbound_customer_columns()
     _clear_outbound_inputs_before_render()
-    _prefill_customer_from_editing_title()
+    _prefill_customer_from_saved_order()
 
     st.title("출고지시")
     st.caption("출고지시 저장 시 해당 제조번호/유통기한/로케이션의 현재고가 즉시 차감됩니다.")
@@ -155,7 +262,12 @@ def page_outbound():
                 st.write(f"주소 : {selected_customer.get('address') or '-'}")
                 st.write(f"연락처 : {selected_customer.get('phone') or '-'}")
         else:
-            st.info("거래처를 검색하거나 거래처 관리에서 먼저 등록하세요.")
+            stored_customer = _current_customer_payload()
+            if stored_customer.get("customer_name"):
+                selected_company = stored_customer.get("company", "")
+                st.info(f"저장된 매출처: {stored_customer.get('customer_name')} | {selected_company or '-'}")
+            else:
+                st.info("거래처를 검색하거나 거래처 관리에서 먼저 등록하세요.")
 
         st.markdown("### 재고 선택 옵션")
         ignore_company = st.checkbox("사업장 구분 없이", value=False, key="out_ignore_company")
@@ -326,7 +438,8 @@ def page_outbound():
             st.session_state["outbound_cart"] = new_cart
             st.session_state["out_cart_editor_token"] = int(st.session_state.get("out_cart_editor_token", 0) or 0) + 1
             st.rerun()
-        customer_name = st.session_state.get("out_selected_customer", {}).get("customer_name", "")
+        customer_payload = _current_customer_payload(selected_customer)
+        customer_name = customer_payload.get("customer_name", "")
         fallback_title = datetime.now().strftime("출고지시 %Y-%m-%d %H:%M")
         default_title = st.session_state.get("editing_order_title") or build_outbound_order_title(customer_name, cart, fallback_title)
         title = st.text_input("출고지시서 제목", value=default_title, placeholder="예: A병원 디센바(1V) 외 2품목")
@@ -334,7 +447,7 @@ def page_outbound():
         with b1:
             if st.button("지시완료 저장", type="primary", use_container_width=True):
                 try:
-                    _save_outbound_cart_action(cart, title)
+                    _save_outbound_cart_with_customer(cart, title, customer_payload)
                 except Exception as e:
                     st.error(str(e))
         with b2:
