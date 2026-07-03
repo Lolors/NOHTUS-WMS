@@ -25,6 +25,8 @@ from nohtus.pages.product_matching import page_product_matching
 from nohtus.pages.closing import page_closing
 from nohtus.pages.master import page_master, page_customer_master, page_inventory_metadata_edit
 from nohtus.pages.outbound import page_outbound
+from nohtus.pages.inbound import page_inbound as page_inbound_refactored
+from nohtus.pages.saved_outbound import page_saved_outbound as page_saved_outbound_refactored
 
 _location_picking_key = location_picking_key
 
@@ -4195,10 +4197,10 @@ def main():
     menu = st.session_state["page"]
     if menu == "로케이션 맵": page_map()
     elif menu == "출고지시": page_outbound()
-    elif menu == "저장된 출고지시": page_saved_outbound()
+    elif menu == "저장된 출고지시": page_saved_outbound_refactored()
     elif menu == "마감": page_closing()
     elif menu == "재고 찾기": page_mobile_stock_finder()
-    elif menu == "입고 등록": page_inbound()
+    elif menu == "입고 등록": page_inbound_refactored()
     elif menu == "이동 등록": page_move()
     elif menu == "재고 실사": page_stocktake()
     elif menu == "제품 매칭 관리": page_product_matching()
