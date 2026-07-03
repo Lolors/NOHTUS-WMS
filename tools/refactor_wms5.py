@@ -11,10 +11,12 @@ Examples:
     python tools/refactor_wms5.py plan
     python tools/refactor_wms5.py auto-outbound
     python tools/refactor_wms5.py auto-inbound
+    python tools/refactor_wms5.py clean-pycache
     python tools/refactor_wms5.py smoke
 
 Design goals:
 - never run against a dirty working tree unless --allow-dirty is given
+- ignore/restore Python bytecode noise before checking the worktree
 - skip functions that have already been moved
 - stop on the first failed command
 - always print the final git status/diff summary
@@ -24,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -57,9 +60,6 @@ OUTBOUND_SERVICE_PLAN = MovePlan(
     ),
 )
 
-# save_outbound_order/update_outbound_order are intentionally separate because
-# nohtus/services/outbound_orders.py may currently contain temporary wrappers.
-# Replace wrappers only after reviewing app.py and the target service file.
 OUTBOUND_ORDER_SAVE_PLAN = MovePlan(
     module="outbound_orders",
     functions=(
@@ -90,10 +90,47 @@ def git_output(args: list[str]) -> str:
     return subprocess.check_output(["git", *args], cwd=ROOT, text=True, stderr=subprocess.STDOUT)
 
 
-def ensure_clean_worktree(allow_dirty: bool) -> None:
+def _is_pycache_path(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    return "__pycache__/" in normalized or normalized.endswith(".pyc") or normalized.endswith(".pyo")
+
+
+def clean_pycache() -> None:
+    """Remove local bytecode noise and restore tracked bytecode if it still exists in old commits."""
     status = git_output(["status", "--porcelain"])
-    if status.strip() and not allow_dirty:
-        print(status)
+    tracked_dirty = []
+    for raw in status.splitlines():
+        path = raw[3:].strip()
+        if _is_pycache_path(path):
+            tracked_dirty.append(path)
+    if tracked_dirty:
+        run(["git", "restore", "--", *tracked_dirty], check=False)
+
+    for pycache in ROOT.rglob("__pycache__"):
+        if ".git" in pycache.parts:
+            continue
+        shutil.rmtree(pycache, ignore_errors=True)
+
+    for pattern in ("*.pyc", "*.pyo"):
+        for bytecode in ROOT.rglob(pattern):
+            if ".git" in bytecode.parts:
+                continue
+            try:
+                bytecode.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def ensure_clean_worktree(allow_dirty: bool) -> None:
+    clean_pycache()
+    status = git_output(["status", "--porcelain"])
+    non_pycache_lines = []
+    for line in status.splitlines():
+        path = line[3:].strip()
+        if not _is_pycache_path(path):
+            non_pycache_lines.append(line)
+    if non_pycache_lines and not allow_dirty:
+        print("\n".join(non_pycache_lines))
         raise SystemExit("Working tree is not clean. Commit/stash changes or rerun with --allow-dirty.")
 
 
@@ -147,6 +184,7 @@ def fix_page(module: str, *function_names: str) -> None:
 
 def smoke() -> None:
     run([sys.executable, "tools/smoke_check.py"])
+    clean_pycache()
 
 
 def print_status() -> None:
@@ -174,7 +212,6 @@ def plan() -> None:
 def auto_outbound(args: argparse.Namespace) -> None:
     ensure_clean_worktree(args.allow_dirty)
     move_service(OUTBOUND_SERVICE_PLAN)
-    # Do not auto-move save/update when target has wrapper functions. This needs manual review.
     if args.include_save_update:
         move_service(OUTBOUND_ORDER_SAVE_PLAN, skip_if_target_exists=not args.replace_existing)
     fix_page("outbound", "page_outbound")
@@ -197,7 +234,8 @@ def parse_args() -> argparse.Namespace:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("plan", help="show what can still be moved")
-    sub.add_parser("smoke", help="run smoke_check.py")
+    sub.add_parser("smoke", help="run smoke_check.py and clean bytecode")
+    sub.add_parser("clean-pycache", help="remove Python bytecode and restore tracked pycache noise")
 
     p_out = sub.add_parser("auto-outbound", help="move outbound helper functions and repair outbound pages")
     p_out.add_argument("--include-save-update", action="store_true", help="also try moving save/update order functions")
@@ -213,6 +251,9 @@ def main() -> None:
         plan()
     elif args.command == "smoke":
         smoke()
+    elif args.command == "clean-pycache":
+        clean_pycache()
+        print_status()
     elif args.command == "auto-outbound":
         auto_outbound(args)
     elif args.command == "auto-inbound":
