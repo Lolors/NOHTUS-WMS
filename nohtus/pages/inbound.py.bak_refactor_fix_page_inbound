@@ -11,7 +11,7 @@ import streamlit as st
 from nohtus.dates import normalize_exp_date
 from nohtus.services.inventory import add_inventory
 from nohtus.services.products import product_options
-from nohtus.services.inbound import ensure_inbound_first_product_mapping, inbound_company_options_for, normalize_blank, product_mapping_name_for, strip_company_stock_label
+from nohtus.services.inbound import ensure_inbound_first_product_mapping, normalize_blank, product_mapping_name_for
 from nohtus.locations import make_location, parse_location
 
 
@@ -52,7 +52,6 @@ def _apply_inbound_location_pending():
 
 
 def page_inbound():
-    from app import inbound_location_picker
     from app import (
         apply_inbound_bridge_style,
         inbound_company_options_for,

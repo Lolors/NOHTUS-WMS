@@ -24,7 +24,6 @@ from nohtus.pages.location_map import page_map
 from nohtus.pages.product_matching import page_product_matching
 from nohtus.pages.closing import page_closing
 from nohtus.pages.master import page_master, page_customer_master, page_inventory_metadata_edit
-from nohtus.services.inbound import strip_company_stock_label, inbound_company_options_for
 from nohtus.pages.outbound import page_outbound
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.saved_outbound import page_saved_outbound as page_saved_outbound_refactored
@@ -1180,6 +1179,33 @@ def insert_transaction_log(cur, *, created_at, tx_type, product_name, warehouse_
                  from_company, from_location, to_company, to_location, int(qty or 0), memo, int(final_stock or 0)))
 
 
+def strip_company_stock_label(label):
+    """'노투스팜 (30 EA)'처럼 표시된 사업장 라벨에서 실제 사업장명만 추출한다."""
+    text = str(label or "").strip()
+    return re.sub(r"\s*\(\s*[-+]?\d+\s*EA\s*\)\s*$", "", text).strip()
+
+
+def inbound_company_options_for(product_name):
+    """입고등록 전용 사업장 선택지.
+    등록대기는 입고등록 전용 임시값이므로 수량을 붙이지 않는다.
+    """
+    product_name = str(product_name or "").strip()
+    stock = {c: 0 for c in COMPANIES}
+    if product_name:
+        df = q("""SELECT company, COALESCE(SUM(qty),0) AS qty
+                  FROM inventory
+                  WHERE product_name=?
+                  GROUP BY company""", (product_name,))
+        if not df.empty:
+            for r in df.itertuples(index=False):
+                c = str(getattr(r, "company", "") or "").strip()
+                if c in stock:
+                    stock[c] = int(getattr(r, "qty", 0) or 0)
+    return [f"{c} ({stock.get(c, 0)} EA)" for c in COMPANIES] + ["등록대기"]
+
+
+
+# ---------------- mobile stock finder helpers ----------------
 def mobile_favorite_users():
     """모바일 재고찾기 즐겨찾기 사용자 목록."""
     try:
