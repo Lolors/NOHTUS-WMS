@@ -18,7 +18,7 @@ from nohtus.dates import display_date_only
 
 
 def page_history():
-    from app import _infer_customer_from_title
+    from nohtus.services.closing import _infer_customer_from_title
     st.title("이력 조회")
 
     today = date.today()

@@ -68,7 +68,7 @@ def page_map_search_results(term):
     같은 표준제품명에 전산상명칭(ERP명)이 여러 개 있으면 전산명별로 별도 표시한다.
     """
     try:
-        from app import get_product_image_path
+        from nohtus.services.location_map import get_product_image_path
     except Exception:
         get_product_image_path = lambda _name: ""
 
@@ -200,7 +200,7 @@ def page_map_search_results(term):
 
 
 def page_map():
-    from app import render_location_map
+    from nohtus.services.location_map import render_location_map
     if st.session_state.pop("_scroll_map_top", False):
         components.html("""<script>
         try { window.parent.scrollTo({top:0,left:0,behavior:'auto'}); } catch(e) {}

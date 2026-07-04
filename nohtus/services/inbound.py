@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from nohtus.services.inventory import first_nonblank, product_mapping_name_for
-from nohtus.services.inbound import ensure_inbound_first_product_mapping, normalize_blank
 from nohtus.config import COMPANIES
 import re
 from nohtus.db import connect, q

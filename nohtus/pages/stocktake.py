@@ -21,8 +21,7 @@ from nohtus.services.inventory import adjust_inventory
 
 
 def page_stocktake():
-    from app import current_baseline_stock_excel_bytes, full_inventory_excel_bytes, import_stock_survey_excel
-    from app import full_inventory_excel_bytes, current_baseline_stock_excel_bytes, import_stock_survey_excel
+    from nohtus.services.stocktake import current_baseline_stock_excel_bytes, full_inventory_excel_bytes, import_stock_survey_excel
     st.title("재고 실사")
     st.caption("제품명/LOT/유통기한/로케이션 단위로 필요한 재고를 먼저 조정하고, 실사용 엑셀과 기준재고 양식을 내려받거나 업로드합니다.")
 

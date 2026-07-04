@@ -13,7 +13,7 @@ import streamlit as st
 
 
 def page_closing():
-    from app import _extract_inbound_source_from_memo, _infer_customer_from_title, dataframe_to_excel_bytes, page_erp_stock_compare
+    from nohtus.services.closing import _extract_inbound_source_from_memo, _infer_customer_from_title, dataframe_to_excel_bytes, page_erp_stock_compare
     st.title("마감")
     st.caption("출고의 마지막 단계입니다. 오늘 출고 체크, ERP 재고 비교, 업무일지 작성 기능을 한 화면에서 전환합니다.")
     tab = st.radio("마감", ["오늘 출고 체크", "ERP 재고 비교", "업무일지 작성"], horizontal=True, key="closing_sub")

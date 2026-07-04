@@ -18,7 +18,7 @@ from nohtus.locations import location_picking_key, make_location, parse_location
 
 
 def page_product_matching():
-    from app import apply_standard_name_change, approve_mapping_conflict, delete_product, find_mapping_conflicts_from_inventory, render_inventory_metadata_editor
+    from nohtus.services.master import apply_standard_name_change, approve_mapping_conflict, delete_product, find_mapping_conflicts_from_inventory, render_inventory_metadata_editor
     st.title("제품 매칭 관리")
     st.caption("표준제품명과 사업장별 ERP명/비자료명을 관리합니다.")
 
