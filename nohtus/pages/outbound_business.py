@@ -12,6 +12,20 @@ def page_outbound():
     original_text_input = st.text_input
     original_checkbox = st.checkbox
 
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stCheckbox"] label {
+            white-space: nowrap !important;
+        }
+        div[data-testid="stCheckbox"] p {
+            white-space: nowrap !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     checkbox_skip_values = {}
 
     def patched_text_input(label, *args, **kwargs):
@@ -31,7 +45,7 @@ def page_outbound():
         if key in checkbox_skip_values:
             return checkbox_skip_values[key]
         if key == "out_ignore_company":
-            c1, spacer, c2, blank = st.columns([1.25, 0.08, 1.25, 5.4], gap="small")
+            c1, spacer, c2, blank = st.columns([2.4, 0.1, 2.2, 3.3], gap="small")
             with c1:
                 ignore_value = original_checkbox(label, *args, **kwargs)
             with c2:
