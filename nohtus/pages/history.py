@@ -175,12 +175,20 @@ def page_history():
     if "exp_date" in show.columns:
         show["exp_date"] = show["exp_date"].apply(display_date_only)
     rename_cols = {
-        "created_at":"일시", "tx_type":"이력유형", "product_name":"제품명",
-        "lot":"LOT", "exp_date":"유통기한", "from_company":"출발사업장", "from_location":"출발위치",
-        "to_company":"도착사업장", "to_location":"도착위치", "memo":"메모"
+        "created_at": "일시",
+        "actor": "사용자",
+        "tx_type": "이력유형",
+        "product_name": "제품명",
+        "lot": "LOT",
+        "exp_date": "유통기한",
+        "from_company": "출발사업장",
+        "from_location": "출발위치",
+        "to_company": "도착사업장",
+        "to_location": "도착위치",
+        "memo": "메모",
     }
     show = show.rename(columns=rename_cols)
-    wanted = ["일시","이력유형","매출처","제품명","LOT","유통기한","출발사업장","출발위치","도착사업장","도착위치","수량","최종재고","메모"]
+    wanted = ["일시", "사용자", "이력유형", "매출처", "제품명", "LOT", "유통기한", "출발사업장", "출발위치", "도착사업장", "도착위치", "수량", "최종재고", "메모"]
     show = show[[c for c in wanted if c in show.columns]]
     st.dataframe(show, use_container_width=True, hide_index=True)
 
