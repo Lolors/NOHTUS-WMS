@@ -1,19 +1,19 @@
-"""Closing page for NOHTUS WMS.
-
-Migrated from app.py. This module intentionally imports Streamlit because it
-contains page rendering code.
-"""
-
-from __future__ import annotations
-
 from datetime import date
 
 import pandas as pd
 import streamlit as st
 
+from nohtus.db import q
+from nohtus.dates import display_date_only
+from nohtus.services.closing import (
+    _infer_customer_from_title,
+    _extract_inbound_source_from_memo,
+    dataframe_to_excel_bytes,
+    page_erp_stock_compare,
+)
+
 
 def page_closing():
-    from nohtus.services.closing import _extract_inbound_source_from_memo, _infer_customer_from_title, dataframe_to_excel_bytes, page_erp_stock_compare
     st.title("마감")
     st.caption("출고의 마지막 단계입니다. 오늘 출고 체크, ERP 재고 비교, 업무일지 작성 기능을 한 화면에서 전환합니다.")
     tab = st.radio("마감", ["오늘 출고 체크", "ERP 재고 비교", "업무일지 작성"], horizontal=True, key="closing_sub")
@@ -35,48 +35,10 @@ def page_closing():
                             COALESCE(i.lot, '-') AS 제조번호,
                             COALESCE(i.exp_date, '-') AS 유통기한,
                             i.qty AS 출고수량,
-                            COALESCE(tx.final_stock + tx.qty, 0) AS 기존수량,
-                            COALESCE(cur.qty, 0) AS 현재수량
+                            COALESCE(inv.qty, 0) AS 현재수량
                      FROM outbound_orders o
                      JOIN outbound_order_items i ON o.id=i.order_id
-                     LEFT JOIN (
-                         SELECT from_company,
-                                from_location,
-                                product_name,
-                                COALESCE(lot, '-') AS lot,
-                                COALESCE(exp_date, '-') AS exp_date,
-                                qty,
-                                final_stock,
-                                substr(created_at, 1, 10) AS tx_date,
-                                MAX(id) AS tx_id
-                         FROM transactions
-                         WHERE tx_type='출고'
-                         GROUP BY from_company, from_location, product_name,
-                                  COALESCE(lot, '-'), COALESCE(exp_date, '-'), qty, final_stock, substr(created_at, 1, 10)
-                     ) tx
-                       ON tx.tx_date = o.order_date
-                      AND tx.from_company = i.company
-                      AND tx.from_location = i.location
-                      AND tx.product_name = i.product_name
-                      AND tx.lot = COALESCE(i.lot, '-')
-                      AND tx.exp_date = COALESCE(i.exp_date, '-')
-                      AND tx.qty = i.qty
-                     LEFT JOIN (
-                         SELECT company,
-                                location,
-                                product_name,
-                                COALESCE(lot, '-') AS lot,
-                                COALESCE(exp_date, '-') AS exp_date,
-                                SUM(qty) AS qty
-                         FROM inventory
-                         WHERE qty <> 0
-                         GROUP BY company, location, product_name, COALESCE(lot, '-'), COALESCE(exp_date, '-')
-                     ) cur
-                       ON cur.company = i.company
-                      AND cur.location = i.location
-                      AND cur.product_name = i.product_name
-                      AND cur.lot = COALESCE(i.lot, '-')
-                      AND cur.exp_date = COALESCE(i.exp_date, '-')
+                     LEFT JOIN inventory inv ON i.inventory_id=inv.id
                      WHERE o.order_date=? AND IFNULL(o.status,'')<>'취소됨'
                      ORDER BY o.id, i.company, i.location, i.product_name, i.lot, i.exp_date""", (ds,))
         if items.empty:
@@ -84,11 +46,13 @@ def page_closing():
         else:
             items["유통기한"] = items["유통기한"].apply(display_date_only)
             items["출고수량"] = pd.to_numeric(items["출고수량"], errors="coerce").fillna(0).astype(int)
-            items["기존수량"] = pd.to_numeric(items["기존수량"], errors="coerce").fillna(0).astype(int)
             items["현재수량"] = pd.to_numeric(items["현재수량"], errors="coerce").fillna(0).astype(int)
-            # 기준:
-            # - 기존수량: 출고 거래 당시 해당 로케이션의 출고 전 재고(transactions.final_stock + qty)
-            # - 현재수량: 현재 inventory 기준 같은 사업장+로케이션+제품+제조번호+유통기한 수량
+            valid_inv = items["재고ID"].notna()
+            items["동일재고출고합계"] = items.groupby("재고ID")["출고수량"].transform("sum").where(valid_inv, items["출고수량"])
+            # 오늘 출고 체크는 실제 지시내역 확인용이다.
+            # 현재수량은 출고지시 저장으로 이미 차감된 뒤의 inventory 수량이며,
+            # 기존수량은 오늘 해당 재고ID의 출고수량을 되돌려 계산한 출고 전 수량이다.
+            items["기존수량"] = items["현재수량"] + items["동일재고출고합계"]
             items["실물수량"] = ""
             try:
                 customers_for_close = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
@@ -115,7 +79,7 @@ def page_closing():
             out = (out_raw.assign(내역=out_raw["표준제품명"].astype(str) + " * " + out_raw["수량"].astype(int).astype(str))
                          .groupby(["출고처", "담당자"], as_index=False)["내역"]
                          .agg(lambda x: ", ".join(x)))
-            tsv = out.to_csv(sep='	', index=False, header=False)
+            tsv = out.to_csv(sep='\t', index=False, header=False)
             st.text_area("드래그해서 복사", value=tsv, height=140, key="worklog_out_tsv")
 
         st.markdown("### 입고")
@@ -146,6 +110,3 @@ def page_closing():
         else:
             tsv = moves.to_csv(sep='\t', index=False, header=False)
             st.text_area("드래그해서 복사", value=tsv, height=120, key="worklog_move_tsv")
-
-
-# ---------------- style/nav ----------------
