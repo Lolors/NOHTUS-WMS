@@ -25,7 +25,7 @@ def apply_query_page_redirects():
         pass
 
 
-def render_sidebar(app_title, version):
+def render_sidebar(app_title, version, allowed_pages=None):
     st.sidebar.markdown(f"# {app_title}")
     st.sidebar.caption(version)
 
@@ -33,6 +33,12 @@ def render_sidebar(app_title, version):
         st.session_state["page"] = DEFAULT_PAGE
 
     apply_query_page_redirects()
+
+    def is_allowed(label):
+        return allowed_pages is None or label in allowed_pages
+
+    if not is_allowed(st.session_state.get("page", DEFAULT_PAGE)):
+        st.session_state["page"] = DEFAULT_PAGE
 
     def nav_button(label):
         active = st.session_state.get("page") == label
@@ -43,10 +49,12 @@ def render_sidebar(app_title, version):
             st.rerun()
 
     for section, labels in MENU_SECTIONS:
+        visible_labels = [label for label in labels if label not in HIDDEN_PAGES and is_allowed(label)]
+        if not visible_labels:
+            continue
         if section:
             st.sidebar.markdown(f"### {section}")
-        for label in labels:
-            if label not in HIDDEN_PAGES:
-                nav_button(label)
+        for label in visible_labels:
+            nav_button(label)
 
     return st.session_state["page"]
