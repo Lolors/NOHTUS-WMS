@@ -1,5 +1,6 @@
 from nohtus.db import connect
 
+
 def init_db():
     con = connect(); cur = con.cursor()
     cur.execute("""
@@ -11,7 +12,6 @@ def init_db():
         aliases TEXT
     )
     """)
-    # v3.6: ERP별 제품명/대체 매칭 메모 컬럼 추가. 기존 DB도 자동 보강.
     product_cols = {r[1] for r in cur.execute("PRAGMA table_info(products)").fetchall()}
     for col in ["erp_nohtuspharm_name", "erp_nohtus_name", "erp_noh_name", "erp_noh_code", "bidata_name", "substitute_note", "image_path"]:
         if col not in product_cols:
@@ -49,6 +49,29 @@ def init_db():
     tx_cols = {r[1] for r in cur.execute("PRAGMA table_info(transactions)").fetchall()}
     if "final_stock" not in tx_cols:
         cur.execute("ALTER TABLE transactions ADD COLUMN final_stock INTEGER")
+    if "actor" not in tx_cols:
+        cur.execute("ALTER TABLE transactions ADD COLUMN actor TEXT")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users(
+        username TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        password_hash TEXT,
+        active INTEGER DEFAULT 1,
+        created_at TEXT,
+        updated_at TEXT
+    )
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS favorite_products(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        created_at TEXT,
+        UNIQUE(username, product_name)
+    )
+    """)
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS erp_stock(
@@ -143,6 +166,4 @@ def init_db():
     if "sort_order" not in fav_cols:
         cur.execute("ALTER TABLE mobile_favorites ADD COLUMN sort_order INTEGER DEFAULT 0")
 
-    # v3.8: 더미데이터 자동 생성 중단.
-    # 처음 실행 시 제품/재고는 비어 있으며, 제품마스터 엑셀 또는 재고조사 엑셀 업로드로 채웁니다.
     con.commit(); con.close()
