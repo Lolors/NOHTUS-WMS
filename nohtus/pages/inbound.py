@@ -15,12 +15,40 @@ from nohtus.services.inbound import ensure_inbound_first_product_mapping, inboun
 from nohtus.services.inbound_bridge_runtime import _apply_inbound_location_pending, _inbound_js_loc_changed
 
 
+_FIRST_INBOUND_SHADOW_MAP = {
+    "inbound_first_product": "_keep_inbound_first_product",
+    "inbound_new_product_name": "_keep_inbound_new_product_name",
+    "inbound_new_erp_name": "_keep_inbound_new_erp_name",
+    "inbound_new_product_code": "_keep_inbound_new_product_code",
+}
+
+
+def _restore_first_inbound_widgets_before_render():
+    """도면 클릭/쿼리 이동 뒤에도 최초등록 체크와 입력창이 사라지지 않게 한다."""
+    if st.session_state.get("_keep_inbound_first_product") is True:
+        st.session_state["inbound_first_product"] = True
+    for widget_key, keep_key in _FIRST_INBOUND_SHADOW_MAP.items():
+        if widget_key == "inbound_first_product":
+            continue
+        keep_value = st.session_state.get(keep_key)
+        if keep_value not in [None, ""] and st.session_state.get(widget_key, "") in [None, ""]:
+            st.session_state[widget_key] = keep_value
+
+
+def _remember_first_inbound_widgets():
+    for widget_key, keep_key in _FIRST_INBOUND_SHADOW_MAP.items():
+        st.session_state[keep_key] = st.session_state.get(widget_key)
+
+
 def page_inbound():
     from styles import apply_inbound_bridge_style
     from nohtus.ui.location_picker import inbound_location_picker
     from inbound_map import render_inbound_quick_location_map
 
+    _restore_first_inbound_widgets_before_render()
     _apply_inbound_location_pending()
+    _restore_first_inbound_widgets_before_render()
+
     st.title("입고 등록")
 
     apply_inbound_bridge_style()
@@ -31,11 +59,14 @@ def page_inbound():
         on_change=_inbound_js_loc_changed,
     )
     if st.button("__입고도면적용", key="_inbound_apply_btn"):
+        _remember_first_inbound_widgets()
         _inbound_js_loc_changed()
         _apply_inbound_location_pending()
+        _restore_first_inbound_widgets_before_render()
         st.rerun()
 
     _apply_inbound_location_pending()
+    _restore_first_inbound_widgets_before_render()
 
     def inbound_product_label(value):
         if value == "":
@@ -57,21 +88,40 @@ def page_inbound():
             inbound_product_term = st.text_input("제품 검색", placeholder="제품명, ERP명, 비자료명, 별칭 일부 입력", key="inbound_product_term")
         with first_col:
             st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-            first_product = st.checkbox("최초 등록", key="inbound_first_product")
+            first_product = st.checkbox("최초 등록", key="inbound_first_product", on_change=_remember_first_inbound_widgets)
+
+        if first_product:
+            st.session_state["_keep_inbound_first_product"] = True
+        else:
+            st.session_state["_keep_inbound_first_product"] = False
 
         products = product_options(inbound_product_term)
         product_list = products["standard_name"].dropna().astype(str).drop_duplicates().tolist() if not products.empty else []
 
         if first_product:
             st.markdown("##### 최초 제품 등록")
-            product = st.text_input("표준제품명", value="", placeholder="WMS 표준제품명", key="inbound_new_product_name").strip()
+            product = st.text_input(
+                "표준제품명",
+                value=st.session_state.get("_keep_inbound_new_product_name", ""),
+                placeholder="WMS 표준제품명",
+                key="inbound_new_product_name",
+                on_change=_remember_first_inbound_widgets,
+            ).strip()
             first_erp_name = st.text_input(
                 "ERP명" if company != "비자료" else "비자료명",
-                value="",
+                value=st.session_state.get("_keep_inbound_new_erp_name", ""),
                 placeholder="선택한 사업장의 ERP명/비자료명",
                 key="inbound_new_erp_name",
+                on_change=_remember_first_inbound_widgets,
             ).strip()
-            first_product_code = st.text_input("제품코드", value="", placeholder="노투스팜/NOH ERP 제품코드", key="inbound_new_product_code").strip()
+            first_product_code = st.text_input(
+                "제품코드",
+                value=st.session_state.get("_keep_inbound_new_product_code", ""),
+                placeholder="노투스팜/NOH ERP 제품코드",
+                key="inbound_new_product_code",
+                on_change=_remember_first_inbound_widgets,
+            ).strip()
+            _remember_first_inbound_widgets()
             wh = first_erp_name or product
         else:
             selected_product = st.selectbox(
@@ -119,6 +169,8 @@ def page_inbound():
                         memo_parts.append(memo)
                     inbound_memo = " / ".join(memo_parts) if memo_parts else "입고 등록"
                     add_inventory(company, product, wh, normalize_blank(lot), normalize_exp_date(exp), loc, int(qty), inbound_memo)
+                    for key in _FIRST_INBOUND_SHADOW_MAP.values():
+                        st.session_state.pop(key, None)
                     save_msg.success(f"입고 저장 완료: {company} / {product} / {loc} / {qty}EA")
                 except Exception as e:
                     save_msg.error(str(e))
