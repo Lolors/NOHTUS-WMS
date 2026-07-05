@@ -17,6 +17,7 @@ IMPORT_RULES = {
     "connect": "from nohtus.db import connect",
     "exec_sql": "from nohtus.db import exec_sql",
     "json": "import json",
+    "re": "import re",
     "Path": "from pathlib import Path",
     "escape": "from html import escape",
     "BytesIO": "from io import BytesIO",
