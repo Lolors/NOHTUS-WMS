@@ -1,24 +1,18 @@
-"""Product Matching page for NOHTUS WMS.
-
-Migrated from app.py. This module intentionally imports Streamlit because it
-contains page rendering code.
-"""
-
-from __future__ import annotations
-
 from datetime import date
-from nohtus.services.products import import_product_master_excel, product_master_excel_bytes
-import pandas as pd
+
 import streamlit as st
 
-from nohtus.config import AREA_COLOR, AREA_CONFIG, COMPANIES, INBOUND_COMPANIES
-from nohtus.db import connect, exec_sql, q
-from nohtus.dates import display_date_only, expiry_status, normalize_exp_date
-from nohtus.locations import location_picking_key, make_location, parse_location
+from nohtus.db import q, exec_sql
+from nohtus.services.products import product_master_excel_bytes, import_product_master_excel
+from nohtus.services.master import (
+    apply_standard_name_change,
+    approve_mapping_conflict,
+    delete_product,
+    find_mapping_conflicts_from_inventory,
+)
 
 
 def page_product_matching():
-    from nohtus.services.master import apply_standard_name_change, approve_mapping_conflict, delete_product, find_mapping_conflicts_from_inventory, render_inventory_metadata_editor
     st.title("제품 매칭 관리")
     st.caption("표준제품명과 사업장별 ERP명/비자료명을 관리합니다.")
 
@@ -158,5 +152,3 @@ def page_product_matching():
                     st.rerun()
                 except Exception as e:
                     st.error(str(e))
-
-    render_inventory_metadata_editor()
