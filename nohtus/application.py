@@ -14,7 +14,7 @@ from nohtus.pages.move import page_move
 from nohtus.pages.outbound_business import page_outbound
 from nohtus.pages.product_matching import page_product_matching
 from nohtus.pages.saved_outbound_business_v2 import page_saved_outbound as page_saved_outbound_refactored
-from nohtus.pages.stocktake import page_stocktake
+from nohtus.pages.stocktake_business import page_stocktake
 
 
 # RC3.0 STABLE BASE 개발 원칙
