@@ -5,6 +5,7 @@ from datetime import date
 import pandas as pd
 from nohtus.db import q
 import streamlit as st
+import re
 
 def _infer_customer_from_title(title, customers_df=None):
     """출고지시서 제목에서 거래처명을 추정한다.
@@ -149,7 +150,6 @@ def page_erp_stock_compare():
             st.error('매칭 실패 항목')
             st.dataframe(fail, use_container_width=True, hide_index=True)
 
-
 def _normalize_erp_current_rows(parsed_files):
     """ERP 파일을 사업장 + ERP 제품명 기준으로 합산한다.
     ERP 파일은 이미 ERP명으로 되어 있으므로 제품매칭표 역변환은 WMS 쪽에만 적용한다.
@@ -161,12 +161,12 @@ def _normalize_erp_current_rows(parsed_files):
     for info in parsed_files:
         if not info:
             continue
-        company = info["company"]
-        raw = info["raw"].copy()
-        name_col = info["name_col"]
-        qty_col = info["qty_col"]
+        company = info['company']
+        raw = info['raw'].copy()
+        name_col = info['name_col']
+        qty_col = info['qty_col']
         raw[name_col] = raw[name_col].apply(clean_excel_text)
-        raw[qty_col] = pd.to_numeric(raw[qty_col], errors="coerce").fillna(0).astype(int)
+        raw[qty_col] = pd.to_numeric(raw[qty_col], errors='coerce').fillna(0).astype(int)
         raw = raw[~raw[name_col].apply(is_ignored_erp_product_name)]
         raw = raw[raw[qty_col] != 0]
         if raw.empty:
@@ -176,15 +176,14 @@ def _normalize_erp_current_rows(parsed_files):
             erp_qty = int(rr[qty_col])
             if is_ignored_erp_product_name(erp_name):
                 continue
-            rows.append({"사업장": company, "제품명": erp_name, "ERP수량": erp_qty})
+            rows.append({'사업장': company, '제품명': erp_name, 'ERP수량': erp_qty})
             auto_count += 1
     if rows:
         erp = pd.DataFrame(rows)
-        erp = erp.groupby(["사업장", "제품명"], as_index=False)["ERP수량"].sum()
+        erp = erp.groupby(['사업장', '제품명'], as_index=False)['ERP수량'].sum()
     else:
-        erp = pd.DataFrame(columns=["사업장", "제품명", "ERP수량"])
-    return erp, pd.DataFrame(amb), pd.DataFrame(fail), auto_count
-
+        erp = pd.DataFrame(columns=['사업장', '제품명', 'ERP수량'])
+    return (erp, pd.DataFrame(amb), pd.DataFrame(fail), auto_count)
 
 def _read_erp_current_file(uploaded, company, key_prefix):
     """ERP 현재고 파일을 고정 규칙으로 읽는다.
@@ -195,60 +194,55 @@ def _read_erp_current_file(uploaded, company, key_prefix):
     if uploaded is None:
         return None
     try:
-        if company == "노투스":
+        if company == '노투스':
             raw = pd.read_excel(uploaded, header=7)
-            name_col = _find_required_column(raw.columns, ["품목명/규격", "품목명", "제품명"])
-            qty_col = _find_required_column(raw.columns, ["현재재고", "현재고", "현재고수량"])
+            name_col = _find_required_column(raw.columns, ['품목명/규격', '품목명', '제품명'])
+            qty_col = _find_required_column(raw.columns, ['현재재고', '현재고', '현재고수량'])
         else:
             raw = pd.read_excel(uploaded)
-            name_col = _find_required_column(raw.columns, ["제품명"])
-            qty_col = _find_required_column(raw.columns, ["현재고수량", "현재고"])
+            name_col = _find_required_column(raw.columns, ['제품명'])
+            qty_col = _find_required_column(raw.columns, ['현재고수량', '현재고'])
     except Exception as e:
-        st.error(f"{company} 엑셀 읽기 실패: {e}")
+        st.error(f'{company} 엑셀 읽기 실패: {e}')
         return None
     if raw.empty:
-        st.warning(f"{company} 엑셀에 데이터가 없습니다.")
+        st.warning(f'{company} 엑셀에 데이터가 없습니다.')
         return None
     raw.columns = [str(c).strip() for c in raw.columns]
-    if not name_col or not qty_col or name_col not in raw.columns or qty_col not in raw.columns:
-        st.error(f"{company} ERP 파일에서 필요한 컬럼을 찾을 수 없습니다.")
-        st.caption("노투스팜/NOH: 제품명, 현재고수량 · 노투스: 8행 헤더의 품목명/규격, 현재재고")
+    if not name_col or not qty_col or name_col not in raw.columns or (qty_col not in raw.columns):
+        st.error(f'{company} ERP 파일에서 필요한 컬럼을 찾을 수 없습니다.')
+        st.caption('노투스팜/NOH: 제품명, 현재고수량 · 노투스: 8행 헤더의 품목명/규격, 현재재고')
         return None
-    return {"company": company, "raw": raw, "name_col": name_col, "qty_col": qty_col}
-
+    return {'company': company, 'raw': raw, 'name_col': name_col, 'qty_col': qty_col}
 
 def clean_excel_text(value):
     """openpyxl이 저장하지 못하는 제어문자와 특수 공백을 제거한다."""
     if value is None:
-        return ""
+        return ''
     text = str(value)
     try:
         from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
-        text = ILLEGAL_CHARACTERS_RE.sub("", text)
+        text = ILLEGAL_CHARACTERS_RE.sub('', text)
     except Exception:
-        text = re.sub(r"[\x00-\x08\x0B-\x0C\x0E-\x1F]", "", text)
-    text = re.sub(r"[\x00-\x1F\x7F-\x9F\u200b\u200c\u200d\ufeff]", "", text)
-    text = text.replace(" ", " ")
+        text = re.sub('[\\x00-\\x08\\x0B-\\x0C\\x0E-\\x1F]', '', text)
+    text = re.sub('[\\x00-\\x1F\\x7F-\\x9F\\u200b\\u200c\\u200d\\ufeff]', '', text)
+    text = text.replace('\xa0', ' ')
     return text.strip()
-
 
 def is_ignored_erp_product_name(value):
     key = _erp_name_key(value)
-    return (not key) or key in {"합계", "배송비"} or "합계" in key or "배송비" in key
-
+    return not key or key in {'합계', '배송비'} or '합계' in key or ('배송비' in key)
 
 def product_compare_name_for(company, standard_name):
     """ERP 비교용 제품명.
     제품매칭표에 해당 사업장의 ERP명이 있으면 ERP명 기준으로 비교하고,
     없으면 표준제품명 기준으로 비교한다.
     """
-    return product_mapping_name_for(company, standard_name) or (standard_name or "")
-
+    return product_mapping_name_for(company, standard_name) or (standard_name or '')
 
 def _erp_name_key(value):
     text = clean_excel_text(value)
-    return re.sub(r"\s+", "", text).replace("[", "").replace("]", "")
-
+    return re.sub('\\s+', '', text).replace('[', '').replace(']', '')
 
 def _find_required_column(columns, candidates):
     cols = [str(c).strip() for c in columns]
@@ -262,29 +256,22 @@ def _find_required_column(columns, candidates):
                 return col
     return None
 
-
 def product_mapping_name_for(company, standard_name):
     if not standard_name:
-        return ""
-    col = {
-        "노투스팜": "erp_nohtuspharm_name",
-        "NOH": "erp_noh_name",
-        "노투스": "erp_nohtus_name",
-        "비자료": "bidata_name",
-    }.get(company)
+        return ''
+    col = {'노투스팜': 'erp_nohtuspharm_name', 'NOH': 'erp_noh_name', '노투스': 'erp_nohtus_name', '비자료': 'bidata_name'}.get(company)
     if not col:
-        return ""
-    df = q(f"SELECT {col} AS nm FROM products WHERE standard_name=?", (standard_name,))
+        return ''
+    df = q(f'SELECT {col} AS nm FROM products WHERE standard_name=?', (standard_name,))
     if df.empty:
-        return ""
-    return first_nonblank(df.iloc[0].get("nm"))
-
+        return ''
+    return first_nonblank(df.iloc[0].get('nm'))
 
 def first_nonblank(*values):
     for v in values:
         if v is None:
             continue
         text = str(v).strip()
-        if text and text.lower() != "nan" and text != "-":
+        if text and text.lower() != 'nan' and (text != '-'):
             return text
-    return ""
+    return ''
