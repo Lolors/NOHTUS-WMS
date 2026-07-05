@@ -1,7 +1,17 @@
-"""Service helpers."""
+"""Location map service helpers."""
 
 from __future__ import annotations
 
+import json
+from html import escape
+from pathlib import Path
+
+import streamlit as st
+import streamlit.components.v1 as components
+
+from nohtus.config import AREA_CONFIG, SPECIAL_LOCATIONS
+from nohtus.db import q
+from nohtus.dates import display_date_only
 
 def get_product_image_path(product_name):
     df = q("SELECT image_path FROM products WHERE standard_name=?", (product_name,))
@@ -10,6 +20,22 @@ def get_product_image_path(product_name):
     value = str(df.iloc[0].get("image_path") or "")
     full = Path(__file__).parent / value
     return str(full) if value and full.exists() else ""
+
+
+def _loc_group_from_df(df):
+    data = {}
+    for r in df.itertuples():
+        loc = str(r.location)
+        data.setdefault(loc, []).append({
+            "id": int(r.id),
+            "company": str(r.company),
+            "product_name": str(r.product_name),
+            "warehouse_name": str(r.warehouse_name or "-"),
+            "lot": str(r.lot or "-"),
+            "exp_date": display_date_only(r.exp_date),
+            "qty": int(r.qty),
+        })
+    return data
 
 
 def render_location_map():
@@ -415,4 +441,3 @@ if(initialSelectedLocation){{setTimeout(()=>showDetail(initialSelectedLocation),
 </script></body></html>
 """
     components.html(html, height=790, scrolling=False)
-# ---------------- detail ----------------

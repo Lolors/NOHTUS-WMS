@@ -163,11 +163,26 @@ def move(kind: str, target: str, funcs: list[str], include_helpers: bool):
 
     app_text = remove_functions(app_text, wanted)
 
-    write(APP, app_text)
-    write(target_path, target_text)
+    original_app = read(APP)
+    original_target = read(target_path) if target_path.exists() else None
 
-    subprocess.run([sys.executable, "-m", "py_compile", str(APP), str(target_path)], cwd=ROOT, check=True)
-    validate()
+    try:
+        write(APP, app_text)
+        write(target_path, target_text)
+
+        subprocess.run([sys.executable, "-m", "py_compile", str(APP), str(target_path)], cwd=ROOT, check=True)
+        validate()
+    except Exception:
+        write(APP, original_app)
+        if original_target is None:
+            try:
+                target_path.unlink()
+            except FileNotFoundError:
+                pass
+        else:
+            write(target_path, original_target)
+        print("ROLLBACK: validation failed, files restored.")
+        raise
 
     print("MOVED:")
     for name in sorted(wanted):
