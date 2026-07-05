@@ -5,15 +5,15 @@ from nohtus.config import APP_TITLE, VERSION
 from nohtus.db_init import init_db
 from nohtus.navigation import render_sidebar
 from nohtus.pages.closing import page_closing
+from nohtus.pages.customer_master_business import page_customer_master
 from nohtus.pages.history import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.location_map import page_map
-from nohtus.pages.master import page_customer_master
 from nohtus.pages.mobile_stock import page_mobile_stock_finder
 from nohtus.pages.move import page_move
-from nohtus.pages.outbound import page_outbound
+from nohtus.pages.outbound_business import page_outbound
 from nohtus.pages.product_matching import page_product_matching
-from nohtus.pages.saved_outbound import page_saved_outbound as page_saved_outbound_refactored
+from nohtus.pages.saved_outbound_business import page_saved_outbound as page_saved_outbound_refactored
 from nohtus.pages.stocktake import page_stocktake
 
 
