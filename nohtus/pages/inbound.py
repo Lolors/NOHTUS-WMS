@@ -1,7 +1,7 @@
 """Inbound page for NOHTUS WMS.
 
 입고 등록 화면을 app.py에서 분리한 페이지 모듈이다.
-기존 도면 클릭/위치 연동 코어는 app.py의 안정 함수들을 재사용한다.
+기존 도면 클릭/위치 연동 코어는 서비스 보조 함수를 재사용한다.
 """
 
 from __future__ import annotations
@@ -12,52 +12,13 @@ from nohtus.dates import normalize_exp_date
 from nohtus.services.inventory import add_inventory
 from nohtus.services.products import product_options
 from nohtus.services.inbound import ensure_inbound_first_product_mapping, inbound_company_options_for, normalize_blank, product_mapping_name_for, strip_company_stock_label
-from nohtus.locations import make_location, parse_location
-
-
-def _inbound_js_loc_changed():
-    """입고 도면 iframe에서 부모 페이지의 숨김 입력칸으로 넘긴 위치값을 받는다."""
-    loc = str(st.session_state.get("_inbound_js_loc_buffer", "") or "").strip()
-    if loc:
-        st.session_state["_pending_inbound_loc"] = loc
-
-
-def _apply_inbound_location_pending():
-    """도면에서 선택한 입고 위치를 다음 렌더의 위치 선택 기본값으로 반영한다."""
-    pending = st.session_state.pop("_pending_inbound_loc", None)
-    if not pending:
-        try:
-            qloc = st.query_params.get("inbound_loc", "")
-            if isinstance(qloc, list):
-                qloc = qloc[0] if qloc else ""
-            pending = str(qloc or "").strip()
-            if pending:
-                try:
-                    del st.query_params["inbound_loc"]
-                except Exception:
-                    pass
-        except Exception:
-            pending = ""
-    if not pending:
-        return
-
-    if pending in ["Q1", "Q2", "Q"]:
-        area, line, level = "Q", "", ""
-    else:
-        area, line, level = parse_location(pending)
-
-    st.session_state["_inbound_picker_defaults"] = {"area": area or "REC", "line": line or "", "level": level or ""}
-    st.session_state["_inbound_selected_loc"] = make_location(area or "REC", line or "", level or "")
-    st.session_state["_inbound_picker_token"] = int(st.session_state.get("_inbound_picker_token", 0) or 0) + 1
+from nohtus.services.inbound_bridge_runtime import _apply_inbound_location_pending, _inbound_js_loc_changed
 
 
 def page_inbound():
     from styles import apply_inbound_bridge_style
     from nohtus.ui.location_picker import inbound_location_picker
     from inbound_map import render_inbound_quick_location_map
-    from nohtus.services.inbound import inbound_company_options_for, strip_company_stock_label
-
-    _apply_inbound_location_pending()
 
     _apply_inbound_location_pending()
     st.title("입고 등록")
