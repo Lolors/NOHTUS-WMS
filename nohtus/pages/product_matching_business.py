@@ -36,16 +36,6 @@ def page_product_matching():
             except Exception as e:
                 st.error(f"업로드 실패: {e}")
 
-    st.markdown("### 제품 매칭표 보완용 파일")
-    st.caption("제품매칭표 전체를 내려받아 누락된 ERP명/비자료명 정보를 보완한 뒤 다시 업로드할 수 있습니다.")
-    st.download_button(
-        "제품 매칭표 보완용 파일 내려받기",
-        data=product_master_excel_bytes(highlight_missing=True),
-        file_name=f"NOHTUS_제품매칭표_보완용_{date.today().strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
-
     st.markdown("### 제품 매칭표 수정")
     df = q("""SELECT id, standard_name AS 표준제품명, erp_nohtuspharm_name AS '노투스팜 ERP명', product_code AS '노투스팜 ERP 제품코드', erp_noh_name AS 'NOH ERP명', erp_noh_code AS 'NOH ERP 제품코드', erp_nohtus_name AS '노투스 ERP명', bidata_name AS '비자료명', aliases AS 별칭
               FROM products ORDER BY standard_name""")
