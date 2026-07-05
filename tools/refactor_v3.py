@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ast
 import builtins
-import copy
 import subprocess
 import sys
 from pathlib import Path
@@ -206,6 +205,21 @@ def guard() -> None:
         subprocess.run([sys.executable, str(guard_path)], cwd=ROOT, check=True)
 
 
+def repair_once(path: Path) -> bool:
+    changed = False
+    missing = unresolved_names(path)
+
+    imports = [IMPORT_RULES[name] for name in sorted(missing) if name in IMPORT_RULES]
+    if imports:
+        changed = add_imports(path, imports) or changed
+
+    missing = unresolved_names(path)
+    for name in sorted(missing):
+        changed = append_helper_from_app(path, name) or changed
+
+    return changed
+
+
 def repair(module: str) -> None:
     if module not in MODULE_FILES:
         raise SystemExit(f"Unknown module: {module}")
@@ -216,22 +230,17 @@ def repair(module: str) -> None:
     try:
         py_compile(path)
 
-        # 1차: import rule 기반 보강
-        missing = unresolved_names(path)
-        imports = [IMPORT_RULES[name] for name in sorted(missing) if name in IMPORT_RULES]
-        if imports:
-            add_imports(path, imports)
+        for _ in range(10):
+            if not repair_once(path):
+                break
+            py_compile(path)
+        else:
+            raise RuntimeError(f"repair did not stabilize: {module}")
 
-        # 2차: app.py에 있는 helper 자동 복사
-        missing = unresolved_names(path)
-        for name in sorted(missing):
-            append_helper_from_app(path, name)
-
-        # 3차: helper 복사 후 필요한 import 다시 보강
-        missing = unresolved_names(path)
-        imports = [IMPORT_RULES[name] for name in sorted(missing) if name in IMPORT_RULES]
-        if imports:
-            add_imports(path, imports)
+        unresolved = unresolved_names(path)
+        actionable = sorted(x for x in unresolved if x in IMPORT_RULES or x in top_level_defs(APP))
+        if actionable:
+            raise RuntimeError(f"unresolved after repair: {', '.join(actionable)}")
 
         py_compile(path)
         smoke()
