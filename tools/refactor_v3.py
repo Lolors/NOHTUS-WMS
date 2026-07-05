@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+import copy
 import subprocess
 import sys
 from pathlib import Path
@@ -53,7 +54,7 @@ def write(path: Path, text: str) -> None:
 
 
 def parse(path: Path) -> ast.Module:
-    return ast.parse(read(path))
+    return ast.parse(read(path), filename=str(path))
 
 
 def top_level_defs(path: Path) -> dict[str, ast.FunctionDef]:
@@ -81,19 +82,21 @@ def imported_names(tree: ast.Module) -> set[str]:
 def defined_names(tree: ast.Module) -> set[str]:
     names = set()
     for node in tree.body:
-        if isinstance(node, ast.FunctionDef):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names.add(node.name)
         elif isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):
                     names.add(target.id)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
     return names
 
 
 def used_names(tree: ast.Module) -> set[str]:
     names = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Name):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
             names.add(node.id)
     return names
 
@@ -107,62 +110,71 @@ def unresolved_names(path: Path) -> set[str]:
     return {x for x in used - known if not x.startswith("__")}
 
 
-def import_insert_index(lines: list[str]) -> int:
-    idx = 0
+def import_signature(node: ast.stmt) -> str | None:
+    if isinstance(node, ast.Import):
+        return ast.unparse(node).strip()
+    if isinstance(node, ast.ImportFrom):
+        return ast.unparse(node).strip()
+    return None
 
-    # module docstring
-    if lines and lines[0].startswith('"""'):
-        for i in range(1, len(lines)):
-            if lines[i].strip().endswith('"""'):
-                idx = i + 1
-                break
 
-    # __future__ / import 블록 / 빈 줄 전부 통과
-    while idx < len(lines):
-        stripped = lines[idx].strip()
+def import_node_from_source(source: str) -> ast.stmt:
+    module = ast.parse(source)
+    if len(module.body) != 1 or not isinstance(module.body[0], (ast.Import, ast.ImportFrom)):
+        raise ValueError(f"Not an import statement: {source}")
+    return module.body[0]
 
-        if stripped == "":
+
+def module_docstring_index(tree: ast.Module) -> int:
+    if tree.body and isinstance(tree.body[0], ast.Expr) and isinstance(tree.body[0].value, ast.Constant) and isinstance(tree.body[0].value.value, str):
+        return 1
+    return 0
+
+
+def import_insert_index(tree: ast.Module) -> int:
+    """Return a top-level AST body index after docstring, __future__, and imports."""
+    idx = module_docstring_index(tree)
+
+    while idx < len(tree.body):
+        node = tree.body[idx]
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__":
             idx += 1
             continue
+        break
 
-        if stripped.startswith("from __future__ import"):
+    while idx < len(tree.body):
+        node = tree.body[idx]
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
             idx += 1
             continue
-
-        if stripped.startswith("import ") or stripped.startswith("from "):
-            idx += 1
-            continue
-
         break
 
     return idx
 
-ddef add_imports(path: Path, imports: list[str]) -> bool:
-    text = read(path)
 
-    existing = set()
-    for line in text.splitlines():
-        s = line.strip()
-        if s.startswith("import ") or s.startswith("from "):
-            existing.add(s)
+def add_imports(path: Path, imports: list[str]) -> bool:
+    """Add imports using AST nodes only, never by string insertion inside functions."""
+    tree = parse(path)
 
-    to_add = [imp for imp in imports if imp not in existing]
-    if not to_add:
+    existing = {sig for node in tree.body if (sig := import_signature(node))}
+    nodes_to_add: list[ast.stmt] = []
+    for source in imports:
+        node = import_node_from_source(source)
+        sig = import_signature(node)
+        if sig and sig not in existing:
+            nodes_to_add.append(node)
+            existing.add(sig)
+
+    if not nodes_to_add:
         return False
 
-    lines = text.splitlines()
-    idx = import_insert_index(lines)
+    idx = import_insert_index(tree)
+    new_body = list(tree.body)
+    new_body[idx:idx] = nodes_to_add
+    tree.body = new_body
 
-    new_lines = lines[:idx]
-    if new_lines and new_lines[-1].strip() != "":
-        new_lines.append("")
-
-    new_lines.extend(to_add)
-    new_lines.append("")
-
-    new_lines.extend(lines[idx:])
-
-    write(path, "\n".join(new_lines))
+    ast.fix_missing_locations(tree)
+    write(path, ast.unparse(tree))
     return True
 
 
@@ -223,6 +235,7 @@ def repair(module: str) -> None:
 
         py_compile(path)
         smoke()
+        guard()
         print(f"OK repair: {module}")
 
     except Exception:
@@ -235,6 +248,7 @@ def doctor() -> None:
     print("NOHTUS Refactor V3 Doctor")
     print("=" * 40)
 
+    app_defs = top_level_defs(APP)
     for name, path in MODULE_FILES.items():
         if not path.exists():
             print(f"MISS {name}: file not found")
@@ -243,7 +257,7 @@ def doctor() -> None:
         try:
             py_compile(path)
             missing = unresolved_names(path)
-            actionable = sorted(x for x in missing if x in IMPORT_RULES or top_level_defs(APP).get(x))
+            actionable = sorted(x for x in missing if x in IMPORT_RULES or x in app_defs)
             if actionable:
                 print(f"WARN {name}: {', '.join(actionable)}")
             else:
