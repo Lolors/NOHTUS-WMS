@@ -1,15 +1,5 @@
-MENU_SECTIONS = [
-    (None, ["로케이션 맵"]),
-    ("출고", ["출고지시", "저장된 출고지시", "마감"]),
-    ("재고", ["입고 등록", "이동 등록", "이력 조회", "재고 실사"]),
-    ("기초", ["제품 매칭 관리", "거래처 관리"]),
-]
-
-HIDDEN_PAGES = {
-    "재고 찾기": "RC3.3: 모바일용 재고 찾기 메뉴는 임시 숨김. 기능 함수는 유지한다.",
-}
-
 import streamlit as st
+
 
 MENU_SECTIONS = [
     (None, ["로케이션 맵"]),
@@ -24,6 +14,7 @@ HIDDEN_PAGES = {
 
 DEFAULT_PAGE = "로케이션 맵"
 
+
 def apply_query_page_redirects():
     try:
         if st.query_params.get("map_search_product", ""):
@@ -32,6 +23,7 @@ def apply_query_page_redirects():
             st.session_state["page"] = "입고 등록"
     except Exception:
         pass
+
 
 def render_sidebar(app_title, version):
     st.sidebar.markdown(f"# {app_title}")
