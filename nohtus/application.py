@@ -12,7 +12,7 @@ from nohtus.pages.master import page_customer_master
 from nohtus.pages.mobile_stock import page_mobile_stock_finder
 from nohtus.pages.move import page_move
 from nohtus.pages.outbound import page_outbound
-from nohtus.pages.product_matching_runtime import page_product_matching
+from nohtus.pages.product_matching import page_product_matching
 from nohtus.pages.saved_outbound import page_saved_outbound as page_saved_outbound_refactored
 from nohtus.pages.stocktake import page_stocktake
 
