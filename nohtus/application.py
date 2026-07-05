@@ -4,7 +4,7 @@ from styles import apply_style
 from nohtus.config import APP_TITLE, VERSION
 from nohtus.db_init import init_db
 from nohtus.navigation import render_sidebar
-from nohtus.pages.closing_runtime import page_closing
+from nohtus.pages.closing import page_closing
 from nohtus.pages.history import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.location_map import page_map
