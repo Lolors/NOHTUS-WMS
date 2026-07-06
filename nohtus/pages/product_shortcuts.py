@@ -7,7 +7,7 @@ import streamlit as st
 
 from nohtus.auth import current_username
 from nohtus.db import connect, q
-from nohtus.dates import display_date_only
+from nohtus.services.products import product_options
 
 
 def add_recent_product_view(product_name: str, username: str | None = None):
@@ -54,24 +54,6 @@ def toggle_favorite_product(product_name: str, username: str | None = None):
         con.commit()
 
 
-def _stock_summary(product_name: str) -> pd.DataFrame:
-    return q(
-        """
-        SELECT company AS 사업장,
-               location AS 로케이션,
-               product_name AS 표준제품명,
-               warehouse_name AS ERP명,
-               lot AS 제조번호,
-               exp_date AS 유통기한,
-               qty AS 수량
-        FROM inventory
-        WHERE product_name=? AND qty>0
-        ORDER BY company, location, exp_date, lot
-        """,
-        (product_name,),
-    )
-
-
 def render_product_stock_summary(product_name: str):
     product_name = str(product_name or "").strip()
     if not product_name:
@@ -81,6 +63,14 @@ def render_product_stock_summary(product_name: str):
     page_map_search_results(product_name)
 
 
+def _select_shortcut_product(product_name: str):
+    product_name = str(product_name or "").strip()
+    if not product_name:
+        return
+    st.session_state["shortcut_selected_product"] = product_name
+    st.rerun()
+
+
 def _product_button_list(df: pd.DataFrame, key_prefix: str):
     if df.empty:
         st.info("표시할 제품이 없습니다.")
@@ -88,8 +78,23 @@ def _product_button_list(df: pd.DataFrame, key_prefix: str):
     for r in df.itertuples(index=False):
         product_name = str(getattr(r, "product_name") or "")
         if st.button(product_name, key=f"{key_prefix}_{product_name}", use_container_width=True):
-            st.session_state["shortcut_selected_product"] = product_name
-            st.rerun()
+            _select_shortcut_product(product_name)
+
+
+def _favorite_product_search():
+    term = st.text_input("제품 검색", placeholder="제품명/ERP명/별칭 일부 입력", key="favorite_product_search_term")
+    term = str(term or "").strip()
+    if not term:
+        return
+    opts = product_options(term)
+    if opts.empty:
+        st.info("검색 결과가 없습니다.")
+        return
+    st.caption("검색 결과")
+    names = opts["standard_name"].dropna().astype(str).drop_duplicates().head(30).tolist()
+    for product_name in names:
+        if st.button(product_name, key=f"favorite_search_pick_{product_name}", use_container_width=True):
+            _select_shortcut_product(product_name)
 
 
 def page_favorite_products():
@@ -106,6 +111,9 @@ def page_favorite_products():
     )
     left, right = st.columns([3, 7], gap="large")
     with left:
+        _favorite_product_search()
+        st.markdown("---")
+        st.markdown("#### 즐겨찾기 목록")
         _product_button_list(fav_df, "favorite_product")
     with right:
         render_product_stock_summary(st.session_state.get("shortcut_selected_product", ""))
