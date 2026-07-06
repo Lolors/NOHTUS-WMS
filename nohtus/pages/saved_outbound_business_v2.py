@@ -64,52 +64,59 @@ def _order_items_summary(order_id, max_items=3):
 def _status_text_html(status):
     status = str(status or "저장됨")
     if status == "취소됨":
-        return "<span class='saved-order-status-cancel'>취소됨</span>"
-    return "<span class='saved-order-status-save'>저장됨</span>"
+        return "<span style='color:#dc2626;font-weight:800;'>취소됨</span>"
+    if status == "수정됨":
+        return "<span style='color:#16a34a;font-weight:800;'>수정됨</span>"
+    return "<span style='color:#2563eb;font-weight:800;'>저장됨</span>"
 
 
 def _render_saved_orders(orders_df, selected_order_id):
-    html = [
+    st.markdown(
         """
         <style>
-        .saved-order-list{width:100%;}
-        .saved-order-head{display:grid;grid-template-columns:.8fr 1.6fr 4.6fr .9fr;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:13px;font-weight:800;}
-        .saved-order-row{display:grid;grid-template-columns:.8fr 1.6fr 4.6fr .9fr;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #f1f5f9;color:#111827;text-decoration:none;border-radius:8px;}
-        .saved-order-row:hover{background:#f8fafc;text-decoration:underline;text-underline-offset:3px;}
-        .saved-order-row.selected{background:#eff6ff;border-bottom-color:#bfdbfe;}
-        .saved-order-cell{min-width:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-        .saved-order-status{text-align:center;}
-        .saved-order-status-save{color:#2563eb;font-weight:700;}
-        .saved-order-status-cancel{color:#dc2626;font-weight:700;}
+        .saved-order-head{display:grid;grid-template-columns:.9fr 1.7fr 4.5fr .9fr;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:13px;font-weight:800;}
+        .saved-order-cell{height:34px;display:flex;align-items:center;color:#111827;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .saved-order-status{justify-content:center;}
+        .saved-order-selected{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:2px 0;margin:2px 0;}
+        .saved-order-sep{height:1px;background:#f1f5f9;margin:3px 0 5px;}
+        div[data-testid="stButton"] button[kind="secondary"]:hover{ text-decoration:underline; text-underline-offset:3px; }
         </style>
-        <div class='saved-order-list'>
-          <div class='saved-order-head'>
-            <div>날짜</div>
-            <div>매출처</div>
-            <div>포함된 출고 제품</div>
-            <div style='text-align:center;'>상태</div>
-          </div>
-        """
-    ]
+        <div class='saved-order-head'>
+          <div>날짜</div>
+          <div>매출처</div>
+          <div>포함된 출고 제품</div>
+          <div style='text-align:center;'>상태</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     for r in orders_df.itertuples(index=False):
         oid = int(getattr(r, "id"))
         created = str(getattr(r, "order_date", "") or getattr(r, "created_at", ""))[:10]
         customer = str(getattr(r, "customer_name", "") or "-")
         status = str(getattr(r, "status", "저장됨") or "저장됨")
         items_text = _order_items_summary(oid)
-        selected_class = " selected" if int(selected_order_id or 0) == oid else ""
-        html.append(
-            f"""
-            <a class='saved-order-row{selected_class}' href='?saved_order_id={oid}#selected-outbound-detail'>
-              <div class='saved-order-cell'>{escape(created)}</div>
-              <div class='saved-order-cell' title='{escape(customer)}'>{escape(customer)}</div>
-              <div class='saved-order-cell' title='{escape(items_text)}'>{escape(items_text)}</div>
-              <div class='saved-order-cell saved-order-status'>{_status_text_html(status)}</div>
-            </a>
-            """
-        )
-    html.append("</div>")
-    st.markdown("".join(html), unsafe_allow_html=True)
+        selected = int(selected_order_id or 0) == oid
+        if selected:
+            st.markdown("<div class='saved-order-selected'>", unsafe_allow_html=True)
+        cols = st.columns([0.9, 1.7, 4.5, 0.9], gap="small")
+        with cols[0]:
+            if st.button(created, key=f"open_order_date_{oid}", use_container_width=True, type="secondary"):
+                st.session_state["selected_saved_order_id"] = oid
+                st.rerun()
+        with cols[1]:
+            if st.button(customer, key=f"open_order_customer_{oid}", use_container_width=True, type="secondary"):
+                st.session_state["selected_saved_order_id"] = oid
+                st.rerun()
+        with cols[2]:
+            if st.button(items_text, key=f"open_order_items_{oid}", use_container_width=True, type="secondary"):
+                st.session_state["selected_saved_order_id"] = oid
+                st.rerun()
+        with cols[3]:
+            st.markdown(f"<div class='saved-order-cell saved-order-status'>{_status_text_html(status)}</div>", unsafe_allow_html=True)
+        if selected:
+            st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("<div class='saved-order-sep'></div>", unsafe_allow_html=True)
 
 
 def _cancel_order(order_id):
