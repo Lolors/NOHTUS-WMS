@@ -11,7 +11,14 @@ import streamlit as st
 from nohtus.dates import normalize_exp_date
 from nohtus.services.inventory import add_inventory
 from nohtus.services.products import product_options
-from nohtus.services.inbound import ensure_inbound_first_product_mapping, inbound_company_options_for, normalize_blank, product_mapping_name_for, strip_company_stock_label
+from nohtus.services.inbound import (
+    ensure_inbound_first_product_mapping,
+    inbound_company_options_for,
+    normalize_blank,
+    product_mapping_name_for,
+    product_mapping_names_for,
+    strip_company_stock_label,
+)
 from nohtus.services.inbound_bridge_runtime import _apply_inbound_location_pending, _inbound_js_loc_changed
 
 
@@ -31,6 +38,10 @@ def _keep_first_product_section_open_if_needed():
     """도면 클릭 후 rerun되어도 최초 등록 체크/입력칸이 접히지 않게 한다."""
     if bool(st.session_state.get("inbound_first_product")) or _has_first_product_draft():
         st.session_state["inbound_first_product"] = True
+
+
+def _erp_choice_label(value):
+    return str(value or "")
 
 
 def page_inbound():
@@ -110,7 +121,19 @@ def page_inbound():
             product = selected_product
             first_erp_name = ""
             first_product_code = ""
-            wh = product_mapping_name_for(company, product) or product
+            mapping_options = product_mapping_names_for(company, product)
+            if len(mapping_options) > 1:
+                st.warning("해당 표준제품명에 연결된 ERP명이 여러 개입니다. 입고할 ERP명을 선택하세요.")
+                wh = st.selectbox(
+                    "입고 ERP명 선택" if company != "비자료" else "입고 비자료명 선택",
+                    mapping_options,
+                    key=f"inbound_erp_choice_{company}_{product}",
+                    format_func=_erp_choice_label,
+                )
+            elif len(mapping_options) == 1:
+                wh = mapping_options[0]
+            else:
+                wh = product_mapping_name_for(company, product) or product
 
     with top_right:
         lot = st.text_input("LOT/제조번호", value="", placeholder="미입력 시 '-' 저장", key="inbound_lot")
@@ -145,6 +168,6 @@ def page_inbound():
                         memo_parts.append(memo)
                     inbound_memo = " / ".join(memo_parts) if memo_parts else "입고 등록"
                     add_inventory(company, product, wh, normalize_blank(lot), normalize_exp_date(exp), loc, int(qty), inbound_memo)
-                    save_msg.success(f"입고 저장 완료: {company} / {product} / {loc} / {qty}EA")
+                    save_msg.success(f"입고 저장 완료: {company} / {product} / {wh} / {loc} / {qty}EA")
                 except Exception as e:
                     save_msg.error(str(e))
