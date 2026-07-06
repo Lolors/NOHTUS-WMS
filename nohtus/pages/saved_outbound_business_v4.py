@@ -8,12 +8,6 @@ import streamlit.components.v1 as components
 import nohtus.pages.saved_outbound_business_v2 as saved_v2
 
 
-NO_CHIP_STYLE = (
-    "width:48px;height:28px;min-width:48px;max-width:48px;"
-    "display:inline-flex;align-items:center;justify-content:center;"
-    "padding:0;border:1px solid #d1d5db;background:#fff;color:#334155;"
-    "border-radius:6px;font-size:13px;font-weight:500;line-height:1;box-sizing:border-box;"
-)
 SELECTED_NO_CHIP_STYLE = (
     "width:48px;height:28px;min-width:48px;max-width:48px;"
     "display:inline-flex;align-items:center;justify-content:center;"
@@ -54,6 +48,11 @@ def _scroll_selected_detail_once():
     )
 
 
+def _row_cell_html(content, *, title="", class_name=""):
+    title_attr = f" title='{escape(title)}'" if title else ""
+    return f"<div class='saved-order-cell {class_name}'{title_attr}>{content}</div>"
+
+
 def _render_saved_orders_compact_number_button(orders_df, selected_order_id):
     st.markdown(
         """
@@ -66,7 +65,7 @@ def _render_saved_orders_compact_number_button(orders_df, selected_order_id):
         .saved-order-cell{
             height:34px;display:flex;align-items:center;min-width:0;
             color:#111827;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-            line-height:34px;
+            line-height:1.2;
         }
         .saved-order-status{justify-content:center;text-align:center;}
         .saved-order-sep{height:1px;background:#f1f5f9;margin:3px 0 5px;}
@@ -75,8 +74,6 @@ def _render_saved_orders_compact_number_button(orders_df, selected_order_id):
             display:inline-flex!important;align-items:center!important;justify-content:center!important;
             padding:0!important;box-sizing:border-box!important;line-height:1!important;
         }
-        div[data-testid="column"]{display:flex;align-items:center;}
-        div[data-testid="stButton"]{height:34px!important;display:flex!important;align-items:center!important;margin:0!important;}
         div[data-testid="stButton"] button[kind="secondary"]{
             width:48px!important;min-width:48px!important;max-width:48px!important;height:28px!important;
             padding:0!important;border:1px solid #d1d5db!important;
@@ -115,13 +112,13 @@ def _render_saved_orders_compact_number_button(orders_df, selected_order_id):
                     st.session_state["_scroll_saved_outbound_detail"] = True
                     st.rerun()
         with cols[1]:
-            st.markdown(f"<div class='saved-order-cell'>{escape(created)}</div>", unsafe_allow_html=True)
+            st.markdown(_row_cell_html(escape(created)), unsafe_allow_html=True)
         with cols[2]:
-            st.markdown(f"<div class='saved-order-cell' title='{escape(customer)}'>{escape(customer)}</div>", unsafe_allow_html=True)
+            st.markdown(_row_cell_html(escape(customer), title=customer), unsafe_allow_html=True)
         with cols[3]:
-            st.markdown(f"<div class='saved-order-cell' title='{escape(items_text)}'>{escape(items_text)}</div>", unsafe_allow_html=True)
+            st.markdown(_row_cell_html(escape(items_text), title=items_text), unsafe_allow_html=True)
         with cols[4]:
-            st.markdown(f"<div class='saved-order-cell saved-order-status'>{_status_text_html(status)}</div>", unsafe_allow_html=True)
+            st.markdown(_row_cell_html(_status_text_html(status), class_name="saved-order-status"), unsafe_allow_html=True)
         st.markdown("<div class='saved-order-sep'></div>", unsafe_allow_html=True)
 
 
