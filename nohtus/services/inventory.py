@@ -189,9 +189,12 @@ def move_inventory(src_id, to_company, to_location, qty, memo=""):
             cur.execute("""INSERT INTO inventory(company,product_name,warehouse_name,lot,exp_date,location,qty,updated_at)
                            VALUES(?,?,?,?,?,?,?,?)""", (to_company, product_name, dest_warehouse, src["lot"], src["exp_date"], to_location, qty, now))
         tx_type = "사업장+위치이동"
-        if src["company"] == to_company and src["location"] != to_location: tx_type = "위치이동"
-        elif src["company"] != to_company and src["location"] == to_location: tx_type = "사업장이동"
-        if to_company == "비자료": tx_type = "비자료전환"
+        if src["company"] == to_company and src["location"] != to_location:
+            tx_type = "위치이동"
+        elif src["company"] != to_company and src["location"] == to_location:
+            tx_type = "사업장이동"
+        if src["company"] != "비자료" and to_company == "비자료":
+            tx_type = "비자료전환"
 
         move_memo = str(memo or "").strip()
         if str(old_warehouse or "").strip() != str(dest_warehouse or "").strip():
