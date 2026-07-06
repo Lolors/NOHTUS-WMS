@@ -344,19 +344,17 @@ def page_saved_outbound():
     with selected_col:
         st.markdown(f"### 선택된 출고지시서 {escape(display_label)} · {escape(customer_name)}")
         item_df = saved_v2.q(
-            f"""
+            """
             SELECT i.id AS 품목ID, i.inventory_id AS 재고ID, i.location AS 로케이션, i.product_name AS 제품명,
                    i.lot AS LOT, i.exp_date AS 유통기한, i.qty AS 요청수량, i.company AS 사업장, i.warehouse_name AS 전산상명칭
             FROM outbound_order_items i
-            JOIN outbound_orders o ON o.id=i.order_id
             WHERE i.order_id=?
-              AND {saved_v2._valid_outbound_exists_sql('o', 'i')}
             ORDER BY i.id
             """,
             (int(order_id),),
         )
         if item_df.empty:
-            st.info("이 출고지시서에는 유효한 품목이 없습니다.")
+            st.info("이 출고지시서에는 저장된 품목이 없습니다.")
         else:
             item_df["유통기한"] = item_df["유통기한"].apply(display_date_only)
             view_items = item_df[["사업장", "로케이션", "제품명", "LOT", "유통기한", "요청수량"]]
