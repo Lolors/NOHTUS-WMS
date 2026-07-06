@@ -6,7 +6,8 @@ from nohtus.config import APP_TITLE, VERSION
 from nohtus.db_init import init_db
 from nohtus.device import is_mobile, sync_mobile_flag
 from nohtus.navigation import render_sidebar
-from nohtus.pages.closing import page_closing
+from nohtus.pages.all_inventory import page_all_inventory
+from nohtus.pages.closing_business import page_closing
 from nohtus.pages.expiry_alerts import page_expiry_alerts
 from nohtus.pages.history_business import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
@@ -19,18 +20,6 @@ from nohtus.pages.product_matching_business import page_product_matching
 from nohtus.pages.product_shortcuts import page_favorite_products, page_recent_products
 from nohtus.pages.saved_outbound_business_v2 import page_saved_outbound as page_saved_outbound_refactored
 from nohtus.pages.stocktake_business import page_stocktake
-
-
-# RC3.0 STABLE BASE 개발 원칙
-# [CORE FREEZE / 절대 수정 금지]
-# - 입고도면 클릭 및 입고 위치 연동
-# - 로케이션맵 상세보기
-# - 로케이션맵 제품명 클릭 -> 제품검색 자동 실행
-# - 도면 SVG / 클릭 JS / query parameter 연동
-#
-# RC2.82는 위 기능이 정상 작동하던 안정 기준입니다.
-# 이후 기능 추가는 이 코어를 직접 수정하지 않고,
-# CSS/UI/서비스 함수 레이어에서만 확장하는 방식으로 진행합니다.
 
 
 def main():
@@ -60,6 +49,8 @@ def main():
         page_expiry_alerts()
     elif menu == "즐겨찾는 제품":
         page_favorite_products()
+    elif menu == "전체 조회":
+        page_all_inventory()
     elif menu == "최근 조회":
         page_recent_products()
     elif menu == "출고지시":
