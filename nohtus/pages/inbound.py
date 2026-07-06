@@ -64,7 +64,6 @@ def _render_inbound_location_bridge():
     st.text_input("__입고도면선택값", value="", key="_inbound_js_loc_buffer", label_visibility="collapsed")
     if st.button("__입고도면적용", key="_inbound_apply_btn"):
         if _set_inbound_location(st.session_state.get("_inbound_js_loc_buffer", "")):
-            st.session_state["_inbound_js_loc_buffer"] = ""
             st.rerun()
 
 
