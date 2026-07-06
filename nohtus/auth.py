@@ -18,7 +18,7 @@ DEFAULT_USERS = {
 ROLE_PAGES = {
     "admin": None,
     "user": None,
-    "viewer": {"로케이션 맵"},
+    "viewer": {"로케이션 맵", "즐겨찾는 제품", "최근 조회"},
 }
 
 
@@ -51,6 +51,17 @@ def ensure_auth_tables():
                 username TEXT NOT NULL,
                 product_name TEXT NOT NULL,
                 created_at TEXT,
+                UNIQUE(username, product_name)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS recent_product_views(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                product_name TEXT NOT NULL,
+                viewed_at TEXT,
                 UNIQUE(username, product_name)
             )
             """
@@ -91,8 +102,7 @@ def current_role():
 
 def allowed_pages_for_current_user():
     role = current_role()
-    pages = ROLE_PAGES.get(role)
-    return pages
+    return ROLE_PAGES.get(role)
 
 
 def can_access_page(page_name: str) -> bool:
@@ -110,20 +120,31 @@ def logout():
     st.rerun()
 
 
+def _load_user(username: str):
+    username = str(username or "").strip().lower()
+    if not username:
+        return None
+    df = q("SELECT username, display_name, role, COALESCE(password_hash,'') AS password_hash FROM users WHERE active=1 AND username=?", (username,))
+    if df.empty:
+        return None
+    return df.iloc[0]
+
+
 def render_login():
     ensure_auth_tables()
     st.title("NOHTUS WMS 로그인")
     st.caption("처음 접속하는 계정은 여기서 비밀번호를 설정합니다.")
 
-    user_df = q("SELECT username, display_name, role, COALESCE(password_hash,'') AS password_hash FROM users WHERE active=1 ORDER BY username")
-    labels = [f"{r.username} · {r.display_name}" for r in user_df.itertuples(index=False)] if not user_df.empty else []
-    if not labels:
-        st.error("사용 가능한 계정이 없습니다.")
+    username = st.text_input("아이디", placeholder="예: khn", key="login_username_input").strip().lower()
+    row = _load_user(username) if username else None
+
+    if username and row is None:
+        st.error("존재하지 않는 계정입니다.")
+        return False
+    if row is None:
         return False
 
-    login_label = st.selectbox("계정", labels, key="login_username_select")
-    username = login_label.split(" · ", 1)[0].strip()
-    row = user_df[user_df["username"] == username].iloc[0]
+    st.caption(f"계정 확인: {row.get('display_name')} ({row.get('role')})")
     password_hash = str(row.get("password_hash") or "")
 
     if not password_hash:
@@ -142,11 +163,7 @@ def render_login():
             with connect() as con:
                 con.execute("UPDATE users SET password_hash=?, updated_at=? WHERE username=?", (new_hash, now, username))
                 con.commit()
-            st.session_state["current_user"] = {
-                "username": username,
-                "display_name": str(row.get("display_name") or username),
-                "role": str(row.get("role") or "user"),
-            }
+            st.session_state["current_user"] = {"username": username, "display_name": str(row.get("display_name") or username), "role": str(row.get("role") or "user")}
             st.rerun()
     else:
         pw = st.text_input("비밀번호", type="password", key="login_password")
@@ -154,11 +171,7 @@ def render_login():
             if _hash_password(username, pw) != password_hash:
                 st.error("비밀번호가 맞지 않습니다.")
                 return False
-            st.session_state["current_user"] = {
-                "username": username,
-                "display_name": str(row.get("display_name") or username),
-                "role": str(row.get("role") or "user"),
-            }
+            st.session_state["current_user"] = {"username": username, "display_name": str(row.get("display_name") or username), "role": str(row.get("role") or "user")}
             st.rerun()
     return False
 
