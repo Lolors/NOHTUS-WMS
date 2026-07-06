@@ -7,6 +7,7 @@ from nohtus.db_init import init_db
 from nohtus.device import is_mobile, sync_mobile_flag
 from nohtus.navigation import render_sidebar
 from nohtus.pages.closing import page_closing
+from nohtus.pages.expiry_alerts import page_expiry_alerts
 from nohtus.pages.history import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.location_map import page_map
@@ -55,6 +56,8 @@ def main():
 
     if menu == "로케이션 맵":
         page_map()
+    elif menu == "유통기한 임박":
+        page_expiry_alerts()
     elif menu == "즐겨찾는 제품":
         page_favorite_products()
     elif menu == "최근 조회":
