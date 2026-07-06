@@ -15,8 +15,8 @@ _SPECIAL_LOCATIONS = ["홍보물랙", "회색 카트", "오른쪽 창고", "사�
 def render_inbound_quick_location_map():
     """입고 등록용 로케이션 도면.
 
-    도면 디자인은 유지하고, 클릭값은 URL query param(inbound_loc)으로 전달한다.
-    오른쪽 Streamlit 위치 선택 위젯까지 동기화되도록 클릭 시 페이지 rerun을 발생시킨다.
+    도면 디자인은 유지하고, 클릭값은 부모 Streamlit 화면의 숨김 브리지로 먼저 전달한다.
+    브리지가 실패하면 URL query param(inbound_loc) fallback으로 위치 선택 위젯을 동기화한다.
     """
     try:
         df = q("SELECT DISTINCT location FROM inventory WHERE qty>0 ORDER BY location")
@@ -153,12 +153,54 @@ function markSelected(loc) {{
   }});
   document.querySelectorAll('[data-special-loc]').forEach(function(x) {{ x.classList.toggle('selected', x.dataset.specialLoc === loc); }});
 }}
+function parentDoc() {{
+  try {{ return window.parent.document; }} catch(e) {{}}
+  try {{ return window.top.document; }} catch(e) {{}}
+  return null;
+}}
 function parentBaseHref() {{
   try {{ return window.top.location.href; }} catch(e) {{}}
   try {{ return window.parent.location.href; }} catch(e) {{}}
   return document.referrer || window.location.href;
 }}
-function writeInboundLoc(loc) {{
+function findParentInput(doc) {{
+  if (!doc) return null;
+  return doc.querySelector('.st-key-_inbound_js_loc_buffer input') ||
+         doc.querySelector('div.st-key-_inbound_js_loc_buffer input') ||
+         doc.querySelector('input[aria-label="__입고도면선택값"]') ||
+         Array.from(doc.querySelectorAll('input')).find(function(x) {{ return (x.getAttribute('aria-label') || '').includes('__입고도면선택값'); }}) || null;
+}}
+function findParentButton(doc) {{
+  if (!doc) return null;
+  return doc.querySelector('.st-key-_inbound_apply_btn button') ||
+         doc.querySelector('div.st-key-_inbound_apply_btn button') ||
+         Array.from(doc.querySelectorAll('button')).find(function(x) {{ return ((x.innerText || x.textContent || '').trim()).includes('__입고도면적용'); }}) || null;
+}}
+function setNativeValue(input, value) {{
+  try {{
+    const win = input.ownerDocument.defaultView || window.parent;
+    const setter = Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, value);
+  }} catch(e) {{
+    input.value = value;
+  }}
+  input.dispatchEvent(new Event('input', {{bubbles: true}}));
+  input.dispatchEvent(new Event('change', {{bubbles: true}}));
+}}
+function sendToParentBridge(loc) {{
+  try {{
+    const doc = parentDoc();
+    const input = findParentInput(doc);
+    const btn = findParentButton(doc);
+    if (!input || !btn) return false;
+    setNativeValue(input, loc);
+    setTimeout(function() {{ btn.click(); }}, 60);
+    return true;
+  }} catch(e) {{
+    return false;
+  }}
+}}
+function fallbackToInboundUrl(loc) {{
   try {{
     const url = new URL(parentBaseHref());
     url.searchParams.set('inbound_loc', loc);
@@ -179,7 +221,9 @@ function applyInboundLoc(loc) {{
   if (!loc) return;
   markSelected(loc);
   try {{ sessionStorage.setItem('nohtus_inbound_loc', loc); }} catch(e) {{}}
-  writeInboundLoc(loc);
+  if (!sendToParentBridge(loc)) {{
+    fallbackToInboundUrl(loc);
+  }}
 }}
 function toggleSpecialMenu(forceClose) {{
   const menu = document.getElementById('specialMenu');
