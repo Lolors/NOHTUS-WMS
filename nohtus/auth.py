@@ -130,12 +130,45 @@ def _load_user(username: str):
     return df.iloc[0]
 
 
+def _apply_login_style():
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stAppViewContainer"] .main .block-container {
+            max-width: 40vw !important;
+            min-width: 360px !important;
+        }
+        div[data-testid="stTextInput"] div[data-baseweb="input"] {
+            border: 0 !important;
+            box-shadow: none !important;
+            background: #f8fafc !important;
+        }
+        div[data-testid="stTextInput"] div[data-baseweb="input"]:focus-within {
+            border: 0 !important;
+            box-shadow: none !important;
+        }
+        div[data-testid="stTextInput"] input {
+            background: #f8fafc !important;
+        }
+        @media (max-width: 900px) {
+            div[data-testid="stAppViewContainer"] .main .block-container {
+                max-width: 92vw !important;
+                min-width: 0 !important;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_login():
     ensure_auth_tables()
+    _apply_login_style()
     st.title("NOHTUS WMS 로그인")
     st.caption("처음 접속하는 계정은 여기서 비밀번호를 설정합니다.")
 
-    username = st.text_input("아이디", placeholder="예: khn", key="login_username_input").strip().lower()
+    username = st.text_input("아이디", key="login_username_input").strip().lower()
     row = _load_user(username) if username else None
 
     if username and row is None:
