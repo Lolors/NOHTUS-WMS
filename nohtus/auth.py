@@ -93,7 +93,13 @@ def ensure_auth_tables():
                     (info["display_name"], info["role"], now, username),
                 )
         for legacy_username in LEGACY_USERNAMES:
-            cur.execute("UPDATE users SET active=0, updated_at=? WHERE username=?", (now, legacy_username))
+            cur.execute("DELETE FROM favorite_products WHERE username=?", (legacy_username,))
+            cur.execute("DELETE FROM recent_product_views WHERE username=?", (legacy_username,))
+            try:
+                cur.execute("DELETE FROM mobile_favorites WHERE username=?", (legacy_username,))
+            except Exception:
+                pass
+            cur.execute("DELETE FROM users WHERE username=?", (legacy_username,))
         con.commit()
 
 
