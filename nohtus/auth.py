@@ -20,7 +20,7 @@ LEGACY_USERNAMES = ["khn", "kjw", "shj", "ngw", "njg"]
 ROLE_PAGES = {
     "admin": None,
     "user": None,
-    "viewer": {"로케이션 맵", "유통기한 임박", "즐겨찾는 제품", "최근 조회"},
+    "viewer": {"로케이션 맵", "유통기한 임박", "즐겨찾는 제품", "전체 조회"},
 }
 
 
@@ -92,14 +92,14 @@ def ensure_auth_tables():
                     "UPDATE users SET display_name=?, role=?, active=1, updated_at=? WHERE username=?",
                     (info["display_name"], info["role"], now, username),
                 )
-        for legacy_username in LEGACY_USERNAMES:
-            cur.execute("DELETE FROM favorite_products WHERE username=?", (legacy_username,))
-            cur.execute("DELETE FROM recent_product_views WHERE username=?", (legacy_username,))
+        for old_username in LEGACY_USERNAMES:
+            cur.execute("DELETE FROM users WHERE username=?", (old_username,))
+            cur.execute("DELETE FROM favorite_products WHERE username=?", (old_username,))
+            cur.execute("DELETE FROM recent_product_views WHERE username=?", (old_username,))
             try:
-                cur.execute("DELETE FROM mobile_favorites WHERE username=?", (legacy_username,))
+                cur.execute("DELETE FROM mobile_favorite_products WHERE username=?", (old_username,))
             except Exception:
                 pass
-            cur.execute("DELETE FROM users WHERE username=?", (legacy_username,))
         con.commit()
 
 
@@ -155,43 +155,29 @@ def render_login():
     ensure_auth_tables()
     st.markdown("""
     <style>
-    div[data-testid="stForm"] {
-        border: 0 !important;
-        box-shadow: none !important;
-        background: transparent !important;
-        padding: 0 !important;
-    }
-    div[data-testid="stForm"] > div {
-        border: 0 !important;
-        box-shadow: none !important;
-        background: transparent !important;
-        padding: 0 !important;
-    }
     @media (min-width: 769px) {
         div[data-testid="stTextInput"],
         div[data-testid="stButton"],
         div[data-testid="stFormSubmitButton"],
-        div[data-testid="stAlert"] {
+        div[data-testid="stAlert"],
+        div[data-testid="stForm"] {
             width: 20vw !important;
-            min-width: 320px !important;
             max-width: 420px !important;
+            min-width: 320px !important;
             margin-left: auto !important;
             margin-right: auto !important;
         }
-        div[data-testid="stTextInput"] > div,
-        div[data-testid="stButton"] > button,
-        div[data-testid="stFormSubmitButton"] > button,
-        div[data-testid="stAlert"] > div {
-            width: 100% !important;
+        div[data-testid="stForm"] {
+            border: 0 !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            padding: 0 !important;
         }
-        .login-caption-narrow {
-            width: 20vw !important;
-            min-width: 320px !important;
-            max-width: 420px !important;
-            margin-left: auto !important;
-            margin-right: auto !important;
-            color: #64748b;
-            font-size: 0.875rem;
+        div[data-testid="stForm"] > div {
+            border: 0 !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            padding: 0 !important;
         }
     }
     @media (max-width: 768px) {
@@ -199,24 +185,18 @@ def render_login():
         div[data-testid="stButton"],
         div[data-testid="stFormSubmitButton"],
         div[data-testid="stAlert"],
-        .login-caption-narrow {
+        div[data-testid="stForm"] {
             width: 100% !important;
-            min-width: 0 !important;
             max-width: 100% !important;
-        }
-        div[data-testid="stTextInput"] > div,
-        div[data-testid="stButton"] > button,
-        div[data-testid="stFormSubmitButton"] > button,
-        div[data-testid="stAlert"] > div {
-            width: 100% !important;
+            min-width: 0 !important;
         }
     }
+    .login-title {text-align:center;margin-top:1.2rem;margin-bottom:0.3rem;font-size:2.2rem;font-weight:700;}
+    .login-caption {text-align:center;color:#64748b;margin-bottom:1.2rem;}
     </style>
-    <div style="text-align:center; margin: 0.2rem 0 0.35rem 0;">
-        <h1 style="margin:0; font-size:2.5rem; line-height:1.25; font-weight:700; color:#111827;">NOHTUS WMS 로그인</h1>
-        <p style="margin:0.5rem 0 1.2rem 0; color:#64748b; font-size:0.95rem;">처음 접속하는 계정은 여기서 비밀번호를 설정합니다.</p>
-    </div>
     """, unsafe_allow_html=True)
+    st.markdown("<div class='login-title'>NOHTUS WMS 로그인</div>", unsafe_allow_html=True)
+    st.markdown("<div class='login-caption'>처음 접속하는 계정은 여기서 비밀번호를 설정합니다.</div>", unsafe_allow_html=True)
 
     username = st.text_input("아이디", key="login_username_input").strip().lower()
     row = _load_user(username) if username else None
@@ -227,15 +207,12 @@ def render_login():
     if row is None:
         return False
 
-    st.markdown(
-        f"<div class='login-caption-narrow'>계정 확인: {row.get('display_name')} ({row.get('role')})</div>",
-        unsafe_allow_html=True,
-    )
+    st.caption(f"계정 확인: {row.get('display_name')} ({row.get('role')})")
     password_hash = str(row.get("password_hash") or "")
 
     if not password_hash:
         st.info("첫 접속입니다. 사용할 비밀번호를 설정하세요.")
-        with st.form("first_password_login_form"):
+        with st.form("first_password_form", clear_on_submit=False):
             p1 = st.text_input("새 비밀번호", type="password", key="first_password_1")
             p2 = st.text_input("새 비밀번호 확인", type="password", key="first_password_2")
             submitted = st.form_submit_button("비밀번호 설정 후 로그인", type="primary", use_container_width=True)
@@ -254,7 +231,7 @@ def render_login():
             st.session_state["current_user"] = {"username": username, "display_name": str(row.get("display_name") or username), "role": str(row.get("role") or "user")}
             st.rerun()
     else:
-        with st.form("password_login_form"):
+        with st.form("login_form", clear_on_submit=False):
             pw = st.text_input("비밀번호", type="password", key="login_password")
             submitted = st.form_submit_button("로그인", type="primary", use_container_width=True)
         if submitted:
