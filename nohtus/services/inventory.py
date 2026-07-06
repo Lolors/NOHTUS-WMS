@@ -47,6 +47,17 @@ def _stock_key(product_name, lot, exp_date):
     )
 
 
+def _current_actor():
+    try:
+        from nohtus.auth import current_display_name, current_username
+
+        display_name = str(current_display_name() or "").strip()
+        username = str(current_username() or "").strip()
+        return display_name or username or ""
+    except Exception:
+        return ""
+
+
 def current_product_lot_exp_stock(cur, product_name, lot, exp_date):
     """현재 DB 기준 표준제품명+LOT+유통기한 전체 재고 합계."""
     product, lot, exp_date = _stock_key(product_name, lot, exp_date)
@@ -120,15 +131,16 @@ def backfill_missing_transaction_final_stock():
 
 def insert_transaction_log(cur, *, created_at, tx_type, product_name, warehouse_name=None,
                            lot=None, exp_date=None, from_company=None, from_location=None,
-                           to_company=None, to_location=None, qty=0, memo="", final_stock=None):
+                           to_company=None, to_location=None, qty=0, memo="", final_stock=None, actor=None):
     if final_stock is None:
         final_stock = current_product_lot_exp_stock(cur, product_name, lot, exp_date)
+    actor = str(actor if actor is not None else _current_actor()).strip()
     cur.execute(
         """INSERT INTO transactions(
-               created_at, tx_type, product_name, warehouse_name, lot, exp_date,
+               created_at, actor, tx_type, product_name, warehouse_name, lot, exp_date,
                from_company, from_location, to_company, to_location, qty, memo, final_stock
-           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (created_at, tx_type, product_name, warehouse_name, lot, exp_date,
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (created_at, actor, tx_type, product_name, warehouse_name, lot, exp_date,
          from_company, from_location, to_company, to_location, int(qty or 0), memo, final_stock),
     )
 
