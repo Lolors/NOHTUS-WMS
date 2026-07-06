@@ -155,6 +155,18 @@ def render_login():
     ensure_auth_tables()
     st.markdown("""
     <style>
+    div[data-testid="stForm"] {
+        border: 0 !important;
+        box-shadow: none !important;
+        background: transparent !important;
+        padding: 0 !important;
+    }
+    div[data-testid="stForm"] > div {
+        border: 0 !important;
+        box-shadow: none !important;
+        background: transparent !important;
+        padding: 0 !important;
+    }
     @media (min-width: 769px) {
         div[data-testid="stTextInput"],
         div[data-testid="stButton"],
