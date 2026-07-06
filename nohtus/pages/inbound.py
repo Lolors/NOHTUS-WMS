@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+import json
+
 import streamlit as st
+import streamlit.components.v1 as components
 
 from nohtus.dates import normalize_exp_date
 from nohtus.services.inventory import add_inventory
@@ -15,11 +18,119 @@ from nohtus.services.inbound import ensure_inbound_first_product_mapping, inboun
 from nohtus.services.inbound_bridge_runtime import _apply_inbound_location_pending, _inbound_js_loc_changed
 
 
+INBOUND_DRAFT_QUERY_KEYS = {
+    "inbound_first_product": "inbound_first_product",
+    "inbound_new_product_name": "inbound_new_product_name",
+    "inbound_new_erp_name": "inbound_new_erp_name",
+    "inbound_new_product_code": "inbound_new_product_code",
+    "inbound_source": "inbound_source",
+    "inbound_product_term": "inbound_product_term",
+    "inbound_lot": "inbound_lot",
+    "inbound_exp": "inbound_exp",
+}
+
+
+def _query_value(name):
+    try:
+        value = st.query_params.get(name)
+    except Exception:
+        return None
+    if isinstance(value, list):
+        return value[0] if value else None
+    return value
+
+
+def _restore_inbound_draft_from_query():
+    """도면 클릭 URL에 실린 최초 등록 입력값을 위젯 생성 전에 복원한다."""
+    restored = False
+    first_flag = _query_value("inbound_first_product")
+    if str(first_flag or "") == "1":
+        st.session_state["inbound_first_product"] = True
+        restored = True
+
+    for query_key, state_key in INBOUND_DRAFT_QUERY_KEYS.items():
+        if query_key == "inbound_first_product":
+            continue
+        value = _query_value(query_key)
+        if value is not None:
+            st.session_state[state_key] = str(value)
+            restored = True
+
+    if restored:
+        for query_key in INBOUND_DRAFT_QUERY_KEYS:
+            try:
+                if query_key in st.query_params:
+                    del st.query_params[query_key]
+            except Exception:
+                pass
+
+
+def _install_inbound_draft_link_preserver():
+    """입고 도면 링크 클릭 직전에 최초 등록 입력값을 query parameter에 싣는다."""
+    label_map = {
+        "inbound_source": ["매입처"],
+        "inbound_product_term": ["제품 검색"],
+        "inbound_new_product_name": ["표준제품명"],
+        "inbound_new_erp_name": ["ERP명", "비자료명"],
+        "inbound_new_product_code": ["제품코드"],
+        "inbound_lot": ["LOT/제조번호"],
+        "inbound_exp": ["유통기한"],
+    }
+    components.html(
+        f"""
+        <script>
+        (function() {{
+          const labelMap = {json.dumps(label_map, ensure_ascii=False)};
+          function install() {{
+            try {{
+              const doc = window.parent.document;
+              if (doc.__nohtusInboundDraftPreserverInstalled) return;
+              doc.__nohtusInboundDraftPreserverInstalled = true;
+
+              function inputValue(labels) {{
+                for (const label of labels) {{
+                  const el = doc.querySelector('input[aria-label="' + label.replace(/"/g, '\\"') + '"]');
+                  if (el) return el.value || '';
+                }}
+                return '';
+              }}
+
+              function checked(label) {{
+                const el = doc.querySelector('input[aria-label="' + label.replace(/"/g, '\\"') + '"]');
+                return !!(el && el.checked);
+              }}
+
+              doc.addEventListener('click', function(ev) {{
+                const target = ev.target && ev.target.closest ? ev.target.closest('a[data-inbound-loc]') : null;
+                if (!target || !checked('최초 등록')) return;
+                const url = new URL(target.href, window.parent.location.href);
+                url.searchParams.set('inbound_first_product', '1');
+                for (const [key, labels] of Object.entries(labelMap)) {{
+                  const value = inputValue(labels);
+                  if (value) url.searchParams.set(key, value);
+                  else url.searchParams.delete(key);
+                }}
+                target.href = url.toString();
+              }}, true);
+            }} catch (e) {{}}
+          }}
+          install();
+          setTimeout(install, 100);
+          setTimeout(install, 500);
+        }})();
+        </script>
+        """,
+        height=0,
+        scrolling=False,
+    )
+
+
 def page_inbound():
     from styles import apply_inbound_bridge_style
     from nohtus.ui.location_picker import inbound_location_picker
     from inbound_map import render_inbound_quick_location_map
 
+    _restore_inbound_draft_from_query()
     _apply_inbound_location_pending()
     st.title("입고 등록")
 
@@ -64,14 +175,13 @@ def page_inbound():
 
         if first_product:
             st.markdown("##### 최초 제품 등록")
-            product = st.text_input("표준제품명", value="", placeholder="WMS 표준제품명", key="inbound_new_product_name").strip()
+            product = st.text_input("표준제품명", placeholder="WMS 표준제품명", key="inbound_new_product_name").strip()
             first_erp_name = st.text_input(
                 "ERP명" if company != "비자료" else "비자료명",
-                value="",
                 placeholder="선택한 사업장의 ERP명/비자료명",
                 key="inbound_new_erp_name",
             ).strip()
-            first_product_code = st.text_input("제품코드", value="", placeholder="노투스팜/NOH ERP 제품코드", key="inbound_new_product_code").strip()
+            first_product_code = st.text_input("제품코드", placeholder="노투스팜/NOH ERP 제품코드", key="inbound_new_product_code").strip()
             wh = first_erp_name or product
         else:
             selected_product = st.selectbox(
@@ -89,6 +199,8 @@ def page_inbound():
     with top_right:
         lot = st.text_input("LOT/제조번호", value="", placeholder="미입력 시 '-' 저장", key="inbound_lot")
         exp = st.text_input("유통기한", value="", placeholder="예: 28/3/2, 28.3.2, 2028-03-02 / 미입력 시 '-' 저장", key="inbound_exp")
+
+    _install_inbound_draft_link_preserver()
 
     st.markdown("---")
     map_col, pos_col = st.columns([7.3, 2.7], gap="large")
