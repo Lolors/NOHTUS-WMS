@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from html import escape
 
 import streamlit as st
@@ -50,6 +51,109 @@ def _scroll_selected_detail_once():
 def _cell(content, *, title="", class_name=""):
     title_attr = f" title='{escape(str(title))}'" if title else ""
     return f"<div class='saved-order-cell {class_name}'{title_attr}>{content}</div>"
+
+
+def _saved_outbound_total_pages(per_page=10):
+    all_orders = saved_v2.q(
+        f"""
+        SELECT DISTINCT o.id, o.created_at, o.order_date, COALESCE(o.title,'') AS title,
+               COALESCE(o.customer_name,'') AS customer_name,
+               COALESCE(o.customer_company,'') AS customer_company,
+               o.status
+        FROM outbound_orders o
+        JOIN outbound_order_items i ON o.id=i.order_id
+        WHERE IFNULL(o.status,'')<>'취소됨'
+          AND {saved_v2._valid_outbound_exists_sql('o', 'i')}
+        ORDER BY o.id DESC
+        """
+    )
+    if all_orders.empty:
+        return 1
+
+    filtered = all_orders.copy()
+    start_date = st.session_state.get("saved_start_date", date.today())
+    end_date = st.session_state.get("saved_end_date", date.today())
+    customer_term = str(st.session_state.get("saved_customer_search", "") or "")
+    search_term = str(st.session_state.get("saved_outbound_search", "") or "")
+
+    if start_date:
+        filtered = filtered[filtered["order_date"] >= str(start_date)]
+    if end_date:
+        filtered = filtered[filtered["order_date"] <= str(end_date)]
+    if customer_term.strip():
+        needle = customer_term.strip().lower()
+        filtered = filtered[filtered["customer_name"].fillna("").astype(str).str.lower().str.contains(needle, regex=False)]
+    if search_term.strip() and not filtered.empty:
+        ids = filtered["id"].astype(int).tolist()
+        if ids:
+            placeholders = ",".join(["?"] * len(ids))
+            items_df = saved_v2.q(
+                f"""
+                SELECT DISTINCT i.order_id
+                FROM outbound_order_items i
+                JOIN outbound_orders o ON o.id=i.order_id
+                WHERE i.order_id IN ({placeholders})
+                  AND i.product_name LIKE ?
+                  AND {saved_v2._valid_outbound_exists_sql('o', 'i')}
+                """,
+                tuple(ids + [f"%{search_term.strip()}%"]),
+            )
+            matched_ids = items_df["order_id"].astype(int).tolist() if not items_df.empty else []
+            filtered = filtered[filtered["id"].astype(int).isin(matched_ids)]
+
+    total = len(filtered)
+    return max(1, (total + per_page - 1) // per_page)
+
+
+def _render_saved_order_page_input():
+    total_pages = _saved_outbound_total_pages(per_page=10)
+    if total_pages <= 1:
+        return
+    current_page = int(st.session_state.get("saved_order_page", 1) or 1)
+    current_page = max(1, min(current_page, total_pages))
+    st.session_state["saved_order_page"] = current_page
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stNumberInput"]{
+            width:138px!important;
+            margin:10px auto 2px auto!important;
+            overflow:visible!important;
+        }
+        div[data-testid="stNumberInput"] input{
+            height:54px!important;
+            min-height:54px!important;
+            text-align:center!important;
+            font-size:16px!important;
+        }
+        div[data-testid="stNumberInput"] button{
+            display:flex!important;
+            visibility:visible!important;
+            opacity:1!important;
+            width:32px!important;
+            min-width:32px!important;
+            height:27px!important;
+            min-height:27px!important;
+            padding:0!important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    _left, page_col, _right = st.columns([1, 0.22, 1])
+    with page_col:
+        selected_page = st.number_input(
+            "저장된 출고지시 페이지",
+            min_value=1,
+            max_value=total_pages,
+            value=current_page,
+            step=1,
+            key="saved_order_page_input",
+            label_visibility="collapsed",
+        )
+    if int(selected_page) != current_page:
+        st.session_state["saved_order_page"] = int(selected_page)
+        st.rerun()
 
 
 def _render_saved_orders_compact_number_button(orders_df, selected_order_id):
@@ -115,14 +219,32 @@ def _render_saved_orders_compact_number_button(orders_df, selected_order_id):
         with cols[4]:
             st.markdown(_cell(_status_text_html(status), class_name="saved-order-status"), unsafe_allow_html=True)
         st.markdown("<div class='saved-order-sep'></div>", unsafe_allow_html=True)
+    _render_saved_order_page_input()
 
 
 def page_saved_outbound():
     original_renderer = saved_v2._render_saved_orders
+    original_button = st.button
+    original_markdown = st.markdown
+
+    def patched_button(*args, **kwargs):
+        if kwargs.get("key") in {"page_prev", "page_next"}:
+            return False
+        return original_button(*args, **kwargs)
+
+    def patched_markdown(body, *args, **kwargs):
+        if isinstance(body, str) and "text-align:center;color:#64748b;font-weight:700;margin:8px 0;" in body:
+            return None
+        return original_markdown(body, *args, **kwargs)
+
     saved_v2._render_saved_orders = _render_saved_orders_compact_number_button
+    st.button = patched_button
+    st.markdown = patched_markdown
     try:
         result = saved_v2.page_saved_outbound()
         _scroll_selected_detail_once()
         return result
     finally:
         saved_v2._render_saved_orders = original_renderer
+        st.button = original_button
+        st.markdown = original_markdown
