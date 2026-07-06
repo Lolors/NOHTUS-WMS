@@ -145,14 +145,24 @@ def render_login():
     ensure_auth_tables()
     st.markdown("""
     <style>
-    div[data-testid="stAppViewContainer"] .main .block-container {
-        max-width: 40% !important;
-        min-width: 420px !important;
-        margin-left: auto !important;
-        margin-right: auto !important;
+    @media (min-width: 769px) {
+        section.main > div.block-container,
+        div[data-testid="stAppViewContainer"] div.block-container,
+        .block-container {
+            width: 40vw !important;
+            max-width: 40vw !important;
+            min-width: 420px !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
     }
     @media (max-width: 768px) {
-        div[data-testid="stAppViewContainer"] .main .block-container {
+        section.main > div.block-container,
+        div[data-testid="stAppViewContainer"] div.block-container,
+        .block-container {
+            width: 100% !important;
             max-width: 100% !important;
             min-width: 0 !important;
         }
