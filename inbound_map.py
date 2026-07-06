@@ -18,8 +18,12 @@ def render_inbound_quick_location_map():
     로케이션 맵과 같은 HTML/CSS 도면을 사용하고,
     클릭 결과만 입고 위치 콤보박스 브리지로 전달한다.
     """
-    df = q("SELECT DISTINCT location FROM inventory WHERE qty>0 ORDER BY location")
-    stock_locs = set(df["location"].dropna().astype(str).tolist()) if not df.empty else set()
+    try:
+        df = q("SELECT DISTINCT location FROM inventory WHERE qty>0 ORDER BY location")
+        stock_locs = set(df["location"].dropna().astype(str).tolist()) if not df.empty else set()
+    except Exception:
+        stock_locs = set()
+
     selected = st.session_state.get("_inbound_selected_loc", "") or "REC"
     selected_js = json.dumps(selected, ensure_ascii=False)
     special_locations_js = json.dumps(_SPECIAL_LOCATIONS, ensure_ascii=False)
@@ -88,6 +92,8 @@ def render_inbound_quick_location_map():
 .qp .qkey{{background:#f186ca;color:#ff0d0d;}}
 .rec-red{{color:#ff1e12;font-weight:900;}}
 .small-title{{position:absolute;font-size:14px;font-weight:900;color:#111827;text-align:center;}}
+.inbound-bridge-error{{display:none;position:absolute;left:16px;bottom:12px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:10px;padding:8px 10px;font-size:12px;font-weight:800;z-index:50;}}
+.inbound-bridge-error.open{{display:block;}}
 </style></head><body>
 <div class="wms-wrap">
   <div class="map-card">
@@ -136,34 +142,13 @@ def render_inbound_quick_location_map():
       <div class="label" style="left:706px;top:482px;width:170px;">R2 비자료 / R1 자료</div>
       {zone('N','기타 위치',930,565,155,60,'white')}
       <div class="special-menu" id="specialMenu" style="left:930px;top:428px;width:155px;"><button type="button" data-special-loc="홍보물랙">홍보물랙</button><button type="button" data-special-loc="회색 카트">회색 카트</button><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button></div>
+      <div id="inboundBridgeError" class="inbound-bridge-error">입고 위치 반영 버튼을 찾지 못했습니다. 화면을 새로고침하지 않고 대기 중입니다.</div>
     </div></div>
   </div>
 </div>
 <script>
 const specialLocations = {special_locations_js};
 const initialSelectedLocation = {selected_js};
-function parentBaseHref(){{
-  try {{ return window.top.location.href; }} catch(e) {{}}
-  try {{ return window.parent.location.href; }} catch(e) {{}}
-  return document.referrer || window.location.href;
-}}
-function buildParentUrl(key, value){{
-  const url = new URL(parentBaseHref());
-  url.searchParams.set(key, value);
-  url.searchParams.delete('map_search_product');
-  return url.toString();
-}}
-function navigateTop(href){{
-  try {{ window.top.location.assign(href); return; }} catch(e) {{}}
-  try {{ window.parent.location.assign(href); return; }} catch(e) {{}}
-  try {{ window.open(href, '_top'); return; }} catch(e) {{}}
-  const a = document.createElement('a');
-  a.href = href;
-  a.target = '_top';
-  a.rel = 'noopener';
-  document.body.appendChild(a);
-  a.click();
-}}
 function markSelected(loc){{
   document.querySelectorAll('[data-loc]').forEach(b=>{{
     const cellLoc = b.dataset.loc || '';
@@ -171,38 +156,43 @@ function markSelected(loc){{
   }});
   document.querySelectorAll('[data-special-loc]').forEach(x=>x.classList.toggle('selected', x.dataset.specialLoc===loc));
 }}
+function showBridgeError(show){{
+  const box = document.getElementById('inboundBridgeError');
+  if(box) box.classList.toggle('open', !!show);
+}}
+function sameLabel(el, label){{
+  const aria = (el.getAttribute('aria-label') || '').trim();
+  const text = (el.innerText || el.textContent || '').trim();
+  return aria === label || text === label || aria.includes(label) || text.includes(label);
+}}
+function findParentInput(doc){{
+  const exact = doc.querySelector('input[aria-label="__입고도면선택값"]');
+  if(exact) return exact;
+  return Array.from(doc.querySelectorAll('input')).find(input => sameLabel(input, '__입고도면선택값')) || null;
+}}
+function findParentApplyButton(doc){{
+  return Array.from(doc.querySelectorAll('button')).find(btn => sameLabel(btn, '__입고도면적용')) || null;
+}}
+function setNativeInputValue(input, value){{
+  try {{
+    const win = input.ownerDocument.defaultView || window.parent;
+    const setter = Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, value);
+  }} catch(e) {{
+    input.value = value;
+  }}
+  input.dispatchEvent(new Event('input', {{bubbles:true}}));
+  input.dispatchEvent(new Event('change', {{bubbles:true}}));
+}}
 function tryParentInbound(loc){{
   try {{
     const doc = window.parent.document;
-    try {{
-      const url = new URL(parentBaseHref());
-      url.searchParams.set('inbound_loc', loc);
-      url.searchParams.delete('map_search_product');
-      if (window.parent && window.parent.history && window.parent.history.replaceState) {{
-        window.parent.history.replaceState(null, '', url.toString());
-      }} else if (window.top && window.top.history && window.top.history.replaceState) {{
-        window.top.history.replaceState(null, '', url.toString());
-      }}
-    }} catch(e) {{}}
-    const input = doc.querySelector('input[aria-label="__입고도면선택값"]');
-    if (input) {{
-      try {{
-        const setter = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value').set;
-        setter.call(input, loc);
-      }} catch(e) {{
-        input.value = loc;
-      }}
-      input.dispatchEvent(new InputEvent('input', {{bubbles:true, inputType:'insertText', data:loc}}));
-      input.dispatchEvent(new Event('change', {{bubbles:true}}));
-    }}
-    let applied = false;
-    doc.querySelectorAll('button').forEach(btn => {{
-      if ((btn.innerText || '').trim() === '__입고도면적용') {{
-        setTimeout(() => btn.click(), 30);
-        applied = true;
-      }}
-    }});
-    return applied;
+    const input = findParentInput(doc);
+    const button = findParentApplyButton(doc);
+    if(!input || !button) return false;
+    setNativeInputValue(input, loc);
+    setTimeout(() => button.click(), 30);
+    return true;
   }} catch(e) {{
     return false;
   }}
@@ -210,8 +200,8 @@ function tryParentInbound(loc){{
 function applyInboundLoc(loc){{
   if(!loc) return;
   markSelected(loc);
-  if(tryParentInbound(loc)) return;
-  navigateTop(buildParentUrl('inbound_loc', loc));
+  const ok = tryParentInbound(loc);
+  showBridgeError(!ok);
 }}
 function toggleSpecialMenu(forceClose=false){{
   const menu=document.getElementById('specialMenu');
@@ -226,9 +216,9 @@ document.querySelectorAll('[data-special-loc]').forEach(btn=>btn.addEventListene
   applyInboundLoc(loc);
 }}));
 document.querySelectorAll('[data-loc]').forEach(btn=>btn.addEventListener('click',(ev)=>{{
+  ev.preventDefault(); ev.stopPropagation();
   const loc=btn.dataset.loc || '';
   if(loc==='N'){{
-    ev.preventDefault(); ev.stopPropagation();
     markSelected('N');
     toggleSpecialMenu(false);
     return;
