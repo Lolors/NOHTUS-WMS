@@ -150,7 +150,7 @@ def page_map_search_results(term):
     .dist-rule{height:1px;background:#e5e7eb;margin:0 0 14px;}
     .company-head{display:flex;align-items:center;gap:10px;margin:0 0 10px;flex-wrap:wrap;}
     .company-pill{display:inline-flex;align-items:center;border-radius:12px;background:#e8f8ef;color:#118445;font-size:20px;font-weight:500;padding:7px 14px;white-space:nowrap;}
-    .company-erp-name{font-size:20px;color:#4f6fff;font-weight:700;white-space:nowrap;margin-left:2px;}
+    .company-erp-name{font-size:14px;color:#cbd5e1;font-weight:400;white-space:nowrap;margin-left:2px;}
     .company-total-blue{font-size:20px;color:#4f6fff;font-weight:700;white-space:nowrap;margin-left:2px;}
     .no-stock-box{border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;padding:22px;color:#64748b;font-weight:800;}
     .dist-cell-text{display:flex;align-items:center;height:28px;font-size:14px;font-weight:400;color:#111827;white-space:nowrap;}
