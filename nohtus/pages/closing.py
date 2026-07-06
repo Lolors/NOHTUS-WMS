@@ -13,6 +13,15 @@ from nohtus.services.closing import (
 )
 
 
+def _join_unique(values):
+    result = []
+    for v in values:
+        text = str(v or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return ", ".join(result)
+
+
 def page_closing():
     st.title("마감")
     st.caption("출고의 마지막 단계입니다. 오늘 출고 체크, ERP 재고 비교, 업무일지 작성 기능을 한 화면에서 전환합니다.")
@@ -40,7 +49,7 @@ def page_closing():
                      JOIN outbound_order_items i ON o.id=i.order_id
                      LEFT JOIN inventory inv ON i.inventory_id=inv.id
                      WHERE o.order_date=? AND IFNULL(o.status,'')<>'취소됨'
-                     ORDER BY o.id, i.company, i.location, i.product_name, i.lot, i.exp_date""", (ds,))
+                     ORDER BY i.product_name, i.lot, i.exp_date, o.id, i.company, i.location""", (ds,))
         if items.empty:
             st.info("해당 날짜의 출고지시가 없습니다.")
         else:
@@ -49,9 +58,6 @@ def page_closing():
             items["현재수량"] = pd.to_numeric(items["현재수량"], errors="coerce").fillna(0).astype(int)
             valid_inv = items["재고ID"].notna()
             items["동일재고출고합계"] = items.groupby("재고ID")["출고수량"].transform("sum").where(valid_inv, items["출고수량"])
-            # 오늘 출고 체크는 실제 지시내역 확인용이다.
-            # 현재수량은 출고지시 저장으로 이미 차감된 뒤의 inventory 수량이며,
-            # 기존수량은 오늘 해당 재고ID의 출고수량을 되돌려 계산한 출고 전 수량이다.
             items["기존수량"] = items["현재수량"] + items["동일재고출고합계"]
             items["실물수량"] = ""
             try:
@@ -59,9 +65,23 @@ def page_closing():
                 items["매출처"] = items["출고지시서제목"].apply(lambda x: _infer_customer_from_title(x, customers_for_close)[0])
             except Exception:
                 items["매출처"] = ""
-            show_cols = ["지시서번호", "매출처", "사업장", "로케이션", "표준제품명", "제조번호", "유통기한", "기존수량", "출고수량", "현재수량", "실물수량"]
-            st.dataframe(items[show_cols], hide_index=True, use_container_width=True, column_config={"지시서번호": st.column_config.NumberColumn(width="small"), "매출처": st.column_config.TextColumn(width="medium"), "사업장": st.column_config.TextColumn(width="small"), "로케이션": st.column_config.TextColumn(width="small"), "표준제품명": st.column_config.TextColumn(width="large"), "제조번호": st.column_config.TextColumn(width="medium"), "유통기한": st.column_config.TextColumn(width="small"), "기존수량": st.column_config.NumberColumn(width="small"), "출고수량": st.column_config.NumberColumn(width="small"), "현재수량": st.column_config.NumberColumn(width="small"), "실물수량": st.column_config.TextColumn(width="small")})
-            st.download_button("마감 체크리스트 엑셀 다운로드", data=dataframe_to_excel_bytes(items[show_cols], "마감체크"), file_name=f"NOHTUS_마감체크_{ds}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+
+            grouped = (
+                items.groupby(["표준제품명", "제조번호", "유통기한"], as_index=False)
+                .agg({
+                    "매출처": _join_unique,
+                    "사업장": _join_unique,
+                    "로케이션": _join_unique,
+                    "기존수량": "sum",
+                    "출고수량": "sum",
+                    "현재수량": "sum",
+                    "실물수량": "first",
+                })
+            )
+            show_cols = ["매출처", "사업장", "로케이션", "표준제품명", "제조번호", "유통기한", "기존수량", "출고수량", "현재수량", "실물수량"]
+            grouped = grouped[show_cols]
+            st.dataframe(grouped, hide_index=True, use_container_width=True, column_config={"매출처": st.column_config.TextColumn(width="medium"), "사업장": st.column_config.TextColumn(width="small"), "로케이션": st.column_config.TextColumn(width="small"), "표준제품명": st.column_config.TextColumn(width="large"), "제조번호": st.column_config.TextColumn(width="medium"), "유통기한": st.column_config.TextColumn(width="small"), "기존수량": st.column_config.NumberColumn(width="small"), "출고수량": st.column_config.NumberColumn(width="small"), "현재수량": st.column_config.NumberColumn(width="small"), "실물수량": st.column_config.TextColumn(width="small")})
+            st.download_button("마감 체크리스트 엑셀 다운로드", data=dataframe_to_excel_bytes(grouped, "마감체크"), file_name=f"NOHTUS_마감체크_{ds}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     else:
         st.markdown("### 출고")
         out_raw = q("""SELECT o.id AS 지시서번호, COALESCE(o.title, '') AS 출고지시서제목,
