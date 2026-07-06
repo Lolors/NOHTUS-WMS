@@ -63,10 +63,11 @@ def _map_search_product_groups(product_name, inv_df):
     return groups
 
 
-def page_map_search_results(term):
+def page_map_search_results(term, compact: bool = False):
     """로케이션맵 > 제품명 검색 결과.
 
     같은 표준제품명에 전산상명칭(ERP명)이 여러 개 있으면 전산명별로 별도 표시한다.
+    compact=True는 즐겨찾기/최근조회처럼 오른쪽 영역이 좁은 화면에서만 사용한다.
     """
     try:
         from nohtus.services.location_map import get_product_image_path
@@ -136,7 +137,28 @@ def page_map_search_results(term):
     </style>
     """, unsafe_allow_html=True)
 
+    if compact:
+        st.markdown("""
+        <style>
+        .product-photo-panel{width:210px!important;height:210px!important;font-size:18px!important;border-radius:16px!important;}
+        .product-main-name{font-size:16px!important;line-height:1.35!important;}
+        .total-card-small{width:72%!important;min-width:145px!important;margin-bottom:26px!important;padding:10px 12px!important;border-radius:16px!important;}
+        .total-label{font-size:13px!important;}
+        .total-value{font-size:21px!important;}
+        .dist-header{font-size:17px!important;margin-bottom:10px!important;}
+        .company-head{gap:8px!important;margin-bottom:8px!important;}
+        .company-pill{font-size:17px!important;padding:6px 11px!important;border-radius:10px!important;}
+        .company-total-blue{font-size:17px!important;}
+        .dist-cell-text{height:30px!important;font-size:13px!important;letter-spacing:-0.01em!important;}
+        .dist-cell-qty{height:30px!important;font-size:13px!important;justify-content:flex-start!important;}
+        div[data-testid="stButton"] > button{white-space:nowrap!important;}
+        </style>
+        """, unsafe_allow_html=True)
+
     company_order = {"노투스팜": 0, "노투스": 1, "NOH": 2, "비자료": 3}
+    card_columns = [0.78, 3.05] if compact else [0.95, 2.35]
+    header_columns = [5.6, 2.6] if compact else [7, 2]
+    stock_row_columns = [0.85, 1.38, 1.45, 0.78, 1.2] if compact else [1.08, 1.05, 1.05, 0.55, 3.25]
 
     for group in result_groups:
         product_name = group["product_name"]
@@ -146,7 +168,7 @@ def page_map_search_results(term):
         add_recent_product_view(product_name)
 
         with st.container(border=True):
-            left, right = st.columns([0.95, 2.35], gap="large")
+            left, right = st.columns(card_columns, gap="large")
             with left:
                 img_path = get_product_image_path(product_name)
                 if img_path:
@@ -163,7 +185,7 @@ def page_map_search_results(term):
                 )
 
             with right:
-                head_col, fav_col = st.columns([7, 2], gap="small")
+                head_col, fav_col = st.columns(header_columns, gap="small")
                 with head_col:
                     st.markdown("<div class='dist-header'>재고 분포</div>", unsafe_allow_html=True)
                 with fav_col:
@@ -191,7 +213,7 @@ def page_map_search_results(term):
                         cg = cg.sort_values(["location", "lot", "exp_date", "warehouse_name"])
                         for rr in cg.itertuples():
                             loc = str(rr.location)
-                            c_loc, c_lot, c_exp, c_qty, c_blank = st.columns([1.08, 1.05, 1.05, 0.55, 3.25], gap="small")
+                            c_loc, c_lot, c_exp, c_qty, c_blank = st.columns(stock_row_columns, gap="small")
                             with c_loc:
                                 if st.button(loc, key=f"map_dist_loc_{product_name}_{warehouse_name}_{rr.id}_{loc}", use_container_width=True):
                                     st.session_state["selected_location"] = loc
