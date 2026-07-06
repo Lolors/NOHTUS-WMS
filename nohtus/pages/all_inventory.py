@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from html import escape
+
 import pandas as pd
 import streamlit as st
 
@@ -84,22 +86,40 @@ def _prepare_display_df(df):
 
 
 def _render_summary(row_count, total_qty, by_company):
-    c1, c2, c3 = st.columns([1.4, 1.4, 5.2], gap="small")
-    with c1:
-        st.metric("조회 행수", f"{row_count:,}건")
-    with c2:
-        st.metric("총 수량", f"{total_qty:,} EA")
-    with c3:
-        if by_company is not None and not by_company.empty:
-            parts = []
-            for r in by_company.itertuples(index=False):
-                parts.append(f"{getattr(r, '사업장')}: {int(getattr(r, '수량') or 0):,} EA")
-            st.markdown(
-                "<div style='padding:10px 0 0;color:#475569;font-weight:700;'>사업장별 합계 · "
-                + " / ".join(parts)
-                + "</div>",
-                unsafe_allow_html=True,
+    parts = []
+    if by_company is not None and not by_company.empty:
+        for r in by_company.itertuples(index=False):
+            parts.append(
+                f"<span class='all-inv-chip'><span>{escape(str(getattr(r, '사업장') or '-'))}</span>"
+                f"<em>{int(getattr(r, '수량') or 0):,} EA</em></span>"
             )
+    company_html = "".join(parts) or "<span class='all-inv-muted'>사업장별 합계 없음</span>"
+    st.markdown(
+        f"""
+        <style>
+        .all-inv-summary{{
+            display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+            border:1px solid #e5e7eb;background:#ffffff;border-radius:14px;
+            padding:9px 12px;margin:2px 0 12px;color:#334155;
+            box-shadow:0 2px 8px rgba(15,23,42,.025);
+        }}
+        .all-inv-mini{{display:inline-flex;align-items:baseline;gap:6px;padding-right:10px;border-right:1px solid #e5e7eb;}}
+        .all-inv-mini span{{font-size:12px;color:#64748b;font-weight:400;}}
+        .all-inv-mini strong{{font-size:14px;color:#111827;font-weight:600;}}
+        .all-inv-company{{display:flex;align-items:center;gap:7px;flex-wrap:wrap;}}
+        .all-inv-company-label{{font-size:12px;color:#64748b;font-weight:400;margin-right:2px;}}
+        .all-inv-chip{{display:inline-flex;align-items:center;gap:5px;border:1px solid #e5e7eb;background:#f8fafc;border-radius:999px;padding:4px 8px;font-size:12px;color:#475569;font-weight:400;}}
+        .all-inv-chip em{{font-style:normal;color:#2563eb;font-weight:500;}}
+        .all-inv-muted{{font-size:12px;color:#94a3b8;font-weight:400;}}
+        </style>
+        <div class='all-inv-summary'>
+            <div class='all-inv-mini'><span>조회 행수</span><strong>{row_count:,}건</strong></div>
+            <div class='all-inv-mini'><span>총 수량</span><strong>{total_qty:,} EA</strong></div>
+            <div class='all-inv-company'><span class='all-inv-company-label'>사업장별</span>{company_html}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def page_all_inventory():
