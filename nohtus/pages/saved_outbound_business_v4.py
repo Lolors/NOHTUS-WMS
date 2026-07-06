@@ -10,7 +10,7 @@ import nohtus.pages.saved_outbound_business_v2 as saved_v2
 
 BUTTON_W = 48
 BUTTON_H = 28
-ROW_H = 36
+ROW_H = 46
 
 
 def _status_text_html(status):
@@ -67,7 +67,7 @@ def _render_saved_orders_compact_number_button(orders_df, selected_order_id):
             line-height:1.2;
         }}
         .saved-order-status{{justify-content:center;text-align:center;}}
-        .saved-order-sep{{height:1px;background:#f1f5f9;margin:3px 0 5px;}}
+        .saved-order-sep{{height:1px;background:#f6f7f9;margin:1px 0 3px;}}
         .saved-order-no-chip{{
             display:inline-flex;align-items:center;justify-content:center;
             width:{BUTTON_W}px;min-width:{BUTTON_W}px;max-width:{BUTTON_W}px;
@@ -78,17 +78,6 @@ def _render_saved_orders_compact_number_button(orders_df, selected_order_id):
         }}
         .saved-order-no-chip.selected{{
             border-color:#93c5fd;background:#dbeafe;color:#1d4ed8;font-weight:700;
-        }}
-        div[data-testid="stButton"] button[kind="secondary"]{{
-            width:{BUTTON_W}px!important;min-width:{BUTTON_W}px!important;max-width:{BUTTON_W}px!important;
-            height:{BUTTON_H}px!important;min-height:{BUTTON_H}px!important;max-height:{BUTTON_H}px!important;
-            padding:0!important;border:1px solid #d1d5db!important;
-            background:#ffffff!important;color:#334155!important;border-radius:6px!important;
-            font-size:13px!important;font-weight:500!important;line-height:1!important;
-            box-shadow:none!important;box-sizing:border-box!important;
-        }}
-        div[data-testid="stButton"] button[kind="secondary"]:hover{{
-            background:#f8fafc!important;border-color:#cbd5e1!important;color:#111827!important;
         }}
         </style>
         <div class='saved-order-head-clean'>
