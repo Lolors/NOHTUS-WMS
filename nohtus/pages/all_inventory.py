@@ -126,7 +126,7 @@ def page_all_inventory():
     st.title("전체 조회")
     st.caption("전체 재고를 사업장, 표준제품명, ERP명 기준으로 조회합니다.")
 
-    f1, f2, f3 = st.columns([2.2, 3.4, 3.4], gap="small")
+    f1, f2, f3 = st.columns([4, 3, 3], gap="small")
     with f1:
         companies = st.multiselect("사업장", COMPANIES, default=COMPANIES, key="all_inv_companies")
     with f2:
