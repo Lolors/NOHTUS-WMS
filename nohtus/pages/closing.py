@@ -1,5 +1,6 @@
 from datetime import date
 from html import escape
+from io import BytesIO
 
 import pandas as pd
 import streamlit as st
@@ -9,9 +10,9 @@ from nohtus.dates import display_date_only
 from nohtus.services.closing import (
     _infer_customer_from_title,
     _extract_inbound_source_from_memo,
-    dataframe_to_excel_bytes,
     page_erp_stock_compare,
 )
+from nohtus.services.outbound import _find_korean_font
 
 
 def _today_outbound_final_stock_map(items):
@@ -58,19 +59,23 @@ def _today_outbound_display_df(items):
     return pd.DataFrame(rows, columns=["제품명", "제조번호", "유통기한", "매출처", "수량", "총 출고수량", "최종재고"])
 
 
-def _render_today_outbound_html(items):
+def _today_outbound_html(items, *, include_style=True):
     group_cols = ["표준제품명", "제조번호", "유통기한"]
     final_map = _today_outbound_final_stock_map(items)
-    html = [
-        "<style>",
-        ".today-out-table{width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;font-size:14px;}",
-        ".today-out-table th{background:#f1f5f9;color:#111827;font-weight:800;border:1px solid #e5e7eb;padding:8px;text-align:center;}",
-        ".today-out-table td{border:1px solid #e5e7eb;padding:8px;vertical-align:middle;color:#111827;}",
-        ".today-out-table td.num{text-align:right;font-weight:700;}",
-        "</style>",
+    html = []
+    if include_style:
+        html.extend([
+            "<style>",
+            ".today-out-table{width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;font-size:14px;}",
+            ".today-out-table th{background:#f1f5f9;color:#111827;font-weight:800;border:1px solid #e5e7eb;padding:8px;text-align:center;}",
+            ".today-out-table td{border:1px solid #e5e7eb;padding:8px;vertical-align:middle;color:#111827;}",
+            ".today-out-table td.num{text-align:right;font-weight:700;}",
+            "</style>",
+        ])
+    html.extend([
         "<table class='today-out-table'>",
         "<thead><tr><th>제품명</th><th>제조번호</th><th>유통기한</th><th>매출처</th><th>수량</th><th>총 출고수량</th><th>최종재고</th></tr></thead><tbody>",
-    ]
+    ])
     for key, grp in items.groupby(group_cols, sort=False, dropna=False):
         product, lot, exp = key
         total_qty = int(grp["출고수량"].sum())
@@ -89,7 +94,83 @@ def _render_today_outbound_html(items):
                 html.append(f"<td class='num' rowspan='{rowspan}'>{final_qty:,}</td>")
             html.append("</tr>")
     html.append("</tbody></table>")
-    st.markdown("".join(html), unsafe_allow_html=True)
+    return "".join(html)
+
+
+def _render_today_outbound_html(items):
+    st.markdown(_today_outbound_html(items), unsafe_allow_html=True)
+
+
+def _today_outbound_pdf_bytes(items, ds):
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    bio = BytesIO()
+    font_name = "Helvetica"
+    font_path = _find_korean_font()
+    if font_path:
+        try:
+            pdfmetrics.registerFont(TTFont("NOHTUS_KR_CLOSING", font_path))
+            font_name = "NOHTUS_KR_CLOSING"
+        except Exception:
+            font_name = "Helvetica"
+
+    styles = getSampleStyleSheet()
+    styles["Title"].fontName = font_name
+    styles["Normal"].fontName = font_name
+    doc = SimpleDocTemplate(bio, pagesize=landscape(A4), leftMargin=22, rightMargin=22, topMargin=24, bottomMargin=24)
+    story = [Paragraph(f"마감 체크리스트 · {ds}", styles["Title"]), Spacer(1, 12)]
+
+    headers = ["제품명", "제조번호", "유통기한", "매출처", "수량", "총 출고수량", "최종재고"]
+    data = [headers]
+    spans = []
+    group_cols = ["표준제품명", "제조번호", "유통기한"]
+    final_map = _today_outbound_final_stock_map(items)
+    row_idx = 1
+    for key, grp in items.groupby(group_cols, sort=False, dropna=False):
+        product, lot, exp = key
+        total_qty = int(grp["출고수량"].sum())
+        final_qty = final_map.get((product, lot, exp), 0)
+        start = row_idx
+        for i, rr in enumerate(grp.itertuples(index=False)):
+            data.append([
+                str(product) if i == 0 else "",
+                str(lot) if i == 0 else "",
+                str(exp) if i == 0 else "",
+                str(getattr(rr, "매출처", "") or "-"),
+                f"{int(getattr(rr, '출고수량', 0) or 0):,}",
+                f"{total_qty:,}" if i == 0 else "",
+                f"{final_qty:,}" if i == 0 else "",
+            ])
+            row_idx += 1
+        end = row_idx - 1
+        if end > start:
+            for col in [0, 1, 2, 5, 6]:
+                spans.append(("SPAN", (col, start), (col, end)))
+
+    table = Table(data, colWidths=[190, 92, 92, 150, 56, 78, 70], repeatRows=1)
+    style_cmds = [
+        ("FONTNAME", (0, 0), (-1, -1), font_name),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F1F5F9")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#111827")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("ALIGN", (4, 1), (6, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+    ]
+    style_cmds.extend(spans)
+    table.setStyle(TableStyle(style_cmds))
+    story.append(table)
+    doc.build(story)
+    bio.seek(0)
+    return bio.getvalue()
 
 
 def page_closing():
@@ -106,14 +187,29 @@ def page_closing():
 
     if tab == "오늘 출고 체크":
         items = q("""SELECT COALESCE(o.title, '') AS 출고지시서제목,
+                            o.id AS 출고지시서ID,
                             i.inventory_id AS 재고ID,
+                            i.location AS 로케이션,
                             i.product_name AS 표준제품명,
                             COALESCE(i.lot, '-') AS 제조번호,
                             COALESCE(i.exp_date, '-') AS 유통기한,
                             i.qty AS 출고수량
                      FROM outbound_orders o
                      JOIN outbound_order_items i ON o.id=i.order_id
-                     WHERE o.order_date=? AND IFNULL(o.status,'')<>'취소됨'
+                     WHERE o.order_date=?
+                       AND IFNULL(o.status,'')<>'취소됨'
+                       AND EXISTS (
+                           SELECT 1
+                           FROM transactions t
+                           WHERE substr(t.created_at,1,10)=o.order_date
+                             AND t.tx_type IN ('출고지시','출고지시수정','출고')
+                             AND t.product_name=i.product_name
+                             AND COALESCE(t.lot,'-')=COALESCE(i.lot,'-')
+                             AND COALESCE(t.exp_date,'-')=COALESCE(i.exp_date,'-')
+                             AND COALESCE(t.from_location,'')=COALESCE(i.location,'')
+                             AND CAST(t.qty AS INTEGER)=CAST(i.qty AS INTEGER)
+                             AND COALESCE(t.memo,'') LIKE '%' || '출고지시서 #' || CAST(o.id AS TEXT) || '%'
+                       )
                      ORDER BY i.product_name, i.lot, i.exp_date, o.id, i.id""", (ds,))
         if items.empty:
             st.info("해당 날짜의 출고지시가 없습니다.")
@@ -126,8 +222,13 @@ def page_closing():
             except Exception:
                 items["매출처"] = ""
             _render_today_outbound_html(items)
-            out_df = _today_outbound_display_df(items)
-            st.download_button("마감 체크리스트 엑셀 다운로드", data=dataframe_to_excel_bytes(out_df, "마감체크"), file_name=f"NOHTUS_마감체크_{ds}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            st.download_button(
+                "마감 체크리스트 PDF 다운로드",
+                data=_today_outbound_pdf_bytes(items, ds),
+                file_name=f"NOHTUS_마감체크_{ds}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
     else:
         st.markdown("### 출고")
         out_raw = q("""SELECT o.id AS 지시서번호, COALESCE(o.title, '') AS 출고지시서제목,
