@@ -49,6 +49,8 @@ def init_db():
     tx_cols = {r[1] for r in cur.execute("PRAGMA table_info(transactions)").fetchall()}
     if "final_stock" not in tx_cols:
         cur.execute("ALTER TABLE transactions ADD COLUMN final_stock INTEGER")
+    if "actor" not in tx_cols:
+        cur.execute("ALTER TABLE transactions ADD COLUMN actor TEXT")
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS erp_stock(
