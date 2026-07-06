@@ -8,7 +8,7 @@ from nohtus.device import is_mobile, sync_mobile_flag
 from nohtus.navigation import render_sidebar
 from nohtus.pages.closing import page_closing
 from nohtus.pages.expiry_alerts import page_expiry_alerts
-from nohtus.pages.history import page_history
+from nohtus.pages.history_business import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.location_map import page_map
 from nohtus.pages.customer_master_business import page_customer_master
