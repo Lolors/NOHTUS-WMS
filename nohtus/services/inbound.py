@@ -22,21 +22,48 @@ def first_nonblank(*values):
     return ""
 
 
-def product_mapping_name_for(company, standard_name):
-    if not standard_name:
-        return ""
-    col = {
+def _mapping_column_for_company(company):
+    return {
         "노투스팜": "erp_nohtuspharm_name",
         "NOH": "erp_noh_name",
         "노투스": "erp_nohtus_name",
         "비자료": "bidata_name",
     }.get(str(company or "").strip())
+
+
+def product_mapping_names_for(company, standard_name):
+    """같은 표준제품명에 연결된 선택 사업장의 ERP명/비자료명 후보 목록."""
+    standard_name = str(standard_name or "").strip()
+    if not standard_name:
+        return []
+    col = _mapping_column_for_company(company)
     if not col:
-        return ""
-    df = q(f"SELECT {col} AS nm FROM products WHERE standard_name=?", (standard_name,))
+        return []
+    df = q(
+        f"""
+        SELECT {col} AS nm
+        FROM products
+        WHERE TRIM(standard_name)=?
+          AND TRIM(COALESCE({col}, '')) <> ''
+        ORDER BY id
+        """,
+        (standard_name,),
+    )
     if df.empty:
-        return ""
-    return first_nonblank(df.iloc[0].get("nm"))
+        return []
+    seen = set()
+    names = []
+    for value in df["nm"].tolist():
+        text = first_nonblank(value)
+        if text and text not in seen:
+            seen.add(text)
+            names.append(text)
+    return names
+
+
+def product_mapping_name_for(company, standard_name):
+    names = product_mapping_names_for(company, standard_name)
+    return names[0] if names else ""
 
 
 def ensure_inbound_first_product_mapping(standard_name, company, erp_name, product_code=""):
@@ -86,6 +113,7 @@ def strip_company_stock_label(label):
     text = str(label or "").strip()
     return re.sub(r"\s*\(\s*[-+]?\d+\s*EA\s*\)\s*$", "", text).strip()
 
+
 def inbound_company_options_for(product_name):
     """입고등록 전용 사업장 선택지.
     등록대기는 입고등록 전용 임시값이므로 수량을 붙이지 않는다.
@@ -103,7 +131,6 @@ def inbound_company_options_for(product_name):
                 if c in stock:
                     stock[c] = int(getattr(r, "qty", 0) or 0)
     return [f"{c} ({stock.get(c, 0)} EA)" for c in COMPANIES] + ["등록대기"]
-
 
 
 # ---------------- mobile stock finder helpers ----------------
