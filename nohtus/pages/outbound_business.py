@@ -13,6 +13,8 @@ def page_outbound():
     original_text_input = st.text_input
     original_checkbox = st.checkbox
     original_data_editor = st.data_editor
+    original_markdown = st.markdown
+    original_caption = st.caption
     original_manual_pick_rows = outbound_page._manual_pick_rows
 
     st.markdown(
@@ -27,6 +29,32 @@ def page_outbound():
     )
 
     checkbox_skip_values = {}
+
+    def all_company_manual_pick_value():
+        return bool(st.session_state.get("out_all_company_manual_pick", False))
+
+    def patched_markdown(body, *args, **kwargs):
+        if isinstance(body, str) and body.strip() == "### 재고 선택 옵션":
+            return None
+        result = original_markdown(body, *args, **kwargs)
+        if isinstance(body, str) and body.strip() == "### 제품 선택":
+            value = original_checkbox(
+                "사업장 구분 없이 특정 재고 선택",
+                value=all_company_manual_pick_value(),
+                key="out_all_company_manual_pick",
+            )
+            checkbox_skip_values["out_ignore_company"] = bool(value)
+            checkbox_skip_values["out_manual_pick"] = bool(value)
+        return result
+
+    def patched_caption(body, *args, **kwargs):
+        if isinstance(body, str) and (
+            "매출처 사업장과 관계없이" in body
+            or "유통기한 우선 추천 없이" in body
+            or "추천 범위: 전체 사업장 재고" in body
+        ):
+            return None
+        return original_caption(body, *args, **kwargs)
 
     def patched_text_input(label, *args, **kwargs):
         if kwargs.get("key") == "out_customer_term":
@@ -44,10 +72,8 @@ def page_outbound():
         key = kwargs.get("key")
         if key in checkbox_skip_values:
             return checkbox_skip_values[key]
-        if key == "out_ignore_company":
-            manual_value = original_checkbox("특정 재고 선택", value=False, key="out_manual_pick")
-            checkbox_skip_values["out_manual_pick"] = bool(manual_value)
-            return False
+        if key in ["out_ignore_company", "out_manual_pick"]:
+            return all_company_manual_pick_value()
         return original_checkbox(label, *args, **kwargs)
 
     def patched_data_editor(data, *args, **kwargs):
@@ -74,6 +100,8 @@ def page_outbound():
 
     outbound_page._render_last_sale_importer = _hide_last_sale_importer
     outbound_page._manual_pick_rows = original_manual_pick_rows
+    st.markdown = patched_markdown
+    st.caption = patched_caption
     st.text_input = patched_text_input
     st.checkbox = patched_checkbox
     st.data_editor = patched_data_editor
@@ -82,6 +110,8 @@ def page_outbound():
     finally:
         outbound_page._render_last_sale_importer = original_renderer
         outbound_page._manual_pick_rows = original_manual_pick_rows
+        st.markdown = original_markdown
+        st.caption = original_caption
         st.text_input = original_text_input
         st.checkbox = original_checkbox
         st.data_editor = original_data_editor
