@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from html import escape
-
 import pandas as pd
 import streamlit as st
 
@@ -21,7 +19,7 @@ def _filter_signature(companies, product_term, erp_term):
     ])
 
 
-def _build_query(companies, product_term, erp_term, limit):
+def _build_where(companies, product_term, erp_term):
     where = ["qty>0"]
     params = []
     if companies:
@@ -36,6 +34,11 @@ def _build_query(companies, product_term, erp_term, limit):
     if erp_term:
         where.append("COALESCE(warehouse_name,'') LIKE ?")
         params.append(f"%{erp_term}%")
+    return " AND ".join(where), params
+
+
+def _build_query(companies, product_term, erp_term, limit):
+    where_sql, params = _build_where(companies, product_term, erp_term)
     sql = f"""
         SELECT company AS 사업장,
                location AS 로케이션,
@@ -45,7 +48,7 @@ def _build_query(companies, product_term, erp_term, limit):
                COALESCE(exp_date, '-') AS 유통기한,
                qty AS 수량
         FROM inventory
-        WHERE {' AND '.join(where)}
+        WHERE {where_sql}
         ORDER BY company, location, product_name, warehouse_name, lot, exp_date, id
         LIMIT ?
     """
@@ -53,37 +56,50 @@ def _build_query(companies, product_term, erp_term, limit):
     return q(sql, tuple(params))
 
 
-def _render_inventory_table(df):
+def _summary_query(companies, product_term, erp_term):
+    where_sql, params = _build_where(companies, product_term, erp_term)
+    total_df = q(f"SELECT COUNT(*) AS row_count, COALESCE(SUM(qty), 0) AS total_qty FROM inventory WHERE {where_sql}", tuple(params))
+    by_company = q(
+        f"""
+        SELECT company AS 사업장, COALESCE(SUM(qty), 0) AS 수량
+        FROM inventory
+        WHERE {where_sql}
+        GROUP BY company
+        ORDER BY company
+        """,
+        tuple(params),
+    )
+    row_count = int(total_df.iloc[0]["row_count"] or 0) if not total_df.empty else 0
+    total_qty = int(total_df.iloc[0]["total_qty"] or 0) if not total_df.empty else 0
+    return row_count, total_qty, by_company
+
+
+def _prepare_display_df(df):
     if df.empty:
-        st.info("조회되는 재고가 없습니다.")
-        return
+        return df
     work = df.copy()
     work["유통기한"] = work["유통기한"].apply(display_date_only)
     work["수량"] = pd.to_numeric(work["수량"], errors="coerce").fillna(0).astype(int)
+    return work[["사업장", "로케이션", "표준제품명", "ERP명", "제조번호", "유통기한", "수량"]]
 
-    html = [
-        "<style>",
-        ".all-inv-wrap{width:100%;overflow:visible;margin-top:12px;}",
-        ".all-inv-table{width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;font-size:13px;}",
-        ".all-inv-table th{position:sticky;top:0;background:#f1f5f9;color:#111827;font-weight:800;border:1px solid #e5e7eb;padding:7px;text-align:center;z-index:1;}",
-        ".all-inv-table td{border:1px solid #e5e7eb;padding:7px;color:#111827;vertical-align:middle;}",
-        ".all-inv-table td.num{text-align:right;font-weight:700;color:#2563eb;}",
-        "</style>",
-        "<div class='all-inv-wrap'><table class='all-inv-table'>",
-        "<thead><tr><th>사업장</th><th>로케이션</th><th>표준제품명</th><th>ERP명</th><th>제조번호</th><th>유통기한</th><th>수량</th></tr></thead><tbody>",
-    ]
-    for r in work.itertuples(index=False):
-        html.append("<tr>")
-        html.append(f"<td>{escape(str(getattr(r, '사업장', '') or '-'))}</td>")
-        html.append(f"<td>{escape(str(getattr(r, '로케이션', '') or '-'))}</td>")
-        html.append(f"<td>{escape(str(getattr(r, '표준제품명', '') or '-'))}</td>")
-        html.append(f"<td>{escape(str(getattr(r, 'ERP명', '') or '-'))}</td>")
-        html.append(f"<td>{escape(str(getattr(r, '제조번호', '') or '-'))}</td>")
-        html.append(f"<td>{escape(str(getattr(r, '유통기한', '') or '-'))}</td>")
-        html.append(f"<td class='num'>{int(getattr(r, '수량', 0) or 0):,}</td>")
-        html.append("</tr>")
-    html.append("</tbody></table></div>")
-    st.markdown("".join(html), unsafe_allow_html=True)
+
+def _render_summary(row_count, total_qty, by_company):
+    c1, c2, c3 = st.columns([1.4, 1.4, 5.2], gap="small")
+    with c1:
+        st.metric("조회 행수", f"{row_count:,}건")
+    with c2:
+        st.metric("총 수량", f"{total_qty:,} EA")
+    with c3:
+        if by_company is not None and not by_company.empty:
+            parts = []
+            for r in by_company.itertuples(index=False):
+                parts.append(f"{getattr(r, '사업장')}: {int(getattr(r, '수량') or 0):,} EA")
+            st.markdown(
+                "<div style='padding:10px 0 0;color:#475569;font-weight:700;'>사업장별 합계 · "
+                + " / ".join(parts)
+                + "</div>",
+                unsafe_allow_html=True,
+            )
 
 
 def page_all_inventory():
@@ -103,13 +119,28 @@ def page_all_inventory():
         st.session_state["_all_inv_filter_sig"] = sig
         st.session_state["all_inv_limit"] = PAGE_SIZE
 
+    row_count, total_qty, by_company = _summary_query(companies, product_term, erp_term)
+    _render_summary(row_count, total_qty, by_company)
+
     limit = int(st.session_state.get("all_inv_limit", PAGE_SIZE) or PAGE_SIZE)
     df = _build_query(companies, product_term, erp_term, limit + 1)
     has_more = len(df) > limit
     shown = df.iloc[:limit].copy() if has_more else df.copy()
+    display_df = _prepare_display_df(shown)
 
-    st.caption(f"표시 중: {len(shown):,}건" + (" · 아래로 내려가 더 보기를 누르면 계속 불러옵니다." if has_more else ""))
-    _render_inventory_table(shown)
+    st.caption(f"표시 중: {len(display_df):,} / {row_count:,}건" + (" · 아래로 내려가 더 보기를 누르면 계속 불러옵니다." if has_more else ""))
+    if display_df.empty:
+        st.info("조회되는 재고가 없습니다.")
+    else:
+        st.dataframe(
+            display_df,
+            hide_index=True,
+            use_container_width=True,
+            height=min(720, 38 + max(1, len(display_df)) * 35),
+            column_config={
+                "수량": st.column_config.NumberColumn("수량", format="%d"),
+            },
+        )
 
     if has_more:
         _left, mid, _right = st.columns([3, 2, 3])
