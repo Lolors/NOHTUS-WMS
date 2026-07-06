@@ -8,12 +8,14 @@ import streamlit as st
 from nohtus.db import connect, q
 
 DEFAULT_USERS = {
-    "khn": {"display_name": "김한나", "role": "admin"},
-    "kjw": {"display_name": "김정욱", "role": "user"},
-    "shj": {"display_name": "신호재", "role": "user"},
-    "ngw": {"display_name": "노건우", "role": "user"},
-    "njg": {"display_name": "노진국", "role": "viewer"},
+    "hn": {"display_name": "김한나", "role": "admin"},
+    "jw": {"display_name": "김정욱", "role": "user"},
+    "hj": {"display_name": "신호재", "role": "user"},
+    "gw": {"display_name": "노건우", "role": "user"},
+    "jg": {"display_name": "노진국", "role": "viewer"},
 }
+
+LEGACY_USERNAMES = ["khn", "kjw", "shj", "ngw", "njg"]
 
 ROLE_PAGES = {
     "admin": None,
@@ -90,6 +92,8 @@ def ensure_auth_tables():
                     "UPDATE users SET display_name=?, role=?, active=1, updated_at=? WHERE username=?",
                     (info["display_name"], info["role"], now, username),
                 )
+        for legacy_username in LEGACY_USERNAMES:
+            cur.execute("UPDATE users SET active=0, updated_at=? WHERE username=?", (now, legacy_username))
         con.commit()
 
 
@@ -147,7 +151,8 @@ def render_login():
     <style>
     @media (min-width: 769px) {
         div[data-testid="stTextInput"],
-        div[data-testid="stButton"] {
+        div[data-testid="stButton"],
+        div[data-testid="stAlert"] {
             width: 20vw !important;
             min-width: 320px !important;
             max-width: 420px !important;
@@ -155,19 +160,32 @@ def render_login():
             margin-right: auto !important;
         }
         div[data-testid="stTextInput"] > div,
-        div[data-testid="stButton"] > button {
+        div[data-testid="stButton"] > button,
+        div[data-testid="stAlert"] > div {
             width: 100% !important;
+        }
+        .login-caption-narrow {
+            width: 20vw !important;
+            min-width: 320px !important;
+            max-width: 420px !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            color: #64748b;
+            font-size: 0.875rem;
         }
     }
     @media (max-width: 768px) {
         div[data-testid="stTextInput"],
-        div[data-testid="stButton"] {
+        div[data-testid="stButton"],
+        div[data-testid="stAlert"],
+        .login-caption-narrow {
             width: 100% !important;
             min-width: 0 !important;
             max-width: 100% !important;
         }
         div[data-testid="stTextInput"] > div,
-        div[data-testid="stButton"] > button {
+        div[data-testid="stButton"] > button,
+        div[data-testid="stAlert"] > div {
             width: 100% !important;
         }
     }
@@ -187,7 +205,10 @@ def render_login():
     if row is None:
         return False
 
-    st.caption(f"계정 확인: {row.get('display_name')} ({row.get('role')})")
+    st.markdown(
+        f"<div class='login-caption-narrow'>계정 확인: {row.get('display_name')} ({row.get('role')})</div>",
+        unsafe_allow_html=True,
+    )
     password_hash = str(row.get("password_hash") or "")
 
     if not password_hash:
