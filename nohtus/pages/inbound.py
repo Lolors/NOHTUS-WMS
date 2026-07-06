@@ -29,6 +29,12 @@ INBOUND_DRAFT_QUERY_KEYS = {
     "inbound_exp": "inbound_exp",
 }
 
+FIRST_PRODUCT_DRAFT_KEYS = [
+    "inbound_new_product_name",
+    "inbound_new_erp_name",
+    "inbound_new_product_code",
+]
+
 
 def _query_value(name):
     try:
@@ -66,7 +72,7 @@ def _restore_inbound_draft_from_query():
 
 
 def _install_inbound_draft_link_preserver():
-    """입고 도면 링크 클릭 직전에 최초 등록 입력값을 query parameter에 싣는다."""
+    """도면 클릭 순간 최초 등록 입력값을 기억하고, 화면 재렌더 후 다시 보이게 복원한다."""
     label_map = {
         "inbound_source": ["매입처"],
         "inbound_product_term": ["제품 검색"],
@@ -76,46 +82,112 @@ def _install_inbound_draft_link_preserver():
         "inbound_lot": ["LOT/제조번호"],
         "inbound_exp": ["유통기한"],
     }
+    first_keys = FIRST_PRODUCT_DRAFT_KEYS
     components.html(
         f"""
         <script>
         (function() {{
           const labelMap = {json.dumps(label_map, ensure_ascii=False)};
+          const firstKeys = {json.dumps(first_keys, ensure_ascii=False)};
+          const storageKey = 'nohtus_inbound_first_product_draft_v2';
+
           function parentDoc() {{ return window.parent.document; }}
+
+          function inputByLabel(doc, label) {{
+            return doc.querySelector('input[aria-label="' + label.replace(/"/g, '\\"') + '"]');
+          }}
 
           function inputValue(labels) {{
             const doc = parentDoc();
             for (const label of labels) {{
-              const el = doc.querySelector('input[aria-label="' + label.replace(/"/g, '\\"') + '"]');
+              const el = inputByLabel(doc, label);
               if (el) return el.value || '';
             }}
             return '';
           }}
 
           function checked(label) {{
-            const el = parentDoc().querySelector('input[aria-label="' + label.replace(/"/g, '\\"') + '"]');
+            const el = inputByLabel(parentDoc(), label);
             return !!(el && el.checked);
           }}
 
-          function preserveOnTarget(target) {{
-            if (!target || !checked('최초 등록')) return;
+          function setInput(labels, value) {{
+            const doc = parentDoc();
+            for (const label of labels) {{
+              const el = inputByLabel(doc, label);
+              if (!el) continue;
+              if ((el.value || '') === (value || '')) return true;
+              const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+              nativeSetter.call(el, value || '');
+              el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+              el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+              return true;
+            }}
+            return false;
+          }}
+
+          function setCheckbox(label, value) {{
+            const el = inputByLabel(parentDoc(), label);
+            if (!el) return false;
+            if (!!el.checked === !!value) return true;
+            el.click();
+            return true;
+          }}
+
+          function collectDraft() {{
+            const draft = {{ inbound_first_product: checked('최초 등록') ? '1' : '0' }};
+            for (const [key, labels] of Object.entries(labelMap)) {{
+              draft[key] = inputValue(labels);
+            }}
+            return draft;
+          }}
+
+          function saveDraft() {{
+            if (!checked('최초 등록')) return null;
+            const draft = collectDraft();
+            try {{ window.parent.localStorage.setItem(storageKey, JSON.stringify(draft)); }} catch (e) {{}}
+            return draft;
+          }}
+
+          function appendDraftToUrl(target, draft) {{
+            if (!target || !draft || draft.inbound_first_product !== '1') return;
             const url = new URL(target.href, window.parent.location.href);
             url.searchParams.set('inbound_first_product', '1');
-            for (const [key, labels] of Object.entries(labelMap)) {{
-              const value = inputValue(labels);
+            for (const [key, value] of Object.entries(draft)) {{
+              if (key === 'inbound_first_product') continue;
               if (value) url.searchParams.set(key, value);
               else url.searchParams.delete(key);
             }}
             target.href = url.toString();
           }}
 
+          function restoreDraft() {{
+            let raw = null;
+            try {{ raw = window.parent.localStorage.getItem(storageKey); }} catch (e) {{}}
+            if (!raw) return;
+            let draft = null;
+            try {{ draft = JSON.parse(raw); }} catch (e) {{ return; }}
+            if (!draft || draft.inbound_first_product !== '1') return;
+
+            setCheckbox('최초 등록', true);
+            for (const key of firstKeys) {{
+              if (Object.prototype.hasOwnProperty.call(draft, key)) {{
+                setInput(labelMap[key] || [], draft[key] || '');
+              }}
+            }}
+          }}
+
           function installInto(doc) {{
             try {{
               if (!doc || doc.__nohtusInboundDraftPreserverInstalled) return;
               doc.__nohtusInboundDraftPreserverInstalled = true;
+              doc.addEventListener('mousedown', function(ev) {{
+                const target = ev.target && ev.target.closest ? ev.target.closest('a[data-inbound-loc]') : null;
+                appendDraftToUrl(target, saveDraft());
+              }}, true);
               doc.addEventListener('click', function(ev) {{
                 const target = ev.target && ev.target.closest ? ev.target.closest('a[data-inbound-loc]') : null;
-                preserveOnTarget(target);
+                appendDraftToUrl(target, saveDraft());
               }}, true);
             }} catch (e) {{}}
           }}
@@ -127,13 +199,15 @@ def _install_inbound_draft_link_preserver():
               doc.querySelectorAll('iframe').forEach(function(frame) {{
                 try {{ installInto(frame.contentDocument || frame.contentWindow.document); }} catch (e) {{}}
               }});
+              restoreDraft();
             }} catch (e) {{}}
           }}
 
           install();
           setTimeout(install, 100);
-          setTimeout(install, 500);
-          setTimeout(install, 1000);
+          setTimeout(install, 300);
+          setTimeout(install, 700);
+          setTimeout(install, 1200);
         }})();
         </script>
         """,
