@@ -15,9 +15,8 @@ _SPECIAL_LOCATIONS = ["홍보물랙", "회색 카트", "오른쪽 창고", "사�
 def render_inbound_quick_location_map():
     """입고 등록용 로케이션 도면.
 
-    로케이션 맵과 같은 HTML/CSS 도면을 사용하고, 클릭값은 부모 페이지의
-    숨김 input/button 브리지로 먼저 전달한다. 브리지 실패 시 URL 파라미터로
-    fallback 하여 선택 위치를 반영한다.
+    도면 디자인은 유지하고, 클릭값은 URL query param(inbound_loc)으로 전달한다.
+    Streamlit 부모 DOM 구조에 의존하지 않으므로 모바일/PC/강제 PC 모드에서 더 안정적이다.
     """
     try:
         df = q("SELECT DISTINCT location FROM inventory WHERE qty>0 ORDER BY location")
@@ -93,8 +92,6 @@ def render_inbound_quick_location_map():
 .qp .qkey{{background:#f186ca;color:#ff0d0d;}}
 .rec-red{{color:#ff1e12;font-weight:900;}}
 .small-title{{position:absolute;font-size:14px;font-weight:900;color:#111827;text-align:center;}}
-.bridge-status{{display:none;position:absolute;left:14px;bottom:10px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:10px;padding:7px 10px;font-size:12px;font-weight:800;z-index:60;}}
-.bridge-status.open{{display:block;}}
 </style></head><body>
 <div class="wms-wrap">
   <div class="map-card">
@@ -143,7 +140,6 @@ def render_inbound_quick_location_map():
       <div class="label" style="left:706px;top:482px;width:170px;">R2 비자료 / R1 자료</div>
       {zone('N','기타 위치',930,565,155,60,'white')}
       <div class="special-menu" id="specialMenu" style="left:930px;top:428px;width:155px;"><button type="button" data-special-loc="홍보물랙">홍보물랙</button><button type="button" data-special-loc="회색 카트">회색 카트</button><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button></div>
-      <div id="bridgeStatus" class="bridge-status">입고 위치를 다시 반영하는 중입니다.</div>
     </div></div>
   </div>
 </div>
@@ -157,16 +153,14 @@ function markSelected(loc) {{
   }});
   document.querySelectorAll('[data-special-loc]').forEach(function(x) {{ x.classList.toggle('selected', x.dataset.specialLoc === loc); }});
 }}
-function setStatus(show) {{
-  const el = document.getElementById('bridgeStatus');
-  if (el) el.classList.toggle('open', !!show);
-}}
 function parentBaseHref() {{
   try {{ return window.top.location.href; }} catch(e) {{}}
   try {{ return window.parent.location.href; }} catch(e) {{}}
   return document.referrer || window.location.href;
 }}
-function fallbackToInboundUrl(loc) {{
+function applyInboundLoc(loc) {{
+  if (!loc) return;
+  markSelected(loc);
   try {{
     const url = new URL(parentBaseHref());
     url.searchParams.set('inbound_loc', loc);
@@ -175,68 +169,34 @@ function fallbackToInboundUrl(loc) {{
     window.open(url.toString(), '_top');
   }} catch(e) {{}}
 }}
-function findParentInput(doc) {{
-  return doc.querySelector('.st-key-_inbound_js_loc_buffer input') ||
-         doc.querySelector('div.st-key-_inbound_js_loc_buffer input') ||
-         doc.querySelector('input[aria-label="__입고도면선택값"]') ||
-         Array.from(doc.querySelectorAll('input')).find(function(x) {{ return (x.getAttribute('aria-label') || '').includes('__입고도면선택값'); }}) || null;
-}}
-function findParentButton(doc) {{
-  return doc.querySelector('.st-key-_inbound_apply_btn button') ||
-         doc.querySelector('div.st-key-_inbound_apply_btn button') ||
-         Array.from(doc.querySelectorAll('button')).find(function(x) {{ return ((x.innerText || x.textContent || '').trim()).includes('__입고도면적용'); }}) || null;
-}}
-function setNativeValue(input, value) {{
-  try {{
-    const win = input.ownerDocument.defaultView || window.parent;
-    const setter = Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, 'value').set;
-    setter.call(input, value);
-  }} catch(e) {{
-    input.value = value;
-  }}
-  input.dispatchEvent(new Event('input', {{bubbles: true}}));
-  input.dispatchEvent(new Event('change', {{bubbles: true}}));
-}}
-function sendToParent(loc) {{
-  try {{
-    const doc = window.parent.document;
-    const input = findParentInput(doc);
-    const btn = findParentButton(doc);
-    if (!input || !btn) return false;
-    setNativeValue(input, loc);
-    setTimeout(function() {{ btn.click(); }}, 40);
-    return true;
-  }} catch(e) {{
-    return false;
-  }}
-}}
-function applyInboundLoc(loc) {{
-  if (!loc) return;
-  markSelected(loc);
-  const sent = sendToParent(loc);
-  setStatus(!sent);
-  if (!sent) {{
-    setTimeout(function() {{ fallbackToInboundUrl(loc); }}, 80);
-  }}
-}}
 function toggleSpecialMenu(forceClose) {{
   const menu = document.getElementById('specialMenu');
   if (!menu) return;
   if (forceClose) {{ menu.classList.remove('open'); return; }}
   menu.classList.toggle('open');
 }}
+function bindActivate(el, handler) {{
+  let lastRun = 0;
+  function run(ev) {{
+    if (ev && ev.type === 'pointerup' && ev.pointerType === 'mouse') return;
+    const now = Date.now();
+    if (now - lastRun < 350) return;
+    lastRun = now;
+    if (ev) {{ ev.preventDefault(); ev.stopPropagation(); }}
+    handler(ev);
+  }}
+  el.addEventListener('click', run);
+  el.addEventListener('touchend', run, {{passive:false}});
+  el.addEventListener('pointerup', run);
+}}
 document.querySelectorAll('[data-special-loc]').forEach(function(btn) {{
-  btn.addEventListener('click', function(ev) {{
-    ev.preventDefault();
-    ev.stopPropagation();
+  bindActivate(btn, function() {{
     toggleSpecialMenu(true);
     applyInboundLoc(btn.dataset.specialLoc || '');
   }});
 }});
 document.querySelectorAll('[data-loc]').forEach(function(btn) {{
-  btn.addEventListener('click', function(ev) {{
-    ev.preventDefault();
-    ev.stopPropagation();
+  bindActivate(btn, function() {{
     const loc = btn.dataset.loc || '';
     if (loc === 'N') {{
       markSelected('N');
