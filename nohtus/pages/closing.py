@@ -41,29 +41,30 @@ def _today_outbound_final_stock_map(items):
 
 
 def _today_outbound_display_df(items):
-    group_cols = ["사업장", "표준제품명", "제조번호", "유통기한"]
+    group_cols = ["사업장", "로케이션", "표준제품명", "제조번호", "유통기한"]
     final_map = _today_outbound_final_stock_map(items)
     rows = []
     for key, grp in items.groupby(group_cols, sort=False, dropna=False):
-        company, product, lot, exp = key
+        company, location, product, lot, exp = key
         total_qty = int(grp["출고수량"].sum())
         final_qty = final_map.get((company, product, lot, exp), 0)
         for i, rr in enumerate(grp.itertuples(index=False)):
             rows.append({
                 "사업장": company if i == 0 else "",
+                "로케이션": location if i == 0 else "",
                 "제품명": product if i == 0 else "",
-                "제조번호": lot if i == 0 else "",
                 "유통기한": exp if i == 0 else "",
                 "매출처": getattr(rr, "매출처", ""),
                 "수량": int(getattr(rr, "출고수량", 0) or 0),
                 "총 출고수량": total_qty if i == 0 else "",
                 "최종재고": final_qty if i == 0 else "",
             })
-    return pd.DataFrame(rows, columns=["사업장", "제품명", "제조번호", "유통기한", "매출처", "수량", "총 출고수량", "최종재고"])
+    return pd.DataFrame(rows, columns=["사업장", "로케이션", "제품명", "유통기한", "매출처", "수량", "총 출고수량", "최종재고"])
 
 
 def _today_outbound_html(items, *, include_style=True):
-    group_cols = ["사업장", "표준제품명", "제조번호", "유통기한"]
+    # 제조번호는 화면에 표시하지 않지만, LOT이 다른 재고가 섞이지 않도록 내부 그룹 기준에는 유지한다.
+    group_cols = ["사업장", "로케이션", "표준제품명", "제조번호", "유통기한"]
     final_map = _today_outbound_final_stock_map(items)
     html = []
     if include_style:
@@ -77,10 +78,10 @@ def _today_outbound_html(items, *, include_style=True):
         ])
     html.extend([
         "<table class='today-out-table'>",
-        "<thead><tr><th>사업장</th><th>제품명</th><th>제조번호</th><th>유통기한</th><th>매출처</th><th>수량</th><th>총 출고수량</th><th>최종재고</th></tr></thead><tbody>",
+        "<thead><tr><th>사업장</th><th>로케이션</th><th>제품명</th><th>유통기한</th><th>매출처</th><th>수량</th><th>총 출고수량</th><th>최종재고</th></tr></thead><tbody>",
     ])
     for key, grp in items.groupby(group_cols, sort=False, dropna=False):
-        company, product, lot, exp = key
+        company, location, product, lot, exp = key
         total_qty = int(grp["출고수량"].sum())
         final_qty = final_map.get((company, product, lot, exp), 0)
         rowspan = len(grp)
@@ -88,8 +89,8 @@ def _today_outbound_html(items, *, include_style=True):
             html.append("<tr>")
             if i == 0:
                 html.append(f"<td rowspan='{rowspan}'>{escape(str(company))}</td>")
+                html.append(f"<td rowspan='{rowspan}'>{escape(str(location))}</td>")
                 html.append(f"<td rowspan='{rowspan}'>{escape(str(product))}</td>")
-                html.append(f"<td rowspan='{rowspan}'>{escape(str(lot))}</td>")
                 html.append(f"<td rowspan='{rowspan}'>{escape(str(exp))}</td>")
             html.append(f"<td>{escape(str(getattr(rr, '매출처', '') or '-'))}</td>")
             html.append(f"<td class='num'>{int(getattr(rr, '출고수량', 0) or 0):,}</td>")
@@ -129,22 +130,22 @@ def _today_outbound_pdf_bytes(items, ds):
     doc = SimpleDocTemplate(bio, pagesize=landscape(A4), leftMargin=20, rightMargin=20, topMargin=24, bottomMargin=24)
     story = [Paragraph(f"마감 체크리스트 · {ds}", styles["Title"]), Spacer(1, 12)]
 
-    headers = ["사업장", "제품명", "제조번호", "유통기한", "매출처", "수량", "총 출고수량", "최종재고"]
+    headers = ["사업장", "로케이션", "제품명", "유통기한", "매출처", "수량", "총 출고수량", "최종재고"]
     data = [headers]
     spans = []
-    group_cols = ["사업장", "표준제품명", "제조번호", "유통기한"]
+    group_cols = ["사업장", "로케이션", "표준제품명", "제조번호", "유통기한"]
     final_map = _today_outbound_final_stock_map(items)
     row_idx = 1
     for key, grp in items.groupby(group_cols, sort=False, dropna=False):
-        company, product, lot, exp = key
+        company, location, product, lot, exp = key
         total_qty = int(grp["출고수량"].sum())
         final_qty = final_map.get((company, product, lot, exp), 0)
         start = row_idx
         for i, rr in enumerate(grp.itertuples(index=False)):
             data.append([
                 str(company) if i == 0 else "",
+                str(location) if i == 0 else "",
                 str(product) if i == 0 else "",
-                str(lot) if i == 0 else "",
                 str(exp) if i == 0 else "",
                 str(getattr(rr, "매출처", "") or "-"),
                 f"{int(getattr(rr, '출고수량', 0) or 0):,}",
@@ -157,7 +158,7 @@ def _today_outbound_pdf_bytes(items, ds):
             for col in [0, 1, 2, 3, 6, 7]:
                 spans.append(("SPAN", (col, start), (col, end)))
 
-    table = Table(data, colWidths=[62, 170, 82, 82, 130, 48, 72, 62], repeatRows=1)
+    table = Table(data, colWidths=[62, 72, 178, 82, 130, 48, 72, 62], repeatRows=1)
     style_cmds = [
         ("FONTNAME", (0, 0), (-1, -1), font_name),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F1F5F9")),
@@ -217,10 +218,11 @@ def page_closing():
                              AND CAST(t.qty AS INTEGER)=CAST(i.qty AS INTEGER)
                              AND COALESCE(t.memo,'') LIKE '%' || '출고지시서 #' || CAST(o.id AS TEXT) || '%'
                        )
-                     ORDER BY i.company, i.product_name, i.lot, i.exp_date, o.id, i.id""", (ds,))
+                     ORDER BY i.company, i.location, i.product_name, i.lot, i.exp_date, o.id, i.id""", (ds,))
         if items.empty:
             st.info("해당 날짜의 출고지시가 없습니다.")
         else:
+            items["로케이션"] = items["로케이션"].astype(str).replace("", "-")
             items["유통기한"] = items["유통기한"].apply(display_date_only)
             items["출고수량"] = pd.to_numeric(items["출고수량"], errors="coerce").fillna(0).astype(int)
             try:
