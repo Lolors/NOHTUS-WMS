@@ -71,7 +71,7 @@ def display_date_only(value) -> str:
 
 
 def expiry_status(exp_date: str) -> str:
-    """Classify expiry as 정상, 임박(6개월), or 만료."""
+    """Classify expiry as 정상, 임박(1년), or 만료."""
     exp = (exp_date or "").strip()
     if not exp or exp == "-":
         return "정상"
@@ -82,6 +82,6 @@ def expiry_status(exp_date: str) -> str:
     today = date.today()
     if d < today:
         return "만료"
-    if (d - today).days <= 183:
-        return "임박(6개월)"
+    if (d - today).days <= 365:
+        return "임박(1년)"
     return "정상"
