@@ -76,19 +76,9 @@ def render_product_stock_summary(product_name: str):
     product_name = str(product_name or "").strip()
     if not product_name:
         return
-    add_recent_product_view(product_name)
-    df = _stock_summary(product_name)
-    st.subheader(product_name)
-    if df.empty:
-        st.info("현재 재고가 없습니다.")
-        return
-    df = df.copy()
-    df["유통기한"] = df["유통기한"].apply(display_date_only)
-    total_qty = int(df["수량"].sum())
-    st.markdown(f"### 총재고 {total_qty:,}EA")
-    company_totals = df.groupby("사업장")["수량"].sum().reset_index()
-    st.dataframe(company_totals, use_container_width=True, hide_index=True)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    from nohtus.pages.location_map import page_map_search_results
+
+    page_map_search_results(product_name)
 
 
 def _product_button_list(df: pd.DataFrame, key_prefix: str):
