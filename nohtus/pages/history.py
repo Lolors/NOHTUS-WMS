@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
@@ -13,15 +13,148 @@ from nohtus.db import connect, q
 from nohtus.dates import display_date_only
 
 
+def _norm(value, fallback="-"):
+    text = str(value if value is not None else "").strip()
+    return text if text else fallback
+
+
+def _adjust_inventory_qty(cur, *, company, product_name, warehouse_name, lot, exp_date, location, delta):
+    company = _norm(company, "")
+    product_name = _norm(product_name, "")
+    warehouse_name = _norm(warehouse_name, "")
+    lot = _norm(lot)
+    exp_date = _norm(exp_date)
+    location = _norm(location, "")
+    delta = int(delta or 0)
+    if not company or not product_name or not location or delta == 0:
+        return
+    row = cur.execute(
+        """
+        SELECT id, qty FROM inventory
+        WHERE company=? AND product_name=? AND IFNULL(warehouse_name,'')=? AND lot=? AND exp_date=? AND location=?
+        """,
+        (company, product_name, warehouse_name, lot, exp_date, location),
+    ).fetchone()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if row:
+        inv_id, current_qty = int(row[0]), int(row[1] or 0)
+        new_qty = current_qty + delta
+        if new_qty < 0:
+            raise ValueError(f"재고 원복 후 수량이 음수가 됩니다: {company} / {location} / {product_name} / {lot} / {exp_date}")
+        cur.execute("UPDATE inventory SET qty=?, updated_at=? WHERE id=?", (new_qty, now, inv_id))
+    else:
+        if delta < 0:
+            raise ValueError(f"차감할 재고를 찾을 수 없습니다: {company} / {location} / {product_name} / {lot} / {exp_date}")
+        cur.execute(
+            """
+            INSERT INTO inventory(company, product_name, warehouse_name, lot, exp_date, location, qty, updated_at)
+            VALUES(?,?,?,?,?,?,?,?)
+            """,
+            (company, product_name, warehouse_name, lot, exp_date, location, delta, now),
+        )
+
+
+def _reverse_transaction(cur, tx):
+    tx_type = _norm(tx["tx_type"], "")
+    qty = int(tx["qty"] or 0)
+    product_name = _norm(tx["product_name"], "")
+    warehouse_name = _norm(tx["warehouse_name"], "")
+    lot = _norm(tx["lot"])
+    exp_date = _norm(tx["exp_date"])
+
+    if tx_type == "입고":
+        _adjust_inventory_qty(
+            cur,
+            company=tx["to_company"],
+            product_name=product_name,
+            warehouse_name=warehouse_name,
+            lot=lot,
+            exp_date=exp_date,
+            location=tx["to_location"],
+            delta=-qty,
+        )
+    elif tx_type in ["출고지시", "출고"]:
+        _adjust_inventory_qty(
+            cur,
+            company=tx["from_company"],
+            product_name=product_name,
+            warehouse_name=warehouse_name,
+            lot=lot,
+            exp_date=exp_date,
+            location=tx["from_location"],
+            delta=qty,
+        )
+    elif tx_type == "출고지시취소":
+        _adjust_inventory_qty(
+            cur,
+            company=tx["to_company"] or tx["from_company"],
+            product_name=product_name,
+            warehouse_name=warehouse_name,
+            lot=lot,
+            exp_date=exp_date,
+            location=tx["to_location"] or tx["from_location"],
+            delta=-qty,
+        )
+    elif tx_type in ["위치이동", "사업장이동", "사업장+위치이동", "비자료전환", "이동"]:
+        _adjust_inventory_qty(
+            cur,
+            company=tx["to_company"],
+            product_name=product_name,
+            warehouse_name=warehouse_name,
+            lot=lot,
+            exp_date=exp_date,
+            location=tx["to_location"],
+            delta=-qty,
+        )
+        _adjust_inventory_qty(
+            cur,
+            company=tx["from_company"],
+            product_name=product_name,
+            warehouse_name=warehouse_name,
+            lot=lot,
+            exp_date=exp_date,
+            location=tx["from_location"],
+            delta=qty,
+        )
+    elif tx_type in ["재고조정", "재고실사"]:
+        # qty는 조정 차이값이다. 삭제 시 차이값을 반대로 적용한다.
+        _adjust_inventory_qty(
+            cur,
+            company=tx["to_company"] or tx["from_company"],
+            product_name=product_name,
+            warehouse_name=warehouse_name,
+            lot=lot,
+            exp_date=exp_date,
+            location=tx["to_location"] or tx["from_location"],
+            delta=-qty,
+        )
+
+
 def _delete_transaction_ids(tx_ids):
     tx_ids = [int(x) for x in tx_ids if x]
     if not tx_ids:
         return 0
     placeholders = ",".join(["?"] * len(tx_ids))
     with connect() as con:
-        con.execute(f"DELETE FROM transactions WHERE id IN ({placeholders})", tuple(tx_ids))
+        con.row_factory = None
+        cur = con.cursor()
+        rows = cur.execute(
+            f"""
+            SELECT id, tx_type, product_name, warehouse_name, lot, exp_date,
+                   from_company, from_location, to_company, to_location, qty, final_stock
+            FROM transactions
+            WHERE id IN ({placeholders})
+            ORDER BY id DESC
+            """,
+            tuple(tx_ids),
+        ).fetchall()
+        cols = [d[0] for d in cur.description]
+        for raw in rows:
+            tx = dict(zip(cols, raw))
+            _reverse_transaction(cur, tx)
+        cur.execute(f"DELETE FROM transactions WHERE id IN ({placeholders})", tuple(tx_ids))
         con.commit()
-    return len(tx_ids)
+    return len(rows)
 
 
 def page_history():
@@ -202,14 +335,14 @@ def page_history():
         )
         selected_ids = [tx_ids[i] for i, checked in enumerate(edited["선택"].tolist()) if checked and i < len(tx_ids)]
         if selected_ids:
-            st.warning(f"선택한 이력 {len(selected_ids)}건은 삭제 시 복구할 수 없습니다. 재고 수량은 변경하지 않습니다.")
+            st.warning(f"선택한 이력 {len(selected_ids)}건은 삭제 시 재고 수량도 함께 원복됩니다.")
             c1, c2 = st.columns([1, 1])
             with c1:
                 if st.button("선택 삭제", type="primary", use_container_width=True):
                     st.session_state["history_delete_pending_ids"] = selected_ids
                     st.rerun()
             with c2:
-                st.caption("삭제는 LOG만 삭제합니다.")
+                st.caption("삭제 대상 이력의 재고 변동을 반대로 적용합니다.")
         pending_ids = st.session_state.get("history_delete_pending_ids") or []
         if pending_ids:
             st.error(f"정말 삭제하시겠습니까? 대상: {len(pending_ids)}건")
@@ -219,11 +352,14 @@ def page_history():
                     st.session_state.pop("history_delete_pending_ids", None)
                     st.rerun()
             with d2:
-                if st.button("예, 삭제합니다", type="primary", use_container_width=True, key="history_delete_confirm"):
-                    deleted = _delete_transaction_ids(pending_ids)
-                    st.session_state.pop("history_delete_pending_ids", None)
-                    st.success(f"이력 {deleted}건을 삭제했습니다.")
-                    st.rerun()
+                if st.button("예, 삭제하고 재고를 원복합니다", type="primary", use_container_width=True, key="history_delete_confirm"):
+                    try:
+                        deleted = _delete_transaction_ids(pending_ids)
+                        st.session_state.pop("history_delete_pending_ids", None)
+                        st.success(f"이력 {deleted}건을 삭제하고 재고를 원복했습니다.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
     else:
         st.dataframe(show, use_container_width=True, hide_index=True)
 
