@@ -37,8 +37,8 @@ def _status_text_html(status):
     return "<span style='color:#2563eb;font-weight:800;'>저장됨</span>"
 
 
-def _selected_number_chip(oid):
-    return f"<span class='saved-order-no-chip selected'>#{int(oid)}</span>"
+def _selected_number_chip(label):
+    return f"<span class='saved-order-no-chip selected'>{escape(str(label))}</span>"
 
 
 def _cell(content, *, title="", class_name=""):
@@ -103,6 +103,18 @@ def _load_orders():
     )
 
 
+def _attach_daily_sequence(df):
+    if df.empty:
+        return df
+    result = df.copy()
+    seq_source = result.sort_values(["order_date", "created_at", "id"], ascending=[True, True, True]).copy()
+    seq_source["daily_no"] = seq_source.groupby("order_date").cumcount() + 1
+    seq_map = dict(zip(seq_source["id"].astype(int), seq_source["daily_no"].astype(int)))
+    result["daily_no"] = result["id"].astype(int).map(seq_map).fillna(0).astype(int)
+    result["display_no"] = result["daily_no"].astype(str)
+    return result
+
+
 def _filter_orders(all_orders, start_date, end_date, customer_term, search_term):
     filtered = all_orders.copy()
     if start_date:
@@ -152,14 +164,15 @@ def _render_saved_orders(orders_df, selected_order_id):
         created = str(getattr(r, "order_date", "") or getattr(r, "created_at", ""))[:10]
         customer = str(getattr(r, "customer_name", "") or "-")
         status = str(getattr(r, "status", "저장됨") or "저장됨")
+        display_no = str(getattr(r, "display_no", "") or getattr(r, "daily_no", "") or oid)
         items_text = _order_items_summary(oid)
         selected = int(selected_order_id or 0) == oid
         cols = st.columns([0.65, 0.9, 1.7, 4.5, 0.9], gap="small")
         with cols[0]:
             if selected:
-                st.markdown(_cell(_selected_number_chip(oid)), unsafe_allow_html=True)
+                st.markdown(_cell(_selected_number_chip(display_no)), unsafe_allow_html=True)
             else:
-                if st.button(f"#{oid}", key=f"open_order_no_{oid}", use_container_width=False, type="secondary"):
+                if st.button(display_no, key=f"open_order_no_{oid}", use_container_width=False, type="secondary"):
                     st.session_state["selected_saved_order_id"] = oid
                     st.session_state["_scroll_saved_outbound_detail"] = True
                     st.rerun()
@@ -205,6 +218,14 @@ def _prepare_edit_customer_session(order_row):
     return saved_v2._prepare_edit_customer_session(order_row)
 
 
+def _order_display_label(order_row):
+    order_date = str(order_row.get("order_date") or "")[:10]
+    daily_no = int(order_row.get("daily_no") or 0)
+    if order_date and daily_no:
+        return f"{order_date} / {daily_no}번"
+    return f"출고지시서 #{int(order_row.get('id'))}"
+
+
 def page_saved_outbound():
     saved_v2._ensure_outbound_customer_columns()
     st.markdown("<h1 style='text-align:left;margin-bottom:0.2em;'>저장된 출고지시</h1>", unsafe_allow_html=True)
@@ -229,7 +250,7 @@ def page_saved_outbound():
         st.error("시작일은 종료일보다 늦을 수 없습니다.")
         return
 
-    all_orders = _load_orders()
+    all_orders = _attach_daily_sequence(_load_orders())
     if all_orders.empty:
         st.info("저장된 출고지시가 없습니다.")
         return
@@ -267,12 +288,13 @@ def page_saved_outbound():
 
     order_status = str(order_row.iloc[0]["status"] or "저장됨")
     customer_name = str(order_row.iloc[0].get("customer_name") or "-")
+    display_label = _order_display_label(order_row.iloc[0])
 
     st.markdown("<div id='selected-outbound-detail'></div>", unsafe_allow_html=True)
     st.markdown("---")
     selected_col, _spacer = st.columns([7, 3], gap="large")
     with selected_col:
-        st.markdown(f"### 선택된 출고지시서 #{int(order_id)} · {escape(customer_name)}")
+        st.markdown(f"### 선택된 출고지시서 {escape(display_label)} · {escape(customer_name)}")
         item_df = saved_v2.q(
             f"""
             SELECT i.id AS 품목ID, i.inventory_id AS 재고ID, i.location AS 로케이션, i.product_name AS 제품명,
@@ -292,7 +314,7 @@ def page_saved_outbound():
             view_items = item_df[["사업장", "로케이션", "제품명", "LOT", "유통기한", "요청수량"]]
             st.dataframe(view_items, hide_index=True, use_container_width=True)
             rows_for_download = view_items.to_dict("records")
-            title_for_download = f"{customer_name} 출고지시서 #{int(order_id)}"
+            title_for_download = f"{customer_name} 출고지시서 {display_label}"
             d1, d2 = st.columns(2)
             with d1:
                 st.download_button("선택 지시서 엑셀 다운로드", data=outbound_excel_bytes(rows_for_download, title_for_download), file_name=f"NOHTUS_출고지시서_{int(order_id)}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
