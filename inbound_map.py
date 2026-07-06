@@ -16,7 +16,7 @@ def render_inbound_quick_location_map():
     """입고 등록용 로케이션 도면.
 
     도면 디자인은 유지하고, 클릭값은 URL query param(inbound_loc)으로 전달한다.
-    Streamlit 부모 DOM 구조에 의존하지 않으므로 모바일/PC/강제 PC 모드에서 더 안정적이다.
+    클릭 시 페이지를 이동하지 않고 history.replaceState로 값만 남겨 새로고침을 피한다.
     """
     try:
         df = q("SELECT DISTINCT location FROM inventory WHERE qty>0 ORDER BY location")
@@ -158,16 +158,26 @@ function parentBaseHref() {{
   try {{ return window.parent.location.href; }} catch(e) {{}}
   return document.referrer || window.location.href;
 }}
-function applyInboundLoc(loc) {{
-  if (!loc) return;
-  markSelected(loc);
+function writeInboundLoc(loc) {{
   try {{
     const url = new URL(parentBaseHref());
     url.searchParams.set('inbound_loc', loc);
-    try {{ window.top.location.assign(url.toString()); return; }} catch(e) {{}}
-    try {{ window.parent.location.assign(url.toString()); return; }} catch(e) {{}}
-    window.open(url.toString(), '_top');
+    try {{
+      window.top.history.replaceState(null, '', url.toString());
+      return true;
+    }} catch(e) {{}}
+    try {{
+      window.parent.history.replaceState(null, '', url.toString());
+      return true;
+    }} catch(e) {{}}
   }} catch(e) {{}}
+  return false;
+}}
+function applyInboundLoc(loc) {{
+  if (!loc) return;
+  markSelected(loc);
+  try {{ sessionStorage.setItem('nohtus_inbound_loc', loc); }} catch(e) {{}}
+  writeInboundLoc(loc);
 }}
 function toggleSpecialMenu(forceClose) {{
   const menu = document.getElementById('specialMenu');
