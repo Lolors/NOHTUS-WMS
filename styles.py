@@ -118,12 +118,7 @@ def apply_style():
         font-size: 16px !important;
     }}
 
-    /* 상위 메뉴 제목(출고/재고/기초)은 st.markdown의 h3라서 bold 유지,
-       하위 메뉴 버튼만 normal weight로 둔다. */
-
-    /* -------------------------
-       Location map / cards
-       ------------------------- */
+    /* Location map / cards */
     .legend-wrap {{display:flex;gap:12px;flex-wrap:wrap;margin:4px 0 14px 0;}}
     .legend-chip {{display:flex;align-items:center;gap:8px;border:1px solid {BORDER};background:#fff;border-radius:12px;padding:9px 14px;font-weight:800;color:#111827;}}
     .swatch {{width:18px;height:18px;border-radius:5px;border:1px solid rgba(15,23,42,.12);display:inline-block;}}
@@ -170,9 +165,6 @@ def apply_style():
     .cal-day small{{position:absolute;right:4px;top:3px;font-size:10px;background:white;color:#2563eb;border-radius:999px;min-width:15px;height:15px;line-height:15px;text-align:center}}
     .cal-day.empty{{background:transparent}}
 
-
-
-    /* Move entire location map section upward */
     .map-card{{
         margin-top:-15px !important;
     }}
@@ -183,7 +175,6 @@ def apply_style():
         margin-top:-7px !important;
     }}
 
-    /* Location map right-edge clipping guard */
     div[data-testid="stHorizontalBlock"]:has(.map-card),
     div[data-testid="column"]:has(.map-card) {{
         overflow: visible !important;
@@ -198,43 +189,32 @@ def apply_style():
 
 def apply_inbound_bridge_style():
     """입고 도면 클릭 브리지용 숨김 input/button CSS.
-    사이드바 메뉴 CSS와 완전히 분리한다.
+    부모 iframe JS가 programmatic click/input을 할 수 있도록 DOM은 정상 유지한다.
     """
     st.markdown("""
 <style>
-/* 입고 도면 클릭 브리지: 화면에서 완전히 숨긴다. */
-div.st-key-_inbound_js_loc_buffer,
-div.st-key-_inbound_apply_btn,
+/* 입고 도면 클릭 브리지: 화면에서는 안 보이지만 JS가 찾고 클릭할 수 있게 유지한다. */
 .st-key-_inbound_js_loc_buffer,
 .st-key-_inbound_apply_btn {
     position:absolute !important;
-    left:-9999px !important;
-    top:-9999px !important;
+    left:0 !important;
+    top:0 !important;
     width:1px !important;
-    min-width:1px !important;
-    max-width:1px !important;
     height:1px !important;
-    min-height:1px !important;
-    max-height:1px !important;
     overflow:hidden !important;
-    opacity:0 !important;
-    pointer-events:none !important;
+    opacity:0.001 !important;
     margin:0 !important;
     padding:0 !important;
-    z-index:-1 !important;
 }
-div[data-testid="stTextInput"]:has(input[aria-label="__입고도면선택값"]),
-div.st-key-_inbound_apply_btn button {
-    position:absolute !important;
-    left:-9999px !important;
-    top:-9999px !important;
+.st-key-_inbound_js_loc_buffer input,
+.st-key-_inbound_apply_btn button {
     width:1px !important;
     height:1px !important;
-    overflow:hidden !important;
-    opacity:0 !important;
-    pointer-events:none !important;
-    margin:0 !important;
+    min-width:1px !important;
+    min-height:1px !important;
     padding:0 !important;
+    margin:0 !important;
+    opacity:0.001 !important;
 }
 </style>
     """, unsafe_allow_html=True)
