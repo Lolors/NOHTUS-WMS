@@ -12,11 +12,14 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+from nohtus.auth import current_username
 from nohtus.config import AREA_COLOR, AREA_CONFIG, COMPANIES
 from nohtus.db import q
 from nohtus.dates import display_date_only
 from nohtus.locations import location_picking_key, parse_location
+from nohtus.services.favorites import is_favorite, record_recent_view, toggle_favorite
 from nohtus.services.products import product_options
+
 
 # Some UI/map helper functions may still live in app.py until later steps.
 # The migration script injects runtime imports inside the moved page as needed.
@@ -62,6 +65,28 @@ def _map_search_product_groups(product_name, inv_df):
     return groups
 
 
+def _company_erp_name(cg):
+    if cg is None or cg.empty or "warehouse_name" not in cg.columns:
+        return ""
+    names = [
+        _map_search_warehouse_name(x)
+        for x in cg["warehouse_name"].dropna().astype(str).str.strip().drop_duplicates().tolist()
+        if _map_search_warehouse_name(x) not in ["", "-"]
+    ]
+    return " / ".join(names)
+
+
+def _render_favorite_button(product_name, button_key):
+    username = current_username()
+    if not username or not product_name:
+        return
+    added = is_favorite(username, product_name)
+    label = "⭐즐겨찾기 추가됨" if added else "⭐즐겨찾기"
+    if st.button(label, key=button_key, use_container_width=True):
+        toggle_favorite(username, product_name)
+        st.rerun()
+
+
 def page_map_search_results(term):
     """로케이션맵 > 제품명 검색 결과.
 
@@ -94,6 +119,7 @@ def page_map_search_results(term):
     result_groups = []
     for product_name in opts["standard_name"].dropna().astype(str).drop_duplicates().tolist():
         result_groups.extend(_map_search_product_groups(product_name, inv))
+        record_recent_view(current_username(), product_name)
 
     if len(result_groups) >= 2:
         st.markdown("""
@@ -112,7 +138,6 @@ def page_map_search_results(term):
     st.markdown("""
     <style>
     .product-main-name{font-size:18px;font-weight:400;color:#111827;line-height:1.35;margin:14px 0 9px;word-break:keep-all;text-align:center;}
-    .product-erp-subtitle{font-size:14px;font-weight:500;color:#64748b;text-align:center;margin:-2px 0 10px;word-break:keep-all;}
     .product-photo-panel{
         width:250px;height:250px;max-width:100%;border:1.5px dashed #d6dee9;border-radius:20px;background:linear-gradient(180deg,#ffffff,#f8fafc);
         display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:600;font-size:20px;line-height:1.55;
@@ -125,6 +150,7 @@ def page_map_search_results(term):
     .dist-rule{height:1px;background:#e5e7eb;margin:0 0 14px;}
     .company-head{display:flex;align-items:center;gap:10px;margin:0 0 10px;flex-wrap:wrap;}
     .company-pill{display:inline-flex;align-items:center;border-radius:12px;background:#e8f8ef;color:#118445;font-size:20px;font-weight:500;padding:7px 14px;white-space:nowrap;}
+    .company-erp-name{font-size:20px;color:#4f6fff;font-weight:700;white-space:nowrap;margin-left:2px;}
     .company-total-blue{font-size:20px;color:#4f6fff;font-weight:700;white-space:nowrap;margin-left:2px;}
     .no-stock-box{border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;padding:22px;color:#64748b;font-weight:800;}
     .dist-cell-text{display:flex;align-items:center;height:28px;font-size:14px;font-weight:400;color:#111827;white-space:nowrap;}
@@ -142,7 +168,6 @@ def page_map_search_results(term):
         warehouse_name = group["warehouse_name"]
         rows = group["rows"]
         total_qty = int(group["total_qty"] or 0)
-        split_by_erp = bool(group["split_by_erp"])
 
         with st.container(border=True):
             left, right = st.columns([0.95, 2.35], gap="large")
@@ -156,18 +181,19 @@ def page_map_search_results(term):
                 else:
                     st.markdown("<div class='product-photo-panel'>제품 사진<br>(업로드 가능)</div>", unsafe_allow_html=True)
                 st.markdown(f"<div class='product-main-name'>{escape(product_name)}</div>", unsafe_allow_html=True)
-                if split_by_erp:
-                    st.markdown(f"<div class='product-erp-subtitle'>전산명: {escape(warehouse_name)}</div>", unsafe_allow_html=True)
                 st.markdown(
                     f"<div class='total-card-small'><span class='total-label'>총 재고</span><span class='total-value'>{total_qty} EA</span></div>",
                     unsafe_allow_html=True,
                 )
 
             with right:
-                header = "재고 분포"
-                if split_by_erp:
-                    header += f" · 전산명: {warehouse_name}"
-                st.markdown(f"<div class='dist-header'>{escape(header)}</div><div class='dist-rule'></div>", unsafe_allow_html=True)
+                header_col, fav_col = st.columns([8, 2], gap="small")
+                with header_col:
+                    st.markdown("<div class='dist-header'>재고 분포</div>", unsafe_allow_html=True)
+                with fav_col:
+                    _render_favorite_button(product_name, f"fav_card_{product_name}_{warehouse_name}")
+                st.markdown("<div class='dist-rule'></div>", unsafe_allow_html=True)
+
                 if rows.empty:
                     st.markdown("<div class='no-stock-box'>현재 재고가 없습니다.</div>", unsafe_allow_html=True)
                 else:
@@ -176,9 +202,11 @@ def page_map_search_results(term):
                     rows = rows.sort_values(["_company_order", "company", "lot", "exp_date", "location"])
                     for company, cg in rows.groupby("company", sort=False):
                         company_total = int(cg["qty"].sum())
+                        erp_name = _company_erp_name(cg)
+                        erp_html = f"<span class='company-erp-name'>{escape(erp_name)}</span>" if erp_name else ""
                         st.markdown(
                             f"<div class='company-head'><span class='company-pill'>{escape(str(company))}</span>"
-                            f"<span class='company-total-blue'>{company_total} EA</span></div>",
+                            f"{erp_html}<span class='company-total-blue'>{company_total} EA</span></div>",
                             unsafe_allow_html=True,
                         )
                         cg = cg.sort_values(["location", "lot", "exp_date", "warehouse_name"])
@@ -224,8 +252,6 @@ div[data-testid="stVerticalBlock"]:has(#wms-top-anchor) {
         if forced_search_term:
             st.session_state["map_view_mode"] = "search"
             st.session_state["_last_map_product_search"] = ""
-            # 제품 상세에서 표준제품명을 눌러 들어온 검색은 결과만 표시하고 입력칸은 비운다.
-            # 위젯 생성 전에만 session_state 값을 정리하므로 widget key 직접 수정 오류가 나지 않는다.
             for _k in ["map_product_search", "map_product_search_forced_blank"]:
                 if _k in st.session_state:
                     st.session_state[_k] = ""
@@ -239,7 +265,6 @@ div[data-testid="stVerticalBlock"]:has(#wms-top-anchor) {
     with h1:
         st.title("📍로케이션 맵")
     with h2:
-        # form을 쓰면 같은 검색어가 남아 있는 상태에서도 Enter/검색 버튼으로 다시 검색결과 화면으로 돌아갈 수 있다.
         with st.form("map_product_search_form", clear_on_submit=False):
             search_col, btn_col = st.columns([8, 1], gap="small")
             with search_col:
@@ -259,15 +284,12 @@ div[data-testid="stVerticalBlock"]:has(#wms-top-anchor) {
     term_clean = forced_search_term or (term or "").strip()
     last_term = st.session_state.get("_last_map_product_search", "")
 
-    # 로케이션 버튼에서 넘어온 경우에는 맵을 보여주되, 검색창 값은 유지한다.
     if st.session_state.get("selected_location_from_search"):
         st.session_state["selected_location"] = st.session_state.pop("selected_location_from_search")
         st.session_state["map_view_mode"] = "map"
 
-    # 검색어가 비면 즉시 기본 로케이션맵으로 복귀한다.
     if not term_clean:
         st.session_state["map_view_mode"] = "search"
-    # 검색 버튼/Enter 또는 검색어 변경이 있으면 검색결과 화면으로 돌아간다.
     elif search_submitted or term_clean != last_term:
         st.session_state["map_view_mode"] = "search"
 
