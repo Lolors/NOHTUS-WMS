@@ -15,6 +15,22 @@ from nohtus.services.inbound import ensure_inbound_first_product_mapping, inboun
 from nohtus.locations import make_location, parse_location
 
 
+def _set_inbound_location(pending):
+    pending = str(pending or "").strip()
+    if not pending:
+        return False
+
+    if pending in ["Q1", "Q2", "Q"]:
+        area, line, level = "Q", "", ""
+    else:
+        area, line, level = parse_location(pending)
+
+    st.session_state["_inbound_picker_defaults"] = {"area": area or "REC", "line": line or "", "level": level or ""}
+    st.session_state["_inbound_selected_loc"] = make_location(area or "REC", line or "", level or "")
+    st.session_state["_inbound_picker_token"] = int(st.session_state.get("_inbound_picker_token", 0) or 0) + 1
+    return True
+
+
 def _apply_inbound_location_pending():
     """URL query param으로 전달된 입고 위치를 위치 선택 기본값으로 반영한다."""
     try:
@@ -29,17 +45,27 @@ def _apply_inbound_location_pending():
                 pass
     except Exception:
         pending = ""
-    if not pending:
-        return
+    _set_inbound_location(pending)
 
-    if pending in ["Q1", "Q2", "Q"]:
-        area, line, level = "Q", "", ""
-    else:
-        area, line, level = parse_location(pending)
 
-    st.session_state["_inbound_picker_defaults"] = {"area": area or "REC", "line": line or "", "level": level or ""}
-    st.session_state["_inbound_selected_loc"] = make_location(area or "REC", line or "", level or "")
-    st.session_state["_inbound_picker_token"] = int(st.session_state.get("_inbound_picker_token", 0) or 0) + 1
+def _render_inbound_location_bridge():
+    """도면 iframe 클릭값을 부모 Streamlit 위치 선택기로 전달하는 숨김 브리지."""
+    st.markdown(
+        """
+        <style>
+        div.st-key-_inbound_js_loc_buffer,
+        div.st-key-_inbound_apply_btn {
+            display: none !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.text_input("__입고도면선택값", value="", key="_inbound_js_loc_buffer", label_visibility="collapsed")
+    if st.button("__입고도면적용", key="_inbound_apply_btn"):
+        if _set_inbound_location(st.session_state.get("_inbound_js_loc_buffer", "")):
+            st.session_state["_inbound_js_loc_buffer"] = ""
+            st.rerun()
 
 
 def page_inbound():
@@ -48,6 +74,7 @@ def page_inbound():
     from nohtus.services.inbound import inbound_company_options_for, strip_company_stock_label
 
     _apply_inbound_location_pending()
+    _render_inbound_location_bridge()
     st.title("입고 등록")
 
     def inbound_product_label(value):
