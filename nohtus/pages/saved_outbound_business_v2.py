@@ -91,6 +91,21 @@ def _cancel_order(order_id):
     st.session_state["cancel_order_done_msg"] = f"출고지시서 #{int(order_id)} 취소 완료: {item_count}개 품목 / 원복 {restored_count}건"
 
 
+def _prepare_edit_customer_session(order_row):
+    customer_name = str(order_row.get("customer_name") or "").strip()
+    customer_company = str(order_row.get("customer_company") or "").strip()
+    if not customer_name:
+        title = str(order_row.get("title") or "").strip()
+        customer_name = title.split(" - ", 1)[0].strip() if title else ""
+    for key in ["out_customer_term", "out_customer_select", "_out_customer_label", "out_selected_customer", "out_customer_direct", "out_customer_manual_name"]:
+        st.session_state.pop(key, None)
+    if customer_name:
+        st.session_state["out_customer_term"] = customer_name
+        st.session_state["out_selected_customer"] = {"customer_name": customer_name, "company": customer_company}
+        st.session_state["out_customer_direct"] = False
+        st.session_state["out_customer_manual_name"] = customer_name
+
+
 def page_saved_outbound():
     _ensure_outbound_customer_columns()
     st.markdown("<h1 style='text-align:left;margin-bottom:0.2em;'>저장된 출고지시</h1>", unsafe_allow_html=True)
@@ -223,6 +238,7 @@ def page_saved_outbound():
                 st.session_state["outbound_cart"] = load_outbound_order(int(order_id))
                 st.session_state["editing_order_id"] = int(order_id)
                 st.session_state["editing_order_title"] = str(order_row.iloc[0].get("title") or "")
+                _prepare_edit_customer_session(order_row.iloc[0])
                 st.session_state["page"] = "출고지시"
                 st.rerun()
         with e2:
