@@ -206,6 +206,20 @@ def page_mobile_stock_finder():
         st.warning("조건에 맞는 현재 재고가 없습니다.")
         return
 
+    if expiry_filter == "임박(1년)":
+        near_df = rows.copy()
+        near_df["_exp_sort"] = pd.to_datetime(near_df["exp_date"], errors="coerce")
+        near_df["_exp_sort"] = near_df["_exp_sort"].fillna(pd.Timestamp.max)
+        near_df = near_df.sort_values(["_exp_sort", "location", "qty"])
+        display_df = pd.DataFrame({
+            "로케이션": near_df["location"].fillna("-").astype(str),
+            "표준제품명": selected_product,
+            "유통기한": near_df["exp_date"].apply(display_date_only),
+            "수량": pd.to_numeric(near_df["qty"], errors="coerce").fillna(0).astype(int),
+        })
+        st.dataframe(display_df, hide_index=True, use_container_width=True)
+        return
+
     company_totals = rows.groupby("company")["qty"].sum().sort_index()
     summary = " · ".join([f"{company} {int(qty):,}EA" for company, qty in company_totals.items() if int(qty or 0) > 0])
     if summary:
