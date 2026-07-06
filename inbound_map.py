@@ -16,7 +16,7 @@ def render_inbound_quick_location_map():
     """입고 등록용 로케이션 도면.
 
     도면 디자인은 유지하고, 클릭값은 URL query param(inbound_loc)으로 전달한다.
-    클릭 시 페이지를 이동하지 않고 history.replaceState로 값만 남겨 새로고침을 피한다.
+    오른쪽 Streamlit 위치 선택 위젯까지 동기화되도록 클릭 시 페이지 rerun을 발생시킨다.
     """
     try:
         df = q("SELECT DISTINCT location FROM inventory WHERE qty>0 ORDER BY location")
@@ -163,13 +163,15 @@ function writeInboundLoc(loc) {{
     const url = new URL(parentBaseHref());
     url.searchParams.set('inbound_loc', loc);
     try {{
-      window.top.history.replaceState(null, '', url.toString());
+      window.top.location.assign(url.toString());
       return true;
     }} catch(e) {{}}
     try {{
-      window.parent.history.replaceState(null, '', url.toString());
+      window.parent.location.assign(url.toString());
       return true;
     }} catch(e) {{}}
+    window.open(url.toString(), '_top');
+    return true;
   }} catch(e) {{}}
   return false;
 }}
