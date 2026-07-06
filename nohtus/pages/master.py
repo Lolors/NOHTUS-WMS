@@ -24,7 +24,7 @@ from nohtus.locations import location_picking_key, make_location, parse_location
 
 
 def page_master():
-    from app import match_erp_name
+    from nohtus.services.master import match_erp_name
     st.title("제품 마스터")
     st.caption("제품 자체의 기준명은 표준제품명으로 관리하고, ERP별 이름은 별도 매핑으로 관리합니다. 노투스팜/NOH ERP 제품코드는 각 ERP명 바로 뒤에서 관리하고, 노투스 ERP명 오른쪽에는 비자료명을 관리합니다.")
     df = q("SELECT id, product_code, standard_name, aliases, erp_nohtuspharm_name, erp_noh_name, erp_noh_code, erp_nohtus_name, bidata_name FROM products ORDER BY standard_name")
@@ -179,7 +179,7 @@ def page_master():
 # ---------------- ERP / customer master ----------------
 
 def page_customer_master():
-    from app import customer_export_excel_bytes, import_customer_master_excel
+    from nohtus.services.master import customer_export_excel_bytes, import_customer_master_excel
     st.title("거래처 관리")
     st.caption("거래처 엑셀을 업로드하면 출고지시와 업무일지에서 매출처/담당자 정보를 재사용할 수 있습니다.")
     c1, c2 = st.columns(2, gap="large")
@@ -209,7 +209,7 @@ def page_customer_master():
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 def page_inventory_metadata_edit():
-    from app import render_inventory_metadata_editor
+    from nohtus.services.master import render_inventory_metadata_editor
     st.title("재고정보 수정")
     st.caption("기존 재고의 제조번호/유통기한이 잘못 입력된 경우에만 사용합니다. 수량은 변경하지 않습니다.")
     render_inventory_metadata_editor()

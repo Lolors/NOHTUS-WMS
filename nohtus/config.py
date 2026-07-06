@@ -1,7 +1,7 @@
 from pathlib import Path
 
 APP_TITLE = "NOHTUS WMS"
-VERSION = "v4.9 RC3.3 UI Stable"
+VERSION = "v3.10.2 Business Patch"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = PROJECT_ROOT / "data" / "nohtus.db"

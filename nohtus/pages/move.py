@@ -9,18 +9,45 @@ from __future__ import annotations
 import streamlit as st
 
 from nohtus.config import COMPANIES
-from nohtus.db import q
+from nohtus.db import connect, q
 from nohtus.dates import display_date_only
 from nohtus.locations import parse_location
 from nohtus.services.inventory import move_inventory
 from nohtus.services.products import product_options
 
-# These UI helpers still live in app.py until later refactor steps.
-# The migration script injects compatibility imports dynamically when needed.
+
+def _product_erp_column(company):
+    return {
+        "노투스팜": "erp_nohtuspharm_name",
+        "NOH": "erp_noh_name",
+        "노투스": "erp_nohtus_name",
+        "비자료": "bidata_name",
+    }.get(str(company or "").strip())
+
+
+def _destination_erp_name(product, company):
+    col = _product_erp_column(company)
+    if not col:
+        return ""
+    df = q(f"SELECT {col} AS nm FROM products WHERE standard_name=?", (product,))
+    if df.empty:
+        return ""
+    return str(df.iloc[0].get("nm") or "").strip()
+
+
+def _save_destination_erp_name(product, company, erp_name):
+    col = _product_erp_column(company)
+    product = str(product or "").strip()
+    erp_name = str(erp_name or "").strip()
+    if not col or not product or not erp_name:
+        return
+    with connect() as con:
+        con.execute(f"UPDATE products SET {col}=? WHERE standard_name=?", (erp_name, product))
+        con.commit()
 
 
 def page_move():
-    from app import location_picker, product_mapping_name_for
+    from nohtus.ui.location_picker import location_picker
     st.title("이동 등록")
     st.caption("제품 → LOT/유통기한을 선택하면 출발 재고가 자동 표시됩니다.")
 
@@ -38,7 +65,7 @@ def page_move():
             "추천 제품",
             [""] + opts["standard_name"].tolist(),
             index=0,
-            format_func=lambda x: "제품명을 입력하거나 선택하세요" if x == "" else x
+            format_func=lambda x: "제품명을 입력하거나 선택하세요" if x == "" else x,
         )
         if not product:
             st.info("이동할 제품을 선택하세요.")
@@ -85,6 +112,14 @@ def page_move():
         if to_company != src_company:
             st.warning("정말로 다른 사업장으로 재고를 이동하시겠습니까?")
 
+        dest_erp_name = _destination_erp_name(product, to_company)
+        new_dest_erp_name = ""
+        if to_company != src_company and not dest_erp_name:
+            st.error(f"[{product}]을(를) {to_company}로 이동시키기 위해서는 {to_company} ERP에 등록된 해당 제품의 제품명이 필요합니다.")
+            new_dest_erp_name = st.text_input(f"{to_company} ERP명", key=f"move_dest_erp_{src_id}_{to_company}_{product}")
+        elif dest_erp_name:
+            st.caption(f"도착사업장 전산상명칭: {dest_erp_name}")
+
         existing_loc_df = q("""SELECT location, SUM(qty) AS qty
                               FROM inventory
                               WHERE company=? AND product_name=? AND qty>0
@@ -110,6 +145,11 @@ def page_move():
 
         if st.button("이동 저장", type="primary", use_container_width=True):
             try:
+                if to_company != src_company and not dest_erp_name:
+                    if not str(new_dest_erp_name or "").strip():
+                        st.error(f"{to_company} ERP명을 입력해야 이동할 수 있습니다.")
+                        return
+                    _save_destination_erp_name(product, to_company, new_dest_erp_name)
                 move_inventory(src_id, to_company, to_location, int(qty), memo)
                 st.success(f"이동 저장 완료: {product} / {qty}EA → {to_company} {to_location}")
                 st.rerun()

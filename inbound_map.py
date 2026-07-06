@@ -209,5 +209,3 @@ document.querySelectorAll('[data-inbound-loc]').forEach(el => {{
 </body></html>
 """
     components.html(html, height=780, scrolling=False)
-
-

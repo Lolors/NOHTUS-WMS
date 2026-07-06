@@ -4,12 +4,7 @@ import streamlit as st
 
 from nohtus.db import q, exec_sql
 from nohtus.services.products import product_master_excel_bytes, import_product_master_excel
-from nohtus.services.master import (
-    apply_standard_name_change,
-    approve_mapping_conflict,
-    delete_product,
-    find_mapping_conflicts_from_inventory,
-)
+from nohtus.services.master import apply_standard_name_change, delete_product
 
 
 def page_product_matching():
@@ -41,43 +36,6 @@ def page_product_matching():
             except Exception as e:
                 st.error(f"업로드 실패: {e}")
 
-    st.markdown("### 🔍 매칭 이상 검사")
-    conflict_df = find_mapping_conflicts_from_inventory()
-    if conflict_df.empty:
-        st.success("확인이 필요한 ERP명/비자료명 공유 충돌이 없습니다.")
-    else:
-        st.warning("같은 ERP명/비자료명이 기존 다른 표준제품명에도 등록되어 있습니다. 실제 충돌인지, 여러 표준제품명이 함께 쓰는 것이 맞는지 확인하세요.")
-        edit_df = conflict_df.copy()
-        edit_df.insert(0, "문제없음", False)
-        edited_conflict = st.data_editor(
-            edit_df,
-            hide_index=True,
-            use_container_width=True,
-            disabled=[c for c in edit_df.columns if c != "문제없음"],
-            column_config={"문제없음": st.column_config.CheckboxColumn("문제없음", help="이 공유 매칭이 의도된 것이면 체크하세요.")},
-            key="pm_conflict_editor",
-        )
-        st.caption("문제없음으로 확인한 ERP명/비자료명은 시스템이 기억하며, 이후 같은 원본명으로는 다시 묻지 않습니다.")
-        if st.button("체크한 공유 매칭 확인 완료", type="primary", use_container_width=True):
-            checked = edited_conflict[edited_conflict["문제없음"] == True]
-            if checked.empty:
-                st.info("체크된 행이 없습니다.")
-            else:
-                for _, rr in checked.iterrows():
-                    approve_mapping_conflict(str(rr.get("사업장", "")), str(rr.get("ERP명/비자료명", "")))
-                st.success(f"{len(checked)}건을 문제없음으로 확인했습니다.")
-                st.rerun()
-
-    st.markdown("### 제품 매칭표 보완용 파일")
-    st.caption("제품매칭표 전체를 내려받아 누락된 ERP명/비자료명 정보를 보완한 뒤 다시 업로드할 수 있습니다.")
-    st.download_button(
-        "제품 매칭표 보완용 파일 내려받기",
-        data=product_master_excel_bytes(highlight_missing=True),
-        file_name=f"NOHTUS_제품매칭표_보완용_{date.today().strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
-
     st.markdown("### 제품 매칭표 수정")
     df = q("""SELECT id, standard_name AS 표준제품명, erp_nohtuspharm_name AS '노투스팜 ERP명', product_code AS '노투스팜 ERP 제품코드', erp_noh_name AS 'NOH ERP명', erp_noh_code AS 'NOH ERP 제품코드', erp_nohtus_name AS '노투스 ERP명', bidata_name AS '비자료명', aliases AS 별칭
               FROM products ORDER BY standard_name""")
@@ -89,7 +47,7 @@ def page_product_matching():
     shown = df.copy()
     if term.strip():
         mask = False
-        for col in ["표준제품명","노투스팜 ERP명","노투스팜 ERP 제품코드","NOH ERP명","NOH ERP 제품코드","노투스 ERP명","비자료명","별칭"]:
+        for col in ["표준제품명", "노투스팜 ERP명", "노투스팜 ERP 제품코드", "NOH ERP명", "NOH ERP 제품코드", "노투스 ERP명", "비자료명", "별칭"]:
             mask = mask | shown[col].fillna("").astype(str).str.contains(term.strip(), case=False, regex=False)
         shown = shown[mask]
     if shown.empty:

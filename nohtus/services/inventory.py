@@ -39,17 +39,45 @@ def product_mapping_name_for(company, standard_name):
     return first_nonblank(df.iloc[0].get("nm"))
 
 
+def _current_actor_name():
+    try:
+        import streamlit as st
+        user = st.session_state.get("current_user") or {}
+        return str(user.get("display_name") or user.get("username") or "").strip()
+    except Exception:
+        return ""
+
+
+def _transaction_has_actor_column(cur):
+    try:
+        cols = {r[1] for r in cur.execute("PRAGMA table_info(transactions)").fetchall()}
+        return "actor" in cols
+    except Exception:
+        return False
+
+
 def insert_transaction_log(cur, *, created_at, tx_type, product_name, warehouse_name=None,
                            lot=None, exp_date=None, from_company=None, from_location=None,
                            to_company=None, to_location=None, qty=0, memo="", final_stock=None):
-    cur.execute(
-        """INSERT INTO transactions(
-               created_at, tx_type, product_name, warehouse_name, lot, exp_date,
-               from_company, from_location, to_company, to_location, qty, memo, final_stock
-           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (created_at, tx_type, product_name, warehouse_name, lot, exp_date,
-         from_company, from_location, to_company, to_location, int(qty or 0), memo, final_stock),
-    )
+    actor = _current_actor_name()
+    if _transaction_has_actor_column(cur):
+        cur.execute(
+            """INSERT INTO transactions(
+                   created_at, tx_type, product_name, warehouse_name, lot, exp_date,
+                   from_company, from_location, to_company, to_location, qty, memo, final_stock, actor
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (created_at, tx_type, product_name, warehouse_name, lot, exp_date,
+             from_company, from_location, to_company, to_location, int(qty or 0), memo, final_stock, actor),
+        )
+    else:
+        cur.execute(
+            """INSERT INTO transactions(
+                   created_at, tx_type, product_name, warehouse_name, lot, exp_date,
+                   from_company, from_location, to_company, to_location, qty, memo, final_stock
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (created_at, tx_type, product_name, warehouse_name, lot, exp_date,
+             from_company, from_location, to_company, to_location, int(qty or 0), memo, final_stock),
+        )
 
 
 def add_inventory(company, product, warehouse, lot, exp, location, qty, memo="입고 등록"):

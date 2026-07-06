@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from nohtus.config import COMPANIES
-import re
 from nohtus.db import connect, q
 
 
@@ -79,31 +77,3 @@ def ensure_inbound_first_product_mapping(standard_name, company, erp_name, produ
             raise ValueError("최초 등록은 사업장을 먼저 선택해야 합니다.")
         con.commit()
     return standard_name, erp_name
-
-
-def strip_company_stock_label(label):
-    """'노투스팜 (30 EA)'처럼 표시된 사업장 라벨에서 실제 사업장명만 추출한다."""
-    text = str(label or "").strip()
-    return re.sub(r"\s*\(\s*[-+]?\d+\s*EA\s*\)\s*$", "", text).strip()
-
-def inbound_company_options_for(product_name):
-    """입고등록 전용 사업장 선택지.
-    등록대기는 입고등록 전용 임시값이므로 수량을 붙이지 않는다.
-    """
-    product_name = str(product_name or "").strip()
-    stock = {c: 0 for c in COMPANIES}
-    if product_name:
-        df = q("""SELECT company, COALESCE(SUM(qty),0) AS qty
-                  FROM inventory
-                  WHERE product_name=?
-                  GROUP BY company""", (product_name,))
-        if not df.empty:
-            for r in df.itertuples(index=False):
-                c = str(getattr(r, "company", "") or "").strip()
-                if c in stock:
-                    stock[c] = int(getattr(r, "qty", 0) or 0)
-    return [f"{c} ({stock.get(c, 0)} EA)" for c in COMPANIES] + ["등록대기"]
-
-
-
-# ---------------- mobile stock finder helpers ----------------

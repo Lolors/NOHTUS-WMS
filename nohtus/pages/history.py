@@ -1,9 +1,4 @@
-"""History page for NOHTUS WMS.
-
-Migrated from app.py. This module intentionally imports Streamlit because it
-contains page rendering code.
-"""
-
+"""History page for NOHTUS WMS."""
 from __future__ import annotations
 
 import re
@@ -12,13 +7,25 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+from nohtus.auth import is_admin
 from nohtus.config import COMPANIES
-from nohtus.db import q
+from nohtus.db import connect, q
 from nohtus.dates import display_date_only
 
 
+def _delete_transaction_ids(tx_ids):
+    tx_ids = [int(x) for x in tx_ids if x]
+    if not tx_ids:
+        return 0
+    placeholders = ",".join(["?"] * len(tx_ids))
+    with connect() as con:
+        con.execute(f"DELETE FROM transactions WHERE id IN ({placeholders})", tuple(tx_ids))
+        con.commit()
+    return len(tx_ids)
+
+
 def page_history():
-    from app import _infer_customer_from_title
+    from nohtus.services.closing import _infer_customer_from_title
     st.title("이력 조회")
 
     today = date.today()
@@ -128,16 +135,12 @@ def page_history():
     for r in df.itertuples():
         typ = str(getattr(r, "tx_type", "") or "")
         qty = int(getattr(r, "qty", 0) or 0)
-        if typ in ["재고조정", "재고실사"]:
-            qty_values.append(f"{qty:+d}")
-        else:
-            qty_values.append(str(qty))
+        qty_values.append(f"{qty:+d}" if typ in ["재고조정", "재고실사"] else str(qty))
         final_stock_value = getattr(r, "final_stock", None)
-        if final_stock_value is not None and not pd.isna(final_stock_value):
-            final_values.append(int(final_stock_value))
-        else:
-            final_values.append("")
+        final_values.append(int(final_stock_value) if final_stock_value is not None and not pd.isna(final_stock_value) else "")
+
     show = df.copy()
+    tx_ids = show["id"].astype(int).tolist() if "id" in show.columns else []
     show["수량"] = qty_values
     show["최종재고"] = final_values
 
@@ -156,33 +159,73 @@ def page_history():
             customers_df = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
             for r in orders_df.itertuples(index=False):
                 saved_customer = str(getattr(r, "customer_name", "") or "")
-                if saved_customer:
-                    customer = saved_customer
-                else:
-                    customer, _manager = _infer_customer_from_title(getattr(r, "title", ""), customers_df)
+                customer = saved_customer or _infer_customer_from_title(getattr(r, "title", ""), customers_df)[0]
                 order_customer_map[int(getattr(r, "id"))] = customer
     except Exception:
         order_customer_map = {}
 
     def _history_customer_from_memo(memo_text):
         m = re.search(r"출고지시서\s*#(\d+)", str(memo_text or ""))
-        if not m:
-            return ""
-        return order_customer_map.get(int(m.group(1)), "")
+        return order_customer_map.get(int(m.group(1)), "") if m else ""
 
     show["매출처"] = show["memo"].apply(_history_customer_from_memo) if "memo" in show.columns else ""
 
     if "exp_date" in show.columns:
         show["exp_date"] = show["exp_date"].apply(display_date_only)
     rename_cols = {
-        "created_at":"일시", "tx_type":"이력유형", "product_name":"제품명",
-        "lot":"LOT", "exp_date":"유통기한", "from_company":"출발사업장", "from_location":"출발위치",
-        "to_company":"도착사업장", "to_location":"도착위치", "memo":"메모"
+        "created_at": "일시",
+        "actor": "사용자",
+        "tx_type": "이력유형",
+        "product_name": "제품명",
+        "lot": "LOT",
+        "exp_date": "유통기한",
+        "from_company": "출발사업장",
+        "from_location": "출발위치",
+        "to_company": "도착사업장",
+        "to_location": "도착위치",
+        "memo": "메모",
     }
     show = show.rename(columns=rename_cols)
-    wanted = ["일시","이력유형","매출처","제품명","LOT","유통기한","출발사업장","출발위치","도착사업장","도착위치","수량","최종재고","메모"]
+    wanted = ["일시", "사용자", "이력유형", "매출처", "제품명", "LOT", "유통기한", "출발사업장", "출발위치", "도착사업장", "도착위치", "수량", "최종재고", "메모"]
     show = show[[c for c in wanted if c in show.columns]]
-    st.dataframe(show, use_container_width=True, hide_index=True)
+
+    if is_admin():
+        admin_show = show.copy()
+        admin_show.insert(0, "선택", False)
+        edited = st.data_editor(
+            admin_show,
+            use_container_width=True,
+            hide_index=True,
+            disabled=[c for c in admin_show.columns if c != "선택"],
+            column_config={"선택": st.column_config.CheckboxColumn("선택")},
+            key="history_admin_delete_editor",
+        )
+        selected_ids = [tx_ids[i] for i, checked in enumerate(edited["선택"].tolist()) if checked and i < len(tx_ids)]
+        if selected_ids:
+            st.warning(f"선택한 이력 {len(selected_ids)}건은 삭제 시 복구할 수 없습니다. 재고 수량은 변경하지 않습니다.")
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                if st.button("선택 삭제", type="primary", use_container_width=True):
+                    st.session_state["history_delete_pending_ids"] = selected_ids
+                    st.rerun()
+            with c2:
+                st.caption("삭제는 LOG만 삭제합니다.")
+        pending_ids = st.session_state.get("history_delete_pending_ids") or []
+        if pending_ids:
+            st.error(f"정말 삭제하시겠습니까? 대상: {len(pending_ids)}건")
+            d1, d2 = st.columns([1, 1])
+            with d1:
+                if st.button("취소", use_container_width=True, key="history_delete_cancel"):
+                    st.session_state.pop("history_delete_pending_ids", None)
+                    st.rerun()
+            with d2:
+                if st.button("예, 삭제합니다", type="primary", use_container_width=True, key="history_delete_confirm"):
+                    deleted = _delete_transaction_ids(pending_ids)
+                    st.session_state.pop("history_delete_pending_ids", None)
+                    st.success(f"이력 {deleted}건을 삭제했습니다.")
+                    st.rerun()
+    else:
+        st.dataframe(show, use_container_width=True, hide_index=True)
 
     page_left, page_mid, page_right = st.columns([1, 2, 1])
     with page_left:
@@ -190,14 +233,7 @@ def page_history():
             st.session_state["history_page"] = max(1, current_page - 1)
             st.rerun()
     with page_mid:
-        selected_page = st.number_input(
-            "페이지",
-            min_value=1,
-            max_value=total_pages,
-            value=current_page,
-            step=1,
-            key="history_page_input",
-        )
+        selected_page = st.number_input("페이지", min_value=1, max_value=total_pages, value=current_page, step=1, key="history_page_input")
         if int(selected_page) != current_page:
             st.session_state["history_page"] = int(selected_page)
             st.rerun()
