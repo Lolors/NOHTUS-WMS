@@ -106,11 +106,12 @@ def render_inbound_quick_location_map():
     {zone('R1','R1',854,460,64,56,'white')}
     <div class="label" style="left:770px;top:526px;width:190px;">R2 비자료 / R1 자료</div>
     {zone('N','기타 위치',975,628,168,60,'white')}
-    <div class="special-menu" id="inboundSpecialMenu" style="left:975px;top:492px;width:168px;">
+    <div class="special-menu" id="inboundSpecialMenu" style="left:975px;top:484px;width:168px;">
       <a href="#" data-inbound-loc="홍보물랙">홍보물랙</a>
       <a href="#" data-inbound-loc="회색 카트">회색 카트</a>
       <a href="#" data-inbound-loc="오른쪽 창고">오른쪽 창고</a>
       <a href="#" data-inbound-loc="사무실(4층)">사무실(4층)</a>
+      <a href="#" data-inbound-loc="지엠메딕">지엠메딕</a>
     </div>
   </div></div>
 </div>
@@ -118,7 +119,7 @@ def render_inbound_quick_location_map():
 function markSelected(loc){{
   document.querySelectorAll('[data-inbound-loc]').forEach(x => {{
     const v = x.getAttribute('data-inbound-loc') || '';
-    x.classList.toggle('selected', v === loc || (loc && loc.startsWith(v + '-')) || (v === 'N' && ['홍보물랙','회색 카트','오른쪽 창고','사무실(4층)'].includes(loc)));
+    x.classList.toggle('selected', v === loc || (loc && loc.startsWith(v + '-')) || (v === 'N' && ['홍보물랙','회색 카트','오른쪽 창고','사무실(4층)','지엠메딕'].includes(loc)));
   }});
 }}
 function toggleInboundSpecialMenu(forceClose=false){{
