@@ -362,17 +362,29 @@ def page_history():
     else:
         st.dataframe(show, use_container_width=True, hide_index=True)
 
-    page_left, page_mid, page_right = st.columns([1, 2, 1])
-    with page_left:
-        if st.button("이전", disabled=current_page <= 1, key="history_prev_page", use_container_width=True):
-            st.session_state["history_page"] = max(1, current_page - 1)
-            st.rerun()
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stNumberInput"]{
+            width:100px!important;
+            margin:10px auto 0 auto!important;
+        }
+        div[data-testid="stNumberInput"] input{
+            height:68px!important;
+            min-height:68px!important;
+            text-align:center!important;
+            font-size:16px!important;
+        }
+        div[data-testid="stNumberInput"] button{
+            min-height:34px!important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    page_left, page_mid, page_right = st.columns([1, 0.2, 1])
     with page_mid:
-        selected_page = st.number_input("페이지", min_value=1, max_value=total_pages, value=current_page, step=1, key="history_page_input")
+        selected_page = st.number_input("페이지", min_value=1, max_value=total_pages, value=current_page, step=1, key="history_page_input", label_visibility="collapsed")
         if int(selected_page) != current_page:
             st.session_state["history_page"] = int(selected_page)
-            st.rerun()
-    with page_right:
-        if st.button("다음", disabled=current_page >= total_pages, key="history_next_page", use_container_width=True):
-            st.session_state["history_page"] = min(total_pages, current_page + 1)
             st.rerun()
