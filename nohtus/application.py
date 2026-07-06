@@ -18,7 +18,7 @@ from nohtus.pages.move import page_move
 from nohtus.pages.outbound_business import page_outbound
 from nohtus.pages.product_matching_business import page_product_matching
 from nohtus.pages.product_shortcuts import page_favorite_products, page_recent_products
-from nohtus.pages.saved_outbound_business_v2 import page_saved_outbound as page_saved_outbound_refactored
+from nohtus.pages.saved_outbound_business_v3 import page_saved_outbound as page_saved_outbound_refactored
 from nohtus.pages.stocktake_business import page_stocktake
 
 
