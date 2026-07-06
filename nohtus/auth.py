@@ -172,9 +172,11 @@ def render_login():
         }
     }
     </style>
+    <div style="text-align:center; margin: 0.2rem 0 0.35rem 0;">
+        <h1 style="margin:0; font-size:2.5rem; line-height:1.25; font-weight:700; color:#111827;">NOHTUS WMS 로그인</h1>
+        <p style="margin:0.5rem 0 1.2rem 0; color:#64748b; font-size:0.95rem;">처음 접속하는 계정은 여기서 비밀번호를 설정합니다.</p>
+    </div>
     """, unsafe_allow_html=True)
-    st.title("NOHTUS WMS 로그인")
-    st.caption("처음 접속하는 계정은 여기서 비밀번호를 설정합니다.")
 
     username = st.text_input("아이디", key="login_username_input").strip().lower()
     row = _load_user(username) if username else None
