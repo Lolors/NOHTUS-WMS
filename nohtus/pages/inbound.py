@@ -6,10 +6,7 @@
 
 from __future__ import annotations
 
-import json
-
 import streamlit as st
-import streamlit.components.v1 as components
 
 from nohtus.dates import normalize_exp_date
 from nohtus.services.inventory import add_inventory
@@ -18,17 +15,6 @@ from nohtus.services.inbound import ensure_inbound_first_product_mapping, inboun
 from nohtus.services.inbound_bridge_runtime import _apply_inbound_location_pending, _inbound_js_loc_changed
 
 
-INBOUND_DRAFT_QUERY_KEYS = {
-    "inbound_first_product": "inbound_first_product",
-    "inbound_new_product_name": "inbound_new_product_name",
-    "inbound_new_erp_name": "inbound_new_erp_name",
-    "inbound_new_product_code": "inbound_new_product_code",
-    "inbound_source": "inbound_source",
-    "inbound_product_term": "inbound_product_term",
-    "inbound_lot": "inbound_lot",
-    "inbound_exp": "inbound_exp",
-}
-
 FIRST_PRODUCT_DRAFT_KEYS = [
     "inbound_new_product_name",
     "inbound_new_erp_name",
@@ -36,184 +22,15 @@ FIRST_PRODUCT_DRAFT_KEYS = [
 ]
 
 
-def _query_value(name):
-    try:
-        value = st.query_params.get(name)
-    except Exception:
-        return None
-    if isinstance(value, list):
-        return value[0] if value else None
-    return value
+def _has_first_product_draft():
+    """최초 등록 입력값이 하나라도 남아 있으면 입력 영역을 계속 열어둔다."""
+    return any(str(st.session_state.get(k) or "").strip() for k in FIRST_PRODUCT_DRAFT_KEYS)
 
 
-def _restore_inbound_draft_from_query():
-    """도면 클릭 URL에 실린 최초 등록 입력값을 위젯 생성 전에 복원한다."""
-    restored = False
-    first_flag = _query_value("inbound_first_product")
-    if str(first_flag or "") == "1":
+def _keep_first_product_section_open_if_needed():
+    """도면 클릭 후 rerun되어도 최초 등록 체크/입력칸이 접히지 않게 한다."""
+    if bool(st.session_state.get("inbound_first_product")) or _has_first_product_draft():
         st.session_state["inbound_first_product"] = True
-        restored = True
-
-    for query_key, state_key in INBOUND_DRAFT_QUERY_KEYS.items():
-        if query_key == "inbound_first_product":
-            continue
-        value = _query_value(query_key)
-        if value is not None:
-            st.session_state[state_key] = str(value)
-            restored = True
-
-    if restored:
-        for query_key in INBOUND_DRAFT_QUERY_KEYS:
-            try:
-                if query_key in st.query_params:
-                    del st.query_params[query_key]
-            except Exception:
-                pass
-
-
-def _install_inbound_draft_link_preserver():
-    """도면 클릭 순간 최초 등록 입력값을 기억하고, 화면 재렌더 후 다시 보이게 복원한다."""
-    label_map = {
-        "inbound_source": ["매입처"],
-        "inbound_product_term": ["제품 검색"],
-        "inbound_new_product_name": ["표준제품명"],
-        "inbound_new_erp_name": ["ERP명", "비자료명"],
-        "inbound_new_product_code": ["제품코드"],
-        "inbound_lot": ["LOT/제조번호"],
-        "inbound_exp": ["유통기한"],
-    }
-    first_keys = FIRST_PRODUCT_DRAFT_KEYS
-    components.html(
-        f"""
-        <script>
-        (function() {{
-          const labelMap = {json.dumps(label_map, ensure_ascii=False)};
-          const firstKeys = {json.dumps(first_keys, ensure_ascii=False)};
-          const storageKey = 'nohtus_inbound_first_product_draft_v2';
-
-          function parentDoc() {{ return window.parent.document; }}
-
-          function inputByLabel(doc, label) {{
-            return doc.querySelector('input[aria-label="' + label.replace(/"/g, '\\"') + '"]');
-          }}
-
-          function inputValue(labels) {{
-            const doc = parentDoc();
-            for (const label of labels) {{
-              const el = inputByLabel(doc, label);
-              if (el) return el.value || '';
-            }}
-            return '';
-          }}
-
-          function checked(label) {{
-            const el = inputByLabel(parentDoc(), label);
-            return !!(el && el.checked);
-          }}
-
-          function setInput(labels, value) {{
-            const doc = parentDoc();
-            for (const label of labels) {{
-              const el = inputByLabel(doc, label);
-              if (!el) continue;
-              if ((el.value || '') === (value || '')) return true;
-              const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-              nativeSetter.call(el, value || '');
-              el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-              el.dispatchEvent(new Event('change', {{ bubbles: true }}));
-              return true;
-            }}
-            return false;
-          }}
-
-          function setCheckbox(label, value) {{
-            const el = inputByLabel(parentDoc(), label);
-            if (!el) return false;
-            if (!!el.checked === !!value) return true;
-            el.click();
-            return true;
-          }}
-
-          function collectDraft() {{
-            const draft = {{ inbound_first_product: checked('최초 등록') ? '1' : '0' }};
-            for (const [key, labels] of Object.entries(labelMap)) {{
-              draft[key] = inputValue(labels);
-            }}
-            return draft;
-          }}
-
-          function saveDraft() {{
-            if (!checked('최초 등록')) return null;
-            const draft = collectDraft();
-            try {{ window.parent.localStorage.setItem(storageKey, JSON.stringify(draft)); }} catch (e) {{}}
-            return draft;
-          }}
-
-          function appendDraftToUrl(target, draft) {{
-            if (!target || !draft || draft.inbound_first_product !== '1') return;
-            const url = new URL(target.href, window.parent.location.href);
-            url.searchParams.set('inbound_first_product', '1');
-            for (const [key, value] of Object.entries(draft)) {{
-              if (key === 'inbound_first_product') continue;
-              if (value) url.searchParams.set(key, value);
-              else url.searchParams.delete(key);
-            }}
-            target.href = url.toString();
-          }}
-
-          function restoreDraft() {{
-            let raw = null;
-            try {{ raw = window.parent.localStorage.getItem(storageKey); }} catch (e) {{}}
-            if (!raw) return;
-            let draft = null;
-            try {{ draft = JSON.parse(raw); }} catch (e) {{ return; }}
-            if (!draft || draft.inbound_first_product !== '1') return;
-
-            setCheckbox('최초 등록', true);
-            for (const key of firstKeys) {{
-              if (Object.prototype.hasOwnProperty.call(draft, key)) {{
-                setInput(labelMap[key] || [], draft[key] || '');
-              }}
-            }}
-          }}
-
-          function installInto(doc) {{
-            try {{
-              if (!doc || doc.__nohtusInboundDraftPreserverInstalled) return;
-              doc.__nohtusInboundDraftPreserverInstalled = true;
-              doc.addEventListener('mousedown', function(ev) {{
-                const target = ev.target && ev.target.closest ? ev.target.closest('a[data-inbound-loc]') : null;
-                appendDraftToUrl(target, saveDraft());
-              }}, true);
-              doc.addEventListener('click', function(ev) {{
-                const target = ev.target && ev.target.closest ? ev.target.closest('a[data-inbound-loc]') : null;
-                appendDraftToUrl(target, saveDraft());
-              }}, true);
-            }} catch (e) {{}}
-          }}
-
-          function install() {{
-            try {{
-              const doc = parentDoc();
-              installInto(doc);
-              doc.querySelectorAll('iframe').forEach(function(frame) {{
-                try {{ installInto(frame.contentDocument || frame.contentWindow.document); }} catch (e) {{}}
-              }});
-              restoreDraft();
-            }} catch (e) {{}}
-          }}
-
-          install();
-          setTimeout(install, 100);
-          setTimeout(install, 300);
-          setTimeout(install, 700);
-          setTimeout(install, 1200);
-        }})();
-        </script>
-        """,
-        height=0,
-        scrolling=False,
-    )
 
 
 def page_inbound():
@@ -221,8 +38,8 @@ def page_inbound():
     from nohtus.ui.location_picker import inbound_location_picker
     from inbound_map import render_inbound_quick_location_map
 
-    _restore_inbound_draft_from_query()
     _apply_inbound_location_pending()
+    _keep_first_product_section_open_if_needed()
     st.title("입고 등록")
 
     apply_inbound_bridge_style()
@@ -235,9 +52,11 @@ def page_inbound():
     if st.button("__입고도면적용", key="_inbound_apply_btn"):
         _inbound_js_loc_changed()
         _apply_inbound_location_pending()
+        _keep_first_product_section_open_if_needed()
         st.rerun()
 
     _apply_inbound_location_pending()
+    _keep_first_product_section_open_if_needed()
 
     def inbound_product_label(value):
         if value == "":
@@ -260,6 +79,12 @@ def page_inbound():
         with first_col:
             st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
             first_product = st.checkbox("최초 등록", key="inbound_first_product")
+
+        # 체크박스가 도면 클릭 rerun 중 잠깐 false로 평가되어도,
+        # 이미 입력된 최초 등록 값이 있으면 바로 다시 열린 상태로 유지한다.
+        if not first_product and _has_first_product_draft():
+            st.session_state["inbound_first_product"] = True
+            first_product = True
 
         products = product_options(inbound_product_term)
         product_list = products["standard_name"].dropna().astype(str).drop_duplicates().tolist() if not products.empty else []
@@ -290,8 +115,6 @@ def page_inbound():
     with top_right:
         lot = st.text_input("LOT/제조번호", value="", placeholder="미입력 시 '-' 저장", key="inbound_lot")
         exp = st.text_input("유통기한", value="", placeholder="예: 28/3/2, 28.3.2, 2028-03-02 / 미입력 시 '-' 저장", key="inbound_exp")
-
-    _install_inbound_draft_link_preserver()
 
     st.markdown("---")
     map_col, pos_col = st.columns([7.3, 2.7], gap="large")
