@@ -91,6 +91,37 @@ def _update_history_dates(original_df, edited_df):
     return updated
 
 
+def _restore_history_spinner_style():
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stNumberInput"]{
+            width:138px!important;
+            margin:10px auto 0 auto!important;
+            overflow:visible!important;
+        }
+        div[data-testid="stNumberInput"] input{
+            height:68px!important;
+            min-height:68px!important;
+            text-align:center!important;
+            font-size:16px!important;
+        }
+        div[data-testid="stNumberInput"] button{
+            display:flex!important;
+            visibility:visible!important;
+            opacity:1!important;
+            width:32px!important;
+            min-width:32px!important;
+            height:34px!important;
+            min-height:34px!important;
+            padding:0!important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def page_history():
     original_data_editor = st.data_editor
 
@@ -118,6 +149,8 @@ def page_history():
                 st.caption(f"최종재고 누락 이력 {updated:,}건을 보정했습니다.")
         except Exception as e:
             st.warning(f"최종재고 보정 중 오류가 발생했습니다: {e}")
-        return _page_history()
+        result = _page_history()
+        _restore_history_spinner_style()
+        return result
     finally:
         st.data_editor = original_data_editor
