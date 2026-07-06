@@ -125,8 +125,15 @@ def page_mobile_stock_finder():
     st.markdown("""
     <style>
     @media (max-width: 768px) {
-        .block-container {
-            padding-top: 4.8rem !important;
+        header[data-testid="stHeader"] {
+            height: 0 !important;
+            min-height: 0 !important;
+        }
+        div[data-testid="stToolbar"] {
+            display: none !important;
+        }
+        div[data-testid="stAppViewContainer"] .main .block-container {
+            padding-top: 0.8rem !important;
         }
     }
     </style>
