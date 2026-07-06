@@ -16,6 +16,7 @@ from nohtus.config import AREA_COLOR, AREA_CONFIG, COMPANIES
 from nohtus.db import q
 from nohtus.dates import display_date_only
 from nohtus.locations import location_picking_key, parse_location
+from nohtus.pages.product_shortcuts import add_recent_product_view, is_favorite_product, toggle_favorite_product
 from nohtus.services.products import product_options
 
 # Some UI/map helper functions may still live in app.py until later steps.
@@ -112,7 +113,6 @@ def page_map_search_results(term):
     st.markdown("""
     <style>
     .product-main-name{font-size:18px;font-weight:400;color:#111827;line-height:1.35;margin:14px 0 9px;word-break:keep-all;text-align:center;}
-    .product-erp-subtitle{font-size:14px;font-weight:500;color:#64748b;text-align:center;margin:-2px 0 10px;word-break:keep-all;}
     .product-photo-panel{
         width:250px;height:250px;max-width:100%;border:1.5px dashed #d6dee9;border-radius:20px;background:linear-gradient(180deg,#ffffff,#f8fafc);
         display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:600;font-size:20px;line-height:1.55;
@@ -125,6 +125,7 @@ def page_map_search_results(term):
     .dist-rule{height:1px;background:#e5e7eb;margin:0 0 14px;}
     .company-head{display:flex;align-items:center;gap:10px;margin:0 0 10px;flex-wrap:wrap;}
     .company-pill{display:inline-flex;align-items:center;border-radius:12px;background:#e8f8ef;color:#118445;font-size:20px;font-weight:500;padding:7px 14px;white-space:nowrap;}
+    .company-erp-name{font-size:9pt;color:#808080;font-weight:400;white-space:nowrap;}
     .company-total-blue{font-size:20px;color:#4f6fff;font-weight:700;white-space:nowrap;margin-left:2px;}
     .no-stock-box{border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;padding:22px;color:#64748b;font-weight:800;}
     .dist-cell-text{display:flex;align-items:center;height:28px;font-size:14px;font-weight:400;color:#111827;white-space:nowrap;}
@@ -142,7 +143,7 @@ def page_map_search_results(term):
         warehouse_name = group["warehouse_name"]
         rows = group["rows"]
         total_qty = int(group["total_qty"] or 0)
-        split_by_erp = bool(group["split_by_erp"])
+        add_recent_product_view(product_name)
 
         with st.container(border=True):
             left, right = st.columns([0.95, 2.35], gap="large")
@@ -156,18 +157,21 @@ def page_map_search_results(term):
                 else:
                     st.markdown("<div class='product-photo-panel'>제품 사진<br>(업로드 가능)</div>", unsafe_allow_html=True)
                 st.markdown(f"<div class='product-main-name'>{escape(product_name)}</div>", unsafe_allow_html=True)
-                if split_by_erp:
-                    st.markdown(f"<div class='product-erp-subtitle'>전산명: {escape(warehouse_name)}</div>", unsafe_allow_html=True)
                 st.markdown(
                     f"<div class='total-card-small'><span class='total-label'>총 재고</span><span class='total-value'>{total_qty} EA</span></div>",
                     unsafe_allow_html=True,
                 )
 
             with right:
-                header = "재고 분포"
-                if split_by_erp:
-                    header += f" · 전산명: {warehouse_name}"
-                st.markdown(f"<div class='dist-header'>{escape(header)}</div><div class='dist-rule'></div>", unsafe_allow_html=True)
+                head_col, fav_col = st.columns([7, 2], gap="small")
+                with head_col:
+                    st.markdown("<div class='dist-header'>재고 분포</div>", unsafe_allow_html=True)
+                with fav_col:
+                    fav_label = "⭐즐겨찾기 추가됨" if is_favorite_product(product_name) else "⭐즐겨찾기"
+                    if st.button(fav_label, key=f"map_fav_{product_name}_{warehouse_name}", use_container_width=True):
+                        toggle_favorite_product(product_name)
+                        st.rerun()
+                st.markdown("<div class='dist-rule'></div>", unsafe_allow_html=True)
                 if rows.empty:
                     st.markdown("<div class='no-stock-box'>현재 재고가 없습니다.</div>", unsafe_allow_html=True)
                 else:
@@ -176,9 +180,12 @@ def page_map_search_results(term):
                     rows = rows.sort_values(["_company_order", "company", "lot", "exp_date", "location"])
                     for company, cg in rows.groupby("company", sort=False):
                         company_total = int(cg["qty"].sum())
+                        erp_names = [x for x in cg["warehouse_name"].dropna().astype(str).str.strip().drop_duplicates().tolist() if x and x != "-"]
+                        erp_text = " / ".join(erp_names)
+                        erp_html = f"<span class='company-erp-name'>{escape(erp_text)}</span>" if erp_text else ""
                         st.markdown(
                             f"<div class='company-head'><span class='company-pill'>{escape(str(company))}</span>"
-                            f"<span class='company-total-blue'>{company_total} EA</span></div>",
+                            f"{erp_html}<span class='company-total-blue'>{company_total} EA</span></div>",
                             unsafe_allow_html=True,
                         )
                         cg = cg.sort_values(["location", "lot", "exp_date", "warehouse_name"])
