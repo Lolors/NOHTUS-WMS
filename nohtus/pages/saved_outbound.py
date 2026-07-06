@@ -94,9 +94,13 @@ def _show_cancel_order_confirm(order_id):
 
 def _status_text_html(status):
     status = str(status or "저장됨")
-    if status == "취소됨":
-        return "<span style='color:#dc2626;font-weight:800;'>취소됨</span>"
-    return "<span style='color:#2563eb;font-weight:800;'>저장됨</span>"
+    colors = {
+        "수정됨": "#16a34a",
+        "취소됨": "#dc2626",
+        "저장됨": "#2563eb",
+    }
+    color = colors.get(status, "#475569")
+    return f"<span style='color:{color};font-weight:800;'>{escape(status)}</span>"
 
 
 def _order_items_summary(order_id, max_items=3):
@@ -121,6 +125,16 @@ def _order_items_summary(order_id, max_items=3):
     return text
 
 
+def _short_cell_text(value, max_len=34):
+    text = str(value or "-")
+    return text if len(text) <= max_len else text[:max_len - 1] + "…"
+
+
+def _select_saved_order(order_id):
+    st.session_state["selected_saved_order_id"] = int(order_id)
+    st.rerun()
+
+
 def _render_saved_orders(orders_df, selected_order_id):
     st.markdown("""
     <style>
@@ -129,6 +143,7 @@ def _render_saved_orders(orders_df, selected_order_id):
     .saved-order-date{color:#475569;}
     .saved-order-title{font-weight:600;}
     .saved-order-status{justify-content:center;}
+    .saved-order-click button{justify-content:flex-start!important;text-align:left!important;overflow:hidden!important;white-space:nowrap!important;text-overflow:ellipsis!important;}
     </style>
     <div class='saved-order-head'>
       <div style='text-align:center;'>번호</div>
@@ -145,17 +160,27 @@ def _render_saved_orders(orders_df, selected_order_id):
         customer = str(getattr(r, "customer_name", "") or "-")
         status = str(getattr(r, "status", "저장됨") or "저장됨")
         items_text = _order_items_summary(oid)
+        selected = int(selected_order_id or 0) == oid
         row_cols = st.columns([0.75, 1.05, 1.6, 4.2, 0.9], gap="small")
+        button_type = "primary" if selected else "secondary"
         with row_cols[0]:
-            if st.button(f"#{oid}", key=f"open_order_{oid}", use_container_width=True, type=("primary" if int(selected_order_id or 0) == oid else "secondary")):
-                st.session_state["selected_saved_order_id"] = oid
-                st.rerun()
+            if st.button(f"#{oid}", key=f"open_order_{oid}", use_container_width=True, type=button_type):
+                _select_saved_order(oid)
         with row_cols[1]:
-            st.markdown(f"<div class='saved-order-cell saved-order-date'>{escape(created)}</div>", unsafe_allow_html=True)
+            st.markdown("<div class='saved-order-click'>", unsafe_allow_html=True)
+            if st.button(_short_cell_text(created, 12), key=f"open_order_date_{oid}", use_container_width=True, type=button_type):
+                _select_saved_order(oid)
+            st.markdown("</div>", unsafe_allow_html=True)
         with row_cols[2]:
-            st.markdown(f"<div class='saved-order-cell' title='{escape(customer)}'>{escape(customer)}</div>", unsafe_allow_html=True)
+            st.markdown("<div class='saved-order-click'>", unsafe_allow_html=True)
+            if st.button(_short_cell_text(customer, 18), key=f"open_order_customer_{oid}", use_container_width=True, type=button_type):
+                _select_saved_order(oid)
+            st.markdown("</div>", unsafe_allow_html=True)
         with row_cols[3]:
-            st.markdown(f"<div class='saved-order-cell saved-order-title' title='{escape(items_text)}'>{escape(items_text)}</div>", unsafe_allow_html=True)
+            st.markdown("<div class='saved-order-click'>", unsafe_allow_html=True)
+            if st.button(_short_cell_text(items_text, 46), key=f"open_order_items_{oid}", use_container_width=True, type=button_type):
+                _select_saved_order(oid)
+            st.markdown("</div>", unsafe_allow_html=True)
         with row_cols[4]:
             st.markdown(f"<div class='saved-order-cell saved-order-status'>{_status_text_html(status)}</div>", unsafe_allow_html=True)
     return st.session_state.get("selected_saved_order_id") or (int(orders_df.iloc[0]["id"]) if not orders_df.empty else None)
