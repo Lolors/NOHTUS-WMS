@@ -17,7 +17,7 @@ def product_master_excel_bytes(highlight_missing=False):
     """제품 마스터를 사용자가 수정하기 쉬운 엑셀 양식으로 내보낸다.
     v3.7부터 제품코드는 노투스팜 ERP 전용 코드로 취급하고, 전산상 명칭은 제품마스터에서 제외한다.
     """
-    df = q("SELECT standard_name, erp_nohtuspharm_name, product_code, erp_noh_name, erp_noh_code, erp_nohtus_name, bidata_name, aliases FROM products ORDER BY standard_name")
+    df = q("SELECT standard_name, erp_nohtuspharm_name, product_code, erp_noh_name, erp_noh_code, erp_nohtus_name, bidata_name, aliases FROM products ORDER BY standard_name, id")
     out = df.rename(columns={
         "standard_name": "표준제품명",
         "erp_nohtuspharm_name": "노투스팜 ERP명",
@@ -62,9 +62,22 @@ def product_master_excel_bytes(highlight_missing=False):
     return bio.getvalue()
 
 
+def _clean_text(value):
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    if text.lower() == "nan":
+        return ""
+    return text
+
+
 def import_product_master_excel(uploaded_file):
-    """업로드된 제품매칭표 엑셀을 products 테이블에 완전 교체 반영한다.
-    기존 제품명/ERP명 데이터가 남지 않도록 업로드 파일 기준으로 products를 다시 만든다.
+    """업로드된 제품매칭표 엑셀을 products 테이블에 반영한다.
+
+    중요 원칙:
+    - 같은 표준제품명에 ERP명이 여러 개 존재할 수 있다.
+    - 표준제품명만 기준으로 중복 제거하지 않는다.
+    - 완전히 같은 행만 중복으로 보며, 서로 다른 ERP명/코드/비자료명은 별도 매칭으로 보존한다.
     """
     df = pd.read_excel(uploaded_file, dtype=str).fillna("")
     rename = {
@@ -90,18 +103,27 @@ def import_product_master_excel(uploaded_file):
     seen = set()
     rows_to_insert = []
     for _, r in df.iterrows():
-        code = "" if pd.isna(r.get("product_code")) else str(r.get("product_code")).strip()
-        name = "" if pd.isna(r.get("standard_name")) else str(r.get("standard_name")).strip()
-        aliases = "" if pd.isna(r.get("aliases")) else str(r.get("aliases")).strip()
-        erp_np = "" if pd.isna(r.get("erp_nohtuspharm_name")) else str(r.get("erp_nohtuspharm_name")).strip()
-        erp_nt = "" if pd.isna(r.get("erp_nohtus_name")) else str(r.get("erp_nohtus_name")).strip()
-        erp_noh = "" if pd.isna(r.get("erp_noh_name")) else str(r.get("erp_noh_name")).strip()
-        erp_noh_code = "" if pd.isna(r.get("erp_noh_code")) else str(r.get("erp_noh_code")).strip()
-        bidata_name = "" if pd.isna(r.get("bidata_name")) else str(r.get("bidata_name")).strip()
+        code = _clean_text(r.get("product_code"))
+        name = _clean_text(r.get("standard_name"))
+        aliases = _clean_text(r.get("aliases"))
+        erp_np = _clean_text(r.get("erp_nohtuspharm_name"))
+        erp_nt = _clean_text(r.get("erp_nohtus_name"))
+        erp_noh = _clean_text(r.get("erp_noh_name"))
+        erp_noh_code = _clean_text(r.get("erp_noh_code"))
+        bidata_name = _clean_text(r.get("bidata_name"))
         if not name:
             skipped += 1
             continue
-        key = name.strip()
+        key = (
+            name,
+            erp_np,
+            code,
+            erp_noh,
+            erp_noh_code,
+            erp_nt,
+            bidata_name,
+            aliases,
+        )
         if key in seen:
             skipped += 1
             continue
@@ -122,7 +144,7 @@ def product_options(term=""):
     term = (term or "").strip().lower()
     df = q("""SELECT standard_name, warehouse_name, aliases,
                     erp_nohtuspharm_name, erp_nohtus_name, erp_noh_name, bidata_name
-             FROM products ORDER BY standard_name""")
+             FROM products ORDER BY standard_name, id""")
     if term:
         search_cols = ["standard_name", "warehouse_name", "aliases", "erp_nohtuspharm_name", "erp_nohtus_name", "erp_noh_name", "bidata_name"]
         mask = df.apply(lambda r: any(term in str(r.get(c, "")).lower() for c in search_cols), axis=1)
