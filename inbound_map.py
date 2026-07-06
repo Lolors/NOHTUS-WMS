@@ -1,7 +1,7 @@
 from html import escape
 from urllib.parse import quote
 
-import streamlit as st
+import strealit as st
 import streamlit.components.v1 as components
 
 
@@ -139,46 +139,6 @@ function markSelected(loc){{
     x.classList.toggle('selected', v === loc || (loc && loc.startsWith(v + '-')) || (v === 'N' && ['홍보물랙','회색 카트','오른쪽 창고','사무실(4층)'].includes(loc)));
   }});
 }}
-function tryParentInbound(loc){{
-  try {{
-    const doc = window.parent.document;
-    // 핵심: Streamlit text_input 값 확정 타이밍에 의존하지 않는다.
-    // 먼저 부모 URL의 query parameter에 클릭 위치를 심고, 숨김 버튼은 rerun 트리거로만 사용한다.
-    try {{
-      const url = new URL(parentBaseHref());
-      url.searchParams.set('inbound_loc', loc);
-      url.searchParams.delete('map_search_product');
-      if (window.parent && window.parent.history && window.parent.history.replaceState) {{
-        window.parent.history.replaceState(null, '', url.toString());
-      }} else if (window.top && window.top.history && window.top.history.replaceState) {{
-        window.top.history.replaceState(null, '', url.toString());
-      }}
-    }} catch(e) {{}}
-
-    const input = doc.querySelector('input[aria-label="__입고도면선택값"]');
-    if (input) {{
-      try {{
-        const setter = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value').set;
-        setter.call(input, loc);
-      }} catch(e) {{
-        input.value = loc;
-      }}
-      input.dispatchEvent(new InputEvent('input', {{bubbles:true, inputType:'insertText', data:loc}}));
-      input.dispatchEvent(new Event('change', {{bubbles:true}}));
-    }}
-
-    let applied = false;
-    doc.querySelectorAll('button').forEach(btn => {{
-      if ((btn.innerText || '').trim() === '__입고도면적용') {{
-        setTimeout(() => btn.click(), 30);
-        applied = true;
-      }}
-    }});
-    return applied;
-  }} catch(e) {{
-    return false;
-  }}
-}}
 function toggleInboundSpecialMenu(forceClose=false){{
   const menu=document.getElementById('inboundSpecialMenu');
   if(!menu) return;
@@ -198,7 +158,6 @@ document.querySelectorAll('[data-inbound-loc]').forEach(el => {{
     }}
     toggleInboundSpecialMenu(true);
     markSelected(loc);
-    if(tryParentInbound(loc)) return;
     const href = buildParentUrl('inbound_loc', loc);
     el.setAttribute('href', href);
     el.setAttribute('target', '_top');
@@ -209,5 +168,3 @@ document.querySelectorAll('[data-inbound-loc]').forEach(el => {{
 </body></html>
 """
     components.html(html, height=780, scrolling=False)
-
-
