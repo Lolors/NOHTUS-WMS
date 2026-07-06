@@ -1,4 +1,5 @@
 from datetime import date
+from html import escape
 
 import pandas as pd
 import streamlit as st
@@ -11,6 +12,84 @@ from nohtus.services.closing import (
     dataframe_to_excel_bytes,
     page_erp_stock_compare,
 )
+
+
+def _today_outbound_final_stock_map(items):
+    if items.empty:
+        return {}
+    keys = items[["표준제품명", "제조번호", "유통기한"]].drop_duplicates()
+    result = {}
+    for r in keys.itertuples(index=False):
+        product = str(getattr(r, "표준제품명") or "")
+        lot = str(getattr(r, "제조번호") or "-")
+        exp = str(getattr(r, "유통기한") or "-")
+        df = q(
+            """
+            SELECT COALESCE(SUM(qty), 0) AS qty
+            FROM inventory
+            WHERE product_name=?
+              AND COALESCE(lot, '-')=?
+              AND COALESCE(exp_date, '-')=?
+            """,
+            (product, lot, exp),
+        )
+        result[(product, lot, exp)] = int(df.iloc[0]["qty"] or 0) if not df.empty else 0
+    return result
+
+
+def _today_outbound_display_df(items):
+    group_cols = ["표준제품명", "제조번호", "유통기한"]
+    final_map = _today_outbound_final_stock_map(items)
+    rows = []
+    for key, grp in items.groupby(group_cols, sort=False, dropna=False):
+        product, lot, exp = key
+        total_qty = int(grp["출고수량"].sum())
+        final_qty = final_map.get((product, lot, exp), 0)
+        for i, rr in enumerate(grp.itertuples(index=False)):
+            rows.append({
+                "제품명": product if i == 0 else "",
+                "제조번호": lot if i == 0 else "",
+                "유통기한": exp if i == 0 else "",
+                "매출처": getattr(rr, "매출처", ""),
+                "수량": int(getattr(rr, "출고수량", 0) or 0),
+                "총 출고수량": total_qty if i == 0 else "",
+                "최종재고": final_qty if i == 0 else "",
+            })
+    return pd.DataFrame(rows, columns=["제품명", "제조번호", "유통기한", "매출처", "수량", "총 출고수량", "최종재고"])
+
+
+def _render_today_outbound_html(items):
+    group_cols = ["표준제품명", "제조번호", "유통기한"]
+    final_map = _today_outbound_final_stock_map(items)
+    html = [
+        "<style>",
+        ".today-out-table{width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;font-size:14px;}",
+        ".today-out-table th{background:#f1f5f9;color:#111827;font-weight:800;border:1px solid #e5e7eb;padding:8px;text-align:center;}",
+        ".today-out-table td{border:1px solid #e5e7eb;padding:8px;vertical-align:middle;color:#111827;}",
+        ".today-out-table td.num{text-align:right;font-weight:700;}",
+        "</style>",
+        "<table class='today-out-table'>",
+        "<thead><tr><th>제품명</th><th>제조번호</th><th>유통기한</th><th>매출처</th><th>수량</th><th>총 출고수량</th><th>최종재고</th></tr></thead><tbody>",
+    ]
+    for key, grp in items.groupby(group_cols, sort=False, dropna=False):
+        product, lot, exp = key
+        total_qty = int(grp["출고수량"].sum())
+        final_qty = final_map.get((product, lot, exp), 0)
+        rowspan = len(grp)
+        for i, rr in enumerate(grp.itertuples(index=False)):
+            html.append("<tr>")
+            if i == 0:
+                html.append(f"<td rowspan='{rowspan}'>{escape(str(product))}</td>")
+                html.append(f"<td rowspan='{rowspan}'>{escape(str(lot))}</td>")
+                html.append(f"<td rowspan='{rowspan}'>{escape(str(exp))}</td>")
+            html.append(f"<td>{escape(str(getattr(rr, '매출처', '') or '-'))}</td>")
+            html.append(f"<td class='num'>{int(getattr(rr, '출고수량', 0) or 0):,}</td>")
+            if i == 0:
+                html.append(f"<td class='num' rowspan='{rowspan}'>{total_qty:,}</td>")
+                html.append(f"<td class='num' rowspan='{rowspan}'>{final_qty:,}</td>")
+            html.append("</tr>")
+    html.append("</tbody></table>")
+    st.markdown("".join(html), unsafe_allow_html=True)
 
 
 def page_closing():
@@ -26,42 +105,29 @@ def page_closing():
     ds = str(target_date)
 
     if tab == "오늘 출고 체크":
-        items = q("""SELECT o.id AS 지시서번호,
-                            COALESCE(o.title, '') AS 출고지시서제목,
+        items = q("""SELECT COALESCE(o.title, '') AS 출고지시서제목,
                             i.inventory_id AS 재고ID,
-                            i.company AS 사업장,
-                            i.location AS 로케이션,
                             i.product_name AS 표준제품명,
                             COALESCE(i.lot, '-') AS 제조번호,
                             COALESCE(i.exp_date, '-') AS 유통기한,
-                            i.qty AS 출고수량,
-                            COALESCE(inv.qty, 0) AS 현재수량
+                            i.qty AS 출고수량
                      FROM outbound_orders o
                      JOIN outbound_order_items i ON o.id=i.order_id
-                     LEFT JOIN inventory inv ON i.inventory_id=inv.id
                      WHERE o.order_date=? AND IFNULL(o.status,'')<>'취소됨'
-                     ORDER BY o.id, i.company, i.location, i.product_name, i.lot, i.exp_date""", (ds,))
+                     ORDER BY i.product_name, i.lot, i.exp_date, o.id, i.id""", (ds,))
         if items.empty:
             st.info("해당 날짜의 출고지시가 없습니다.")
         else:
             items["유통기한"] = items["유통기한"].apply(display_date_only)
             items["출고수량"] = pd.to_numeric(items["출고수량"], errors="coerce").fillna(0).astype(int)
-            items["현재수량"] = pd.to_numeric(items["현재수량"], errors="coerce").fillna(0).astype(int)
-            valid_inv = items["재고ID"].notna()
-            items["동일재고출고합계"] = items.groupby("재고ID")["출고수량"].transform("sum").where(valid_inv, items["출고수량"])
-            # 오늘 출고 체크는 실제 지시내역 확인용이다.
-            # 현재수량은 출고지시 저장으로 이미 차감된 뒤의 inventory 수량이며,
-            # 기존수량은 오늘 해당 재고ID의 출고수량을 되돌려 계산한 출고 전 수량이다.
-            items["기존수량"] = items["현재수량"] + items["동일재고출고합계"]
-            items["실물수량"] = ""
             try:
                 customers_for_close = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
                 items["매출처"] = items["출고지시서제목"].apply(lambda x: _infer_customer_from_title(x, customers_for_close)[0])
             except Exception:
                 items["매출처"] = ""
-            show_cols = ["지시서번호", "매출처", "사업장", "로케이션", "표준제품명", "제조번호", "유통기한", "기존수량", "출고수량", "현재수량", "실물수량"]
-            st.dataframe(items[show_cols], hide_index=True, use_container_width=True, column_config={"지시서번호": st.column_config.NumberColumn(width="small"), "매출처": st.column_config.TextColumn(width="medium"), "사업장": st.column_config.TextColumn(width="small"), "로케이션": st.column_config.TextColumn(width="small"), "표준제품명": st.column_config.TextColumn(width="large"), "제조번호": st.column_config.TextColumn(width="medium"), "유통기한": st.column_config.TextColumn(width="small"), "기존수량": st.column_config.NumberColumn(width="small"), "출고수량": st.column_config.NumberColumn(width="small"), "현재수량": st.column_config.NumberColumn(width="small"), "실물수량": st.column_config.TextColumn(width="small")})
-            st.download_button("마감 체크리스트 엑셀 다운로드", data=dataframe_to_excel_bytes(items[show_cols], "마감체크"), file_name=f"NOHTUS_마감체크_{ds}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            _render_today_outbound_html(items)
+            out_df = _today_outbound_display_df(items)
+            st.download_button("마감 체크리스트 엑셀 다운로드", data=dataframe_to_excel_bytes(out_df, "마감체크"), file_name=f"NOHTUS_마감체크_{ds}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     else:
         st.markdown("### 출고")
         out_raw = q("""SELECT o.id AS 지시서번호, COALESCE(o.title, '') AS 출고지시서제목,
