@@ -146,25 +146,29 @@ def render_login():
     st.markdown("""
     <style>
     @media (min-width: 769px) {
-        section.main > div.block-container,
-        div[data-testid="stAppViewContainer"] div.block-container,
-        .block-container {
-            width: 40vw !important;
-            max-width: 40vw !important;
-            min-width: 420px !important;
+        div[data-testid="stTextInput"],
+        div[data-testid="stButton"] {
+            width: 20vw !important;
+            min-width: 320px !important;
+            max-width: 420px !important;
             margin-left: auto !important;
             margin-right: auto !important;
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
+        }
+        div[data-testid="stTextInput"] > div,
+        div[data-testid="stButton"] > button {
+            width: 100% !important;
         }
     }
     @media (max-width: 768px) {
-        section.main > div.block-container,
-        div[data-testid="stAppViewContainer"] div.block-container,
-        .block-container {
+        div[data-testid="stTextInput"],
+        div[data-testid="stButton"] {
             width: 100% !important;
-            max-width: 100% !important;
             min-width: 0 !important;
+            max-width: 100% !important;
+        }
+        div[data-testid="stTextInput"] > div,
+        div[data-testid="stButton"] > button {
+            width: 100% !important;
         }
     }
     </style>
