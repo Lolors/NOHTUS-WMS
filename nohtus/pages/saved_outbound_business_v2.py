@@ -51,9 +51,10 @@ def _status_text_html(status):
 def _render_saved_orders(orders_df, selected_order_id):
     st.markdown("""
     <style>
-    .saved-order-head{display:grid;grid-template-columns:.75fr 1.05fr 1.6fr 4.2fr .9fr;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:13px;font-weight:800;}
-    .saved-order-cell{height:34px;display:flex;align-items:center;border-bottom:1px solid #f1f5f9;color:#111827;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .saved-order-head{display:grid;grid-template-columns:.45fr 1.05fr 1.6fr 4.2fr .9fr;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:13px;font-weight:800;}
+    .saved-order-cell{height:36px;display:flex;align-items:center;color:#111827;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .saved-order-status{justify-content:center;}
+    .saved-order-sep{height:1px;background:#f1f5f9;margin:3px 0 5px;}
     </style>
     <div class='saved-order-head'>
       <div style='text-align:center;'>번호</div>
@@ -69,9 +70,9 @@ def _render_saved_orders(orders_df, selected_order_id):
         customer = str(getattr(r, "customer_name", "") or "-")
         status = str(getattr(r, "status", "저장됨") or "저장됨")
         items_text = _order_items_summary(oid)
-        cols = st.columns([0.75, 1.05, 1.6, 4.2, 0.9], gap="small")
+        cols = st.columns([0.45, 1.05, 1.6, 4.2, 0.9], gap="small")
         with cols[0]:
-            if st.button(f"#{oid}", key=f"open_order_{oid}", use_container_width=True, type=("primary" if int(selected_order_id or 0) == oid else "secondary")):
+            if st.button(f"#{oid}", key=f"open_order_{oid}", use_container_width=False, type=("primary" if int(selected_order_id or 0) == oid else "secondary")):
                 st.session_state["selected_saved_order_id"] = oid
                 st.rerun()
         with cols[1]:
@@ -82,6 +83,7 @@ def _render_saved_orders(orders_df, selected_order_id):
             st.markdown(f"<div class='saved-order-cell' title='{escape(items_text)}'>{escape(items_text)}</div>", unsafe_allow_html=True)
         with cols[4]:
             st.markdown(f"<div class='saved-order-cell saved-order-status'>{_status_text_html(status)}</div>", unsafe_allow_html=True)
+        st.markdown("<div class='saved-order-sep'></div>", unsafe_allow_html=True)
 
 
 def _cancel_order(order_id):
