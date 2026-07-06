@@ -2,17 +2,53 @@ import pandas as pd
 import streamlit as st
 
 import nohtus.pages.outbound as outbound_page
+from nohtus.db import connect
 
 
 def _hide_last_sale_importer():
     return None
 
 
+def _upsert_wms_last_sale(customer_payload, order_date):
+    customer_name = str((customer_payload or {}).get("customer_name") or "").strip()
+    company = str((customer_payload or {}).get("company") or "").strip()
+    order_date = str(order_date or "").strip()
+    if not customer_name or not order_date:
+        return
+    now = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+    outbound_page._ensure_customer_last_sales_table()
+    with connect() as con:
+        cur = con.cursor()
+        old = cur.execute(
+            "SELECT id, last_sale_date FROM customer_last_sales WHERE customer_name=? AND company=?",
+            (customer_name, company),
+        ).fetchone()
+        if old:
+            old_date = str(old[1] or "")
+            final_date = max(old_date, order_date) if old_date else order_date
+            cur.execute(
+                """
+                UPDATE customer_last_sales
+                SET last_sale_date=?, source_company=?, updated_at=?
+                WHERE id=?
+                """,
+                (final_date, company or "WMS", now, int(old[0])),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO customer_last_sales(customer_name, company, last_sale_date, source_company, updated_at)
+                VALUES(?,?,?,?,?)
+                """,
+                (customer_name, company, order_date, company or "WMS", now),
+            )
+        con.commit()
+
+
 def page_outbound():
     original_renderer = outbound_page._render_last_sale_importer
     original_save_with_customer = outbound_page._save_outbound_cart_with_customer
     original_text_input = st.text_input
-    original_selectbox = st.selectbox
     original_checkbox = st.checkbox
     original_data_editor = st.data_editor
     original_markdown = st.markdown
@@ -38,6 +74,7 @@ def page_outbound():
     def patched_save_outbound_cart_with_customer(cart, title, customer_payload):
         outbound_page._ensure_outbound_customer_columns()
         editing_id = st.session_state.get("editing_order_id")
+        order_date = pd.Timestamp.now().strftime("%Y-%m-%d")
         if editing_id:
             outbound_page.update_outbound_order(int(editing_id), title, cart)
             outbound_page._save_outbound_customer(int(editing_id), customer_payload)
@@ -48,6 +85,7 @@ def page_outbound():
             oid = outbound_page.save_outbound_order(cart, title)
             outbound_page._save_outbound_customer(int(oid), customer_payload)
             msg = f"출고지시서 #{int(oid)} 저장 완료"
+        _upsert_wms_last_sale(customer_payload, order_date)
 
         for k in [
             "outbound_cart",
@@ -112,20 +150,6 @@ def page_outbound():
             return value
         return original_text_input(label, *args, **kwargs)
 
-    def patched_selectbox(label, options, *args, **kwargs):
-        if kwargs.get("key") == "out_customer_select":
-            opts = list(options or [])
-            blank = ""
-            if blank not in opts:
-                opts = [blank] + opts
-            default_label = st.session_state.get("_out_customer_label")
-            if default_label in opts:
-                kwargs["index"] = opts.index(default_label)
-            else:
-                kwargs["index"] = 0
-            return original_selectbox(label, opts, *args, **kwargs)
-        return original_selectbox(label, options, *args, **kwargs)
-
     def patched_checkbox(label, *args, **kwargs):
         key = kwargs.get("key")
         if key in checkbox_skip_values:
@@ -162,7 +186,6 @@ def page_outbound():
     st.markdown = patched_markdown
     st.caption = patched_caption
     st.text_input = patched_text_input
-    st.selectbox = patched_selectbox
     st.checkbox = patched_checkbox
     st.data_editor = patched_data_editor
     try:
@@ -174,6 +197,5 @@ def page_outbound():
         st.markdown = original_markdown
         st.caption = original_caption
         st.text_input = original_text_input
-        st.selectbox = original_selectbox
         st.checkbox = original_checkbox
         st.data_editor = original_data_editor
