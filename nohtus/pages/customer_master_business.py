@@ -10,7 +10,7 @@ from nohtus.services.master import customer_export_excel_bytes, import_customer_
 
 def _render_three_company_last_sale_importer():
     st.markdown("#### 최근거래일 갱신")
-    st.caption("노투스팜/노투스 매출은 매출일자 기준, NOH 매출은 명세서일자 기준으로 거래처별 마지막 거래일만 저장합니다.")
+    st.caption("노투스팜은 매출일자, NOH는 명세서일자, 노투스는 거래일자 기준으로 거래처별 마지막 거래일만 저장합니다.")
     u1, u2, u3 = st.columns(3, gap="small")
     with u1:
         np_file = st.file_uploader("노투스팜 매출 파일", type=["xls", "xlsx"], key="last_sale_np_file")
@@ -27,7 +27,7 @@ def _render_three_company_last_sale_importer():
             if noh_file is not None:
                 frames.append(_parse_sales_excel(noh_file, company="NOH", header_row=0, date_col="명세서일자", customer_col="거래처명"))
             if nt_file is not None:
-                frames.append(_parse_sales_excel(nt_file, company="노투스", header_row=6, date_col="매출일자", customer_col="거래처명"))
+                frames.append(_parse_sales_excel(nt_file, company="노투스", header_row=6, date_col="거래일자", customer_col="거래처명"))
             if not frames:
                 st.warning("갱신할 매출 파일을 업로드하세요.")
             else:
