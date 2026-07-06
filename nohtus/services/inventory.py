@@ -39,9 +39,90 @@ def product_mapping_name_for(company, standard_name):
     return first_nonblank(df.iloc[0].get("nm"))
 
 
+def _stock_key(product_name, lot, exp_date):
+    return (
+        str(product_name or "").strip(),
+        str(lot or "-").strip() or "-",
+        str(exp_date or "-").strip() or "-",
+    )
+
+
+def current_product_lot_exp_stock(cur, product_name, lot, exp_date):
+    """현재 DB 기준 표준제품명+LOT+유통기한 전체 재고 합계."""
+    product, lot, exp_date = _stock_key(product_name, lot, exp_date)
+    if not product:
+        return None
+    row = cur.execute(
+        """
+        SELECT COALESCE(SUM(qty), 0)
+        FROM inventory
+        WHERE product_name=?
+          AND IFNULL(lot, '-')=?
+          AND IFNULL(exp_date, '-')=?
+        """,
+        (product, lot, exp_date),
+    ).fetchone()
+    return int((row[0] if row else 0) or 0)
+
+
+def _transaction_stock_delta(tx_type, qty):
+    """표준제품명+LOT+유통기한 전체 재고 관점의 이력 증감값."""
+    tx_type = str(tx_type or "").strip()
+    qty = int(qty or 0)
+    if tx_type in ["입고", "출고지시취소", "재고조사불러오기", "기준재고", "전산재고"]:
+        return qty
+    if tx_type in ["출고지시", "출고", "출고지시수정", "출고확정"]:
+        return -qty
+    if tx_type in ["재고조정", "재고실사", "재고정보수정"]:
+        return qty
+    if tx_type in ["위치이동", "사업장이동", "사업장+위치이동", "비자료전환", "이동"]:
+        return 0
+    return 0
+
+
+def backfill_missing_transaction_final_stock():
+    """비어 있는 과거 final_stock을 현재 재고에서 이력을 역순으로 되감아 보정한다."""
+    with connect() as con:
+        cur = con.cursor()
+        missing = cur.execute("SELECT COUNT(*) FROM transactions WHERE final_stock IS NULL").fetchone()[0]
+        if int(missing or 0) <= 0:
+            return 0
+
+        stock_rows = cur.execute(
+            """
+            SELECT product_name, IFNULL(lot, '-') AS lot, IFNULL(exp_date, '-') AS exp_date,
+                   COALESCE(SUM(qty), 0) AS qty
+            FROM inventory
+            GROUP BY product_name, IFNULL(lot, '-'), IFNULL(exp_date, '-')
+            """
+        ).fetchall()
+        running = {_stock_key(r[0], r[1], r[2]): int(r[3] or 0) for r in stock_rows}
+
+        rows = cur.execute(
+            """
+            SELECT id, tx_type, product_name, lot, exp_date, qty, final_stock
+            FROM transactions
+            WHERE TRIM(COALESCE(product_name, '')) <> ''
+            ORDER BY id DESC
+            """
+        ).fetchall()
+        updated = 0
+        for tx_id, tx_type, product_name, lot, exp_date, qty, final_stock in rows:
+            key = _stock_key(product_name, lot, exp_date)
+            current_after = int(running.get(key, 0) or 0)
+            if final_stock is None:
+                cur.execute("UPDATE transactions SET final_stock=? WHERE id=?", (current_after, int(tx_id)))
+                updated += 1
+            running[key] = current_after - _transaction_stock_delta(tx_type, qty)
+        con.commit()
+        return updated
+
+
 def insert_transaction_log(cur, *, created_at, tx_type, product_name, warehouse_name=None,
                            lot=None, exp_date=None, from_company=None, from_location=None,
                            to_company=None, to_location=None, qty=0, memo="", final_stock=None):
+    if final_stock is None:
+        final_stock = current_product_lot_exp_stock(cur, product_name, lot, exp_date)
     cur.execute(
         """INSERT INTO transactions(
                created_at, tx_type, product_name, warehouse_name, lot, exp_date,
