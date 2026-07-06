@@ -8,9 +8,8 @@ import streamlit.components.v1 as components
 def render_inbound_quick_location_map():
     """입고 등록용 로케이션 도면.
 
-    quality/v3-9-cleanup 시절의 components.html 기반 구조로 복원한다.
-    클릭은 target="_top" 링크로 현재 WMS 화면에 inbound_loc query parameter를 넘긴다.
-    새 창/새 탭 fallback(window.open 등)은 쓰지 않는다.
+    quality/v3-9-cleanup 시절의 components.html 기반 클릭 브리지를 복원한다.
+    클릭은 부모 Streamlit 화면의 숨김 input/button으로 전달하고, 새 창 fallback은 쓰지 않는다.
     """
     selected = st.session_state.get("_inbound_selected_loc", "") or "REC"
 
@@ -55,7 +54,8 @@ def render_inbound_quick_location_map():
 .map-cell:hover,.zone:hover{{outline:3px solid rgba(37,99,235,.22);z-index:2;text-decoration:none!important;}}
 .map-cell:nth-child(2n){{border-right:none;}}
 .map-cell:nth-child(n+5){{border-bottom:none;}}
-.special-menu{{position:absolute;z-index:30;background:#fff;border:1px solid #cbd5e1;border-radius:12px;box-shadow:0 12px 28px rgba(15,23,42,.18);padding:6px;display:grid;gap:5px;}}
+.special-menu{{position:absolute;z-index:30;background:#fff;border:1px solid #cbd5e1;border-radius:12px;box-shadow:0 12px 28px rgba(15,23,42,.18);padding:6px;display:none;gap:5px;}}
+.special-menu.open{{display:grid;}}
 .special-menu a{{appearance:none;border:1px solid #e2e8f0;background:#f8fafc;border-radius:9px;padding:8px 7px;font-size:12px;font-weight:900;color:#0f172a!important;cursor:pointer;font-family:inherit;text-align:center;text-decoration:none!important;}}
 .special-menu a:hover,.special-menu a.selected{{background:#22c55e;color:#fff!important;border-color:#16a34a;text-decoration:none!important;}}
 .map-cell.selected,.zone.selected{{background:#22c55e!important;color:#ffffff!important;outline:3px solid rgba(34,197,94,.35)!important;box-shadow:0 0 0 3px rgba(255,255,255,.8),0 0 18px rgba(34,197,94,.75)!important;border-color:#16a34a!important;z-index:4;}}
@@ -115,9 +115,82 @@ def render_inbound_quick_location_map():
     {zone('R1','R1',854,460,64,56,'white')}
     <div class="label" style="left:770px;top:526px;width:190px;">R2 비자료 / R1 자료</div>
     {zone('N','기타 위치',975,628,168,60,'white')}
-    <div class="special-menu" style="left:975px;top:478px;width:168px;">{special_links}</div>
+    <div class="special-menu" id="inboundSpecialMenu" style="left:975px;top:478px;width:168px;">{special_links}</div>
   </div></div>
 </div>
+<script>
+function parentBaseHref(){{
+  try {{ return window.parent.location.href; }} catch(e) {{}}
+  try {{ return window.top.location.href; }} catch(e) {{}}
+  return document.referrer || window.location.href;
+}}
+function markSelected(loc){{
+  document.querySelectorAll('[data-inbound-loc]').forEach(x => {{
+    const v = x.getAttribute('data-inbound-loc') || '';
+    x.classList.toggle('selected', v === loc || (loc && loc.startsWith(v + '-')) || (v === 'N' && ['홍보물랙','회색 카트','오른쪽 창고','사무실(4층)','지엠메딕'].includes(loc)));
+  }});
+}}
+function toggleInboundSpecialMenu(forceClose=false){{
+  const menu=document.getElementById('inboundSpecialMenu');
+  if(!menu) return;
+  if(forceClose){{menu.classList.remove('open'); return;}}
+  menu.classList.toggle('open');
+}}
+function setNativeValue(input, value){{
+  try {{
+    const setter = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, value);
+  }} catch(e) {{ input.value = value; }}
+  input.dispatchEvent(new InputEvent('input', {{bubbles:true, inputType:'insertText', data:value}}));
+  input.dispatchEvent(new Event('change', {{bubbles:true}}));
+}}
+function tryParentInbound(loc){{
+  try {{
+    const doc = window.parent.document;
+    try {{
+      const url = new URL(parentBaseHref());
+      url.searchParams.set('inbound_loc', loc);
+      url.searchParams.delete('map_search_product');
+      if (window.parent && window.parent.history && window.parent.history.replaceState) {{
+        window.parent.history.replaceState(null, '', url.toString());
+      }}
+    }} catch(e) {{}}
+
+    const input = doc.querySelector('input[aria-label="__입고도면선택값"]');
+    if (input) setNativeValue(input, loc);
+
+    let btn = doc.querySelector('div.st-key-_inbound_apply_btn button') || doc.querySelector('.st-key-_inbound_apply_btn button');
+    if(!btn) {{
+      doc.querySelectorAll('button').forEach(b => {{
+        if(!btn && (b.innerText || b.textContent || '').trim() === '__입고도면적용') btn = b;
+      }});
+    }}
+    if(btn) {{
+      setTimeout(() => btn.click(), 30);
+      setTimeout(() => btn.click(), 180);
+      return true;
+    }}
+  }} catch(e) {{}}
+  return false;
+}}
+document.querySelectorAll('[data-inbound-loc]').forEach(el => {{
+  el.addEventListener('click', (ev) => {{
+    ev.preventDefault();
+    ev.stopPropagation();
+    const loc = el.getAttribute('data-inbound-loc') || '';
+    if(!loc) return false;
+    if(loc === 'N'){{
+      markSelected('N');
+      toggleInboundSpecialMenu(false);
+      return false;
+    }}
+    toggleInboundSpecialMenu(true);
+    markSelected(loc);
+    tryParentInbound(loc);
+    return false;
+  }});
+}});
+</script>
 </body></html>
 """
     components.html(html, height=780, scrolling=False)
