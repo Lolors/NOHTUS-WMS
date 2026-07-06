@@ -19,14 +19,34 @@ def _ensure_outbound_customer_columns():
         con.commit()
 
 
+def _valid_outbound_exists_sql(alias_order="o", alias_item="i"):
+    return f"""
+    EXISTS (
+        SELECT 1
+        FROM transactions t
+        WHERE substr(t.created_at,1,10)={alias_order}.order_date
+          AND t.tx_type IN ('출고지시','출고지시수정','출고')
+          AND COALESCE(t.from_company,'')=COALESCE({alias_item}.company,'')
+          AND t.product_name={alias_item}.product_name
+          AND COALESCE(t.lot,'-')=COALESCE({alias_item}.lot,'-')
+          AND COALESCE(t.exp_date,'-')=COALESCE({alias_item}.exp_date,'-')
+          AND COALESCE(t.from_location,'')=COALESCE({alias_item}.location,'')
+          AND CAST(t.qty AS INTEGER)=CAST({alias_item}.qty AS INTEGER)
+          AND COALESCE(t.memo,'') LIKE '%' || '출고지시서 #' || CAST({alias_order}.id AS TEXT) || '%'
+    )
+    """
+
+
 def _order_items_summary(order_id, max_items=3):
     df = q(
-        """
-        SELECT product_name, SUM(qty) AS qty
-        FROM outbound_order_items
-        WHERE order_id=?
-        GROUP BY product_name
-        ORDER BY MIN(id)
+        f"""
+        SELECT i.product_name, SUM(i.qty) AS qty
+        FROM outbound_order_items i
+        JOIN outbound_orders o ON o.id=i.order_id
+        WHERE i.order_id=?
+          AND {_valid_outbound_exists_sql('o', 'i')}
+        GROUP BY i.product_name
+        ORDER BY MIN(i.id)
         """,
         (int(order_id),),
     )
@@ -44,46 +64,52 @@ def _order_items_summary(order_id, max_items=3):
 def _status_text_html(status):
     status = str(status or "저장됨")
     if status == "취소됨":
-        return "<span style='color:#dc2626;font-weight:800;'>취소됨</span>"
-    return "<span style='color:#2563eb;font-weight:800;'>저장됨</span>"
+        return "<span class='saved-order-status-cancel'>취소됨</span>"
+    return "<span class='saved-order-status-save'>저장됨</span>"
 
 
 def _render_saved_orders(orders_df, selected_order_id):
-    st.markdown("""
-    <style>
-    .saved-order-head{display:grid;grid-template-columns:.45fr 1.05fr 1.6fr 4.2fr .9fr;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:13px;font-weight:800;}
-    .saved-order-cell{height:36px;display:flex;align-items:center;color:#111827;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .saved-order-status{justify-content:center;}
-    .saved-order-sep{height:1px;background:#f1f5f9;margin:3px 0 5px;}
-    </style>
-    <div class='saved-order-head'>
-      <div style='text-align:center;'>번호</div>
-      <div>날짜</div>
-      <div>매출처</div>
-      <div>포함된 출고 제품</div>
-      <div style='text-align:center;'>상태</div>
-    </div>
-    """, unsafe_allow_html=True)
+    html = [
+        """
+        <style>
+        .saved-order-list{width:100%;}
+        .saved-order-head{display:grid;grid-template-columns:.8fr 1.6fr 4.6fr .9fr;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:13px;font-weight:800;}
+        .saved-order-row{display:grid;grid-template-columns:.8fr 1.6fr 4.6fr .9fr;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #f1f5f9;color:#111827;text-decoration:none;border-radius:8px;}
+        .saved-order-row:hover{background:#f8fafc;text-decoration:underline;text-underline-offset:3px;}
+        .saved-order-row.selected{background:#eff6ff;border-bottom-color:#bfdbfe;}
+        .saved-order-cell{min-width:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .saved-order-status{text-align:center;}
+        .saved-order-status-save{color:#2563eb;font-weight:700;}
+        .saved-order-status-cancel{color:#dc2626;font-weight:700;}
+        </style>
+        <div class='saved-order-list'>
+          <div class='saved-order-head'>
+            <div>날짜</div>
+            <div>매출처</div>
+            <div>포함된 출고 제품</div>
+            <div style='text-align:center;'>상태</div>
+          </div>
+        """
+    ]
     for r in orders_df.itertuples(index=False):
         oid = int(getattr(r, "id"))
         created = str(getattr(r, "order_date", "") or getattr(r, "created_at", ""))[:10]
         customer = str(getattr(r, "customer_name", "") or "-")
         status = str(getattr(r, "status", "저장됨") or "저장됨")
         items_text = _order_items_summary(oid)
-        cols = st.columns([0.45, 1.05, 1.6, 4.2, 0.9], gap="small")
-        with cols[0]:
-            if st.button(f"#{oid}", key=f"open_order_{oid}", use_container_width=False, type=("primary" if int(selected_order_id or 0) == oid else "secondary")):
-                st.session_state["selected_saved_order_id"] = oid
-                st.rerun()
-        with cols[1]:
-            st.markdown(f"<div class='saved-order-cell'>{escape(created)}</div>", unsafe_allow_html=True)
-        with cols[2]:
-            st.markdown(f"<div class='saved-order-cell' title='{escape(customer)}'>{escape(customer)}</div>", unsafe_allow_html=True)
-        with cols[3]:
-            st.markdown(f"<div class='saved-order-cell' title='{escape(items_text)}'>{escape(items_text)}</div>", unsafe_allow_html=True)
-        with cols[4]:
-            st.markdown(f"<div class='saved-order-cell saved-order-status'>{_status_text_html(status)}</div>", unsafe_allow_html=True)
-        st.markdown("<div class='saved-order-sep'></div>", unsafe_allow_html=True)
+        selected_class = " selected" if int(selected_order_id or 0) == oid else ""
+        html.append(
+            f"""
+            <a class='saved-order-row{selected_class}' href='?saved_order_id={oid}#selected-outbound-detail'>
+              <div class='saved-order-cell'>{escape(created)}</div>
+              <div class='saved-order-cell' title='{escape(customer)}'>{escape(customer)}</div>
+              <div class='saved-order-cell' title='{escape(items_text)}'>{escape(items_text)}</div>
+              <div class='saved-order-cell saved-order-status'>{_status_text_html(status)}</div>
+            </a>
+            """
+        )
+    html.append("</div>")
+    st.markdown("".join(html), unsafe_allow_html=True)
 
 
 def _cancel_order(order_id):
@@ -106,6 +132,16 @@ def _prepare_edit_customer_session(order_row):
         st.session_state["out_selected_customer"] = {"customer_name": customer_name, "company": customer_company}
         st.session_state["out_customer_direct"] = False
         st.session_state["out_customer_manual_name"] = customer_name
+
+
+def _query_selected_order_id():
+    try:
+        value = st.query_params.get("saved_order_id", "")
+        if isinstance(value, list):
+            value = value[0] if value else ""
+        return int(value) if str(value).strip().isdigit() else None
+    except Exception:
+        return None
 
 
 def page_saved_outbound():
@@ -132,14 +168,19 @@ def page_saved_outbound():
         st.error("시작일은 종료일보다 늦을 수 없습니다.")
         return
 
-    all_orders = q("""
-        SELECT id, created_at, order_date, COALESCE(title,'') AS title,
-               COALESCE(customer_name,'') AS customer_name,
-               COALESCE(customer_company,'') AS customer_company,
-               status
-        FROM outbound_orders
-        ORDER BY id DESC
-    """)
+    all_orders = q(
+        f"""
+        SELECT DISTINCT o.id, o.created_at, o.order_date, COALESCE(o.title,'') AS title,
+               COALESCE(o.customer_name,'') AS customer_name,
+               COALESCE(o.customer_company,'') AS customer_company,
+               o.status
+        FROM outbound_orders o
+        JOIN outbound_order_items i ON o.id=i.order_id
+        WHERE IFNULL(o.status,'')<>'취소됨'
+          AND {_valid_outbound_exists_sql('o', 'i')}
+        ORDER BY o.id DESC
+        """
+    )
     if all_orders.empty:
         st.info("저장된 출고지시가 없습니다.")
         return
@@ -156,18 +197,27 @@ def page_saved_outbound():
         ids = filtered["id"].astype(int).tolist()
         if ids:
             placeholders = ",".join(["?"] * len(ids))
-            items_df = q(f"""
-                SELECT DISTINCT order_id
-                FROM outbound_order_items
-                WHERE order_id IN ({placeholders})
-                  AND product_name LIKE ?
-            """, tuple(ids + [f"%{search_term.strip()}%"]))
+            items_df = q(
+                f"""
+                SELECT DISTINCT i.order_id
+                FROM outbound_order_items i
+                JOIN outbound_orders o ON o.id=i.order_id
+                WHERE i.order_id IN ({placeholders})
+                  AND i.product_name LIKE ?
+                  AND {_valid_outbound_exists_sql('o', 'i')}
+                """,
+                tuple(ids + [f"%{search_term.strip()}%"]),
+            )
             matched_ids = items_df["order_id"].astype(int).tolist() if not items_df.empty else []
             filtered = filtered[filtered["id"].astype(int).isin(matched_ids)]
 
     if filtered.empty:
         st.warning("조건에 맞는 출고지시서가 없습니다.")
         return
+
+    query_order_id = _query_selected_order_id()
+    if query_order_id and query_order_id in set(filtered["id"].astype(int).tolist()):
+        st.session_state["selected_saved_order_id"] = int(query_order_id)
 
     total = len(filtered)
     per_page = 10
@@ -176,11 +226,16 @@ def page_saved_outbound():
     st.session_state["saved_order_page"] = page_no
     orders = filtered.iloc[(page_no - 1) * per_page: page_no * per_page].copy()
 
+    valid_ids = set(filtered["id"].astype(int).tolist())
+    order_id = st.session_state.get("selected_saved_order_id")
+    if not order_id or int(order_id) not in valid_ids:
+        order_id = int(orders.iloc[0]["id"])
+        st.session_state["selected_saved_order_id"] = order_id
+
     st.markdown(f"#### 출고지시서 {total}건")
     list_col, _ = st.columns([7, 3], gap="large")
     with list_col:
-        selected_id = st.session_state.get("selected_saved_order_id")
-        _render_saved_orders(orders, selected_id)
+        _render_saved_orders(orders, order_id)
         if max_page > 1:
             p1, p2, p3 = st.columns([1, 3, 1])
             with p1:
@@ -194,12 +249,6 @@ def page_saved_outbound():
                     st.session_state["saved_order_page"] = page_no + 1
                     st.rerun()
 
-    valid_ids = set(filtered["id"].astype(int).tolist())
-    order_id = st.session_state.get("selected_saved_order_id")
-    if not order_id or int(order_id) not in valid_ids:
-        order_id = int(orders.iloc[0]["id"])
-        st.session_state["selected_saved_order_id"] = order_id
-
     order_row = all_orders[all_orders["id"] == int(order_id)]
     if order_row.empty:
         st.session_state.pop("selected_saved_order_id", None)
@@ -208,17 +257,25 @@ def page_saved_outbound():
     order_status = str(order_row.iloc[0]["status"] or "저장됨")
     customer_name = str(order_row.iloc[0].get("customer_name") or "-")
 
+    st.markdown("<div id='selected-outbound-detail'></div>", unsafe_allow_html=True)
     st.markdown("---")
     selected_col, _spacer = st.columns([7, 3], gap="large")
     with selected_col:
         st.markdown(f"### 선택된 출고지시서 #{int(order_id)} · {escape(customer_name)}")
-        item_df = q("""
-            SELECT id AS 품목ID, inventory_id AS 재고ID, location AS 로케이션, product_name AS 제품명,
-                   lot AS LOT, exp_date AS 유통기한, qty AS 요청수량, company AS 사업장, warehouse_name AS 전산상명칭
-            FROM outbound_order_items WHERE order_id=? ORDER BY id
-        """, (int(order_id),))
+        item_df = q(
+            f"""
+            SELECT i.id AS 품목ID, i.inventory_id AS 재고ID, i.location AS 로케이션, i.product_name AS 제품명,
+                   i.lot AS LOT, i.exp_date AS 유통기한, i.qty AS 요청수량, i.company AS 사업장, i.warehouse_name AS 전산상명칭
+            FROM outbound_order_items i
+            JOIN outbound_orders o ON o.id=i.order_id
+            WHERE i.order_id=?
+              AND {_valid_outbound_exists_sql('o', 'i')}
+            ORDER BY i.id
+            """,
+            (int(order_id),),
+        )
         if item_df.empty:
-            st.info("이 출고지시서에는 품목이 없습니다.")
+            st.info("이 출고지시서에는 유효한 품목이 없습니다.")
         else:
             item_df["유통기한"] = item_df["유통기한"].apply(display_date_only)
             view_items = item_df[["로케이션", "제품명", "LOT", "유통기한", "요청수량"]]
