@@ -9,7 +9,7 @@ from nohtus.navigation import render_sidebar
 from nohtus.pages.closing import page_closing
 from nohtus.pages.customer_master_business import page_customer_master
 from nohtus.pages.history import page_history
-from nohtus.pages.inbound_business import page_inbound as page_inbound_refactored
+from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.location_map_business import page_map
 from nohtus.pages.mobile_stock import page_mobile_stock_finder
 from nohtus.pages.move import page_move
