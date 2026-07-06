@@ -1,7 +1,7 @@
 from html import escape
 from urllib.parse import quote
 
-import strealit as st
+import streamlit as st
 import streamlit.components.v1 as components
 
 
@@ -44,7 +44,6 @@ def render_inbound_quick_location_map():
 .map-cell:hover,.zone:hover{{outline:3px solid rgba(37,99,235,.22);z-index:2;}}
 .map-cell:nth-child(2n){{border-right:none;}}
 .map-cell:nth-child(n+5){{border-bottom:none;}}
-
 .special-menu{{position:absolute;display:none;z-index:30;background:#fff;border:1px solid #cbd5e1;border-radius:12px;box-shadow:0 12px 28px rgba(15,23,42,.18);padding:6px;}}
 .special-menu.open{{display:grid;gap:5px;}}
 .special-menu button,.special-menu a{{appearance:none;border:1px solid #e2e8f0;background:#f8fafc;border-radius:9px;padding:8px 7px;font-size:12px;font-weight:900;color:#0f172a;cursor:pointer;font-family:inherit;text-align:center;text-decoration:none;}}
