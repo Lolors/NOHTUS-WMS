@@ -16,7 +16,8 @@ def render_inbound_quick_location_map():
     """입고 등록용 로케이션 도면.
 
     로케이션 맵과 같은 HTML/CSS 도면을 사용하고, 클릭값은 부모 페이지의
-    숨김 input/button 브리지로 전달한다. URL 이동은 하지 않는다.
+    숨김 input/button 브리지로 먼저 전달한다. 브리지 실패 시 URL 파라미터로
+    fallback 하여 선택 위치를 반영한다.
     """
     try:
         df = q("SELECT DISTINCT location FROM inventory WHERE qty>0 ORDER BY location")
@@ -142,7 +143,7 @@ def render_inbound_quick_location_map():
       <div class="label" style="left:706px;top:482px;width:170px;">R2 비자료 / R1 자료</div>
       {zone('N','기타 위치',930,565,155,60,'white')}
       <div class="special-menu" id="specialMenu" style="left:930px;top:428px;width:155px;"><button type="button" data-special-loc="홍보물랙">홍보물랙</button><button type="button" data-special-loc="회색 카트">회색 카트</button><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button></div>
-      <div id="bridgeStatus" class="bridge-status">입고 위치 반영 브리지를 찾지 못했습니다.</div>
+      <div id="bridgeStatus" class="bridge-status">입고 위치를 다시 반영하는 중입니다.</div>
     </div></div>
   </div>
 </div>
@@ -159,6 +160,20 @@ function markSelected(loc) {{
 function setStatus(show) {{
   const el = document.getElementById('bridgeStatus');
   if (el) el.classList.toggle('open', !!show);
+}}
+function parentBaseHref() {{
+  try {{ return window.top.location.href; }} catch(e) {{}}
+  try {{ return window.parent.location.href; }} catch(e) {{}}
+  return document.referrer || window.location.href;
+}}
+function fallbackToInboundUrl(loc) {{
+  try {{
+    const url = new URL(parentBaseHref());
+    url.searchParams.set('inbound_loc', loc);
+    try {{ window.top.location.assign(url.toString()); return; }} catch(e) {{}}
+    try {{ window.parent.location.assign(url.toString()); return; }} catch(e) {{}}
+    window.open(url.toString(), '_top');
+  }} catch(e) {{}}
 }}
 function findParentInput(doc) {{
   return doc.querySelector('.st-key-_inbound_js_loc_buffer input') ||
@@ -198,7 +213,11 @@ function sendToParent(loc) {{
 function applyInboundLoc(loc) {{
   if (!loc) return;
   markSelected(loc);
-  setStatus(!sendToParent(loc));
+  const sent = sendToParent(loc);
+  setStatus(!sent);
+  if (!sent) {{
+    setTimeout(function() {{ fallbackToInboundUrl(loc); }}, 80);
+  }}
 }}
 function toggleSpecialMenu(forceClose) {{
   const menu = document.getElementById('specialMenu');
