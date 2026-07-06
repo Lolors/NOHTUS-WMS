@@ -158,6 +158,7 @@ def render_login():
     @media (min-width: 769px) {
         div[data-testid="stTextInput"],
         div[data-testid="stButton"],
+        div[data-testid="stFormSubmitButton"],
         div[data-testid="stAlert"] {
             width: 20vw !important;
             min-width: 320px !important;
@@ -167,6 +168,7 @@ def render_login():
         }
         div[data-testid="stTextInput"] > div,
         div[data-testid="stButton"] > button,
+        div[data-testid="stFormSubmitButton"] > button,
         div[data-testid="stAlert"] > div {
             width: 100% !important;
         }
@@ -183,6 +185,7 @@ def render_login():
     @media (max-width: 768px) {
         div[data-testid="stTextInput"],
         div[data-testid="stButton"],
+        div[data-testid="stFormSubmitButton"],
         div[data-testid="stAlert"],
         .login-caption-narrow {
             width: 100% !important;
@@ -191,6 +194,7 @@ def render_login():
         }
         div[data-testid="stTextInput"] > div,
         div[data-testid="stButton"] > button,
+        div[data-testid="stFormSubmitButton"] > button,
         div[data-testid="stAlert"] > div {
             width: 100% !important;
         }
@@ -219,9 +223,11 @@ def render_login():
 
     if not password_hash:
         st.info("첫 접속입니다. 사용할 비밀번호를 설정하세요.")
-        p1 = st.text_input("새 비밀번호", type="password", key="first_password_1")
-        p2 = st.text_input("새 비밀번호 확인", type="password", key="first_password_2")
-        if st.button("비밀번호 설정 후 로그인", type="primary", use_container_width=True):
+        with st.form("first_password_login_form"):
+            p1 = st.text_input("새 비밀번호", type="password", key="first_password_1")
+            p2 = st.text_input("새 비밀번호 확인", type="password", key="first_password_2")
+            submitted = st.form_submit_button("비밀번호 설정 후 로그인", type="primary", use_container_width=True)
+        if submitted:
             if not p1 or len(p1) < 4:
                 st.error("비밀번호는 4자 이상으로 설정하세요.")
                 return False
@@ -236,8 +242,10 @@ def render_login():
             st.session_state["current_user"] = {"username": username, "display_name": str(row.get("display_name") or username), "role": str(row.get("role") or "user")}
             st.rerun()
     else:
-        pw = st.text_input("비밀번호", type="password", key="login_password")
-        if st.button("로그인", type="primary", use_container_width=True):
+        with st.form("password_login_form"):
+            pw = st.text_input("비밀번호", type="password", key="login_password")
+            submitted = st.form_submit_button("로그인", type="primary", use_container_width=True)
+        if submitted:
             if _hash_password(username, pw) != password_hash:
                 st.error("비밀번호가 맞지 않습니다.")
                 return False
