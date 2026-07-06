@@ -193,9 +193,57 @@ def _render_page_input(current_page, total_pages):
     st.markdown(
         """
         <style>
-        div[data-testid="stNumberInput"]{width:138px!important;margin:10px auto 2px auto!important;overflow:visible!important;}
-        div[data-testid="stNumberInput"] input{height:54px!important;min-height:54px!important;text-align:center!important;font-size:16px!important;}
-        div[data-testid="stNumberInput"] button{display:flex!important;visibility:visible!important;opacity:1!important;width:32px!important;min-width:32px!important;height:27px!important;min-height:27px!important;padding:0!important;}
+        div[data-testid="stNumberInput"]{
+            width:144px!important;
+            margin:12px auto 2px auto!important;
+            overflow:visible!important;
+            background:#f1f5f9!important;
+            border:1px solid #e2e8f0!important;
+            border-radius:11px!important;
+            padding:0!important;
+            box-sizing:border-box!important;
+        }
+        div[data-testid="stNumberInput"] > div{
+            display:flex!important;
+            align-items:stretch!important;
+            gap:0!important;
+            background:transparent!important;
+            border:0!important;
+            box-shadow:none!important;
+        }
+        div[data-testid="stNumberInput"] input{
+            width:64px!important;
+            height:44px!important;
+            min-height:44px!important;
+            text-align:center!important;
+            font-size:16px!important;
+            background:transparent!important;
+            border:0!important;
+            box-shadow:none!important;
+            padding:0!important;
+        }
+        div[data-testid="stNumberInput"] button{
+            display:flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            visibility:visible!important;
+            opacity:1!important;
+            width:40px!important;
+            min-width:40px!important;
+            height:44px!important;
+            min-height:44px!important;
+            padding:0!important;
+            margin:0!important;
+            border:0!important;
+            background:transparent!important;
+            box-shadow:none!important;
+            color:#4b5563!important;
+            border-radius:10px!important;
+        }
+        div[data-testid="stNumberInput"] button:hover{
+            background:#e2e8f0!important;
+            color:#111827!important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
