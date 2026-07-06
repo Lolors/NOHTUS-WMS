@@ -20,7 +20,7 @@ LEGACY_USERNAMES = ["khn", "kjw", "shj", "ngw", "njg"]
 ROLE_PAGES = {
     "admin": None,
     "user": None,
-    "viewer": {"로케이션 맵", "즐겨찾는 제품", "최근 조회"},
+    "viewer": {"로케이션 맵", "유통기한 임박", "즐겨찾는 제품", "최근 조회"},
 }
 
 
