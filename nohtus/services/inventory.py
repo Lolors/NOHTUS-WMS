@@ -219,6 +219,6 @@ def adjust_inventory(inv_id, actual_qty, reason, memo=""):
         reason_memo = reason if not memo else f"{reason} / {memo}"
         insert_transaction_log(cur, created_at=now, tx_type="재고조정", product_name=src["product_name"], warehouse_name=src["warehouse_name"],
                                lot=src["lot"], exp_date=src["exp_date"], from_company=src["company"], from_location=src["location"],
-                               to_company=src["company"], to_location=src["location"], qty=diff, memo=reason_memo, final_stock=actual_qty)
+                               to_company=src["company"], to_location=src["location"], qty=diff, memo=reason_memo)
         con.commit()
         return before, actual_qty, diff
