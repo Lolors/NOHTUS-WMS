@@ -191,12 +191,11 @@ def render_login():
             min-width: 0 !important;
         }
     }
-    .login-title {text-align:center;margin-top:1.2rem;margin-bottom:0.3rem;font-size:2.2rem;font-weight:700;}
-    .login-caption {text-align:center;color:#64748b;margin-bottom:1.2rem;}
+    .login-title {text-align:center;margin-top:1.2rem;margin-bottom:1.2rem;font-size:2.2rem;font-weight:700;}
+    .login-account {text-align:center;color:#64748b;margin:0.25rem auto 0.9rem;font-size:0.92rem;}
     </style>
     """, unsafe_allow_html=True)
     st.markdown("<div class='login-title'>NOHTUS WMS 로그인</div>", unsafe_allow_html=True)
-    st.markdown("<div class='login-caption'>처음 접속하는 계정은 여기서 비밀번호를 설정합니다.</div>", unsafe_allow_html=True)
 
     username = st.text_input("아이디", key="login_username_input").strip().lower()
     row = _load_user(username) if username else None
@@ -207,7 +206,10 @@ def render_login():
     if row is None:
         return False
 
-    st.caption(f"계정 확인: {row.get('display_name')} ({row.get('role')})")
+    st.markdown(
+        f"<div class='login-account'>계정 확인: {row.get('display_name')} ({row.get('role')})</div>",
+        unsafe_allow_html=True,
+    )
     password_hash = str(row.get("password_hash") or "")
 
     if not password_hash:
