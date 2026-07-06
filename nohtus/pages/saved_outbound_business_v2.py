@@ -301,7 +301,7 @@ def page_saved_outbound():
             st.info("이 출고지시서에는 유효한 품목이 없습니다.")
         else:
             item_df["유통기한"] = item_df["유통기한"].apply(display_date_only)
-            view_items = item_df[["로케이션", "제품명", "LOT", "유통기한", "요청수량"]]
+            view_items = item_df[["사업장", "로케이션", "제품명", "LOT", "유통기한", "요청수량"]]
             st.dataframe(view_items, hide_index=True, use_container_width=True)
             rows_for_download = view_items.to_dict("records")
             title_for_download = f"{customer_name} 출고지시서 #{int(order_id)}"
