@@ -12,6 +12,7 @@ def page_outbound():
     original_renderer = outbound_page._render_last_sale_importer
     original_save_with_customer = outbound_page._save_outbound_cart_with_customer
     original_text_input = st.text_input
+    original_selectbox = st.selectbox
     original_checkbox = st.checkbox
     original_data_editor = st.data_editor
     original_markdown = st.markdown
@@ -111,6 +112,20 @@ def page_outbound():
             return value
         return original_text_input(label, *args, **kwargs)
 
+    def patched_selectbox(label, options, *args, **kwargs):
+        if kwargs.get("key") == "out_customer_select":
+            opts = list(options or [])
+            blank = ""
+            if blank not in opts:
+                opts = [blank] + opts
+            default_label = st.session_state.get("_out_customer_label")
+            if default_label in opts:
+                kwargs["index"] = opts.index(default_label)
+            else:
+                kwargs["index"] = 0
+            return original_selectbox(label, opts, *args, **kwargs)
+        return original_selectbox(label, options, *args, **kwargs)
+
     def patched_checkbox(label, *args, **kwargs):
         key = kwargs.get("key")
         if key in checkbox_skip_values:
@@ -147,6 +162,7 @@ def page_outbound():
     st.markdown = patched_markdown
     st.caption = patched_caption
     st.text_input = patched_text_input
+    st.selectbox = patched_selectbox
     st.checkbox = patched_checkbox
     st.data_editor = patched_data_editor
     try:
@@ -158,5 +174,6 @@ def page_outbound():
         st.markdown = original_markdown
         st.caption = original_caption
         st.text_input = original_text_input
+        st.selectbox = original_selectbox
         st.checkbox = original_checkbox
         st.data_editor = original_data_editor
