@@ -8,8 +8,7 @@ import streamlit.components.v1 as components
 def render_inbound_quick_location_map():
     """입고 등록용 로케이션 도면.
 
-    도면 클릭 시 새 창을 열지 않고 현재 부모 Streamlit 화면을 inbound_loc query parameter로
-    다시 로드한다. 이렇게 해야 Streamlit이 rerun되며 오른쪽 구역/라인/단 콤보박스가 갱신된다.
+    iframe 내부 이동은 절대 하지 않고, 부모 Streamlit 화면의 숨김 input/button 브리지만 사용한다.
     """
     selected = st.session_state.get("_inbound_selected_loc", "") or "REC"
 
@@ -75,7 +74,7 @@ def render_inbound_quick_location_map():
   <div class="title">도면에서 입고 위치 선택</div>
   <div class="map-scroll"><div class="map-stage">
     <div class="big-left">
-      <a class="g2 gray{' selected' if is_selected('G2') else ''}" href="?inbound_loc=G2" data-inbound-loc="G2">G2</a>
+      <a class="g2 gray{' selected' if is_selected('G2') else ''}" href="#" data-inbound-loc="G2">G2</a>
       <div class="g1row">{cell('G1-01')}{cell('G1-02')}{cell('G1-03')}</div>
     </div>
     {rack(['A2-03','A2-04','A2-02','A2-05','A2-01','A2-06'],230,0,'yellow')}
@@ -98,8 +97,8 @@ def render_inbound_quick_location_map():
     {zone('X1-02','X1-02',1090,324,64,56,'gray')}
     {zone('X1-03','X1-03',1090,380,64,56,'gray')}
     <div class="qp">
-      <a class="{'selected' if is_selected('Q1') or is_selected('Q2') or is_selected('Q') else ''}" href="?inbound_loc=Q" data-inbound-loc="Q"><span class="qp-key qkey">Q</span><span>유통기간임박</span></a>
-      <a class="{'selected' if is_selected('P') else ''}" href="?inbound_loc=P" data-inbound-loc="P"><span class="qp-key">P</span><span>수출대기</span></a>
+      <a class="{'selected' if is_selected('Q1') or is_selected('Q2') or is_selected('Q') else ''}" href="#" data-inbound-loc="Q"><span class="qp-key qkey">Q</span><span>유통기간임박</span></a>
+      <a class="{'selected' if is_selected('P') else ''}" href="#" data-inbound-loc="P"><span class="qp-key">P</span><span>수출대기</span></a>
     </div>
     {zone('REC','<span><span class="rec-red">REC</span>eiving</span>',372,568,142,56,'white')}
     <div class="label" style="left:372px;top:635px;width:142px;">매입등록대기</div>
@@ -108,25 +107,14 @@ def render_inbound_quick_location_map():
     <div class="label" style="left:770px;top:526px;width:190px;">R2 비자료 / R1 자료</div>
     {zone('N','기타 위치',975,628,168,60,'white')}
     <div class="special-menu" id="inboundSpecialMenu" style="left:975px;top:492px;width:168px;">
-      <a href="?inbound_loc=홍보물랙" data-inbound-loc="홍보물랙">홍보물랙</a>
-      <a href="?inbound_loc=회색 카트" data-inbound-loc="회색 카트">회색 카트</a>
-      <a href="?inbound_loc=오른쪽 창고" data-inbound-loc="오른쪽 창고">오른쪽 창고</a>
-      <a href="?inbound_loc=사무실(4층)" data-inbound-loc="사무실(4층)">사무실(4층)</a>
+      <a href="#" data-inbound-loc="홍보물랙">홍보물랙</a>
+      <a href="#" data-inbound-loc="회색 카트">회색 카트</a>
+      <a href="#" data-inbound-loc="오른쪽 창고">오른쪽 창고</a>
+      <a href="#" data-inbound-loc="사무실(4층)">사무실(4층)</a>
     </div>
   </div></div>
 </div>
 <script>
-function parentBaseHref(){{
-  try {{ return window.parent.location.href; }} catch(e) {{}}
-  try {{ return window.top.location.href; }} catch(e) {{}}
-  return document.referrer || window.location.href;
-}}
-function buildParentUrl(value){{
-  const url = new URL(parentBaseHref());
-  url.searchParams.set('inbound_loc', value);
-  url.searchParams.delete('map_search_product');
-  return url.toString();
-}}
 function markSelected(loc){{
   document.querySelectorAll('[data-inbound-loc]').forEach(x => {{
     const v = x.getAttribute('data-inbound-loc') || '';
@@ -139,11 +127,41 @@ function toggleInboundSpecialMenu(forceClose=false){{
   if(forceClose){{menu.classList.remove('open'); return;}}
   menu.classList.toggle('open');
 }}
-function reloadParentWithLocation(loc){{
-  const href = buildParentUrl(loc);
-  try {{ window.parent.location.href = href; return; }} catch(e) {{}}
-  try {{ window.top.location.href = href; return; }} catch(e) {{}}
-  try {{ window.location.href = href; return; }} catch(e) {{}}
+function setNativeValue(input, value){{
+  try {{
+    const setter = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, value);
+  }} catch(e) {{ input.value = value; }}
+  input.dispatchEvent(new InputEvent('input', {{bubbles:true, inputType:'insertText', data:value}}));
+  input.dispatchEvent(new Event('change', {{bubbles:true}}));
+}}
+function syncInboundLocation(loc){{
+  try {{
+    const doc = window.parent.document;
+    const input = doc.querySelector('input[aria-label="__입고도면선택값"]');
+    if(input) setNativeValue(input, loc);
+    const buttonSelectors = [
+      'div.st-key-_inbound_apply_btn button',
+      '.st-key-_inbound_apply_btn button',
+      'button[aria-label="__입고도면적용"]'
+    ];
+    let btn = null;
+    for (const sel of buttonSelectors) {{
+      btn = doc.querySelector(sel);
+      if(btn) break;
+    }}
+    if(!btn) {{
+      doc.querySelectorAll('button').forEach(b => {{
+        if(!btn && (b.innerText || b.textContent || '').trim() === '__입고도면적용') btn = b;
+      }});
+    }}
+    if(btn) {{
+      setTimeout(() => btn.click(), 120);
+      setTimeout(() => btn.click(), 350);
+      return true;
+    }}
+  }} catch(e) {{}}
+  return false;
 }}
 document.querySelectorAll('[data-inbound-loc]').forEach(el => {{
   el.addEventListener('click', (ev) => {{
@@ -158,7 +176,7 @@ document.querySelectorAll('[data-inbound-loc]').forEach(el => {{
     }}
     toggleInboundSpecialMenu(true);
     markSelected(loc);
-    reloadParentWithLocation(loc);
+    syncInboundLocation(loc);
     return false;
   }});
 }});
