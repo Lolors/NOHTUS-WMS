@@ -60,7 +60,7 @@ def render_product_stock_summary(product_name: str):
         return
     from nohtus.pages.location_map import page_map_search_results
 
-    page_map_search_results(product_name)
+    page_map_search_results(product_name, compact=True)
 
 
 def _select_shortcut_product(product_name: str):
@@ -97,6 +97,10 @@ def _favorite_product_search():
             _select_shortcut_product(product_name)
 
 
+def _shortcut_columns():
+    return st.columns([2.5, 7.5], gap="large")
+
+
 def page_favorite_products():
     st.title("즐겨찾는 제품")
     username = current_username() or "기본"
@@ -109,7 +113,7 @@ def page_favorite_products():
         """,
         (username,),
     )
-    left, right = st.columns([3, 7], gap="large")
+    left, right = _shortcut_columns()
     with left:
         _favorite_product_search()
         st.markdown("---")
@@ -132,7 +136,7 @@ def page_recent_products():
         """,
         (username,),
     )
-    left, right = st.columns([3, 7], gap="large")
+    left, right = _shortcut_columns()
     with left:
         _product_button_list(recent_df, "recent_product")
     with right:
