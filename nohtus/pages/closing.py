@@ -1,4 +1,5 @@
 from datetime import date
+from html import escape
 
 import pandas as pd
 import streamlit as st
@@ -22,11 +23,18 @@ def _join_unique(values):
     return ", ".join(result)
 
 
-def _daily_outbound_check_rows(items: pd.DataFrame) -> pd.DataFrame:
-    """오늘 출고 체크 표를 고객별 행 + 제품별 합계 표시 형태로 만든다."""
-    rows = []
+def _daily_outbound_check_rows(items: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """오늘 출고 체크 표를 병합형 화면표시용/엑셀용 데이터로 만든다.
+
+    화면은 HTML rowspan으로 제품명/제조번호/유통기한/총 출고수량/최종재고를 병합 표시한다.
+    엑셀 다운로드용 데이터는 같은 값을 첫 행에만 남겨 캡처와 비슷하게 보이도록 만든다.
+    """
+    html_rows = []
+    excel_rows = []
+    columns = ["제품명", "제조번호", "유통기한", "매출처", "수량", "총 출고수량", "최종재고"]
     if items.empty:
-        return pd.DataFrame(columns=["매출처", "제품명", "제조번호", "유통기한", "수량", "총 출고수량", "최종재고"])
+        empty = pd.DataFrame(columns=columns)
+        return empty, empty
 
     work = items.copy()
     work["매출처"] = work["매출처"].fillna("").astype(str).replace("", "-")
@@ -36,31 +44,123 @@ def _daily_outbound_check_rows(items: pd.DataFrame) -> pd.DataFrame:
     work["출고수량"] = pd.to_numeric(work["출고수량"], errors="coerce").fillna(0).astype(int)
     work["현재수량"] = pd.to_numeric(work["현재수량"], errors="coerce").fillna(0).astype(int)
 
-    for (product, lot, exp), g in work.groupby(["표준제품명", "제조번호", "유통기한"], sort=True):
-        customer_qty = (
-            g.groupby("매출처", as_index=False)["출고수량"]
-            .sum()
-            .sort_values(["매출처"])
-            .reset_index(drop=True)
-        )
-        total_qty = int(customer_qty["출고수량"].sum())
-        if "재고ID" in g.columns:
-            stock_base = g.drop_duplicates(subset=["재고ID"])["현재수량"] if g["재고ID"].notna().any() else g["현재수량"]
-        else:
-            stock_base = g["현재수량"]
-        final_stock = int(pd.to_numeric(stock_base, errors="coerce").fillna(0).sum())
+    product_groups = []
+    for product, product_df in work.groupby("표준제품명", sort=True):
+        lot_groups = []
+        product_rowspan = 0
+        for lot, lot_df in product_df.groupby("제조번호", sort=True):
+            exp_groups = []
+            lot_rowspan = 0
+            for exp, exp_df in lot_df.groupby("유통기한", sort=True):
+                customer_qty = (
+                    exp_df.groupby("매출처", as_index=False)["출고수량"]
+                    .sum()
+                    .sort_values(["매출처"])
+                    .reset_index(drop=True)
+                )
+                row_count = max(1, len(customer_qty))
+                total_qty = int(customer_qty["출고수량"].sum()) if not customer_qty.empty else 0
+                if "재고ID" in exp_df.columns and exp_df["재고ID"].notna().any():
+                    stock_base = exp_df.drop_duplicates(subset=["재고ID"])["현재수량"]
+                else:
+                    stock_base = exp_df["현재수량"]
+                final_stock = int(pd.to_numeric(stock_base, errors="coerce").fillna(0).sum())
+                exp_groups.append({
+                    "exp": exp,
+                    "rows": customer_qty,
+                    "rowspan": row_count,
+                    "total_qty": total_qty,
+                    "final_stock": final_stock,
+                })
+                lot_rowspan += row_count
+            lot_groups.append({"lot": lot, "rowspan": lot_rowspan, "exp_groups": exp_groups})
+            product_rowspan += lot_rowspan
+        product_groups.append({"product": product, "rowspan": product_rowspan, "lot_groups": lot_groups})
 
-        for idx, r in customer_qty.iterrows():
-            rows.append({
-                "매출처": r["매출처"],
-                "제품명": product,
-                "제조번호": lot,
-                "유통기한": exp,
-                "수량": int(r["출고수량"] or 0),
-                "총 출고수량": total_qty if idx == 0 else "",
-                "최종재고": final_stock if idx == 0 else "",
-            })
-    return pd.DataFrame(rows, columns=["매출처", "제품명", "제조번호", "유통기한", "수량", "총 출고수량", "최종재고"])
+    for product_group in product_groups:
+        product_written = False
+        for lot_group in product_group["lot_groups"]:
+            lot_written = False
+            for exp_group in lot_group["exp_groups"]:
+                exp_written = False
+                rows_df = exp_group["rows"]
+                if rows_df.empty:
+                    rows_iter = [{"매출처": "-", "출고수량": 0}]
+                else:
+                    rows_iter = rows_df.to_dict("records")
+                for r in rows_iter:
+                    row = {
+                        "제품명": product_group["product"] if not product_written else "",
+                        "제품명_rowspan": product_group["rowspan"] if not product_written else 0,
+                        "제조번호": lot_group["lot"] if not lot_written else "",
+                        "제조번호_rowspan": lot_group["rowspan"] if not lot_written else 0,
+                        "유통기한": exp_group["exp"] if not exp_written else "",
+                        "유통기한_rowspan": exp_group["rowspan"] if not exp_written else 0,
+                        "매출처": str(r.get("매출처", "") or "-"),
+                        "수량": int(r.get("출고수량", 0) or 0),
+                        "총 출고수량": exp_group["total_qty"] if not exp_written else "",
+                        "총 출고수량_rowspan": exp_group["rowspan"] if not exp_written else 0,
+                        "최종재고": exp_group["final_stock"] if not exp_written else "",
+                        "최종재고_rowspan": exp_group["rowspan"] if not exp_written else 0,
+                    }
+                    html_rows.append(row)
+                    excel_rows.append({c: row[c] for c in columns})
+                    product_written = True
+                    lot_written = True
+                    exp_written = True
+
+    return pd.DataFrame(html_rows), pd.DataFrame(excel_rows, columns=columns)
+
+
+def _render_daily_outbound_check_html(display_df: pd.DataFrame):
+    if display_df.empty:
+        st.info("표시할 출고 체크 데이터가 없습니다.")
+        return
+
+    def td(value, *, rowspan=0, align="center"):
+        rs = f' rowspan="{int(rowspan)}"' if int(rowspan or 0) > 1 else ""
+        text = escape(str(value if value is not None else ""))
+        return f'<td{rs} style="text-align:{align};vertical-align:middle;">{text}</td>'
+
+    trs = []
+    for row in display_df.to_dict("records"):
+        cells = []
+        if int(row.get("제품명_rowspan", 0) or 0) > 0:
+            cells.append(td(row.get("제품명", ""), rowspan=row.get("제품명_rowspan"), align="left"))
+        if int(row.get("제조번호_rowspan", 0) or 0) > 0:
+            cells.append(td(row.get("제조번호", ""), rowspan=row.get("제조번호_rowspan")))
+        if int(row.get("유통기한_rowspan", 0) or 0) > 0:
+            cells.append(td(row.get("유통기한", ""), rowspan=row.get("유통기한_rowspan")))
+        cells.append(td(row.get("매출처", ""), align="left"))
+        cells.append(td(row.get("수량", "")))
+        if int(row.get("총 출고수량_rowspan", 0) or 0) > 0:
+            cells.append(td(row.get("총 출고수량", ""), rowspan=row.get("총 출고수량_rowspan")))
+        if int(row.get("최종재고_rowspan", 0) or 0) > 0:
+            cells.append(td(row.get("최종재고", ""), rowspan=row.get("최종재고_rowspan")))
+        trs.append("<tr>" + "".join(cells) + "</tr>")
+
+    html = """
+<style>
+.nohtus-close-table-wrap{width:100%;overflow-x:auto;margin-top:8px;}
+.nohtus-close-table{border-collapse:collapse;width:100%;background:white;font-size:14px;table-layout:fixed;}
+.nohtus-close-table th{background:#f1f5f9;border:1px solid #94a3b8;padding:8px 6px;text-align:center;font-weight:800;color:#0f172a;white-space:nowrap;}
+.nohtus-close-table td{border:1px solid #94a3b8;padding:7px 6px;color:#111827;line-height:1.35;word-break:keep-all;}
+.nohtus-close-table th:nth-child(1){width:20%;}
+.nohtus-close-table th:nth-child(2){width:13%;}
+.nohtus-close-table th:nth-child(3){width:13%;}
+.nohtus-close-table th:nth-child(4){width:24%;}
+.nohtus-close-table th:nth-child(5){width:8%;}
+.nohtus-close-table th:nth-child(6){width:11%;}
+.nohtus-close-table th:nth-child(7){width:11%;}
+</style>
+<div class="nohtus-close-table-wrap">
+<table class="nohtus-close-table">
+<thead><tr><th>제품명</th><th>제조번호</th><th>유통기한</th><th>매출처</th><th>수량</th><th>총 출고수량</th><th>최종재고</th></tr></thead>
+<tbody>
+""" + "\n".join(trs) + """
+</tbody></table></div>
+"""
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def page_closing():
@@ -103,24 +203,11 @@ def page_closing():
             except Exception:
                 items["매출처"] = ""
 
-            checklist = _daily_outbound_check_rows(items)
-            st.dataframe(
-                checklist,
-                hide_index=True,
-                use_container_width=True,
-                column_config={
-                    "매출처": st.column_config.TextColumn(width="medium"),
-                    "제품명": st.column_config.TextColumn(width="large"),
-                    "제조번호": st.column_config.TextColumn(width="medium"),
-                    "유통기한": st.column_config.TextColumn(width="small"),
-                    "수량": st.column_config.NumberColumn(width="small"),
-                    "총 출고수량": st.column_config.TextColumn(width="small"),
-                    "최종재고": st.column_config.TextColumn(width="small"),
-                },
-            )
+            display_df, excel_df = _daily_outbound_check_rows(items)
+            _render_daily_outbound_check_html(display_df)
             st.download_button(
                 "마감 체크리스트 엑셀 다운로드",
-                data=dataframe_to_excel_bytes(checklist, "마감체크"),
+                data=dataframe_to_excel_bytes(excel_df, "마감체크"),
                 file_name=f"NOHTUS_마감체크_{ds}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
