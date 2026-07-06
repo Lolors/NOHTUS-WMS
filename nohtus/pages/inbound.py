@@ -15,29 +15,20 @@ from nohtus.services.inbound import ensure_inbound_first_product_mapping, inboun
 from nohtus.locations import make_location, parse_location
 
 
-def _inbound_js_loc_changed():
-    """입고 도면 iframe에서 부모 페이지의 숨김 입력칸으로 넘긴 위치값을 받는다."""
-    loc = str(st.session_state.get("_inbound_js_loc_buffer", "") or "").strip()
-    if loc:
-        st.session_state["_pending_inbound_loc"] = loc
-
-
 def _apply_inbound_location_pending():
-    """도면에서 선택한 입고 위치를 다음 렌더의 위치 선택 기본값으로 반영한다."""
-    pending = st.session_state.pop("_pending_inbound_loc", None)
-    if not pending:
-        try:
-            qloc = st.query_params.get("inbound_loc", "")
-            if isinstance(qloc, list):
-                qloc = qloc[0] if qloc else ""
-            pending = str(qloc or "").strip()
-            if pending:
-                try:
-                    del st.query_params["inbound_loc"]
-                except Exception:
-                    pass
-        except Exception:
-            pending = ""
+    """URL query param으로 전달된 입고 위치를 위치 선택 기본값으로 반영한다."""
+    try:
+        qloc = st.query_params.get("inbound_loc", "")
+        if isinstance(qloc, list):
+            qloc = qloc[0] if qloc else ""
+        pending = str(qloc or "").strip()
+        if pending:
+            try:
+                del st.query_params["inbound_loc"]
+            except Exception:
+                pass
+    except Exception:
+        pending = ""
     if not pending:
         return
 
@@ -52,29 +43,12 @@ def _apply_inbound_location_pending():
 
 
 def page_inbound():
-    from styles import apply_inbound_bridge_style
     from nohtus.ui.location_picker import inbound_location_picker
     from inbound_map import render_inbound_quick_location_map
     from nohtus.services.inbound import inbound_company_options_for, strip_company_stock_label
 
     _apply_inbound_location_pending()
-
-    _apply_inbound_location_pending()
     st.title("입고 등록")
-
-    apply_inbound_bridge_style()
-    st.text_input(
-        "__입고도면선택값",
-        key="_inbound_js_loc_buffer",
-        label_visibility="collapsed",
-        on_change=_inbound_js_loc_changed,
-    )
-    if st.button("__입고도면적용", key="_inbound_apply_btn"):
-        _inbound_js_loc_changed()
-        _apply_inbound_location_pending()
-        st.rerun()
-
-    _apply_inbound_location_pending()
 
     def inbound_product_label(value):
         if value == "":
