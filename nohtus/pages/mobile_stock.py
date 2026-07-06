@@ -125,15 +125,7 @@ def page_mobile_stock_finder():
     st.title("재고 찾기")
     st.caption("모바일 조회 전용 화면입니다. 표준제품명, ERP명, 비자료명, 별칭으로 제품을 찾아 현재 재고 위치를 확인합니다.")
 
-    users = mobile_favorite_users()
-    user_options = users + ["새 사용자 입력"] if users else ["기본", "새 사용자 입력"]
-    default_user = st.session_state.get("mobile_stock_user", users[0] if users else "기본")
-    default_idx = user_options.index(default_user) if default_user in user_options else 0
-    user_choice = st.selectbox("사용자", user_options, index=default_idx, key="mobile_user_select")
-    if user_choice == "새 사용자 입력":
-        username = st.text_input("사용자명", value=st.session_state.get("mobile_stock_user", ""), placeholder="예: 김대리", key="mobile_user_new").strip() or "기본"
-    else:
-        username = user_choice
+    username = "기본"
     st.session_state["mobile_stock_user"] = username
 
     fav_df = mobile_favorites_for_user(username)
