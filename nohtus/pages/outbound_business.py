@@ -10,6 +10,7 @@ def _hide_last_sale_importer():
 
 def page_outbound():
     original_renderer = outbound_page._render_last_sale_importer
+    original_save_with_customer = outbound_page._save_outbound_cart_with_customer
     original_text_input = st.text_input
     original_checkbox = st.checkbox
     original_data_editor = st.data_editor
@@ -32,6 +33,48 @@ def page_outbound():
 
     def all_company_manual_pick_value():
         return bool(st.session_state.get("out_all_company_manual_pick", False))
+
+    def patched_save_outbound_cart_with_customer(cart, title, customer_payload):
+        outbound_page._ensure_outbound_customer_columns()
+        editing_id = st.session_state.get("editing_order_id")
+        if editing_id:
+            outbound_page.update_outbound_order(int(editing_id), title, cart)
+            outbound_page._save_outbound_customer(int(editing_id), customer_payload)
+            msg = f"출고지시서 #{int(editing_id)} 수정 저장 완료"
+            st.session_state.pop("editing_order_id", None)
+            st.session_state.pop("editing_order_title", None)
+        else:
+            oid = outbound_page.save_outbound_order(cart, title)
+            outbound_page._save_outbound_customer(int(oid), customer_payload)
+            msg = f"출고지시서 #{int(oid)} 저장 완료"
+
+        for k in [
+            "outbound_cart",
+            "out_customer_term",
+            "out_customer_select",
+            "_out_customer_label",
+            "out_selected_customer",
+            "out_customer_direct",
+            "out_customer_manual_name",
+            "out_product_term",
+            "out_req_qty",
+            "out_rec_editor",
+            "out_manual_editor",
+            "out_ignore_company",
+            "out_manual_pick",
+            "out_all_company_manual_pick",
+            "out_expiry_short_first",
+            "pending_outbound_save",
+            "pending_outbound_expiry_warnings",
+            "pending_outbound_add_rows",
+            "pending_outbound_add_warnings",
+        ]:
+            st.session_state.pop(k, None)
+        st.session_state["outbound_cart"] = []
+        st.session_state["out_cart_editor_token"] = int(st.session_state.get("out_cart_editor_token", 0) or 0) + 1
+        st.session_state["_outbound_reset_inputs_pending"] = True
+        st.session_state["_outbound_last_success"] = msg
+        st.rerun()
 
     def patched_markdown(body, *args, **kwargs):
         if isinstance(body, str) and body.strip() == "### 재고 선택 옵션":
@@ -99,6 +142,7 @@ def page_outbound():
         return original_data_editor(data, *args, **kwargs)
 
     outbound_page._render_last_sale_importer = _hide_last_sale_importer
+    outbound_page._save_outbound_cart_with_customer = patched_save_outbound_cart_with_customer
     outbound_page._manual_pick_rows = original_manual_pick_rows
     st.markdown = patched_markdown
     st.caption = patched_caption
@@ -109,6 +153,7 @@ def page_outbound():
         return outbound_page.page_outbound()
     finally:
         outbound_page._render_last_sale_importer = original_renderer
+        outbound_page._save_outbound_cart_with_customer = original_save_with_customer
         outbound_page._manual_pick_rows = original_manual_pick_rows
         st.markdown = original_markdown
         st.caption = original_caption
