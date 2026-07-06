@@ -70,18 +70,26 @@ def _status_text_html(status):
     return "<span style='color:#2563eb;font-weight:800;'>저장됨</span>"
 
 
+def _md_link(text, oid):
+    safe = str(text or "-").replace("[", "\\[").replace("]", "\\]")
+    return f"[{safe}](?saved_order_id={int(oid)}#selected-outbound-detail)"
+
+
 def _render_saved_orders(orders_df, selected_order_id):
     st.markdown(
         """
         <style>
-        .saved-order-head{display:grid;grid-template-columns:.9fr 1.7fr 4.5fr .9fr;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:13px;font-weight:800;}
-        .saved-order-cell{height:34px;display:flex;align-items:center;color:#111827;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .saved-order-head{display:grid;grid-template-columns:.65fr .9fr 1.7fr 4.5fr .9fr;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:13px;font-weight:800;}
+        .saved-order-cell{height:31px;display:flex;align-items:center;color:#111827;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
         .saved-order-status{justify-content:center;}
-        .saved-order-selected{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:2px 0;margin:2px 0;}
+        .saved-order-selected{background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:7px 10px;margin:2px 0;color:#111827;font-size:14px;}
+        .saved-order-selected-grid{display:grid;grid-template-columns:.65fr .9fr 1.7fr 4.5fr .9fr;gap:8px;align-items:center;}
         .saved-order-sep{height:1px;background:#f1f5f9;margin:3px 0 5px;}
-        div[data-testid="stButton"] button[kind="secondary"]:hover{ text-decoration:underline; text-underline-offset:3px; }
+        div[data-testid="stMarkdownContainer"] a{color:#111827;text-decoration:none;}
+        div[data-testid="stMarkdownContainer"] a:hover{text-decoration:underline;text-underline-offset:3px;background:#f8fafc;}
         </style>
         <div class='saved-order-head'>
+          <div>번호</div>
           <div>날짜</div>
           <div>매출처</div>
           <div>포함된 출고 제품</div>
@@ -98,24 +106,32 @@ def _render_saved_orders(orders_df, selected_order_id):
         items_text = _order_items_summary(oid)
         selected = int(selected_order_id or 0) == oid
         if selected:
-            st.markdown("<div class='saved-order-selected'>", unsafe_allow_html=True)
-        cols = st.columns([0.9, 1.7, 4.5, 0.9], gap="small")
-        with cols[0]:
-            if st.button(created, key=f"open_order_date_{oid}", use_container_width=True, type="secondary"):
-                st.session_state["selected_saved_order_id"] = oid
-                st.rerun()
-        with cols[1]:
-            if st.button(customer, key=f"open_order_customer_{oid}", use_container_width=True, type="secondary"):
-                st.session_state["selected_saved_order_id"] = oid
-                st.rerun()
-        with cols[2]:
-            if st.button(items_text, key=f"open_order_items_{oid}", use_container_width=True, type="secondary"):
-                st.session_state["selected_saved_order_id"] = oid
-                st.rerun()
-        with cols[3]:
-            st.markdown(f"<div class='saved-order-cell saved-order-status'>{_status_text_html(status)}</div>", unsafe_allow_html=True)
-        if selected:
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"""
+                <div class='saved-order-selected'>
+                  <div class='saved-order-selected-grid'>
+                    <div>#{oid}</div>
+                    <div>{escape(created)}</div>
+                    <div title='{escape(customer)}'>{escape(customer)}</div>
+                    <div title='{escape(items_text)}'>{escape(items_text)}</div>
+                    <div style='text-align:center;'>{_status_text_html(status)}</div>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            cols = st.columns([0.65, 0.9, 1.7, 4.5, 0.9], gap="small")
+            with cols[0]:
+                st.markdown(_md_link(f"#{oid}", oid))
+            with cols[1]:
+                st.markdown(_md_link(created, oid))
+            with cols[2]:
+                st.markdown(_md_link(customer, oid))
+            with cols[3]:
+                st.markdown(_md_link(items_text, oid))
+            with cols[4]:
+                st.markdown(f"<div class='saved-order-cell saved-order-status'>{_status_text_html(status)}</div>", unsafe_allow_html=True)
         st.markdown("<div class='saved-order-sep'></div>", unsafe_allow_html=True)
 
 
