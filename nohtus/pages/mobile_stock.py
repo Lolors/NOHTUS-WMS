@@ -159,7 +159,7 @@ def page_mobile_stock_finder():
     with filter_c1:
         company_filter = st.selectbox("사업장", ["전체"] + COMPANIES, key="mobile_company_filter")
     with filter_c2:
-        expiry_filter = st.selectbox("유통기한", ["전체", "정상", "임박(6개월)", "만료"], key="mobile_expiry_filter")
+        expiry_filter = st.selectbox("유통기한", ["전체", "정상", "임박(1년)", "만료"], key="mobile_expiry_filter")
 
     candidates = mobile_product_candidates(term, limit=30) if term.strip() else []
     selected_product = st.session_state.get("mobile_selected_product", "")
