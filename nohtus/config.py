@@ -8,7 +8,7 @@ DB_PATH = PROJECT_ROOT / "data" / "nohtus.db"
 
 COMPANIES = ["노투스팜", "노투스", "NOH", "비자료"]
 INBOUND_COMPANIES = COMPANIES + ["등록대기"]
-SPECIAL_LOCATIONS = ["홍보물랙", "회색 카트", "오른쪽 창고", "사무실(4층)"]
+SPECIAL_LOCATIONS = ["홍보물랙", "회색 카트", "오른쪽 창고", "사무실(4층)", "지엠메딕"]
 
 AREA_CONFIG = {
     "A1": {"lines": ["01", "02", "03", "04", "05", "06"], "levels": ["01", "02", "03"]},
