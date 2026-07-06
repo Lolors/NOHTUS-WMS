@@ -72,6 +72,15 @@ def init_db():
         UNIQUE(username, product_name)
     )
     """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS recent_product_views(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        viewed_at TEXT,
+        UNIQUE(username, product_name)
+    )
+    """)
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS erp_stock(
