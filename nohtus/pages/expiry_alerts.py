@@ -69,8 +69,11 @@ def _render_html_table(rows: pd.DataFrame):
         """
         <style>
         .expiry-alert-table-wrap{
-            width:50vw;
+            width:40vw;
             max-width:100%;
+            height:auto!important;
+            max-height:none!important;
+            overflow:visible!important;
             margin-top:14px;
         }
         .expiry-alert-table{
