@@ -81,42 +81,59 @@ def _install_inbound_draft_link_preserver():
         <script>
         (function() {{
           const labelMap = {json.dumps(label_map, ensure_ascii=False)};
-          function install() {{
+          function parentDoc() {{ return window.parent.document; }}
+
+          function inputValue(labels) {{
+            const doc = parentDoc();
+            for (const label of labels) {{
+              const el = doc.querySelector('input[aria-label="' + label.replace(/"/g, '\\"') + '"]');
+              if (el) return el.value || '';
+            }}
+            return '';
+          }}
+
+          function checked(label) {{
+            const el = parentDoc().querySelector('input[aria-label="' + label.replace(/"/g, '\\"') + '"]');
+            return !!(el && el.checked);
+          }}
+
+          function preserveOnTarget(target) {{
+            if (!target || !checked('최초 등록')) return;
+            const url = new URL(target.href, window.parent.location.href);
+            url.searchParams.set('inbound_first_product', '1');
+            for (const [key, labels] of Object.entries(labelMap)) {{
+              const value = inputValue(labels);
+              if (value) url.searchParams.set(key, value);
+              else url.searchParams.delete(key);
+            }}
+            target.href = url.toString();
+          }}
+
+          function installInto(doc) {{
             try {{
-              const doc = window.parent.document;
-              if (doc.__nohtusInboundDraftPreserverInstalled) return;
+              if (!doc || doc.__nohtusInboundDraftPreserverInstalled) return;
               doc.__nohtusInboundDraftPreserverInstalled = true;
-
-              function inputValue(labels) {{
-                for (const label of labels) {{
-                  const el = doc.querySelector('input[aria-label="' + label.replace(/"/g, '\\"') + '"]');
-                  if (el) return el.value || '';
-                }}
-                return '';
-              }}
-
-              function checked(label) {{
-                const el = doc.querySelector('input[aria-label="' + label.replace(/"/g, '\\"') + '"]');
-                return !!(el && el.checked);
-              }}
-
               doc.addEventListener('click', function(ev) {{
                 const target = ev.target && ev.target.closest ? ev.target.closest('a[data-inbound-loc]') : null;
-                if (!target || !checked('최초 등록')) return;
-                const url = new URL(target.href, window.parent.location.href);
-                url.searchParams.set('inbound_first_product', '1');
-                for (const [key, labels] of Object.entries(labelMap)) {{
-                  const value = inputValue(labels);
-                  if (value) url.searchParams.set(key, value);
-                  else url.searchParams.delete(key);
-                }}
-                target.href = url.toString();
+                preserveOnTarget(target);
               }}, true);
             }} catch (e) {{}}
           }}
+
+          function install() {{
+            try {{
+              const doc = parentDoc();
+              installInto(doc);
+              doc.querySelectorAll('iframe').forEach(function(frame) {{
+                try {{ installInto(frame.contentDocument || frame.contentWindow.document); }} catch (e) {{}}
+              }});
+            }} catch (e) {{}}
+          }}
+
           install();
           setTimeout(install, 100);
           setTimeout(install, 500);
+          setTimeout(install, 1000);
         }})();
         </script>
         """,
