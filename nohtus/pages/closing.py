@@ -22,6 +22,47 @@ def _join_unique(values):
     return ", ".join(result)
 
 
+def _daily_outbound_check_rows(items: pd.DataFrame) -> pd.DataFrame:
+    """오늘 출고 체크 표를 고객별 행 + 제품별 합계 표시 형태로 만든다."""
+    rows = []
+    if items.empty:
+        return pd.DataFrame(columns=["매출처", "제품명", "제조번호", "유통기한", "수량", "총 출고수량", "최종재고"])
+
+    work = items.copy()
+    work["매출처"] = work["매출처"].fillna("").astype(str).replace("", "-")
+    work["표준제품명"] = work["표준제품명"].fillna("-").astype(str)
+    work["제조번호"] = work["제조번호"].fillna("-").astype(str).replace("", "-")
+    work["유통기한"] = work["유통기한"].fillna("-").astype(str).replace("", "-")
+    work["출고수량"] = pd.to_numeric(work["출고수량"], errors="coerce").fillna(0).astype(int)
+    work["현재수량"] = pd.to_numeric(work["현재수량"], errors="coerce").fillna(0).astype(int)
+
+    for (product, lot, exp), g in work.groupby(["표준제품명", "제조번호", "유통기한"], sort=True):
+        customer_qty = (
+            g.groupby("매출처", as_index=False)["출고수량"]
+            .sum()
+            .sort_values(["매출처"])
+            .reset_index(drop=True)
+        )
+        total_qty = int(customer_qty["출고수량"].sum())
+        if "재고ID" in g.columns:
+            stock_base = g.drop_duplicates(subset=["재고ID"])["현재수량"] if g["재고ID"].notna().any() else g["현재수량"]
+        else:
+            stock_base = g["현재수량"]
+        final_stock = int(pd.to_numeric(stock_base, errors="coerce").fillna(0).sum())
+
+        for idx, r in customer_qty.iterrows():
+            rows.append({
+                "매출처": r["매출처"],
+                "제품명": product,
+                "제조번호": lot,
+                "유통기한": exp,
+                "수량": int(r["출고수량"] or 0),
+                "총 출고수량": total_qty if idx == 0 else "",
+                "최종재고": final_stock if idx == 0 else "",
+            })
+    return pd.DataFrame(rows, columns=["매출처", "제품명", "제조번호", "유통기한", "수량", "총 출고수량", "최종재고"])
+
+
 def page_closing():
     st.title("마감")
     st.caption("출고의 마지막 단계입니다. 오늘 출고 체크, ERP 재고 비교, 업무일지 작성 기능을 한 화면에서 전환합니다.")
@@ -56,32 +97,34 @@ def page_closing():
             items["유통기한"] = items["유통기한"].apply(display_date_only)
             items["출고수량"] = pd.to_numeric(items["출고수량"], errors="coerce").fillna(0).astype(int)
             items["현재수량"] = pd.to_numeric(items["현재수량"], errors="coerce").fillna(0).astype(int)
-            valid_inv = items["재고ID"].notna()
-            items["동일재고출고합계"] = items.groupby("재고ID")["출고수량"].transform("sum").where(valid_inv, items["출고수량"])
-            items["기존수량"] = items["현재수량"] + items["동일재고출고합계"]
-            items["실물수량"] = ""
             try:
                 customers_for_close = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
                 items["매출처"] = items["출고지시서제목"].apply(lambda x: _infer_customer_from_title(x, customers_for_close)[0])
             except Exception:
                 items["매출처"] = ""
 
-            grouped = (
-                items.groupby(["표준제품명", "제조번호", "유통기한"], as_index=False)
-                .agg({
-                    "매출처": _join_unique,
-                    "사업장": _join_unique,
-                    "로케이션": _join_unique,
-                    "기존수량": "sum",
-                    "출고수량": "sum",
-                    "현재수량": "sum",
-                    "실물수량": "first",
-                })
+            checklist = _daily_outbound_check_rows(items)
+            st.dataframe(
+                checklist,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "매출처": st.column_config.TextColumn(width="medium"),
+                    "제품명": st.column_config.TextColumn(width="large"),
+                    "제조번호": st.column_config.TextColumn(width="medium"),
+                    "유통기한": st.column_config.TextColumn(width="small"),
+                    "수량": st.column_config.NumberColumn(width="small"),
+                    "총 출고수량": st.column_config.TextColumn(width="small"),
+                    "최종재고": st.column_config.TextColumn(width="small"),
+                },
             )
-            show_cols = ["매출처", "사업장", "로케이션", "표준제품명", "제조번호", "유통기한", "기존수량", "출고수량", "현재수량", "실물수량"]
-            grouped = grouped[show_cols]
-            st.dataframe(grouped, hide_index=True, use_container_width=True, column_config={"매출처": st.column_config.TextColumn(width="medium"), "사업장": st.column_config.TextColumn(width="small"), "로케이션": st.column_config.TextColumn(width="small"), "표준제품명": st.column_config.TextColumn(width="large"), "제조번호": st.column_config.TextColumn(width="medium"), "유통기한": st.column_config.TextColumn(width="small"), "기존수량": st.column_config.NumberColumn(width="small"), "출고수량": st.column_config.NumberColumn(width="small"), "현재수량": st.column_config.NumberColumn(width="small"), "실물수량": st.column_config.TextColumn(width="small")})
-            st.download_button("마감 체크리스트 엑셀 다운로드", data=dataframe_to_excel_bytes(grouped, "마감체크"), file_name=f"NOHTUS_마감체크_{ds}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            st.download_button(
+                "마감 체크리스트 엑셀 다운로드",
+                data=dataframe_to_excel_bytes(checklist, "마감체크"),
+                file_name=f"NOHTUS_마감체크_{ds}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
     else:
         st.markdown("### 출고")
         out_raw = q("""SELECT o.id AS 지시서번호, COALESCE(o.title, '') AS 출고지시서제목,
