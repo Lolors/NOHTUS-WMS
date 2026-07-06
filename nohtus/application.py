@@ -10,14 +10,14 @@ from nohtus.pages.closing import page_closing
 from nohtus.pages.history import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.location_map import page_map
-from nohtus.pages.master import page_customer_master
+from nohtus.pages.customer_master_business import page_customer_master
 from nohtus.pages.mobile_stock import page_mobile_stock_finder
 from nohtus.pages.move import page_move
-from nohtus.pages.outbound import page_outbound
-from nohtus.pages.product_matching import page_product_matching
+from nohtus.pages.outbound_business import page_outbound
+from nohtus.pages.product_matching_business import page_product_matching
 from nohtus.pages.product_shortcuts import page_favorite_products, page_recent_products
-from nohtus.pages.saved_outbound import page_saved_outbound as page_saved_outbound_refactored
-from nohtus.pages.stocktake import page_stocktake
+from nohtus.pages.saved_outbound_business_v2 import page_saved_outbound as page_saved_outbound_refactored
+from nohtus.pages.stocktake_business import page_stocktake
 
 
 # RC3.0 STABLE BASE 개발 원칙
