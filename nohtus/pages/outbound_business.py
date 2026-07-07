@@ -1,3 +1,5 @@
+from datetime import date, datetime
+
 import pandas as pd
 import streamlit as st
 
@@ -20,6 +22,39 @@ def _outbound_order_exists(order_id):
     with connect() as con:
         row = con.execute("SELECT id FROM outbound_orders WHERE id=?", (oid,)).fetchone()
     return row is not None
+
+
+def _default_outbound_date():
+    if "outbound_order_date" in st.session_state:
+        return st.session_state["outbound_order_date"]
+    order_id = st.session_state.get("editing_order_id")
+    if order_id:
+        try:
+            with connect() as con:
+                row = con.execute("SELECT order_date FROM outbound_orders WHERE id=?", (int(order_id),)).fetchone()
+            value = str(row[0] if row else "").strip()
+            if value:
+                return datetime.strptime(value[:10], "%Y-%m-%d").date()
+        except Exception:
+            pass
+    return date.today()
+
+
+def _selected_outbound_date_text():
+    value = st.session_state.get("outbound_order_date") or date.today()
+    try:
+        return value.strftime("%Y-%m-%d")
+    except Exception:
+        return str(value)[:10]
+
+
+def _set_outbound_order_date(order_id):
+    if not order_id:
+        return
+    outbound_date = _selected_outbound_date_text()
+    with connect() as con:
+        con.execute("UPDATE outbound_orders SET order_date=? WHERE id=?", (outbound_date, int(order_id)))
+        con.commit()
 
 
 def _upsert_wms_last_sale(customer_payload, order_date):
@@ -88,10 +123,11 @@ def page_outbound():
     def patched_save_outbound_cart_with_customer(cart, title, customer_payload):
         outbound_page._ensure_outbound_customer_columns()
         editing_id = st.session_state.get("editing_order_id")
-        order_date = pd.Timestamp.now().strftime("%Y-%m-%d")
+        order_date = _selected_outbound_date_text()
         if editing_id and _outbound_order_exists(editing_id):
             outbound_page.update_outbound_order(int(editing_id), title, cart)
             outbound_page._save_outbound_customer(int(editing_id), customer_payload)
+            _set_outbound_order_date(int(editing_id))
             msg = f"출고지시서 #{int(editing_id)} 수정 저장 완료"
             st.session_state.pop("editing_order_id", None)
             st.session_state.pop("editing_order_title", None)
@@ -104,11 +140,13 @@ def page_outbound():
                 prefix = ""
             oid = outbound_page.save_outbound_order(cart, title)
             outbound_page._save_outbound_customer(int(oid), customer_payload)
+            _set_outbound_order_date(int(oid))
             msg = f"{prefix} 출고지시서 #{int(oid)} 저장 완료".strip()
         _upsert_wms_last_sale(customer_payload, order_date)
 
         for k in [
             "outbound_cart",
+            "outbound_order_date",
             "out_customer_term",
             "out_customer_select",
             "_out_customer_label",
@@ -162,6 +200,7 @@ def page_outbound():
 
     def patched_text_input(label, *args, **kwargs):
         if kwargs.get("key") == "out_customer_term":
+            st.date_input("출고일자", value=_default_outbound_date(), key="outbound_order_date")
             search_col, direct_col = st.columns([8, 2], gap="small")
             with search_col:
                 value = original_text_input(label, *args, **kwargs)
