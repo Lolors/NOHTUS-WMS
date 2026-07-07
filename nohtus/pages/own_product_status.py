@@ -8,6 +8,15 @@ import streamlit as st
 from nohtus.db import q
 
 COMPANIES = ["노투스팜", "NOH", "노투스"]
+OWN_PRODUCTS = [
+    "리쥬네르 골드라벨",
+    "리쥬네르 블랙라벨",
+    "델가다 (5EA)",
+    "디센바 (5EA)",
+    "디센바B (5EA)",
+    "마이클리어 (10 EA)",
+    "하이바이 (5EA)",
+]
 INBOUND_TYPES = {"입고", "출고지시취소"}
 OUTBOUND_TYPES = {"출고지시", "출고", "출고지시수정", "출고확정"}
 MOVE_TYPES = {"사업장이동", "사업장+위치이동", "비자료전환", "이동"}
@@ -17,18 +26,8 @@ def _today_text():
     return date.today().strftime("%Y-%m-%d")
 
 
-def _product_master_names():
-    df = q(
-        """
-        SELECT DISTINCT TRIM(standard_name) AS product_name
-        FROM products
-        WHERE TRIM(COALESCE(standard_name,'')) <> ''
-        ORDER BY product_name
-        """
-    )
-    if df.empty:
-        return []
-    return [str(x or "").strip() for x in df["product_name"].tolist() if str(x or "").strip()]
+def _own_product_names():
+    return list(OWN_PRODUCTS)
 
 
 def _company_current_stock(company: str, product_names: list[str]) -> pd.DataFrame:
@@ -52,15 +51,17 @@ def _today_transactions(product_names: list[str]) -> pd.DataFrame:
     if not product_names:
         return pd.DataFrame(columns=["tx_type", "product_name", "from_company", "to_company", "qty"])
     placeholders = ",".join(["?"] * len(product_names))
+    tx_types = sorted(INBOUND_TYPES | OUTBOUND_TYPES | MOVE_TYPES)
+    tx_type_placeholders = ",".join(["?"] * len(tx_types))
     return q(
         f"""
         SELECT tx_type, product_name, from_company, to_company, qty
         FROM transactions
         WHERE substr(created_at,1,10)=?
           AND product_name IN ({placeholders})
-          AND tx_type IN ({','.join(['?'] * (len(INBOUND_TYPES) + len(OUTBOUND_TYPES) + len(MOVE_TYPES)))})
+          AND tx_type IN ({tx_type_placeholders})
         """,
-        tuple([_today_text()] + product_names + sorted(INBOUND_TYPES | OUTBOUND_TYPES | MOVE_TYPES)),
+        tuple([_today_text()] + product_names + tx_types),
     )
 
 
@@ -131,7 +132,6 @@ def _company_table(company: str, product_names: list[str], delta_map: dict[tuple
     out["증감"] = out["표준제품명"].map(lambda product: int(delta_map.get((company, product), 0) or 0))
     out["전일수량"] = out["현재수량"] - out["증감"]
     out = out[["표준제품명", "전일수량", "증감", "현재수량"]]
-    out = out[(out["전일수량"] != 0) | (out["증감"] != 0) | (out["현재수량"] != 0)]
     out["전일수량"] = out["전일수량"].map(_format_qty)
     out["증감"] = out["증감"].map(_format_delta)
     out["현재수량"] = out["현재수량"].map(_format_qty)
@@ -140,10 +140,9 @@ def _company_table(company: str, product_names: list[str], delta_map: dict[tuple
 
 def _render_table(company: str, df: pd.DataFrame):
     st.markdown(f"<h2 class='own-product-company'>{company}</h2>", unsafe_allow_html=True)
-    if df.empty:
-        st.info("표시할 자사제품 재고가 없습니다.")
-        return
+    st.markdown("<div class='own-product-table'>", unsafe_allow_html=True)
     st.dataframe(df, hide_index=True, use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def page_own_product_status():
@@ -158,15 +157,22 @@ def page_own_product_status():
             font-weight:500;
             margin:1.8rem 0 .3rem 0;
         }
+        .own-product-table{
+            width:30vw;
+            min-width:420px;
+            margin:0 auto 2rem auto;
+        }
+        @media (max-width: 768px){
+            .own-product-table{
+                width:100%;
+                min-width:0;
+            }
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    product_names = _product_master_names()
-    if not product_names:
-        st.warning("제품 매칭 관리에 등록된 표준제품명이 없습니다.")
-        return
-
+    product_names = _own_product_names()
     delta_map = _today_delta_map(product_names)
     for company in COMPANIES:
         _render_table(company, _company_table(company, product_names, delta_map))
