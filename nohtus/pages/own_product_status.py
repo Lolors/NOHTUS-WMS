@@ -28,91 +28,65 @@ def _today_text():
     return date.today().strftime("%Y-%m-%d")
 
 
-def _own_product_names():
-    return list(OWN_PRODUCTS)
-
-
-def _company_current_stock(company: str, product_names: list[str]) -> pd.DataFrame:
-    if not product_names:
-        return pd.DataFrame(columns=["product_name", "qty"])
-    placeholders = ",".join(["?"] * len(product_names))
-    params = tuple([company] + product_names)
+def _company_current_stock(company: str) -> pd.DataFrame:
+    placeholders = ",".join(["?"] * len(OWN_PRODUCTS))
     return q(
         f"""
         SELECT product_name, COALESCE(SUM(qty),0) AS qty
         FROM inventory
-        WHERE company=?
-          AND product_name IN ({placeholders})
+        WHERE company=? AND product_name IN ({placeholders})
         GROUP BY product_name
         """,
-        params,
+        tuple([company] + OWN_PRODUCTS),
     )
 
 
-def _today_transactions(product_names: list[str]) -> pd.DataFrame:
-    if not product_names:
-        return pd.DataFrame(columns=["tx_type", "product_name", "from_company", "to_company", "qty"])
-    placeholders = ",".join(["?"] * len(product_names))
+def _today_transactions() -> pd.DataFrame:
+    product_placeholders = ",".join(["?"] * len(OWN_PRODUCTS))
     tx_types = sorted(INBOUND_TYPES | OUTBOUND_TYPES | MOVE_TYPES)
-    tx_type_placeholders = ",".join(["?"] * len(tx_types))
+    tx_placeholders = ",".join(["?"] * len(tx_types))
     return q(
         f"""
         SELECT tx_type, product_name, from_company, to_company, qty
         FROM transactions
         WHERE substr(created_at,1,10)=?
-          AND product_name IN ({placeholders})
-          AND tx_type IN ({tx_type_placeholders})
+          AND product_name IN ({product_placeholders})
+          AND tx_type IN ({tx_placeholders})
         """,
-        tuple([_today_text()] + product_names + tx_types),
+        tuple([_today_text()] + OWN_PRODUCTS + tx_types),
     )
 
 
-def _today_delta_map(product_names: list[str]) -> dict[tuple[str, str], int]:
-    deltas = {(company, product): 0 for company in COMPANIES for product in product_names}
-    tx_df = _today_transactions(product_names)
+def _today_delta_map() -> dict[tuple[str, str], int]:
+    deltas = {(company, product): 0 for company in COMPANIES for product in OWN_PRODUCTS}
+    tx_df = _today_transactions()
     if tx_df.empty:
         return deltas
-
     for _, row in tx_df.iterrows():
         product = str(row.get("product_name") or "").strip()
         tx_type = str(row.get("tx_type") or "").strip()
         from_company = str(row.get("from_company") or "").strip()
         to_company = str(row.get("to_company") or "").strip()
-        try:
-            qty = int(row.get("qty") or 0)
-        except Exception:
-            qty = 0
-        if not product or qty == 0:
-            continue
-
-        if tx_type in INBOUND_TYPES:
-            if to_company in COMPANIES:
-                deltas[(to_company, product)] = deltas.get((to_company, product), 0) + qty
-        elif tx_type in OUTBOUND_TYPES:
-            if from_company in COMPANIES:
-                deltas[(from_company, product)] = deltas.get((from_company, product), 0) - qty
+        qty = int(row.get("qty") or 0)
+        if tx_type in INBOUND_TYPES and to_company in COMPANIES:
+            deltas[(to_company, product)] += qty
+        elif tx_type in OUTBOUND_TYPES and from_company in COMPANIES:
+            deltas[(from_company, product)] -= qty
         elif tx_type in MOVE_TYPES and from_company != to_company:
             if from_company in COMPANIES:
-                deltas[(from_company, product)] = deltas.get((from_company, product), 0) - qty
+                deltas[(from_company, product)] -= qty
             if to_company in COMPANIES:
-                deltas[(to_company, product)] = deltas.get((to_company, product), 0) + qty
-
+                deltas[(to_company, product)] += qty
     return deltas
 
 
-def _format_qty(value) -> str:
-    try:
-        value = int(value or 0)
-    except Exception:
-        value = 0
+def _fmt_qty(value) -> str:
+    value = int(value or 0)
     return "-" if value == 0 else f"{value:,}"
 
 
-def _format_delta(value) -> str:
-    try:
-        value = int(value or 0)
-    except Exception:
-        value = 0
+def _fmt_delta(value) -> str:
+    value = int(value or 0)
     if value > 0:
         return f"+{value:,}"
     if value < 0:
@@ -120,166 +94,66 @@ def _format_delta(value) -> str:
     return "-"
 
 
-def _company_table(company: str, product_names: list[str], delta_map: dict[tuple[str, str], int]) -> pd.DataFrame:
-    base = pd.DataFrame({"표준제품명": product_names})
-    current = _company_current_stock(company, product_names)
-
+def _company_table(company: str, delta_map: dict[tuple[str, str], int]) -> pd.DataFrame:
+    base = pd.DataFrame({"표준제품명": OWN_PRODUCTS})
+    current = _company_current_stock(company)
     if not current.empty:
         current = current.rename(columns={"product_name": "표준제품명", "qty": "현재수량"})
     else:
         current = pd.DataFrame(columns=["표준제품명", "현재수량"])
-
     out = base.merge(current, on="표준제품명", how="left")
     out["현재수량"] = out["현재수량"].fillna(0).astype(int)
-    out["증감"] = out["표준제품명"].map(lambda product: int(delta_map.get((company, product), 0) or 0))
+    out["증감"] = out["표준제품명"].map(lambda p: int(delta_map.get((company, p), 0) or 0))
     out["전일수량"] = out["현재수량"] - out["증감"]
     out = out[["표준제품명", "전일수량", "증감", "현재수량"]]
-    out["전일수량"] = out["전일수량"].map(_format_qty)
-    out["증감"] = out["증감"].map(_format_delta)
-    out["현재수량"] = out["현재수량"].map(_format_qty)
-    return out.reset_index(drop=True)
+    out["전일수량"] = out["전일수량"].map(_fmt_qty)
+    out["증감"] = out["증감"].map(_fmt_delta)
+    out["현재수량"] = out["현재수량"].map(_fmt_qty)
+    return out
 
 
 def _table_html(df: pd.DataFrame) -> str:
-    headers = "".join(f"<th>{escape(str(col))}</th>" for col in df.columns)
-    body_rows = []
+    head = "".join(f"<th>{escape(str(c))}</th>" for c in df.columns)
+    rows = []
     for _, row in df.iterrows():
         cells = []
         for col in df.columns:
-            align_class = " own-num" if col != "표준제품명" else " own-name"
-            cells.append(f"<td class='{align_class.strip()}'>{escape(str(row.get(col, '')))}</td>")
-        body_rows.append("<tr>" + "".join(cells) + "</tr>")
-    return (
-        "<table class='own-product-html-table'>"
-        "<colgroup>"
-        "<col class='own-col-name'>"
-        "<col class='own-col-num'>"
-        "<col class='own-col-num'>"
-        "<col class='own-col-num'>"
-        "</colgroup>"
-        f"<thead><tr>{headers}</tr></thead>"
-        f"<tbody>{''.join(body_rows)}</tbody>"
-        "</table>"
-    )
+            cls = "name" if col == "표준제품명" else "num"
+            cells.append(f"<td class='{cls}'>{escape(str(row[col]))}</td>")
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+    return """
+    <table>
+      <colgroup><col class='col-name'><col class='col-num'><col class='col-num'><col class='col-num'></colgroup>
+      <thead><tr>{head}</tr></thead>
+      <tbody>{body}</tbody>
+    </table>
+    """.format(head=head, body="".join(rows))
 
 
-def _render_table(company: str, df: pd.DataFrame) -> str:
-    return (
-        "<section class='own-product-card'>"
-        f"<h2 class='own-product-company'>{escape(company)}</h2>"
-        f"<div class='own-product-table'>{_table_html(df)}</div>"
-        "</section>"
-    )
-
-
-def _report_html(sections: list[str]) -> str:
+def _report_html(delta_map: dict[tuple[str, str], int]) -> str:
+    cards = []
+    for company in COMPANIES:
+        cards.append(f"<section><h2>{escape(company)}</h2>{_table_html(_company_table(company, delta_map))}</section>")
     return f"""
-<!doctype html>
-<html lang="ko">
-<head>
-<meta charset="utf-8" />
-<style>
-html, body {{
-    margin:0;
-    padding:0;
-    background:transparent;
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-    color:#0f172a;
-}}
-.own-product-grid {{
-    width:100%;
-    display:grid;
-    grid-template-columns:30vw 30vw 30vw;
-    justify-content:center;
-    gap:1.5vw;
-    align-items:start;
-    box-sizing:border-box;
-}}
-.own-product-card {{
-    width:30vw;
-    max-width:30vw;
-    min-width:0;
-    box-sizing:border-box;
-}}
-.own-product-company {{
-    text-align:center;
-    font-size:32px;
-    font-weight:600;
-    margin:0 0 10px 0;
-    line-height:1.2;
-}}
-.own-product-table {{
-    width:30vw;
-    max-width:30vw;
-    min-width:0;
-    overflow-x:auto;
-}}
-.own-product-html-table {{
-    width:100%;
-    border-collapse:collapse;
-    table-layout:fixed;
-    font-size:13px;
-    background:white;
-}}
-.own-product-html-table .own-col-name {{
-    width:calc(100% - 150px);
-}}
-.own-product-html-table .own-col-num {{
-    width:50px;
-}}
-.own-product-html-table th,
-.own-product-html-table td {{
-    border:1px solid #e5e7eb;
-    padding:6px 8px;
-    line-height:1.25;
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
-}}
-.own-product-html-table th {{
-    background:#f8fafc;
-    color:#334155;
-    font-weight:800;
-    text-align:center;
-}}
-.own-product-html-table .own-name {{
-    text-align:left;
-}}
-.own-product-html-table .own-num {{
-    text-align:center;
-}}
-@media (max-width: 768px) {{
-    .own-product-grid {{
-        display:block;
-        width:100%;
-    }}
-    .own-product-card,
-    .own-product-table {{
-        width:100%;
-        max-width:100%;
-        min-width:0;
-        margin:0 0 28px 0;
-    }}
-    .own-product-company {{
-        font-size:28px;
-        margin:18px 0 8px 0;
-    }}
-}}
-</style>
-</head>
-<body>
-<div class="own-product-grid">{''.join(sections)}</div>
-</body>
-</html>
-"""
+    <!doctype html><html lang='ko'><head><meta charset='utf-8'>
+    <style>
+      body{{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;}}
+      .grid{{display:grid;grid-template-columns:30vw 30vw 30vw;gap:1.5vw;justify-content:center;align-items:start;width:100%;}}
+      section{{width:30vw;box-sizing:border-box;}}
+      h2{{text-align:center;font-size:32px;font-weight:600;margin:0 0 10px 0;line-height:1.2;}}
+      table{{border-collapse:collapse;table-layout:fixed;width:auto;background:white;font-size:13px;}}
+      .col-name{{width:134px;}}
+      .col-num{{width:62px;}}
+      th,td{{border:1px solid #e5e7eb;padding:6px 6px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
+      th{{background:#f8fafc;color:#334155;font-weight:800;text-align:center;}}
+      td.name{{text-align:left;}}
+      td.num{{text-align:center;}}
+      @media(max-width:768px){{.grid{{display:block;width:100%;}}section{{width:100%;margin-bottom:28px;}}}}
+    </style></head><body><div class='grid'>{''.join(cards)}</div></body></html>
+    """
 
 
 def page_own_product_status():
     st.title("자사제품 조회")
     st.caption(f"기준일자: {_today_text()} · 전일수량 = 현재수량 - 금일 입고/출고/사업장 이동 증감")
-    product_names = _own_product_names()
-    delta_map = _today_delta_map(product_names)
-    sections = []
-    for company in COMPANIES:
-        sections.append(_render_table(company, _company_table(company, product_names, delta_map)))
-    components.html(_report_html(sections), height=420, scrolling=False)
+    components.html(_report_html(_today_delta_map()), height=420, scrolling=False)
