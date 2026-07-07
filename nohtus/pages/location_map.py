@@ -29,44 +29,27 @@ def _map_search_warehouse_name(value):
 
 
 def _map_search_product_groups(product_name, inv_df):
-    """표준제품명 검색 결과를 전산상명칭(ERP명)별로 나눈다.
-
-    같은 표준제품명이라도 inventory.warehouse_name이 2개 이상이면
-    로케이션맵 검색 결과에서 전산명별로 별도 카드가 나오도록 한다.
-    """
+    """Return one search card group per standard product name."""
     product_name = str(product_name or "").strip()
     rows = inv_df[inv_df["product_name"] == product_name].copy() if inv_df is not None and not inv_df.empty else pd.DataFrame()
     if rows.empty:
-        return [{"product_name": product_name, "warehouse_name": "-", "rows": rows, "total_qty": 0, "split_by_erp": False}]
+        return [{"product_name": product_name, "warehouse_name": "ALL", "rows": rows, "total_qty": 0, "split_by_erp": False}]
 
     rows["warehouse_name"] = rows["warehouse_name"].apply(_map_search_warehouse_name)
-    erp_names = [x for x in rows["warehouse_name"].dropna().astype(str).str.strip().drop_duplicates().tolist() if x]
-    split_by_erp = len(erp_names) >= 2
-    groups = []
-    if split_by_erp:
-        for wh, g in rows.groupby("warehouse_name", sort=True):
-            groups.append({
-                "product_name": product_name,
-                "warehouse_name": _map_search_warehouse_name(wh),
-                "rows": g.copy(),
-                "total_qty": int(g["qty"].sum()),
-                "split_by_erp": True,
-            })
-    else:
-        groups.append({
-            "product_name": product_name,
-            "warehouse_name": erp_names[0] if erp_names else "-",
-            "rows": rows,
-            "total_qty": int(rows["qty"].sum()),
-            "split_by_erp": False,
-        })
-    return groups
+    return [{
+        "product_name": product_name,
+        "warehouse_name": "ALL",
+        "rows": rows,
+        "total_qty": int(rows["qty"].sum()),
+        "split_by_erp": False,
+    }]
 
 
 def page_map_search_results(term, compact: bool = False):
     """로케이션맵 > 제품명 검색 결과.
 
-    같은 표준제품명에 전산상명칭(ERP명)이 여러 개 있으면 전산명별로 별도 표시한다.
+    제품매칭표로 합쳐진 같은 표준제품명은 한 카드에 표시하고,
+    카드 안의 재고 분포에서 사업장별 ERP명을 함께 보여준다.
     compact=True는 즐겨찾기/최근조회처럼 오른쪽 영역이 좁은 화면에서만 사용한다.
     """
     try:
