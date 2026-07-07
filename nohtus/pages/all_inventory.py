@@ -10,17 +10,6 @@ from nohtus.db import q
 from nohtus.dates import display_date_only
 
 
-PAGE_SIZE = 100
-
-
-def _filter_signature(companies, product_term, erp_term):
-    return "|".join([
-        ",".join(companies or []),
-        str(product_term or "").strip(),
-        str(erp_term or "").strip(),
-    ])
-
-
 def _build_where(companies, product_term, erp_term):
     where = ["qty>0"]
     params = []
@@ -39,7 +28,7 @@ def _build_where(companies, product_term, erp_term):
     return " AND ".join(where), params
 
 
-def _build_query(companies, product_term, erp_term, limit):
+def _build_query(companies, product_term, erp_term):
     where_sql, params = _build_where(companies, product_term, erp_term)
     sql = f"""
         SELECT company AS 사업장,
@@ -52,9 +41,7 @@ def _build_query(companies, product_term, erp_term, limit):
         FROM inventory
         WHERE {where_sql}
         ORDER BY company, location, product_name, warehouse_name, lot, exp_date, id
-        LIMIT ?
     """
-    params.append(int(limit))
     return q(sql, tuple(params))
 
 
@@ -134,21 +121,13 @@ def page_all_inventory():
     with f3:
         erp_term = st.text_input("ERP명 검색", placeholder="ERP명 일부 입력", key="all_inv_erp_term")
 
-    sig = _filter_signature(companies, product_term, erp_term)
-    if st.session_state.get("_all_inv_filter_sig") != sig:
-        st.session_state["_all_inv_filter_sig"] = sig
-        st.session_state["all_inv_limit"] = PAGE_SIZE
-
     row_count, total_qty, by_company = _summary_query(companies, product_term, erp_term)
     _render_summary(row_count, total_qty, by_company)
 
-    limit = int(st.session_state.get("all_inv_limit", PAGE_SIZE) or PAGE_SIZE)
-    df = _build_query(companies, product_term, erp_term, limit + 1)
-    has_more = len(df) > limit
-    shown = df.iloc[:limit].copy() if has_more else df.copy()
-    display_df = _prepare_display_df(shown)
+    df = _build_query(companies, product_term, erp_term)
+    display_df = _prepare_display_df(df)
 
-    st.caption(f"표시 중: {len(display_df):,} / {row_count:,}건" + (" · 아래로 내려가 더 보기를 누르면 계속 불러옵니다." if has_more else ""))
+    st.caption(f"표시 중: {len(display_df):,} / {row_count:,}건")
     if display_df.empty:
         st.info("조회되는 재고가 없습니다.")
     else:
@@ -161,10 +140,3 @@ def page_all_inventory():
                 "수량": st.column_config.NumberColumn("수량", format="%d"),
             },
         )
-
-    if has_more:
-        _left, mid, _right = st.columns([3, 2, 3])
-        with mid:
-            if st.button(f"더 보기 (+{PAGE_SIZE}건)", use_container_width=True):
-                st.session_state["all_inv_limit"] = limit + PAGE_SIZE
-                st.rerun()
