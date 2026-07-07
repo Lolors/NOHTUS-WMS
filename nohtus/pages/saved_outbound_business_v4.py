@@ -78,9 +78,16 @@ def _order_items_summary(order_id, max_items=3):
     )
     if df.empty:
         return "-"
-    names = [str(r.product_name or "-") for r in df.itertuples(index=False)]
-    shown = names[:max_items]
-    remain = max(0, len(names) - len(shown))
+    items = []
+    for r in df.itertuples(index=False):
+        name = str(r.product_name or "-")
+        try:
+            qty = int(r.qty or 0)
+        except Exception:
+            qty = 0
+        items.append(f"{name} * {qty}")
+    shown = items[:max_items]
+    remain = max(0, len(items) - len(shown))
     text = ", ".join(shown)
     if remain:
         text += f" 외 {remain}품목"
@@ -146,9 +153,9 @@ def _render_saved_orders(orders_df, selected_order_id):
     st.markdown(
         f"""
         <style>
-        .saved-order-head-clean{{display:grid;grid-template-columns:.65fr .9fr 1.7fr 4.5fr .9fr;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:13px;font-weight:800;}}
-        .saved-order-cell{{height:{ROW_H}px;display:flex;align-items:center;min-width:0;color:#111827;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;}}
-        .saved-order-status{{justify-content:center;text-align:center;}}
+        .saved-order-head-clean{{display:grid;grid-template-columns:.65fr .9fr 1.5fr 3fr .85fr;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:13px;font-weight:800;}}
+        .saved-order-cell{{min-height:{ROW_H}px;display:flex;align-items:center;min-width:0;color:#111827;font-size:14px;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35;word-break:keep-all;overflow-wrap:anywhere;}}
+        .saved-order-status{{justify-content:center;text-align:center;word-break:keep-all;}}
         .saved-order-sep{{height:1px;background:#f6f7f9;margin:1px 0 3px;}}
         .saved-order-no-chip{{display:inline-flex;align-items:center;justify-content:center;width:{BUTTON_W}px;min-width:{BUTTON_W}px;max-width:{BUTTON_W}px;height:{BUTTON_H}px;min-height:{BUTTON_H}px;max-height:{BUTTON_H}px;padding:0;border:1px solid #d1d5db;background:#fff;color:#334155;border-radius:6px;font-size:13px;font-weight:500;box-sizing:border-box;line-height:1;}}
         .saved-order-no-chip.selected{{border-color:#93c5fd;background:#dbeafe;color:#1d4ed8;font-weight:700;}}
@@ -167,7 +174,7 @@ def _render_saved_orders(orders_df, selected_order_id):
         display_no = str(getattr(r, "display_no", "") or getattr(r, "daily_no", "") or oid)
         order_title = str(getattr(r, "title", "") or "").strip() or _order_items_summary(oid)
         selected = int(selected_order_id or 0) == oid
-        cols = st.columns([0.65, 0.9, 1.7, 4.5, 0.9], gap="small")
+        cols = st.columns([0.65, 0.9, 1.5, 3, 0.85], gap="small")
         with cols[0]:
             if selected:
                 st.markdown(_cell(_selected_number_chip(display_no)), unsafe_allow_html=True)
@@ -190,75 +197,15 @@ def _render_saved_orders(orders_df, selected_order_id):
 def _render_page_input(current_page, total_pages):
     if total_pages <= 1:
         return current_page
-    st.markdown(
-        """
-        <style>
-        div[data-testid="stNumberInput"]{
-            width:144px!important;
-            margin:12px auto 2px auto!important;
-            overflow:visible!important;
-            background:#f1f5f9!important;
-            border:1px solid #e2e8f0!important;
-            border-radius:11px!important;
-            padding:0!important;
-            box-sizing:border-box!important;
-        }
-        div[data-testid="stNumberInput"] > div{
-            display:flex!important;
-            align-items:stretch!important;
-            gap:0!important;
-            background:transparent!important;
-            border:0!important;
-            box-shadow:none!important;
-        }
-        div[data-testid="stNumberInput"] input{
-            width:64px!important;
-            height:44px!important;
-            min-height:44px!important;
-            text-align:center!important;
-            font-size:16px!important;
-            background:transparent!important;
-            border:0!important;
-            box-shadow:none!important;
-            padding:0!important;
-        }
-        div[data-testid="stNumberInput"] button{
-            display:flex!important;
-            align-items:center!important;
-            justify-content:center!important;
-            visibility:visible!important;
-            opacity:1!important;
-            width:40px!important;
-            min-width:40px!important;
-            height:44px!important;
-            min-height:44px!important;
-            padding:0!important;
-            margin:0!important;
-            border:0!important;
-            background:transparent!important;
-            box-shadow:none!important;
-            color:#4b5563!important;
-            border-radius:10px!important;
-        }
-        div[data-testid="stNumberInput"] button:hover{
-            background:#e2e8f0!important;
-            color:#111827!important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
+    selected_page = st.number_input(
+        "저장된 출고지시 페이지",
+        min_value=1,
+        max_value=total_pages,
+        value=current_page,
+        step=1,
+        key="saved_order_page_input",
+        label_visibility="collapsed",
     )
-    _left, page_col, _right = st.columns([1, 0.22, 1])
-    with page_col:
-        selected_page = st.number_input(
-            "저장된 출고지시 페이지",
-            min_value=1,
-            max_value=total_pages,
-            value=current_page,
-            step=1,
-            key="saved_order_page_input",
-            label_visibility="collapsed",
-        )
     return int(selected_page)
 
 
@@ -272,6 +219,27 @@ def _order_display_label(order_row):
     if order_date and daily_no:
         return f"{order_date} / {daily_no}번"
     return f"출고지시서 #{int(order_row.get('id'))}"
+
+
+def _detail_table_html(view_items):
+    headers = "".join(f"<th>{escape(str(col))}</th>" for col in view_items.columns)
+    rows = []
+    for _, row in view_items.iterrows():
+        cells = []
+        for col in view_items.columns:
+            cls = "detail-product" if col == "제품명" else ""
+            cells.append(f"<td class='{cls}'>{escape(str(row.get(col, '')))}</td>")
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+    return f"""
+    <style>
+    .saved-detail-table{{width:100%;border-collapse:collapse;font-size:13px;table-layout:auto;}}
+    .saved-detail-table th,.saved-detail-table td{{border:1px solid #e5e7eb;padding:6px 7px;line-height:1.35;vertical-align:middle;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;}}
+    .saved-detail-table th{{background:#f8fafc;color:#334155;font-weight:800;text-align:center;}}
+    .saved-detail-table td:not(.detail-product){{text-align:center;}}
+    .saved-detail-table .detail-product{{text-align:left;}}
+    </style>
+    <table class='saved-detail-table'><thead><tr>{headers}</tr></thead><tbody>{''.join(rows)}</tbody></table>
+    """
 
 
 def page_saved_outbound():
@@ -320,15 +288,6 @@ def page_saved_outbound():
         order_id = int(orders.iloc[0]["id"])
         st.session_state["selected_saved_order_id"] = order_id
 
-    st.markdown(f"#### 출고지시서 {total}건")
-    list_col, _ = st.columns([7, 3], gap="large")
-    with list_col:
-        _render_saved_orders(orders, order_id)
-        selected_page = _render_page_input(page_no, total_pages)
-        if selected_page != page_no:
-            st.session_state["saved_order_page"] = selected_page
-            st.rerun()
-
     order_row = all_orders[all_orders["id"] == int(order_id)]
     if order_row.empty:
         st.session_state.pop("selected_saved_order_id", None)
@@ -338,11 +297,18 @@ def page_saved_outbound():
     customer_name = str(order_row.iloc[0].get("customer_name") or "-")
     display_label = _order_display_label(order_row.iloc[0])
 
-    st.markdown("<div id='selected-outbound-detail'></div>", unsafe_allow_html=True)
-    st.markdown("---")
-    selected_col, _spacer = st.columns([7, 3], gap="large")
-    with selected_col:
-        st.markdown(f"### 선택된 출고지시서 {escape(display_label)} · {escape(customer_name)}")
+    list_col, detail_col = st.columns([6, 4], gap="large")
+    with list_col:
+        st.markdown(f"#### 출고지시서 목록 {total}건")
+        _render_saved_orders(orders, order_id)
+        selected_page = _render_page_input(page_no, total_pages)
+        if selected_page != page_no:
+            st.session_state["saved_order_page"] = selected_page
+            st.rerun()
+
+    with detail_col:
+        st.markdown("<div id='selected-outbound-detail'></div>", unsafe_allow_html=True)
+        st.markdown(f"#### 선택된 출고지시서<br>{escape(display_label)} · {escape(customer_name)}", unsafe_allow_html=True)
         item_df = saved_v2.q(
             """
             SELECT i.id AS 품목ID, i.inventory_id AS 재고ID, i.location AS 로케이션, i.product_name AS 제품명,
@@ -355,24 +321,26 @@ def page_saved_outbound():
         )
         if item_df.empty:
             st.info("이 출고지시서에는 저장된 품목이 없습니다.")
+            rows_for_download = []
         else:
             item_df["유통기한"] = item_df["유통기한"].apply(display_date_only)
             view_items = item_df[["사업장", "로케이션", "제품명", "LOT", "유통기한", "요청수량"]]
-            st.dataframe(view_items, hide_index=True, use_container_width=True)
+            st.markdown(_detail_table_html(view_items), unsafe_allow_html=True)
             rows_for_download = view_items.to_dict("records")
-            title_for_download = f"{customer_name} 출고지시서 {display_label}"
-            d1, d2 = st.columns(2)
-            with d1:
-                st.download_button("선택 지시서 엑셀 다운로드", data=outbound_excel_bytes(rows_for_download, title_for_download), file_name=f"NOHTUS_출고지시서_{int(order_id)}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-            with d2:
-                try:
-                    st.download_button("선택 지시서 PDF 다운로드", data=outbound_pdf_bytes(rows_for_download, title_for_download), file_name=f"NOHTUS_출고지시서_{int(order_id)}.pdf", mime="application/pdf", use_container_width=True)
-                except Exception as e:
-                    st.warning(f"PDF 생성 실패: {e}")
+
+        title_for_download = f"{customer_name} 출고지시서 {display_label}"
+        d1, d2 = st.columns(2)
+        with d1:
+            st.download_button("엑셀 다운로드", data=outbound_excel_bytes(rows_for_download, title_for_download), file_name=f"NOHTUS_출고지시서_{int(order_id)}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, disabled=not rows_for_download)
+        with d2:
+            try:
+                st.download_button("PDF 다운로드", data=outbound_pdf_bytes(rows_for_download, title_for_download), file_name=f"NOHTUS_출고지시서_{int(order_id)}.pdf", mime="application/pdf", use_container_width=True, disabled=not rows_for_download)
+            except Exception as e:
+                st.warning(f"PDF 생성 실패: {e}")
 
         e1, e2 = st.columns(2)
         with e1:
-            if st.button("출고지시서 수정하기", type="primary", use_container_width=True, disabled=(order_status == "취소됨")):
+            if st.button("수정하기", type="primary", use_container_width=True, disabled=(order_status == "취소됨")):
                 st.session_state["outbound_cart"] = load_outbound_order(int(order_id))
                 st.session_state["editing_order_id"] = int(order_id)
                 st.session_state["editing_order_title"] = str(order_row.iloc[0].get("title") or "")
@@ -380,19 +348,19 @@ def page_saved_outbound():
                 st.session_state["page"] = "출고지시"
                 st.rerun()
         with e2:
-            if st.button("출고지시 취소하기", type="primary", use_container_width=True, key=f"cancel_order_{int(order_id)}", disabled=(order_status == "취소됨")):
+            if st.button("취소하기", type="primary", use_container_width=True, key=f"cancel_order_{int(order_id)}", disabled=(order_status == "취소됨")):
                 st.session_state["confirm_cancel_order_id"] = int(order_id)
                 st.rerun()
 
         if st.session_state.get("confirm_cancel_order_id") == int(order_id):
             st.warning("정말로 취소하시겠습니까? 제품의 수량은 출고지시 이전으로 복원됩니다.")
-            c1, c2, _ = st.columns([1, 1.6, 5])
+            c1, c2 = st.columns(2)
             with c1:
                 if st.button("아니오", use_container_width=True, key=f"cancel_no_{int(order_id)}"):
                     st.session_state.pop("confirm_cancel_order_id", None)
                     st.rerun()
             with c2:
-                if st.button("예, 취소합니다", type="primary", use_container_width=True, key=f"cancel_yes_{int(order_id)}"):
+                if st.button("예, 취소", type="primary", use_container_width=True, key=f"cancel_yes_{int(order_id)}"):
                     try:
                         saved_v2._cancel_order(int(order_id))
                         st.rerun()
