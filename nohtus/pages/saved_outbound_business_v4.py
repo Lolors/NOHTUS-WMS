@@ -154,7 +154,7 @@ def _render_saved_orders(orders_df, selected_order_id):
         .saved-order-no-chip.selected{{border-color:#93c5fd;background:#dbeafe;color:#1d4ed8;font-weight:700;}}
         </style>
         <div class='saved-order-head-clean'>
-          <div>번호</div><div>날짜</div><div>매출처</div><div>포함된 출고 제품</div><div style='text-align:center;'>상태</div>
+          <div>번호</div><div>날짜</div><div>매출처</div><div>출고지시서 제목</div><div style='text-align:center;'>상태</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -165,7 +165,7 @@ def _render_saved_orders(orders_df, selected_order_id):
         customer = str(getattr(r, "customer_name", "") or "-")
         status = str(getattr(r, "status", "저장됨") or "저장됨")
         display_no = str(getattr(r, "display_no", "") or getattr(r, "daily_no", "") or oid)
-        items_text = _order_items_summary(oid)
+        order_title = str(getattr(r, "title", "") or "").strip() or _order_items_summary(oid)
         selected = int(selected_order_id or 0) == oid
         cols = st.columns([0.65, 0.9, 1.7, 4.5, 0.9], gap="small")
         with cols[0]:
@@ -181,7 +181,7 @@ def _render_saved_orders(orders_df, selected_order_id):
         with cols[2]:
             st.markdown(_cell(escape(customer), title=customer), unsafe_allow_html=True)
         with cols[3]:
-            st.markdown(_cell(escape(items_text), title=items_text), unsafe_allow_html=True)
+            st.markdown(_cell(escape(order_title), title=order_title), unsafe_allow_html=True)
         with cols[4]:
             st.markdown(_cell(_status_text_html(status), class_name="saved-order-status"), unsafe_allow_html=True)
         st.markdown("<div class='saved-order-sep'></div>", unsafe_allow_html=True)
