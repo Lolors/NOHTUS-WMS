@@ -227,34 +227,67 @@ def read_erp_current_stock_file(uploaded, company):
 
 def load_wms_stock_by_erp_name():
     """WMS inventory 재고를 사업장별 ERP제품명 기준으로 합산한다."""
-    sql = """
-        SELECT
-            i.company AS 사업장,
-            COALESCE(NULLIF(TRIM(
-                CASE i.company
-                    WHEN '노투스팜' THEN p.erp_nohtuspharm_name
-                    WHEN 'NOH' THEN p.erp_noh_name
-                    WHEN '노투스' THEN p.erp_nohtus_name
-                    ELSE ''
-                END
-            ), ''), i.product_name) AS ERP제품명,
-            SUM(i.qty) AS WMS수량
-        FROM inventory i
-        LEFT JOIN products p
-          ON p.standard_name = i.product_name
-        WHERE i.qty <> 0
-          AND i.company IN ('노투스팜', 'NOH', '노투스')
-        GROUP BY i.company, ERP제품명
-    """
-    wms = q(sql)
-    if wms.empty:
+    wms_raw = q("""
+        SELECT company AS 사업장, product_name AS 표준제품명, SUM(qty) AS WMS수량
+        FROM inventory
+        WHERE qty <> 0
+          AND company IN ('노투스팜', 'NOH', '노투스')
+        GROUP BY company, product_name
+    """)
+    if wms_raw.empty:
         return pd.DataFrame(columns=["사업장", "ERP제품명", "WMS수량"])
 
-    wms["ERP제품명"] = wms["ERP제품명"].apply(clean_excel_text)
+    product_map = load_product_erp_name_map()
+    rows = []
+    for r in wms_raw.itertuples(index=False):
+        company = clean_excel_text(getattr(r, "사업장", ""))
+        standard_name = clean_excel_text(getattr(r, "표준제품명", ""))
+        erp_name = product_map.get((company, standard_name)) or standard_name
+        erp_name = clean_excel_text(erp_name)
+        if is_ignored_erp_product_name(erp_name):
+            continue
+        rows.append({
+            "사업장": company,
+            "ERP제품명": erp_name,
+            "WMS수량": int(getattr(r, "WMS수량", 0) or 0),
+        })
+
+    if not rows:
+        return pd.DataFrame(columns=["사업장", "ERP제품명", "WMS수량"])
+
+    wms = pd.DataFrame(rows)
     wms["WMS수량"] = pd.to_numeric(wms["WMS수량"], errors="coerce").fillna(0).astype(int)
-    wms = wms[~wms["ERP제품명"].apply(is_ignored_erp_product_name)]
     wms = wms[wms["WMS수량"] != 0]
     return wms.groupby(["사업장", "ERP제품명"], as_index=False)["WMS수량"].sum().sort_values(["사업장", "ERP제품명"])
+
+
+def load_product_erp_name_map():
+    """제품매칭표에서 표준제품명별 사업장 ERP명을 가져온다.
+    같은 표준제품명이 여러 줄이면 사업장별 첫 번째 비어있지 않은 ERP명을 사용한다.
+    """
+    products = q("""
+        SELECT standard_name, erp_nohtuspharm_name, erp_noh_name, erp_nohtus_name
+        FROM products
+        ORDER BY standard_name, id
+    """)
+    result = {}
+    if products.empty:
+        return result
+
+    for r in products.itertuples(index=False):
+        standard_name = clean_excel_text(getattr(r, "standard_name", ""))
+        if not standard_name:
+            continue
+        values = {
+            "노투스팜": clean_excel_text(getattr(r, "erp_nohtuspharm_name", "")),
+            "NOH": clean_excel_text(getattr(r, "erp_noh_name", "")),
+            "노투스": clean_excel_text(getattr(r, "erp_nohtus_name", "")),
+        }
+        for company, erp_name in values.items():
+            key = (company, standard_name)
+            if erp_name and key not in result:
+                result[key] = erp_name
+    return result
 
 
 def compare_erp_and_wms_stock(erp_sum, wms_sum):
