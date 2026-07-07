@@ -142,13 +142,14 @@ def _select_saved_order(order_id):
 def _render_saved_orders(orders_df, selected_order_id):
     st.markdown("""
     <style>
-    .saved-order-head{display:grid;grid-template-columns:.75fr 1.05fr 1.6fr 4.2fr .9fr;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:13px;font-weight:800;}
-    .saved-order-cell{min-height:46px;display:flex;align-items:center;border-bottom:1px solid #f1f5f9;color:#111827;font-size:14px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:6px 0;}
+    .saved-order-head{display:grid;grid-template-columns:.75fr 1.05fr 1.6fr 4.2fr .9fr;gap:6px;align-items:center;padding:5px 8px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:12.5px;font-weight:800;}
+    .saved-order-cell{min-height:34px;display:flex;align-items:center;border-bottom:1px solid #f1f5f9;color:#111827;font-size:13px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2px 0;}
     .saved-order-number{justify-content:center;font-weight:800;color:#334155;}
     .saved-order-date{color:#475569;}
     .saved-order-title{font-weight:600;white-space:normal;}
     .saved-order-status-note{height:0;margin:0;padding:0;overflow:hidden;}
-    div[data-testid="stButton"] > button[kind="secondary"]{min-height:38px;}
+    div[data-testid="stButton"] > button[kind="secondary"]{min-height:32px;padding-top:4px!important;padding-bottom:4px!important;}
+    div[data-testid="stButton"] > button[kind="primary"]{min-height:32px;padding-top:4px!important;padding-bottom:4px!important;}
     </style>
     <div class='saved-order-head'>
       <div style='text-align:center;'>번호</div>
@@ -255,7 +256,7 @@ def page_saved_outbound():
     orders = filtered.iloc[(page_no - 1) * per_page: page_no * per_page].copy()
 
     st.markdown(f"#### 출고지시서 {total}건")
-    list_col, _ = st.columns([7, 3], gap="large")
+    list_col, selected_col = st.columns([5, 5], gap="large")
     with list_col:
         selected_id = st.session_state.get("selected_saved_order_id")
         _render_saved_orders(orders, selected_id)
@@ -284,8 +285,6 @@ def page_saved_outbound():
         return
     order_status = str(order_row.iloc[0]["status"] or "저장됨")
 
-    st.markdown("---")
-    selected_col, _spacer = st.columns([7, 3], gap="large")
     with selected_col:
         customer_name = str(order_row.iloc[0].get("customer_name") or "-")
         st.markdown(f"### 선택된 출고지시서 #{int(order_id)} · {escape(customer_name)}")
