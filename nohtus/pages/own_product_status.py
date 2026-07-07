@@ -151,6 +151,12 @@ def _table_html(df: pd.DataFrame) -> str:
         body_rows.append("<tr>" + "".join(cells) + "</tr>")
     return (
         "<table class='own-product-html-table'>"
+        "<colgroup>"
+        "<col class='own-col-name'>"
+        "<col class='own-col-num'>"
+        "<col class='own-col-num'>"
+        "<col class='own-col-num'>"
+        "</colgroup>"
         f"<thead><tr>{headers}</tr></thead>"
         f"<tbody>{''.join(body_rows)}</tbody>"
         "</table>"
@@ -209,12 +215,17 @@ html, body {{
     overflow-x:auto;
 }}
 .own-product-html-table {{
-    width:max-content;
-    min-width:100%;
+    width:100%;
     border-collapse:collapse;
-    table-layout:auto;
+    table-layout:fixed;
     font-size:13px;
     background:white;
+}}
+.own-product-html-table .own-col-name {{
+    width:calc(100% - 150px);
+}}
+.own-product-html-table .own-col-num {{
+    width:50px;
 }}
 .own-product-html-table th,
 .own-product-html-table td {{
@@ -222,6 +233,8 @@ html, body {{
     padding:6px 8px;
     line-height:1.25;
     white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
 }}
 .own-product-html-table th {{
     background:#f8fafc;
@@ -233,8 +246,7 @@ html, body {{
     text-align:left;
 }}
 .own-product-html-table .own-num {{
-    text-align:right;
-    width:1%;
+    text-align:center;
 }}
 @media (max-width: 768px) {{
     .own-product-grid {{
