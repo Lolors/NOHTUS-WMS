@@ -19,6 +19,16 @@ def _ensure_outbound_customer_columns():
         con.commit()
 
 
+def _format_qty(value):
+    try:
+        qty = float(value or 0)
+        if qty.is_integer():
+            return str(int(qty))
+        return f"{qty:g}"
+    except Exception:
+        return str(value or 0)
+
+
 def _order_items_summary(order_id, max_items=3):
     df = q(
         """
@@ -32,9 +42,9 @@ def _order_items_summary(order_id, max_items=3):
     )
     if df.empty:
         return "-"
-    names = [str(r.product_name or "-") for r in df.itertuples(index=False)]
-    shown = names[:max_items]
-    remain = max(0, len(names) - len(shown))
+    items = [f"{str(r.product_name or '-')} * {_format_qty(r.qty)}" for r in df.itertuples(index=False)]
+    shown = items[:max_items]
+    remain = max(0, len(items) - len(shown))
     text = ", ".join(shown)
     if remain:
         text += f" 외 {remain}품목"
