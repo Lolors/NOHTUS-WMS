@@ -139,11 +139,11 @@ def _report_html(delta_map: dict[tuple[str, str], int]) -> str:
     <style>
       body{{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;}}
       .grid{{display:grid;grid-template-columns:30vw 30vw 30vw;gap:1.5vw;justify-content:center;align-items:start;width:100%;}}
-      section{{width:30vw;box-sizing:border-box;}}
+      section{{width:30vw;box-sizing:border-box;overflow-x:auto;}}
       h2{{text-align:center;font-size:32px;font-weight:600;margin:0 0 10px 0;line-height:1.2;}}
-      table{{border-collapse:collapse;table-layout:fixed;width:auto;background:white;font-size:13px;}}
-      .col-name{{width:134px;}}
-      .col-num{{width:62px;}}
+      table{{border-collapse:collapse;table-layout:fixed;width:100%;background:white;font-size:13px;}}
+      .col-name{{width:150px;}}
+      .col-num{{width:72px;}}
       th,td{{border:1px solid #e5e7eb;padding:6px 6px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
       th{{background:#f8fafc;color:#334155;font-weight:800;text-align:center;}}
       td.name{{text-align:left;}}
