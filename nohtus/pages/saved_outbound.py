@@ -92,15 +92,19 @@ def _show_cancel_order_confirm(order_id):
     _dialog()
 
 
-def _status_text_html(status):
-    status = str(status or "저장됨")
+def _status_color(status):
     colors = {
         "수정됨": "#16a34a",
         "취소됨": "#dc2626",
-        "저장됨": "#2563eb",
+        "저장됨": "#334155",
     }
-    color = colors.get(status, "#475569")
-    return f"<span style='color:{color};font-weight:800;'>{escape(status)}</span>"
+    return colors.get(str(status or "저장됨"), "#475569")
+
+
+def _status_button_type(status, selected):
+    if selected:
+        return "primary"
+    return "secondary"
 
 
 def _order_items_summary(order_id, max_items=3):
@@ -139,11 +143,12 @@ def _render_saved_orders(orders_df, selected_order_id):
     st.markdown("""
     <style>
     .saved-order-head{display:grid;grid-template-columns:.75fr 1.05fr 1.6fr 4.2fr .9fr;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:13px;font-weight:800;}
-    .saved-order-cell{height:34px;display:flex;align-items:center;border-bottom:1px solid #f1f5f9;color:#111827;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .saved-order-cell{min-height:46px;display:flex;align-items:center;border-bottom:1px solid #f1f5f9;color:#111827;font-size:14px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:6px 0;}
+    .saved-order-number{justify-content:center;font-weight:800;color:#334155;}
     .saved-order-date{color:#475569;}
-    .saved-order-title{font-weight:600;}
-    .saved-order-status{justify-content:center;}
-    .saved-order-click button{justify-content:flex-start!important;text-align:left!important;overflow:hidden!important;white-space:nowrap!important;text-overflow:ellipsis!important;}
+    .saved-order-title{font-weight:600;white-space:normal;}
+    .saved-order-status-note{height:0;margin:0;padding:0;overflow:hidden;}
+    div[data-testid="stButton"] > button[kind="secondary"]{min-height:38px;}
     </style>
     <div class='saved-order-head'>
       <div style='text-align:center;'>번호</div>
@@ -162,27 +167,21 @@ def _render_saved_orders(orders_df, selected_order_id):
         items_text = _order_items_summary(oid)
         selected = int(selected_order_id or 0) == oid
         row_cols = st.columns([0.75, 1.05, 1.6, 4.2, 0.9], gap="small")
-        button_type = "primary" if selected else "secondary"
         with row_cols[0]:
-            if st.button(f"#{oid}", key=f"open_order_{oid}", use_container_width=True, type=button_type):
-                _select_saved_order(oid)
+            st.markdown(f"<div class='saved-order-cell saved-order-number'>{oid}</div>", unsafe_allow_html=True)
         with row_cols[1]:
-            st.markdown("<div class='saved-order-click'>", unsafe_allow_html=True)
-            if st.button(_short_cell_text(created, 12), key=f"open_order_date_{oid}", use_container_width=True, type=button_type):
-                _select_saved_order(oid)
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='saved-order-cell saved-order-date'>{escape(_short_cell_text(created, 12))}</div>", unsafe_allow_html=True)
         with row_cols[2]:
-            st.markdown("<div class='saved-order-click'>", unsafe_allow_html=True)
-            if st.button(_short_cell_text(customer, 18), key=f"open_order_customer_{oid}", use_container_width=True, type=button_type):
-                _select_saved_order(oid)
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='saved-order-cell'>{escape(_short_cell_text(customer, 18))}</div>", unsafe_allow_html=True)
         with row_cols[3]:
-            st.markdown("<div class='saved-order-click'>", unsafe_allow_html=True)
-            if st.button(_short_cell_text(items_text, 46), key=f"open_order_items_{oid}", use_container_width=True, type=button_type):
-                _select_saved_order(oid)
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='saved-order-cell saved-order-title'>{escape(items_text)}</div>", unsafe_allow_html=True)
         with row_cols[4]:
-            st.markdown(f"<div class='saved-order-cell saved-order-status'>{_status_text_html(status)}</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='saved-order-status-note' style='color:{_status_color(status)}'>{escape(status)}</div>",
+                unsafe_allow_html=True,
+            )
+            if st.button(status, key=f"open_order_status_{oid}", use_container_width=True, type=_status_button_type(status, selected)):
+                _select_saved_order(oid)
     return st.session_state.get("selected_saved_order_id") or (int(orders_df.iloc[0]["id"]) if not orders_df.empty else None)
 
 
