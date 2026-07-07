@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from html import escape
 
 import pandas as pd
 import streamlit as st
@@ -138,11 +139,26 @@ def _company_table(company: str, product_names: list[str], delta_map: dict[tuple
     return out.reset_index(drop=True)
 
 
+def _table_html(df: pd.DataFrame) -> str:
+    headers = "".join(f"<th>{escape(str(col))}</th>" for col in df.columns)
+    body_rows = []
+    for _, row in df.iterrows():
+        cells = []
+        for col in df.columns:
+            align_class = " own-num" if col != "표준제품명" else ""
+            cells.append(f"<td class='{align_class.strip()}'>{escape(str(row.get(col, '')))}</td>")
+        body_rows.append("<tr>" + "".join(cells) + "</tr>")
+    return f"""
+    <table class='own-product-html-table'>
+      <thead><tr>{headers}</tr></thead>
+      <tbody>{''.join(body_rows)}</tbody>
+    </table>
+    """
+
+
 def _render_table(company: str, df: pd.DataFrame):
     st.markdown(f"<h2 class='own-product-company'>{company}</h2>", unsafe_allow_html=True)
-    st.markdown("<div class='own-product-table'>", unsafe_allow_html=True)
-    st.dataframe(df, hide_index=True, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='own-product-table'>{_table_html(df)}</div>", unsafe_allow_html=True)
 
 
 def page_own_product_status():
@@ -158,13 +174,44 @@ def page_own_product_status():
             margin:1.8rem 0 .3rem 0;
         }
         .own-product-table{
-            width:30vw;
+            width:30vw !important;
+            max-width:30vw !important;
             min-width:420px;
             margin:0 auto 2rem auto;
         }
+        .own-product-html-table{
+            width:100%;
+            border-collapse:collapse;
+            table-layout:fixed;
+            font-size:14px;
+            background:white;
+        }
+        .own-product-html-table th,
+        .own-product-html-table td{
+            border:1px solid #e5e7eb;
+            padding:7px 8px;
+            line-height:1.25;
+            overflow:hidden;
+            text-overflow:ellipsis;
+            white-space:nowrap;
+        }
+        .own-product-html-table th{
+            background:#f8fafc;
+            color:#334155;
+            font-weight:800;
+            text-align:center;
+        }
+        .own-product-html-table td:first-child{
+            text-align:left;
+            width:46%;
+        }
+        .own-product-html-table .own-num{
+            text-align:right;
+        }
         @media (max-width: 768px){
             .own-product-table{
-                width:100%;
+                width:100% !important;
+                max-width:100% !important;
                 min-width:0;
             }
         }
