@@ -156,9 +156,13 @@ def _table_html(df: pd.DataFrame) -> str:
     """
 
 
-def _render_table(company: str, df: pd.DataFrame):
-    st.markdown(f"<h2 class='own-product-company'>{company}</h2>", unsafe_allow_html=True)
-    st.markdown(f"<div class='own-product-table'>{_table_html(df)}</div>", unsafe_allow_html=True)
+def _render_table(company: str, df: pd.DataFrame) -> str:
+    return f"""
+    <section class='own-product-card'>
+      <h2 class='own-product-company'>{escape(company)}</h2>
+      <div class='own-product-table'>{_table_html(df)}</div>
+    </section>
+    """
 
 
 def page_own_product_status():
@@ -167,29 +171,44 @@ def page_own_product_status():
     st.markdown(
         """
         <style>
+        .own-product-grid{
+            width:100%;
+            display:grid;
+            grid-template-columns:20vw 20vw 20vw;
+            justify-content:center;
+            gap:2.4vw;
+            align-items:start;
+            margin-top:1.2rem;
+        }
+        .own-product-card{
+            width:20vw !important;
+            max-width:20vw !important;
+            min-width:0 !important;
+            margin:0;
+        }
         .own-product-company{
             text-align:center;
-            font-size:2rem;
+            font-size:1.7rem;
             font-weight:500;
-            margin:1.8rem 0 .3rem 0;
+            margin:0 0 .45rem 0;
         }
         .own-product-table{
-            width:30vw !important;
-            max-width:30vw !important;
-            min-width:420px;
-            margin:0 auto 2rem auto;
+            width:20vw !important;
+            max-width:20vw !important;
+            min-width:0 !important;
+            margin:0;
         }
         .own-product-html-table{
             width:100%;
             border-collapse:collapse;
             table-layout:fixed;
-            font-size:14px;
+            font-size:13px;
             background:white;
         }
         .own-product-html-table th,
         .own-product-html-table td{
             border:1px solid #e5e7eb;
-            padding:7px 8px;
+            padding:6px 6px;
             line-height:1.25;
             overflow:hidden;
             text-overflow:ellipsis;
@@ -209,10 +228,20 @@ def page_own_product_status():
             text-align:right;
         }
         @media (max-width: 768px){
+            .own-product-grid{
+                display:block;
+                width:100%;
+            }
+            .own-product-card,
             .own-product-table{
                 width:100% !important;
                 max-width:100% !important;
-                min-width:0;
+                min-width:0 !important;
+                margin:0 0 2rem 0;
+            }
+            .own-product-company{
+                font-size:1.7rem;
+                margin:1.5rem 0 .45rem 0;
             }
         }
         </style>
@@ -221,5 +250,7 @@ def page_own_product_status():
     )
     product_names = _own_product_names()
     delta_map = _today_delta_map(product_names)
+    sections = []
     for company in COMPANIES:
-        _render_table(company, _company_table(company, product_names, delta_map))
+        sections.append(_render_table(company, _company_table(company, product_names, delta_map)))
+    st.markdown("<div class='own-product-grid'>" + "".join(sections) + "</div>", unsafe_allow_html=True)
