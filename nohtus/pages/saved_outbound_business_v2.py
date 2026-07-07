@@ -52,9 +52,16 @@ def _order_items_summary(order_id, max_items=3):
     )
     if df.empty:
         return "-"
-    names = [str(r.product_name or "-") for r in df.itertuples(index=False)]
-    shown = names[:max_items]
-    remain = max(0, len(names) - len(shown))
+    items = []
+    for r in df.itertuples(index=False):
+        name = str(r.product_name or "-")
+        try:
+            qty = int(r.qty or 0)
+        except Exception:
+            qty = 0
+        items.append(f"{name} * {qty}")
+    shown = items[:max_items]
+    remain = max(0, len(items) - len(shown))
     text = ", ".join(shown)
     if remain:
         text += f" 외 {remain}품목"
