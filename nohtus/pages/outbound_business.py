@@ -1,11 +1,47 @@
+from datetime import date, datetime
+
 import pandas as pd
 import streamlit as st
 
 import nohtus.pages.outbound as outbound_page
+from nohtus.db import connect, q
 
 
 def _hide_last_sale_importer():
     return None
+
+
+def _default_outbound_date():
+    if "outbound_order_date" in st.session_state:
+        return st.session_state["outbound_order_date"]
+    order_id = st.session_state.get("editing_order_id")
+    if order_id:
+        try:
+            df = q("SELECT order_date FROM outbound_orders WHERE id=?", (int(order_id),))
+            if not df.empty:
+                value = str(df.iloc[0].get("order_date") or "").strip()
+                if value:
+                    return datetime.strptime(value[:10], "%Y-%m-%d").date()
+        except Exception:
+            pass
+    return date.today()
+
+
+def _selected_outbound_date_text():
+    value = st.session_state.get("outbound_order_date") or date.today()
+    try:
+        return value.strftime("%Y-%m-%d")
+    except Exception:
+        return str(value)[:10]
+
+
+def _set_outbound_order_date(order_id):
+    if not order_id:
+        return
+    outbound_date = _selected_outbound_date_text()
+    with connect() as con:
+        con.execute("UPDATE outbound_orders SET order_date=? WHERE id=?", (outbound_date, int(order_id)))
+        con.commit()
 
 
 def page_outbound():
@@ -14,6 +50,8 @@ def page_outbound():
     original_checkbox = st.checkbox
     original_data_editor = st.data_editor
     original_manual_pick_rows = outbound_page._manual_pick_rows
+    original_save_outbound_order = outbound_page.save_outbound_order
+    original_update_outbound_order = outbound_page.update_outbound_order
 
     st.markdown(
         """
@@ -27,10 +65,20 @@ def page_outbound():
     )
 
     checkbox_skip_values = {}
-    manual_source_df = {"df": None}
+
+    def patched_save_outbound_order(cart, title='', memo=''):
+        order_id = original_save_outbound_order(cart, title, memo)
+        _set_outbound_order_date(order_id)
+        return order_id
+
+    def patched_update_outbound_order(order_id, title_or_cart, maybe_cart=None):
+        result = original_update_outbound_order(order_id, title_or_cart, maybe_cart)
+        _set_outbound_order_date(order_id)
+        return result
 
     def patched_text_input(label, *args, **kwargs):
         if kwargs.get("key") == "out_customer_term":
+            st.date_input("출고일자", value=_default_outbound_date(), key="outbound_order_date")
             search_col, direct_col = st.columns([8, 2], gap="small")
             with search_col:
                 value = original_text_input(label, *args, **kwargs)
@@ -79,6 +127,8 @@ def page_outbound():
 
     outbound_page._render_last_sale_importer = _hide_last_sale_importer
     outbound_page._manual_pick_rows = patched_manual_pick_rows
+    outbound_page.save_outbound_order = patched_save_outbound_order
+    outbound_page.update_outbound_order = patched_update_outbound_order
     st.text_input = patched_text_input
     st.checkbox = patched_checkbox
     st.data_editor = patched_data_editor
@@ -87,6 +137,8 @@ def page_outbound():
     finally:
         outbound_page._render_last_sale_importer = original_renderer
         outbound_page._manual_pick_rows = original_manual_pick_rows
+        outbound_page.save_outbound_order = original_save_outbound_order
+        outbound_page.update_outbound_order = original_update_outbound_order
         st.text_input = original_text_input
         st.checkbox = original_checkbox
         st.data_editor = original_data_editor
