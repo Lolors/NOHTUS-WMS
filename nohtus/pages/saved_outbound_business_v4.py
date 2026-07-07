@@ -11,10 +11,10 @@ from nohtus.dates import display_date_only
 from nohtus.services.outbound import load_outbound_order, outbound_excel_bytes, outbound_pdf_bytes
 
 
-BUTTON_W = 48
-BUTTON_H = 28
-ROW_H = 46
-PER_PAGE = 10
+BUTTON_W = 28
+BUTTON_H = 22
+ROW_H = 26
+PER_PAGE = 15
 
 
 def _order_has_history_sql(alias_order="o"):
@@ -153,12 +153,13 @@ def _render_saved_orders(orders_df, selected_order_id):
     st.markdown(
         f"""
         <style>
-        .saved-order-head-clean{{display:grid;grid-template-columns:.65fr .9fr 1.5fr 3fr .85fr;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:13px;font-weight:800;}}
-        .saved-order-cell{{min-height:{ROW_H}px;display:flex;align-items:center;min-width:0;color:#111827;font-size:14px;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35;word-break:keep-all;overflow-wrap:anywhere;}}
-        .saved-order-status{{justify-content:center;text-align:center;word-break:keep-all;}}
-        .saved-order-sep{{height:1px;background:#f6f7f9;margin:1px 0 3px;}}
-        .saved-order-no-chip{{display:inline-flex;align-items:center;justify-content:center;width:{BUTTON_W}px;min-width:{BUTTON_W}px;max-width:{BUTTON_W}px;height:{BUTTON_H}px;min-height:{BUTTON_H}px;max-height:{BUTTON_H}px;padding:0;border:1px solid #d1d5db;background:#fff;color:#334155;border-radius:6px;font-size:13px;font-weight:500;box-sizing:border-box;line-height:1;}}
-        .saved-order-no-chip.selected{{border-color:#93c5fd;background:#dbeafe;color:#1d4ed8;font-weight:700;}}
+        .saved-order-head-clean{{display:grid;grid-template-columns:.45fr .85fr 1.35fr 3.1fr .75fr;gap:6px;align-items:center;padding:5px 6px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:12px;font-weight:800;}}
+        .saved-order-cell{{min-height:{ROW_H}px;display:flex;align-items:center;min-width:0;color:#111827;font-size:12.5px;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.18;word-break:keep-all;overflow-wrap:anywhere;}}
+        .saved-order-status{{justify-content:center;text-align:center;word-break:keep-all;font-size:12px;}}
+        .saved-order-sep{{height:1px;background:#f6f7f9;margin:0;}}
+        .saved-order-no-chip{{display:inline-flex;align-items:center;justify-content:center;width:{BUTTON_W}px;min-width:{BUTTON_W}px;max-width:{BUTTON_W}px;height:{BUTTON_H}px;min-height:{BUTTON_H}px;max-height:{BUTTON_H}px;padding:0;border:0;background:transparent;color:#2563eb;border-radius:0;font-size:12.5px;font-weight:700;box-sizing:border-box;line-height:1;text-decoration:underline;text-underline-offset:2px;}}
+        .saved-order-no-chip.selected{{background:#dbeafe;color:#1d4ed8;border-radius:5px;text-decoration:none;}}
+        div[data-testid="stButton"] > button[kind="secondary"]{{min-height:22px!important;height:22px!important;padding:0 4px!important;border:0!important;background:transparent!important;color:#2563eb!important;text-decoration:underline!important;font-size:12.5px!important;font-weight:700!important;}}
         </style>
         <div class='saved-order-head-clean'>
           <div>번호</div><div>날짜</div><div>매출처</div><div>출고지시서 제목</div><div style='text-align:center;'>상태</div>
@@ -174,7 +175,7 @@ def _render_saved_orders(orders_df, selected_order_id):
         display_no = str(getattr(r, "display_no", "") or getattr(r, "daily_no", "") or oid)
         order_title = str(getattr(r, "title", "") or "").strip() or _order_items_summary(oid)
         selected = int(selected_order_id or 0) == oid
-        cols = st.columns([0.65, 0.9, 1.5, 3, 0.85], gap="small")
+        cols = st.columns([0.45, 0.85, 1.35, 3.1, 0.75], gap="small")
         with cols[0]:
             if selected:
                 st.markdown(_cell(_selected_number_chip(display_no)), unsafe_allow_html=True)
@@ -232,6 +233,9 @@ def _detail_table_html(view_items):
         rows.append("<tr>" + "".join(cells) + "</tr>")
     return f"""
     <style>
+    .saved-detail-title{{display:flex;align-items:baseline;gap:8px;margin:0 0 10px 0;}}
+    .saved-detail-title-main{{font-size:20px;font-weight:800;color:#111827;}}
+    .saved-detail-title-sub{{font-size:11pt;font-weight:600;color:#475569;line-height:1.2;}}
     .saved-detail-table{{width:100%;border-collapse:collapse;font-size:13px;table-layout:auto;}}
     .saved-detail-table th,.saved-detail-table td{{border:1px solid #e5e7eb;padding:6px 7px;line-height:1.35;vertical-align:middle;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;}}
     .saved-detail-table th{{background:#f8fafc;color:#334155;font-weight:800;text-align:center;}}
@@ -308,7 +312,10 @@ def page_saved_outbound():
 
     with detail_col:
         st.markdown("<div id='selected-outbound-detail'></div>", unsafe_allow_html=True)
-        st.markdown(f"#### 선택된 출고지시서<br>{escape(display_label)} · {escape(customer_name)}", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='saved-detail-title'><span class='saved-detail-title-main'>선택된 출고지시서</span><span class='saved-detail-title-sub'>{escape(display_label)} · {escape(customer_name)}</span></div>",
+            unsafe_allow_html=True,
+        )
         item_df = saved_v2.q(
             """
             SELECT i.id AS 품목ID, i.inventory_id AS 재고ID, i.location AS 로케이션, i.product_name AS 제품명,
