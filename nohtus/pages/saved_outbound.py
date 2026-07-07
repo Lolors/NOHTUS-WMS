@@ -141,11 +141,11 @@ def _select_saved_order(order_id):
 def _render_saved_orders(orders_df, selected_order_id):
     st.markdown("""
     <style>
-    .saved-order-head{display:grid;grid-template-columns:.7fr 1fr 1.5fr 3fr .95fr;gap:6px;align-items:center;padding:5px 8px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:12.5px;font-weight:800;}
-    .saved-order-cell{min-height:34px;display:flex;align-items:center;border-bottom:1px solid #f1f5f9;color:#111827;font-size:13px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2px 0;min-width:0;}
+    .saved-order-head{display:grid;grid-template-columns:.75fr 1.05fr 1.6fr 4.2fr .9fr;gap:6px;align-items:center;padding:5px 8px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:12.5px;font-weight:800;}
+    .saved-order-cell{min-height:34px;display:flex;align-items:center;border-bottom:1px solid #f1f5f9;color:#111827;font-size:13px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2px 0;}
     .saved-order-number{justify-content:center;font-weight:800;color:#334155;}
     .saved-order-date{color:#475569;}
-    .saved-order-title{font-weight:600;white-space:normal;min-width:0;overflow:hidden;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;text-overflow:ellipsis;}
+    .saved-order-title{font-weight:600;white-space:normal;}
     .saved-order-status-note{height:0;margin:0;padding:0;overflow:hidden;}
     div[data-testid="stButton"] > button[kind="secondary"]{min-height:32px;padding-top:4px!important;padding-bottom:4px!important;}
     div[data-testid="stButton"] > button[kind="primary"]{min-height:32px;padding-top:4px!important;padding-bottom:4px!important;}
@@ -166,7 +166,7 @@ def _render_saved_orders(orders_df, selected_order_id):
         status = str(getattr(r, "status", "저장됨") or "저장됨")
         items_text = _order_items_summary(oid)
         selected = int(selected_order_id or 0) == oid
-        row_cols = st.columns([0.7, 1.0, 1.5, 3.0, 0.95], gap="small")
+        row_cols = st.columns([0.75, 1.05, 1.6, 4.2, 0.9], gap="small")
         with row_cols[0]:
             st.markdown(f"<div class='saved-order-cell saved-order-number'>{oid}</div>", unsafe_allow_html=True)
         with row_cols[1]:
