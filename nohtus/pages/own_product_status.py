@@ -146,7 +146,7 @@ def _table_html(df: pd.DataFrame) -> str:
     for _, row in df.iterrows():
         cells = []
         for col in df.columns:
-            align_class = " own-num" if col != "표준제품명" else ""
+            align_class = " own-num" if col != "표준제품명" else " own-name"
             cells.append(f"<td class='{align_class.strip()}'>{escape(str(row.get(col, '')))}</td>")
         body_rows.append("<tr>" + "".join(cells) + "</tr>")
     return (
@@ -206,21 +206,21 @@ html, body {{
     width:30vw;
     max-width:30vw;
     min-width:0;
+    overflow-x:auto;
 }}
 .own-product-html-table {{
-    width:100%;
+    width:max-content;
+    min-width:100%;
     border-collapse:collapse;
-    table-layout:fixed;
+    table-layout:auto;
     font-size:13px;
     background:white;
 }}
 .own-product-html-table th,
 .own-product-html-table td {{
     border:1px solid #e5e7eb;
-    padding:6px 6px;
+    padding:6px 8px;
     line-height:1.25;
-    overflow:hidden;
-    text-overflow:ellipsis;
     white-space:nowrap;
 }}
 .own-product-html-table th {{
@@ -229,12 +229,12 @@ html, body {{
     font-weight:800;
     text-align:center;
 }}
-.own-product-html-table td:first-child {{
+.own-product-html-table .own-name {{
     text-align:left;
-    width:46%;
 }}
 .own-product-html-table .own-num {{
     text-align:right;
+    width:1%;
 }}
 @media (max-width: 768px) {{
     .own-product-grid {{
