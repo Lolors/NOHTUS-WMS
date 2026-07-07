@@ -174,15 +174,15 @@ def page_own_product_status():
         .own-product-grid{
             width:100%;
             display:grid;
-            grid-template-columns:20vw 20vw 20vw;
+            grid-template-columns:30vw 30vw 30vw;
             justify-content:center;
-            gap:2.4vw;
+            gap:1.5vw;
             align-items:start;
             margin-top:1.2rem;
         }
         .own-product-card{
-            width:20vw !important;
-            max-width:20vw !important;
+            width:30vw !important;
+            max-width:30vw !important;
             min-width:0 !important;
             margin:0;
         }
@@ -193,8 +193,8 @@ def page_own_product_status():
             margin:0 0 .45rem 0;
         }
         .own-product-table{
-            width:20vw !important;
-            max-width:20vw !important;
+            width:30vw !important;
+            max-width:30vw !important;
             min-width:0 !important;
             margin:0;
         }
