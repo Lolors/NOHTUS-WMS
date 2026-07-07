@@ -41,9 +41,23 @@ def _selected_number_chip(label):
     return f"<span class='saved-order-no-chip selected'>{escape(str(label))}</span>"
 
 
+def _title_link(text, oid):
+    return f"<a class='saved-order-title-link' href='?saved_order_id={int(oid)}#selected-outbound-detail'>{escape(str(text or '-'))}</a>"
+
+
 def _cell(content, *, title="", class_name=""):
     title_attr = f" title='{escape(str(title))}'" if title else ""
     return f"<div class='saved-order-cell {class_name}'{title_attr}>{content}</div>"
+
+
+def _query_selected_order_id():
+    try:
+        value = st.query_params.get("saved_order_id", "")
+        if isinstance(value, list):
+            value = value[0] if value else ""
+        return int(value) if str(value).strip().isdigit() else None
+    except Exception:
+        return None
 
 
 def _scroll_selected_detail_once():
@@ -157,9 +171,10 @@ def _render_saved_orders(orders_df, selected_order_id):
         .saved-order-cell{{min-height:{ROW_H}px;display:flex;align-items:center;min-width:0;color:#111827;font-size:12.5px;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.18;word-break:keep-all;overflow-wrap:anywhere;}}
         .saved-order-status{{justify-content:center;text-align:center;word-break:keep-all;font-size:12px;}}
         .saved-order-sep{{height:1px;background:#f6f7f9;margin:0;}}
-        .saved-order-no-chip{{display:inline-flex;align-items:center;justify-content:center;width:{BUTTON_W}px;min-width:{BUTTON_W}px;max-width:{BUTTON_W}px;height:{BUTTON_H}px;min-height:{BUTTON_H}px;max-height:{BUTTON_H}px;padding:0;border:0;background:transparent;color:#2563eb;border-radius:0;font-size:12.5px;font-weight:700;box-sizing:border-box;line-height:1;text-decoration:underline;text-underline-offset:2px;}}
+        .saved-order-no-chip{{display:inline-flex;align-items:center;justify-content:center;width:{BUTTON_W}px;min-width:{BUTTON_W}px;max-width:{BUTTON_W}px;height:{BUTTON_H}px;min-height:{BUTTON_H}px;max-height:{BUTTON_H}px;padding:0;border:0;background:transparent;color:#334155;border-radius:0;font-size:12.5px;font-weight:700;box-sizing:border-box;line-height:1;text-decoration:none;}}
         .saved-order-no-chip.selected{{background:#dbeafe;color:#1d4ed8;border-radius:5px;text-decoration:none;}}
-        div[data-testid="stButton"] > button[kind="secondary"]{{min-height:22px!important;height:22px!important;padding:0 4px!important;border:0!important;background:transparent!important;color:#2563eb!important;text-decoration:underline!important;font-size:12.5px!important;font-weight:700!important;}}
+        .saved-order-title-link{{color:#111827;text-decoration:none;font-weight:500;}}
+        .saved-order-title-link:hover{{color:#1d4ed8;text-decoration:underline;text-underline-offset:3px;}}
         </style>
         <div class='saved-order-head-clean'>
           <div>번호</div><div>날짜</div><div>매출처</div><div>출고지시서 제목</div><div style='text-align:center;'>상태</div>
@@ -177,19 +192,15 @@ def _render_saved_orders(orders_df, selected_order_id):
         selected = int(selected_order_id or 0) == oid
         cols = st.columns([0.45, 0.85, 1.35, 3.1, 0.75], gap="small")
         with cols[0]:
-            if selected:
-                st.markdown(_cell(_selected_number_chip(display_no)), unsafe_allow_html=True)
-            else:
-                if st.button(display_no, key=f"open_order_no_{oid}", use_container_width=False, type="secondary"):
-                    st.session_state["selected_saved_order_id"] = oid
-                    st.session_state["_scroll_saved_outbound_detail"] = True
-                    st.rerun()
+            number_html = _selected_number_chip(display_no) if selected else escape(display_no)
+            st.markdown(_cell(number_html), unsafe_allow_html=True)
         with cols[1]:
             st.markdown(_cell(escape(created)), unsafe_allow_html=True)
         with cols[2]:
             st.markdown(_cell(escape(customer), title=customer), unsafe_allow_html=True)
         with cols[3]:
-            st.markdown(_cell(escape(order_title), title=order_title), unsafe_allow_html=True)
+            title_html = f"<strong>{escape(order_title)}</strong>" if selected else _title_link(order_title, oid)
+            st.markdown(_cell(title_html, title=order_title), unsafe_allow_html=True)
         with cols[4]:
             st.markdown(_cell(_status_text_html(status), class_name="saved-order-status"), unsafe_allow_html=True)
         st.markdown("<div class='saved-order-sep'></div>", unsafe_allow_html=True)
@@ -293,6 +304,10 @@ def page_saved_outbound():
         st.warning("조건에 맞는 출고지시서가 없습니다.")
         return
 
+    query_order_id = _query_selected_order_id()
+    if query_order_id and query_order_id in set(filtered["id"].astype(int).tolist()):
+        st.session_state["selected_saved_order_id"] = int(query_order_id)
+
     total = len(filtered)
     total_pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
     page_no = max(1, min(int(st.session_state.get("saved_order_page", 1) or 1), total_pages))
@@ -369,8 +384,8 @@ def page_saved_outbound():
             st.markdown(_detail_table_html(view_items), unsafe_allow_html=True)
             rows_for_download = view_items.to_dict("records")
 
-        st.markdown("<div class='saved-detail-download-gap'></div>", unsafe_allow_html=True)
         title_for_download = f"{customer_name} 출고지시서 {display_label}"
+        st.markdown("<div class='saved-detail-download-gap'></div>", unsafe_allow_html=True)
         d1, d2 = st.columns(2)
         with d1:
             st.download_button("엑셀 다운로드", data=outbound_excel_bytes(rows_for_download, title_for_download), file_name=f"NOHTUS_출고지시서_{int(order_id)}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, disabled=not rows_for_download)
