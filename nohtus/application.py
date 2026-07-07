@@ -16,8 +16,9 @@ from nohtus.pages.customer_master_business import page_customer_master
 from nohtus.pages.mobile_stock import page_mobile_stock_finder
 from nohtus.pages.move import page_move
 from nohtus.pages.outbound_business import page_outbound
+from nohtus.pages.own_product_status import page_own_product_status
 from nohtus.pages.product_matching_business import page_product_matching
-from nohtus.pages.product_shortcuts import page_favorite_products, page_recent_products
+from nohtus.pages.product_shortcuts import page_recent_products
 from nohtus.pages.saved_outbound_business_v4 import page_saved_outbound as page_saved_outbound_refactored
 from nohtus.pages.stocktake_business import page_stocktake
 
@@ -47,8 +48,8 @@ def main():
         page_map()
     elif menu == "유통기한 임박":
         page_expiry_alerts()
-    elif menu == "즐겨찾는 제품":
-        page_favorite_products()
+    elif menu == "자사제품 조회":
+        page_own_product_status()
     elif menu == "전체 조회":
         page_all_inventory()
     elif menu == "최근 조회":
