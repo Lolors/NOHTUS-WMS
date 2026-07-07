@@ -37,10 +37,6 @@ def _status_text_html(status):
     return "<span style='color:#475569;font-weight:800;'>저장됨</span>"
 
 
-def _selected_number_chip(label):
-    return f"<span class='saved-order-no-chip selected'>{escape(str(label))}</span>"
-
-
 def _cell(content, *, title="", class_name=""):
     title_attr = f" title='{escape(str(title))}'" if title else ""
     return f"<div class='saved-order-cell {class_name}'{title_attr}>{content}</div>"
@@ -157,9 +153,6 @@ def _render_saved_orders(orders_df, selected_order_id):
         .saved-order-cell{{min-height:{ROW_H}px;display:flex;align-items:center;min-width:0;color:#111827;font-size:12.5px;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.18;word-break:keep-all;overflow-wrap:anywhere;}}
         .saved-order-status{{justify-content:center;text-align:center;word-break:keep-all;font-size:12px;}}
         .saved-order-sep{{height:1px;background:#f6f7f9;margin:0;}}
-        .saved-order-no-chip{{display:inline-flex;align-items:center;justify-content:center;width:{BUTTON_W}px;min-width:{BUTTON_W}px;max-width:{BUTTON_W}px;height:{BUTTON_H}px;min-height:{BUTTON_H}px;max-height:{BUTTON_H}px;padding:0;border:0;background:transparent;color:#334155;border-radius:0;font-size:12.5px;font-weight:700;box-sizing:border-box;line-height:1;text-decoration:none;}}
-        .saved-order-no-chip.selected{{background:#e2e8f0;color:#0f172a;border-radius:5px;text-decoration:none;}}
-        .saved-order-title-selected{{font-weight:800;color:#0f172a;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:5px 8px;width:100%;}}
         </style>
         <div class='saved-order-head-clean'>
           <div>번호</div><div>날짜</div><div>매출처</div><div>출고지시서 제목</div><div style='text-align:center;'>상태</div>
@@ -177,20 +170,16 @@ def _render_saved_orders(orders_df, selected_order_id):
         selected = int(selected_order_id or 0) == oid
         cols = st.columns([0.45, 0.85, 1.35, 3.1, 0.75], gap="small")
         with cols[0]:
-            number_html = _selected_number_chip(display_no) if selected else escape(display_no)
-            st.markdown(_cell(number_html), unsafe_allow_html=True)
+            if st.button(display_no, key=f"open_order_no_{oid}", use_container_width=False, type=("primary" if selected else "secondary")):
+                st.session_state["selected_saved_order_id"] = oid
+                st.session_state["_scroll_saved_outbound_detail"] = True
+                st.rerun()
         with cols[1]:
             st.markdown(_cell(escape(created)), unsafe_allow_html=True)
         with cols[2]:
             st.markdown(_cell(escape(customer), title=customer), unsafe_allow_html=True)
         with cols[3]:
-            if selected:
-                st.markdown(_cell(f"<div class='saved-order-title-selected'>{escape(order_title)}</div>", title=order_title), unsafe_allow_html=True)
-            else:
-                if st.button(order_title, key=f"open_order_title_{oid}", use_container_width=True, type="secondary"):
-                    st.session_state["selected_saved_order_id"] = oid
-                    st.session_state["_scroll_saved_outbound_detail"] = True
-                    st.rerun()
+            st.markdown(_cell(escape(order_title), title=order_title), unsafe_allow_html=True)
         with cols[4]:
             st.markdown(_cell(_status_text_html(status), class_name="saved-order-status"), unsafe_allow_html=True)
         st.markdown("<div class='saved-order-sep'></div>", unsafe_allow_html=True)
