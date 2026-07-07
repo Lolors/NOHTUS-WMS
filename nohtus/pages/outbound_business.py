@@ -109,6 +109,16 @@ def page_outbound():
         div[data-testid="stCheckbox"] label, div[data-testid="stCheckbox"] p {
             white-space: nowrap !important;
         }
+        div[data-testid="stDateInput"] {
+            width: 15vw !important;
+            min-width: 150px !important;
+            max-width: 240px !important;
+        }
+        div[data-testid="stDateInput"] input {
+            width: 15vw !important;
+            min-width: 150px !important;
+            max-width: 240px !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -116,6 +126,7 @@ def page_outbound():
 
     checkbox_skip_values = {}
     manual_pick_option_rendered = False
+    outbound_date_rendered = False
 
     def all_company_manual_pick_value():
         return bool(st.session_state.get(_ALL_COMPANY_MANUAL_PICK_KEY, False))
@@ -174,9 +185,12 @@ def page_outbound():
         st.rerun()
 
     def patched_markdown(body, *args, **kwargs):
-        nonlocal manual_pick_option_rendered
+        nonlocal manual_pick_option_rendered, outbound_date_rendered
         if isinstance(body, str) and body.strip() == "### 재고 선택 옵션":
             return None
+        if isinstance(body, str) and body.strip() == "### 매출처" and not outbound_date_rendered:
+            outbound_date_rendered = True
+            st.date_input("출고일자", value=_default_outbound_date(), key="outbound_order_date")
         result = original_markdown(body, *args, **kwargs)
         if isinstance(body, str) and body.strip() == "### 제품 선택" and not manual_pick_option_rendered:
             manual_pick_option_rendered = True
@@ -200,7 +214,6 @@ def page_outbound():
 
     def patched_text_input(label, *args, **kwargs):
         if kwargs.get("key") == "out_customer_term":
-            st.date_input("출고일자", value=_default_outbound_date(), key="outbound_order_date")
             search_col, direct_col = st.columns([8, 2], gap="small")
             with search_col:
                 value = original_text_input(label, *args, **kwargs)
