@@ -5,6 +5,7 @@ from html import escape
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from nohtus.db import q
 
@@ -148,109 +149,125 @@ def _table_html(df: pd.DataFrame) -> str:
             align_class = " own-num" if col != "표준제품명" else ""
             cells.append(f"<td class='{align_class.strip()}'>{escape(str(row.get(col, '')))}</td>")
         body_rows.append("<tr>" + "".join(cells) + "</tr>")
-    return f"""
-    <table class='own-product-html-table'>
-      <thead><tr>{headers}</tr></thead>
-      <tbody>{''.join(body_rows)}</tbody>
-    </table>
-    """
+    return (
+        "<table class='own-product-html-table'>"
+        f"<thead><tr>{headers}</tr></thead>"
+        f"<tbody>{''.join(body_rows)}</tbody>"
+        "</table>"
+    )
 
 
 def _render_table(company: str, df: pd.DataFrame) -> str:
+    return (
+        "<section class='own-product-card'>"
+        f"<h2 class='own-product-company'>{escape(company)}</h2>"
+        f"<div class='own-product-table'>{_table_html(df)}</div>"
+        "</section>"
+    )
+
+
+def _report_html(sections: list[str]) -> str:
     return f"""
-    <section class='own-product-card'>
-      <h2 class='own-product-company'>{escape(company)}</h2>
-      <div class='own-product-table'>{_table_html(df)}</div>
-    </section>
-    """
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<style>
+html, body {{
+    margin:0;
+    padding:0;
+    background:transparent;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    color:#0f172a;
+}}
+.own-product-grid {{
+    width:100%;
+    display:grid;
+    grid-template-columns:30vw 30vw 30vw;
+    justify-content:center;
+    gap:1.5vw;
+    align-items:start;
+    box-sizing:border-box;
+}}
+.own-product-card {{
+    width:30vw;
+    max-width:30vw;
+    min-width:0;
+    box-sizing:border-box;
+}}
+.own-product-company {{
+    text-align:center;
+    font-size:32px;
+    font-weight:600;
+    margin:0 0 10px 0;
+    line-height:1.2;
+}}
+.own-product-table {{
+    width:30vw;
+    max-width:30vw;
+    min-width:0;
+}}
+.own-product-html-table {{
+    width:100%;
+    border-collapse:collapse;
+    table-layout:fixed;
+    font-size:13px;
+    background:white;
+}}
+.own-product-html-table th,
+.own-product-html-table td {{
+    border:1px solid #e5e7eb;
+    padding:6px 6px;
+    line-height:1.25;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}}
+.own-product-html-table th {{
+    background:#f8fafc;
+    color:#334155;
+    font-weight:800;
+    text-align:center;
+}}
+.own-product-html-table td:first-child {{
+    text-align:left;
+    width:46%;
+}}
+.own-product-html-table .own-num {{
+    text-align:right;
+}}
+@media (max-width: 768px) {{
+    .own-product-grid {{
+        display:block;
+        width:100%;
+    }}
+    .own-product-card,
+    .own-product-table {{
+        width:100%;
+        max-width:100%;
+        min-width:0;
+        margin:0 0 28px 0;
+    }}
+    .own-product-company {{
+        font-size:28px;
+        margin:18px 0 8px 0;
+    }}
+}}
+</style>
+</head>
+<body>
+<div class="own-product-grid">{''.join(sections)}</div>
+</body>
+</html>
+"""
 
 
 def page_own_product_status():
     st.title("자사제품 조회")
     st.caption(f"기준일자: {_today_text()} · 전일수량 = 현재수량 - 금일 입고/출고/사업장 이동 증감")
-    st.markdown(
-        """
-        <style>
-        .own-product-grid{
-            width:100%;
-            display:grid;
-            grid-template-columns:30vw 30vw 30vw;
-            justify-content:center;
-            gap:1.5vw;
-            align-items:start;
-            margin-top:1.2rem;
-        }
-        .own-product-card{
-            width:30vw !important;
-            max-width:30vw !important;
-            min-width:0 !important;
-            margin:0;
-        }
-        .own-product-company{
-            text-align:center;
-            font-size:1.7rem;
-            font-weight:500;
-            margin:0 0 .45rem 0;
-        }
-        .own-product-table{
-            width:30vw !important;
-            max-width:30vw !important;
-            min-width:0 !important;
-            margin:0;
-        }
-        .own-product-html-table{
-            width:100%;
-            border-collapse:collapse;
-            table-layout:fixed;
-            font-size:13px;
-            background:white;
-        }
-        .own-product-html-table th,
-        .own-product-html-table td{
-            border:1px solid #e5e7eb;
-            padding:6px 6px;
-            line-height:1.25;
-            overflow:hidden;
-            text-overflow:ellipsis;
-            white-space:nowrap;
-        }
-        .own-product-html-table th{
-            background:#f8fafc;
-            color:#334155;
-            font-weight:800;
-            text-align:center;
-        }
-        .own-product-html-table td:first-child{
-            text-align:left;
-            width:46%;
-        }
-        .own-product-html-table .own-num{
-            text-align:right;
-        }
-        @media (max-width: 768px){
-            .own-product-grid{
-                display:block;
-                width:100%;
-            }
-            .own-product-card,
-            .own-product-table{
-                width:100% !important;
-                max-width:100% !important;
-                min-width:0 !important;
-                margin:0 0 2rem 0;
-            }
-            .own-product-company{
-                font-size:1.7rem;
-                margin:1.5rem 0 .45rem 0;
-            }
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
     product_names = _own_product_names()
     delta_map = _today_delta_map(product_names)
     sections = []
     for company in COMPANIES:
         sections.append(_render_table(company, _company_table(company, product_names, delta_map)))
-    st.markdown("<div class='own-product-grid'>" + "".join(sections) + "</div>", unsafe_allow_html=True)
+    components.html(_report_html(sections), height=420, scrolling=False)
