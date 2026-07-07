@@ -20,7 +20,7 @@ OWN_PRODUCTS = [
     "하이바이 (5EA)",
 ]
 INBOUND_TYPES = {"입고", "출고지시취소"}
-OUTBOUND_TYPES = {"출고지시", "출고", "출고지시수정", "출고확정"}
+OUTBOUND_TYPES = {"출고지시", "출고지시수정", "출고", "출고확정"}
 MOVE_TYPES = {"사업장이동", "사업장+위치이동", "비자료전환", "이동"}
 
 
@@ -122,7 +122,7 @@ def _table_html(df: pd.DataFrame) -> str:
             cells.append(f"<td class='{cls}'>{escape(str(row[col]))}</td>")
         rows.append("<tr>" + "".join(cells) + "</tr>")
     return """
-    <table>
+    <table tabindex='-1'>
       <colgroup><col class='col-name'><col class='col-num'><col class='col-num'><col class='col-num'></colgroup>
       <thead><tr>{head}</tr></thead>
       <tbody>{body}</tbody>
@@ -137,19 +137,20 @@ def _report_html(delta_map: dict[tuple[str, str], int]) -> str:
     return f"""
     <!doctype html><html lang='ko'><head><meta charset='utf-8'>
     <style>
-      body{{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;}}
+      html,body,*{{caret-color:transparent!important;}}
+      body{{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;cursor:default;user-select:none;overflow:hidden;}}
       .grid{{display:grid;grid-template-columns:30vw 30vw 30vw;gap:1.5vw;justify-content:center;align-items:start;width:100%;}}
       section{{width:30vw;box-sizing:border-box;overflow-x:auto;}}
       h2{{text-align:center;font-size:32px;font-weight:600;margin:0 0 10px 0;line-height:1.2;}}
-      table{{border-collapse:collapse;table-layout:fixed;width:100%;background:white;font-size:13px;}}
+      table{{border-collapse:collapse;table-layout:fixed;width:100%;background:white;font-size:13px;outline:0;}}
       .col-name{{width:150px;}}
       .col-num{{width:72px;}}
       th,td{{border:1px solid #e5e7eb;padding:6px 6px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
       th{{background:#f8fafc;color:#334155;font-weight:800;text-align:center;}}
       td.name{{text-align:left;}}
       td.num{{text-align:center;}}
-      @media(max-width:768px){{.grid{{display:block;width:100%;}}section{{width:100%;margin-bottom:28px;}}}}
-    </style></head><body><div class='grid'>{''.join(cards)}</div></body></html>
+      @media(max-width:768px){{.grid{{display:block;width:100%;}}section{{width:100%;margin-bottom:28px;}}body{{overflow:auto;}}}}
+    </style></head><body tabindex='-1'><div class='grid'>{''.join(cards)}</div></body></html>
     """
 
 
