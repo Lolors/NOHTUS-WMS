@@ -136,7 +136,6 @@ def _short_cell_text(value, max_len=34):
 
 def _select_saved_order(order_id):
     st.session_state["selected_saved_order_id"] = int(order_id)
-    st.rerun()
 
 
 def _render_saved_orders(orders_df, selected_order_id):
@@ -256,7 +255,7 @@ def page_saved_outbound():
     orders = filtered.iloc[(page_no - 1) * per_page: page_no * per_page].copy()
 
     st.markdown(f"#### 출고지시서 {total}건")
-    list_col, selected_col = st.columns([5, 5], gap="large")
+    list_col, selected_col = st.columns([4, 6], gap="large")
     with list_col:
         selected_id = st.session_state.get("selected_saved_order_id")
         _render_saved_orders(orders, selected_id)
