@@ -200,10 +200,17 @@ def render_login():
     username = st.text_input("아이디", key="login_username_input").strip().lower()
     row = _load_user(username) if username else None
 
-    if username and row is None:
-        st.error("존재하지 않는 계정입니다.")
-        return False
+    # 입력 중에는 '존재하지 않는 계정' 경고를 표시하지 않는다.
+    # Streamlit은 text_input 변경 때마다 rerun되므로, 완성 전 ID 때문에 빨간 경고가 깜빡일 수 있다.
     if row is None:
+        with st.form("login_form_unknown_user", clear_on_submit=False):
+            pw = st.text_input("비밀번호", type="password", key="login_password_unknown")
+            submitted = st.form_submit_button("로그인", type="primary", use_container_width=True)
+        if submitted:
+            if not username:
+                st.error("아이디를 입력하세요.")
+            else:
+                st.error("아이디 또는 비밀번호가 맞지 않습니다.")
         return False
 
     st.markdown(
@@ -238,7 +245,7 @@ def render_login():
             submitted = st.form_submit_button("로그인", type="primary", use_container_width=True)
         if submitted:
             if _hash_password(username, pw) != password_hash:
-                st.error("비밀번호가 맞지 않습니다.")
+                st.error("아이디 또는 비밀번호가 맞지 않습니다.")
                 return False
             st.session_state["current_user"] = {"username": username, "display_name": str(row.get("display_name") or username), "role": str(row.get("role") or "user")}
             st.rerun()
