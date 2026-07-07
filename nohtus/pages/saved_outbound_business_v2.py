@@ -24,8 +24,7 @@ def _valid_outbound_exists_sql(alias_order="o", alias_item="i"):
     EXISTS (
         SELECT 1
         FROM transactions t
-        WHERE substr(t.created_at,1,10)={alias_order}.order_date
-          AND t.tx_type IN ('출고지시','출고지시수정','출고')
+        WHERE t.tx_type IN ('출고지시','출고지시수정','출고')
           AND COALESCE(t.from_company,'')=COALESCE({alias_item}.company,'')
           AND t.product_name={alias_item}.product_name
           AND COALESCE(t.lot,'-')=COALESCE({alias_item}.lot,'-')
