@@ -198,6 +198,22 @@ def _render_saved_orders(orders_df, selected_order_id):
 def _render_page_input(current_page, total_pages):
     if total_pages <= 1:
         return current_page
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stNumberInput"]{
+            width:10vw!important;
+            min-width:86px!important;
+            max-width:140px!important;
+            margin:8px auto 0 auto!important;
+        }
+        div[data-testid="stNumberInput"] input{
+            text-align:center!important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     selected_page = st.number_input(
         "저장된 출고지시 페이지",
         min_value=1,
@@ -233,10 +249,7 @@ def _detail_table_html(view_items):
         rows.append("<tr>" + "".join(cells) + "</tr>")
     return f"""
     <style>
-    .saved-detail-title{{display:flex;align-items:baseline;gap:8px;margin:0 0 10px 0;}}
-    .saved-detail-title-main{{font-size:20px;font-weight:800;color:#111827;}}
-    .saved-detail-title-sub{{font-size:11pt;font-weight:600;color:#475569;line-height:1.2;}}
-    .saved-detail-table{{width:100%;border-collapse:collapse;font-size:13px;table-layout:auto;}}
+    .saved-detail-table{{width:100%;border-collapse:collapse;font-size:13px;table-layout:auto;margin-bottom:22px;}}
     .saved-detail-table th,.saved-detail-table td{{border:1px solid #e5e7eb;padding:6px 7px;line-height:1.35;vertical-align:middle;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;}}
     .saved-detail-table th{{background:#f8fafc;color:#334155;font-weight:800;text-align:center;}}
     .saved-detail-table td:not(.detail-product){{text-align:center;}}
@@ -301,7 +314,25 @@ def page_saved_outbound():
     customer_name = str(order_row.iloc[0].get("customer_name") or "-")
     display_label = _order_display_label(order_row.iloc[0])
 
-    list_col, detail_col = st.columns([6, 4], gap="large")
+    st.markdown(
+        """
+        <style>
+        .saved-column-separator{
+            width:1px;
+            min-height:650px;
+            margin:4px auto 0 auto;
+            background:linear-gradient(to bottom, transparent 0%, #e2e8f0 8%, #e2e8f0 92%, transparent 100%);
+        }
+        .saved-detail-title{display:flex;align-items:baseline;gap:8px;margin:0 0 22px 0;}
+        .saved-detail-title-main{font-size:20px;font-weight:800;color:#111827;}
+        .saved-detail-title-sub{font-size:11pt;font-weight:600;color:#475569;line-height:1.2;}
+        .saved-detail-download-gap{height:8px;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    list_col, sep_col, detail_col = st.columns([6, 0.15, 4], gap="medium")
     with list_col:
         st.markdown(f"#### 출고지시서 목록 {total}건")
         _render_saved_orders(orders, order_id)
@@ -309,6 +340,9 @@ def page_saved_outbound():
         if selected_page != page_no:
             st.session_state["saved_order_page"] = selected_page
             st.rerun()
+
+    with sep_col:
+        st.markdown("<div class='saved-column-separator'></div>", unsafe_allow_html=True)
 
     with detail_col:
         st.markdown("<div id='selected-outbound-detail'></div>", unsafe_allow_html=True)
@@ -335,6 +369,7 @@ def page_saved_outbound():
             st.markdown(_detail_table_html(view_items), unsafe_allow_html=True)
             rows_for_download = view_items.to_dict("records")
 
+        st.markdown("<div class='saved-detail-download-gap'></div>", unsafe_allow_html=True)
         title_for_download = f"{customer_name} 출고지시서 {display_label}"
         d1, d2 = st.columns(2)
         with d1:
