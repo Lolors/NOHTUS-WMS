@@ -1,7 +1,7 @@
 """Outbound order save/update wrapper services.
 
-The heavy DB save/update implementation still lives in app.py for now.
-This wrapper removes direct app.py imports from page modules first, then the
+The heavy DB save/update implementation still lives in app.py for now. This
+wrapper removes direct app.py imports from page modules first, then the
 implementation can be migrated here in smaller safe commits.
 """
 from __future__ import annotations
@@ -54,13 +54,10 @@ def save_outbound_order(cart, title='', memo=''):
                 raise ValueError(f'{product} / {loc} / {lot} / {exp} 재고가 부족합니다. 현재 {before_qty}EA, 요청 {req_qty}EA')
         cur.execute('INSERT INTO outbound_orders(created_at, order_date, title, status, memo) VALUES(?,?,?,?,?)', (now, order_date, title or f'출고지시 {now}', '저장됨', memo))
         order_id = cur.lastrowid
-        final_by_inv = {}
         for inv_key, req_qty in requested_by_inv.items():
             before_qty = int(inv_map[inv_key].get('qty', 0) or 0)
             final_stock = before_qty - int(req_qty)
             cur.execute('UPDATE inventory SET qty=?, updated_at=? WHERE id=?', (final_stock, now, inv_key))
-            final_by_inv[inv_key] = final_stock
-        running_final = {k: int(inv_map[k].get('qty', 0) or 0) for k in inv_map}
         for item in valid_cart:
             qty = int(item.get('요청수량', 0) or 0)
             inv_key = int(item.get('id'))
@@ -71,7 +68,8 @@ def save_outbound_order(cart, title='', memo=''):
             product = src.get('product_name', item.get('제품명', ''))
             lot = src.get('lot', item.get('LOT', '-'))
             exp = src.get('exp_date', item.get('유통기한', '-'))
-            cur.execute('INSERT INTO outbound_order_items(order_id, inventory_id, location, product_name, lot, exp_date, qty, company, warehouse_name)\n                           VALUES(?,?,?,?,?,?,?,?,?)', (order_id, inv_key, loc, product, lot, exp, qty, company, wh))
+            cur.execute('INSERT INTO outbound_order_items(order_id, inventory_id, location, product_name, lot, exp_date, qty, company, warehouse_name)
+                          VALUES(?,?,?,?,?,?,?,?,?)', (order_id, inv_key, loc, product, lot, exp, qty, company, wh))
             insert_transaction_log(cur, created_at=now, tx_type='출고지시', product_name=product, warehouse_name=wh, lot=lot, exp_date=exp, from_company=company, from_location=loc, to_company=None, to_location=None, qty=qty, memo=f'출고지시서 #{order_id} / 재고차감')
         con.commit()
         return order_id
@@ -111,7 +109,8 @@ def update_outbound_order(order_id, title_or_cart, maybe_cart=None):
             raise ValueError('수정할 출고지시서를 찾을 수 없습니다.')
         if str(order[1] or '') == '취소됨':
             raise ValueError('취소된 출고지시서는 수정할 수 없습니다.')
-        old_rows = cur.execute('SELECT inventory_id, location, product_name, lot, exp_date, qty, company, warehouse_name\n                                  FROM outbound_order_items WHERE order_id=? ORDER BY id', (order_id,)).fetchall()
+        old_rows = cur.execute('SELECT inventory_id, location, product_name, lot, exp_date, qty, company, warehouse_name
+                                  FROM outbound_order_items WHERE order_id=? ORDER BY id', (order_id,)).fetchall()
         old_by_inv = {}
         for inv_id, location, product_name, lot, exp_date, qty, company, warehouse_name in old_rows:
             if inv_id:
@@ -141,13 +140,10 @@ def update_outbound_order(order_id, title_or_cart, maybe_cart=None):
                 cur.execute('UPDATE inventory SET qty=?, updated_at=? WHERE id=?', (restored, now, inv_key))
                 src['qty'] = restored
         cur.execute('DELETE FROM outbound_order_items WHERE order_id=?', (order_id,))
-        final_by_inv = {}
         for inv_key, new_qty in new_requested_by_inv.items():
             src = inv_map[inv_key]
             final_stock = int(src.get('qty', 0) or 0) - int(new_qty or 0)
             cur.execute('UPDATE inventory SET qty=?, updated_at=? WHERE id=?', (final_stock, now, inv_key))
-            final_by_inv[inv_key] = final_stock
-        running_final = {k: int(inv_map[k].get('qty', 0) or 0) for k in inv_map}
         for item in valid_cart:
             qty = int(item.get('요청수량', 0) or 0)
             inv_key = int(item.get('id'))
@@ -158,7 +154,8 @@ def update_outbound_order(order_id, title_or_cart, maybe_cart=None):
             product = src.get('product_name', item.get('제품명', ''))
             lot = src.get('lot', item.get('LOT', '-'))
             exp = src.get('exp_date', item.get('유통기한', '-'))
-            cur.execute('INSERT INTO outbound_order_items(order_id, inventory_id, location, product_name, lot, exp_date, qty, company, warehouse_name)\n                           VALUES(?,?,?,?,?,?,?,?,?)', (order_id, inv_key, loc, product, lot, exp, qty, company, wh))
+            cur.execute('INSERT INTO outbound_order_items(order_id, inventory_id, location, product_name, lot, exp_date, qty, company, warehouse_name)
+                          VALUES(?,?,?,?,?,?,?,?,?)', (order_id, inv_key, loc, product, lot, exp, qty, company, wh))
             insert_transaction_log(cur, created_at=now, tx_type='출고지시수정', product_name=product, warehouse_name=wh, lot=lot, exp_date=exp, from_company=company, from_location=loc, to_company=None, to_location=None, qty=qty, memo=f'출고지시서 #{order_id} 수정 / 재고 재차감')
         if title is not None:
             cur.execute("UPDATE outbound_orders SET title=?, status='수정됨', memo=IFNULL(memo,'') || ? WHERE id=?", (title or f'출고지시서 #{order_id}', '\n' + now + ' 수정', order_id))
