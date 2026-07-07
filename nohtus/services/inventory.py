@@ -39,6 +39,42 @@ def product_mapping_name_for(company, standard_name):
     return first_nonblank(df.iloc[0].get("nm"))
 
 
+def _stock_key_value(value, fallback="-"):
+    text = str(value if value is not None else "").strip()
+    return text if text else fallback
+
+
+def stock_key_final_qty(cur, *, company, product_name, lot, exp_date):
+    """사업장+제품명+LOT+유통기한 조합의 현재 최종재고 합계.
+
+    로케이션과 전산상명칭은 일부 변경/분산될 수 있으므로 최종재고 기준에서 제외한다.
+    """
+    company = _stock_key_value(company, "")
+    product_name = _stock_key_value(product_name, "")
+    lot = _stock_key_value(lot)
+    exp_date = _stock_key_value(exp_date)
+    if not company or not product_name:
+        return None
+    row = cur.execute(
+        """
+        SELECT COALESCE(SUM(qty), 0)
+        FROM inventory
+        WHERE company=? AND product_name=? AND IFNULL(lot,'-')=? AND IFNULL(exp_date,'-')=?
+        """,
+        (company, product_name, lot, exp_date),
+    ).fetchone()
+    return int((row[0] if row else 0) or 0)
+
+
+def _infer_transaction_stock_company(tx_type, from_company, to_company):
+    tx_type = str(tx_type or "")
+    if tx_type in ["입고", "출고지시취소", "재고조정", "재고실사", "기준재고", "전산재고"]:
+        return to_company or from_company
+    if tx_type in ["출고지시", "출고", "출고지시수정"]:
+        return from_company or to_company
+    return to_company or from_company
+
+
 def _current_actor_name():
     try:
         import streamlit as st
@@ -59,6 +95,15 @@ def _transaction_has_actor_column(cur):
 def insert_transaction_log(cur, *, created_at, tx_type, product_name, warehouse_name=None,
                            lot=None, exp_date=None, from_company=None, from_location=None,
                            to_company=None, to_location=None, qty=0, memo="", final_stock=None):
+    if final_stock is None:
+        stock_company = _infer_transaction_stock_company(tx_type, from_company, to_company)
+        final_stock = stock_key_final_qty(
+            cur,
+            company=stock_company,
+            product_name=product_name,
+            lot=lot,
+            exp_date=exp_date,
+        )
     actor = _current_actor_name()
     if _transaction_has_actor_column(cur):
         cur.execute(
@@ -133,12 +178,8 @@ def move_inventory(src_id, to_company, to_location, qty, memo=""):
             erp_note = f"전산상명칭 변경: {old_warehouse or '-'} → {dest_warehouse or '-'}"
             move_memo = f"{move_memo} / {erp_note}" if move_memo else erp_note
         if src["company"] != to_company:
-            dest_company_qty_row = cur.execute(
-                "SELECT COALESCE(SUM(qty), 0) FROM inventory WHERE company=? AND product_name=?",
-                (to_company, product_name),
-            ).fetchone()
-            dest_company_qty = int((dest_company_qty_row[0] if dest_company_qty_row else 0) or 0)
-            stock_note = f"이동 후 {to_company} 해당 제품 재고: {dest_company_qty}EA"
+            dest_stock_key_qty = stock_key_final_qty(cur, company=to_company, product_name=product_name, lot=src["lot"], exp_date=src["exp_date"])
+            stock_note = f"이동 후 {to_company} 해당 LOT 재고: {dest_stock_key_qty}EA"
             move_memo = f"{move_memo} / {stock_note}" if move_memo else stock_note
 
         insert_transaction_log(cur, created_at=now, tx_type=tx_type, product_name=product_name, warehouse_name=dest_warehouse,
@@ -164,8 +205,9 @@ def adjust_inventory(inv_id, actual_qty, reason, memo=""):
         diff = actual_qty - before
         cur.execute("UPDATE inventory SET qty=?, updated_at=? WHERE id=?", (actual_qty, now, inv_id))
         reason_memo = reason if not memo else f"{reason} / {memo}"
+        final_stock = stock_key_final_qty(cur, company=src["company"], product_name=src["product_name"], lot=src["lot"], exp_date=src["exp_date"])
         insert_transaction_log(cur, created_at=now, tx_type="재고조정", product_name=src["product_name"], warehouse_name=src["warehouse_name"],
                                lot=src["lot"], exp_date=src["exp_date"], from_company=src["company"], from_location=src["location"],
-                               to_company=src["company"], to_location=src["location"], qty=diff, memo=reason_memo, final_stock=actual_qty)
+                               to_company=src["company"], to_location=src["location"], qty=diff, memo=reason_memo, final_stock=final_stock)
         con.commit()
         return before, actual_qty, diff
