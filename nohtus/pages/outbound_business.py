@@ -110,14 +110,16 @@ def page_outbound():
             white-space: nowrap !important;
         }
         div[data-testid="stDateInput"] {
-            width: 15vw !important;
-            min-width: 150px !important;
-            max-width: 240px !important;
+            width: 118px !important;
+            min-width: 118px !important;
+            max-width: 118px !important;
         }
         div[data-testid="stDateInput"] input {
-            width: 15vw !important;
-            min-width: 150px !important;
-            max-width: 240px !important;
+            width: 118px !important;
+            min-width: 118px !important;
+            max-width: 118px !important;
+            padding-left: 8px !important;
+            padding-right: 8px !important;
         }
         </style>
         """,
