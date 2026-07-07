@@ -8,6 +8,9 @@ import streamlit as st
 from nohtus.db import q
 
 COMPANIES = ["노투스팜", "NOH", "노투스"]
+INBOUND_TYPES = {"입고", "출고지시취소"}
+OUTBOUND_TYPES = {"출고지시", "출고", "출고지시수정", "출고확정"}
+MOVE_TYPES = {"사업장이동", "사업장+위치이동", "비자료전환", "이동"}
 
 
 def _today_text():
@@ -45,43 +48,53 @@ def _company_current_stock(company: str, product_names: list[str]) -> pd.DataFra
     )
 
 
-def _company_today_delta(company: str, product_names: list[str]) -> pd.DataFrame:
+def _today_transactions(product_names: list[str]) -> pd.DataFrame:
     if not product_names:
-        return pd.DataFrame(columns=["product_name", "delta_qty"])
-    today = _today_text()
+        return pd.DataFrame(columns=["tx_type", "product_name", "from_company", "to_company", "qty"])
     placeholders = ",".join(["?"] * len(product_names))
-    params = tuple([today, company, company] + product_names)
     return q(
         f"""
-        SELECT product_name,
-               COALESCE(SUM(
-                   CASE
-                     WHEN tx_type IN ('입고','출고지시취소','재고조사불러오기','기준재고','전산재고')
-                          AND COALESCE(to_company,'')=? THEN CAST(qty AS INTEGER)
-                     WHEN tx_type IN ('출고지시','출고','출고지시수정','출고확정')
-                          AND COALESCE(from_company,'')=? THEN -CAST(qty AS INTEGER)
-                     WHEN tx_type IN ('사업장이동','사업장+위치이동','비자료전환','이동')
-                          AND COALESCE(to_company,'')=? AND COALESCE(from_company,'')<>? THEN CAST(qty AS INTEGER)
-                     WHEN tx_type IN ('사업장이동','사업장+위치이동','비자료전환','이동')
-                          AND COALESCE(from_company,'')=? AND COALESCE(to_company,'')<>? THEN -CAST(qty AS INTEGER)
-                     WHEN tx_type IN ('재고조정','재고실사','재고정보수정')
-                          AND COALESCE(to_company, from_company, '')=? THEN CAST(qty AS INTEGER)
-                     ELSE 0
-                   END
-               ),0) AS delta_qty
+        SELECT tx_type, product_name, from_company, to_company, qty
         FROM transactions
         WHERE substr(created_at,1,10)=?
           AND product_name IN ({placeholders})
-          AND tx_type IN (
-              '입고','출고지시취소','재고조사불러오기','기준재고','전산재고',
-              '출고지시','출고','출고지시수정','출고확정',
-              '사업장이동','사업장+위치이동','비자료전환','이동',
-              '재고조정','재고실사','재고정보수정'
-          )
-        GROUP BY product_name
+          AND tx_type IN ({','.join(['?'] * (len(INBOUND_TYPES) + len(OUTBOUND_TYPES) + len(MOVE_TYPES)))})
         """,
-        tuple([company, company, company, company, company, company, company, today] + product_names),
+        tuple([_today_text()] + product_names + sorted(INBOUND_TYPES | OUTBOUND_TYPES | MOVE_TYPES)),
     )
+
+
+def _today_delta_map(product_names: list[str]) -> dict[tuple[str, str], int]:
+    deltas = {(company, product): 0 for company in COMPANIES for product in product_names}
+    tx_df = _today_transactions(product_names)
+    if tx_df.empty:
+        return deltas
+
+    for _, row in tx_df.iterrows():
+        product = str(row.get("product_name") or "").strip()
+        tx_type = str(row.get("tx_type") or "").strip()
+        from_company = str(row.get("from_company") or "").strip()
+        to_company = str(row.get("to_company") or "").strip()
+        try:
+            qty = int(row.get("qty") or 0)
+        except Exception:
+            qty = 0
+        if not product or qty == 0:
+            continue
+
+        if tx_type in INBOUND_TYPES:
+            if to_company in COMPANIES:
+                deltas[(to_company, product)] = deltas.get((to_company, product), 0) + qty
+        elif tx_type in OUTBOUND_TYPES:
+            if from_company in COMPANIES:
+                deltas[(from_company, product)] = deltas.get((from_company, product), 0) - qty
+        elif tx_type in MOVE_TYPES and from_company != to_company:
+            if from_company in COMPANIES:
+                deltas[(from_company, product)] = deltas.get((from_company, product), 0) - qty
+            if to_company in COMPANIES:
+                deltas[(to_company, product)] = deltas.get((to_company, product), 0) + qty
+
+    return deltas
 
 
 def _format_qty(value) -> str:
@@ -104,25 +117,20 @@ def _format_delta(value) -> str:
     return "-"
 
 
-def _company_table(company: str, product_names: list[str]) -> pd.DataFrame:
-    base = pd.DataFrame({"제품명": product_names})
+def _company_table(company: str, product_names: list[str], delta_map: dict[tuple[str, str], int]) -> pd.DataFrame:
+    base = pd.DataFrame({"표준제품명": product_names})
     current = _company_current_stock(company, product_names)
-    delta = _company_today_delta(company, product_names)
 
     if not current.empty:
-        current = current.rename(columns={"product_name": "제품명", "qty": "현재수량"})
+        current = current.rename(columns={"product_name": "표준제품명", "qty": "현재수량"})
     else:
-        current = pd.DataFrame(columns=["제품명", "현재수량"])
-    if not delta.empty:
-        delta = delta.rename(columns={"product_name": "제품명", "delta_qty": "증감"})
-    else:
-        delta = pd.DataFrame(columns=["제품명", "증감"])
+        current = pd.DataFrame(columns=["표준제품명", "현재수량"])
 
-    out = base.merge(current, on="제품명", how="left").merge(delta, on="제품명", how="left")
+    out = base.merge(current, on="표준제품명", how="left")
     out["현재수량"] = out["현재수량"].fillna(0).astype(int)
-    out["증감"] = out["증감"].fillna(0).astype(int)
+    out["증감"] = out["표준제품명"].map(lambda product: int(delta_map.get((company, product), 0) or 0))
     out["전일수량"] = out["현재수량"] - out["증감"]
-    out = out[["제품명", "전일수량", "증감", "현재수량"]]
+    out = out[["표준제품명", "전일수량", "증감", "현재수량"]]
     out = out[(out["전일수량"] != 0) | (out["증감"] != 0) | (out["현재수량"] != 0)]
     out["전일수량"] = out["전일수량"].map(_format_qty)
     out["증감"] = out["증감"].map(_format_delta)
@@ -140,7 +148,7 @@ def _render_table(company: str, df: pd.DataFrame):
 
 def page_own_product_status():
     st.title("자사제품 조회")
-    st.caption(f"기준일자: {_today_text()} · 전일수량은 현재수량에서 금일 입고/출고/이동 변동값을 되돌린 수량입니다.")
+    st.caption(f"기준일자: {_today_text()} · 전일수량 = 현재수량 - 금일 입고/출고/사업장 이동 증감")
     st.markdown(
         """
         <style>
@@ -158,5 +166,7 @@ def page_own_product_status():
     if not product_names:
         st.warning("제품 매칭 관리에 등록된 표준제품명이 없습니다.")
         return
+
+    delta_map = _today_delta_map(product_names)
     for company in COMPANIES:
-        _render_table(company, _company_table(company, product_names))
+        _render_table(company, _company_table(company, product_names, delta_map))
