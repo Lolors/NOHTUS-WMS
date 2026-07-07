@@ -39,8 +39,9 @@ def product_mapping_name_for(company, standard_name):
     return first_nonblank(df.iloc[0].get("nm"))
 
 
-def _stock_key(product_name, lot, exp_date):
+def _stock_key(company, product_name, lot, exp_date):
     return (
+        str(company or "").strip(),
         str(product_name or "").strip(),
         str(lot or "-").strip() or "-",
         str(exp_date or "-").strip() or "-",
@@ -58,9 +59,41 @@ def _current_actor():
         return ""
 
 
-def current_product_lot_exp_stock(cur, product_name, lot, exp_date):
-    """현재 DB 기준 표준제품명+LOT+유통기한 전체 재고 합계."""
-    product, lot, exp_date = _stock_key(product_name, lot, exp_date)
+def _infer_transaction_stock_company(tx_type, from_company, to_company):
+    tx_type = str(tx_type or "").strip()
+    if tx_type in ["입고", "출고지시취소", "재고조사불러오기", "기준재고", "전산재고", "재고조정", "재고실사", "재고정보수정"]:
+        return to_company or from_company
+    if tx_type in ["출고지시", "출고", "출고지시수정", "출고확정"]:
+        return from_company or to_company
+    return to_company or from_company
+
+
+def stock_key_final_qty(cur, *, company, product_name, lot, exp_date):
+    """사업장+표준제품명+LOT+유통기한 조합의 현재 최종재고 합계."""
+    company, product, lot, exp_date = _stock_key(company, product_name, lot, exp_date)
+    if not company or not product:
+        return None
+    row = cur.execute(
+        """
+        SELECT COALESCE(SUM(qty), 0)
+        FROM inventory
+        WHERE company=?
+          AND product_name=?
+          AND IFNULL(lot, '-')=?
+          AND IFNULL(exp_date, '-')=?
+        """,
+        (company, product, lot, exp_date),
+    ).fetchone()
+    return int((row[0] if row else 0) or 0)
+
+
+def current_product_lot_exp_stock(cur, product_name, lot, exp_date, company=None):
+    """호환용 wrapper. company가 있으면 사업장 포함 기준으로 계산한다."""
+    if company:
+        return stock_key_final_qty(cur, company=company, product_name=product_name, lot=lot, exp_date=exp_date)
+    product = str(product_name or "").strip()
+    lot = str(lot or "-").strip() or "-"
+    exp_date = str(exp_date or "-").strip() or "-"
     if not product:
         return None
     row = cur.execute(
@@ -76,8 +109,8 @@ def current_product_lot_exp_stock(cur, product_name, lot, exp_date):
     return int((row[0] if row else 0) or 0)
 
 
-def _transaction_stock_delta(tx_type, qty):
-    """표준제품명+LOT+유통기한 전체 재고 관점의 이력 증감값."""
+def _transaction_stock_delta(tx_type, qty, from_company=None, to_company=None):
+    """사업장+표준제품명+LOT+유통기한 기준의 이력 증감값."""
     tx_type = str(tx_type or "").strip()
     qty = int(qty or 0)
     if tx_type in ["입고", "출고지시취소", "재고조사불러오기", "기준재고", "전산재고"]:
@@ -86,7 +119,9 @@ def _transaction_stock_delta(tx_type, qty):
         return -qty
     if tx_type in ["재고조정", "재고실사", "재고정보수정"]:
         return qty
-    if tx_type in ["위치이동", "사업장이동", "사업장+위치이동", "비자료전환", "이동"]:
+    if tx_type in ["사업장이동", "사업장+위치이동", "비자료전환", "이동"]:
+        return qty if str(from_company or "") != str(to_company or "") else 0
+    if tx_type == "위치이동":
         return 0
     return 0
 
@@ -101,30 +136,31 @@ def backfill_missing_transaction_final_stock():
 
         stock_rows = cur.execute(
             """
-            SELECT product_name, IFNULL(lot, '-') AS lot, IFNULL(exp_date, '-') AS exp_date,
+            SELECT company, product_name, IFNULL(lot, '-') AS lot, IFNULL(exp_date, '-') AS exp_date,
                    COALESCE(SUM(qty), 0) AS qty
             FROM inventory
-            GROUP BY product_name, IFNULL(lot, '-'), IFNULL(exp_date, '-')
+            GROUP BY company, product_name, IFNULL(lot, '-'), IFNULL(exp_date, '-')
             """
         ).fetchall()
-        running = {_stock_key(r[0], r[1], r[2]): int(r[3] or 0) for r in stock_rows}
+        running = {_stock_key(r[0], r[1], r[2], r[3]): int(r[4] or 0) for r in stock_rows}
 
         rows = cur.execute(
             """
-            SELECT id, tx_type, product_name, lot, exp_date, qty, final_stock
+            SELECT id, tx_type, product_name, lot, exp_date, from_company, to_company, qty, final_stock
             FROM transactions
             WHERE TRIM(COALESCE(product_name, '')) <> ''
             ORDER BY id DESC
             """
         ).fetchall()
         updated = 0
-        for tx_id, tx_type, product_name, lot, exp_date, qty, final_stock in rows:
-            key = _stock_key(product_name, lot, exp_date)
+        for tx_id, tx_type, product_name, lot, exp_date, from_company, to_company, qty, final_stock in rows:
+            company = _infer_transaction_stock_company(tx_type, from_company, to_company)
+            key = _stock_key(company, product_name, lot, exp_date)
             current_after = int(running.get(key, 0) or 0)
             if final_stock is None:
                 cur.execute("UPDATE transactions SET final_stock=? WHERE id=?", (current_after, int(tx_id)))
                 updated += 1
-            running[key] = current_after - _transaction_stock_delta(tx_type, qty)
+            running[key] = current_after - _transaction_stock_delta(tx_type, qty, from_company, to_company)
         con.commit()
         return updated
 
@@ -133,7 +169,14 @@ def insert_transaction_log(cur, *, created_at, tx_type, product_name, warehouse_
                            lot=None, exp_date=None, from_company=None, from_location=None,
                            to_company=None, to_location=None, qty=0, memo="", final_stock=None, actor=None):
     if final_stock is None:
-        final_stock = current_product_lot_exp_stock(cur, product_name, lot, exp_date)
+        company = _infer_transaction_stock_company(tx_type, from_company, to_company)
+        final_stock = stock_key_final_qty(
+            cur,
+            company=company,
+            product_name=product_name,
+            lot=lot,
+            exp_date=exp_date,
+        )
     actor = str(actor if actor is not None else _current_actor()).strip()
     cur.execute(
         """INSERT INTO transactions(
@@ -201,12 +244,8 @@ def move_inventory(src_id, to_company, to_location, qty, memo=""):
             erp_note = f"전산상명칭 변경: {old_warehouse or '-'} → {dest_warehouse or '-'}"
             move_memo = f"{move_memo} / {erp_note}" if move_memo else erp_note
         if src["company"] != to_company:
-            dest_company_qty_row = cur.execute(
-                "SELECT COALESCE(SUM(qty), 0) FROM inventory WHERE company=? AND product_name=?",
-                (to_company, product_name),
-            ).fetchone()
-            dest_company_qty = int((dest_company_qty_row[0] if dest_company_qty_row else 0) or 0)
-            stock_note = f"이동 후 {to_company} 해당 제품 재고: {dest_company_qty}EA"
+            dest_stock_key_qty = stock_key_final_qty(cur, company=to_company, product_name=product_name, lot=src["lot"], exp_date=src["exp_date"])
+            stock_note = f"이동 후 {to_company} 해당 LOT 재고: {dest_stock_key_qty}EA"
             move_memo = f"{move_memo} / {stock_note}" if move_memo else stock_note
 
         insert_transaction_log(cur, created_at=now, tx_type=tx_type, product_name=product_name, warehouse_name=dest_warehouse,
@@ -232,8 +271,9 @@ def adjust_inventory(inv_id, actual_qty, reason, memo=""):
         diff = actual_qty - before
         cur.execute("UPDATE inventory SET qty=?, updated_at=? WHERE id=?", (actual_qty, now, inv_id))
         reason_memo = reason if not memo else f"{reason} / {memo}"
+        final_stock = stock_key_final_qty(cur, company=src["company"], product_name=src["product_name"], lot=src["lot"], exp_date=src["exp_date"])
         insert_transaction_log(cur, created_at=now, tx_type="재고조정", product_name=src["product_name"], warehouse_name=src["warehouse_name"],
                                lot=src["lot"], exp_date=src["exp_date"], from_company=src["company"], from_location=src["location"],
-                               to_company=src["company"], to_location=src["location"], qty=diff, memo=reason_memo)
+                               to_company=src["company"], to_location=src["location"], qty=diff, memo=reason_memo, final_stock=final_stock)
         con.commit()
         return before, actual_qty, diff
