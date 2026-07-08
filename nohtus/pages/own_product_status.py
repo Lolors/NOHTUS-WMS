@@ -141,13 +141,13 @@ def _report_html(delta_map: dict[tuple[str, str], int]) -> str:
       body{{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;cursor:default;user-select:none;overflow:hidden;}}
       .grid{{display:flex;flex-direction:column;gap:26px;align-items:flex-start;justify-content:flex-start;width:100%;}}
       section{{width:38vw;min-width:520px;box-sizing:border-box;overflow-x:auto;}}
-      h2{{text-align:left;font-size:32px;font-weight:600;margin:0 0 10px 0;line-height:1.2;}}
+      h2{{text-align:center;font-size:32px;font-weight:600;margin:0 0 10px 0;line-height:1.2;}}
       table{{border-collapse:collapse;table-layout:fixed;width:100%;background:white;font-size:13px;outline:0;}}
       .col-name{{width:150px;}}
       .col-num{{width:72px;}}
       th,td{{border:1px solid #e5e7eb;padding:6px 6px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
       th{{background:#f8fafc;color:#334155;font-weight:800;text-align:center;}}
-      td.name{{text-align:left;}}
+      td.name{{text-align:center;}}
       td.num{{text-align:center;}}
       @media(max-width:768px){{.grid{{display:block;width:100%;}}section{{width:100%;min-width:0;margin-bottom:28px;}}body{{overflow:auto;}}}}
     </style></head><body tabindex='-1'><div class='grid'>{''.join(cards)}</div></body></html>
