@@ -67,6 +67,30 @@ def _order_items_summary(order_id, max_items=3):
     return text
 
 
+def _order_company_summary(order_id, max_items=2):
+    df = q(
+        f"""
+        SELECT COALESCE(i.company, '') AS company, MIN(i.id) AS first_id
+        FROM outbound_order_items i
+        JOIN outbound_orders o ON o.id=i.order_id
+        WHERE i.order_id=?
+          AND {_valid_outbound_exists_sql('o', 'i')}
+        GROUP BY COALESCE(i.company, '')
+        ORDER BY first_id
+        """,
+        (int(order_id),),
+    )
+    if df.empty:
+        return "-"
+    companies = [str(r.company or "-").strip() or "-" for r in df.itertuples(index=False)]
+    shown = companies[:max_items]
+    remain = max(0, len(companies) - len(shown))
+    text = ", ".join(shown)
+    if remain:
+        text += f" 외 {remain}"
+    return text
+
+
 def _status_text_html(status):
     status = str(status or "저장됨")
     if status == "취소됨":
@@ -97,7 +121,7 @@ def _render_saved_orders(orders_df, selected_order_id):
         <div class='saved-order-head'>
           <div>번호</div>
           <div>날짜</div>
-          <div>매출처</div>
+          <div>사업장</div>
           <div>포함된 출고 제품</div>
           <div style='text-align:center;'>상태</div>
         </div>
@@ -107,7 +131,7 @@ def _render_saved_orders(orders_df, selected_order_id):
     for r in orders_df.itertuples(index=False):
         oid = int(getattr(r, "id"))
         created = str(getattr(r, "order_date", "") or getattr(r, "created_at", ""))[:10]
-        customer = str(getattr(r, "customer_name", "") or "-")
+        company_text = _order_company_summary(oid)
         status = str(getattr(r, "status", "저장됨") or "저장됨")
         items_text = _order_items_summary(oid)
         selected = int(selected_order_id or 0) == oid
@@ -118,7 +142,7 @@ def _render_saved_orders(orders_df, selected_order_id):
                   <div class='saved-order-selected-grid'>
                     <div>#{oid}</div>
                     <div>{escape(created)}</div>
-                    <div title='{escape(customer)}'>{escape(customer)}</div>
+                    <div title='{escape(company_text)}'>{escape(company_text)}</div>
                     <div title='{escape(items_text)}'>{escape(items_text)}</div>
                     <div style='text-align:center;'>{_status_text_html(status)}</div>
                   </div>
@@ -133,7 +157,7 @@ def _render_saved_orders(orders_df, selected_order_id):
             with cols[1]:
                 st.markdown(_md_link(created, oid))
             with cols[2]:
-                st.markdown(_md_link(customer, oid))
+                st.markdown(_md_link(company_text, oid))
             with cols[3]:
                 st.markdown(_md_link(items_text, oid))
             with cols[4]:
