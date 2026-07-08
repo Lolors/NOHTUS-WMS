@@ -151,6 +151,15 @@ def _load_user(username: str):
     return df.iloc[0]
 
 
+def _login_notice(message: str):
+    if not message:
+        return
+    st.markdown(
+        f"<div class='login-notice'>{message}</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def render_login():
     ensure_auth_tables()
     st.markdown("""
@@ -193,6 +202,8 @@ def render_login():
     }
     .login-title {text-align:center;margin-top:1.2rem;margin-bottom:1.2rem;font-size:2.2rem;font-weight:700;}
     .login-account {text-align:center;color:#64748b;margin:0.25rem auto 0.9rem;font-size:0.92rem;}
+    .login-notice {width:20vw;max-width:420px;min-width:320px;margin:8px auto 0 auto;color:#64748b;font-size:0.9rem;text-align:center;}
+    @media (max-width: 768px) {.login-notice{width:100%;max-width:100%;min-width:0;}}
     </style>
     """, unsafe_allow_html=True)
     st.markdown("<div class='login-title'>NOHTUS WMS 로그인</div>", unsafe_allow_html=True)
@@ -200,17 +211,17 @@ def render_login():
     username = st.text_input("아이디", key="login_username_input").strip().lower()
     row = _load_user(username) if username else None
 
-    # 입력 중에는 '존재하지 않는 계정' 경고를 표시하지 않는다.
-    # Streamlit은 text_input 변경 때마다 rerun되므로, 완성 전 ID 때문에 빨간 경고가 깜빡일 수 있다.
+    # 입력 중에는 존재하지 않는 계정 경고를 표시하지 않는다.
+    # 제출 후에도 빨간 alert 대신 작은 일반 안내문으로 처리한다.
     if row is None:
         with st.form("login_form_unknown_user", clear_on_submit=False):
             pw = st.text_input("비밀번호", type="password", key="login_password_unknown")
             submitted = st.form_submit_button("로그인", type="primary", use_container_width=True)
         if submitted:
             if not username:
-                st.error("아이디를 입력하세요.")
+                _login_notice("아이디를 입력하세요.")
             else:
-                st.error("아이디 또는 비밀번호가 맞지 않습니다.")
+                _login_notice("아이디 또는 비밀번호가 맞지 않습니다.")
         return False
 
     st.markdown(
@@ -227,10 +238,10 @@ def render_login():
             submitted = st.form_submit_button("비밀번호 설정 후 로그인", type="primary", use_container_width=True)
         if submitted:
             if not p1 or len(p1) < 4:
-                st.error("비밀번호는 4자 이상으로 설정하세요.")
+                _login_notice("비밀번호는 4자 이상으로 설정하세요.")
                 return False
             if p1 != p2:
-                st.error("비밀번호 확인이 일치하지 않습니다.")
+                _login_notice("비밀번호 확인이 일치하지 않습니다.")
                 return False
             new_hash = _hash_password(username, p1)
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -245,7 +256,7 @@ def render_login():
             submitted = st.form_submit_button("로그인", type="primary", use_container_width=True)
         if submitted:
             if _hash_password(username, pw) != password_hash:
-                st.error("아이디 또는 비밀번호가 맞지 않습니다.")
+                _login_notice("아이디 또는 비밀번호가 맞지 않습니다.")
                 return False
             st.session_state["current_user"] = {"username": username, "display_name": str(row.get("display_name") or username), "role": str(row.get("role") or "user")}
             st.rerun()
