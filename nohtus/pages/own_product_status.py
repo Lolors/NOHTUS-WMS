@@ -139,9 +139,9 @@ def _report_html(delta_map: dict[tuple[str, str], int]) -> str:
     <style>
       html,body,*{{caret-color:transparent!important;}}
       body{{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;cursor:default;user-select:none;overflow:hidden;}}
-      .grid{{display:grid;grid-template-columns:30vw 30vw 30vw;gap:1.5vw;justify-content:center;align-items:start;width:100%;}}
-      section{{width:30vw;box-sizing:border-box;overflow-x:auto;}}
-      h2{{text-align:center;font-size:32px;font-weight:600;margin:0 0 10px 0;line-height:1.2;}}
+      .grid{{display:flex;flex-direction:column;gap:26px;align-items:flex-start;justify-content:flex-start;width:100%;}}
+      section{{width:38vw;min-width:520px;box-sizing:border-box;overflow-x:auto;}}
+      h2{{text-align:left;font-size:32px;font-weight:600;margin:0 0 10px 0;line-height:1.2;}}
       table{{border-collapse:collapse;table-layout:fixed;width:100%;background:white;font-size:13px;outline:0;}}
       .col-name{{width:150px;}}
       .col-num{{width:72px;}}
@@ -149,7 +149,7 @@ def _report_html(delta_map: dict[tuple[str, str], int]) -> str:
       th{{background:#f8fafc;color:#334155;font-weight:800;text-align:center;}}
       td.name{{text-align:left;}}
       td.num{{text-align:center;}}
-      @media(max-width:768px){{.grid{{display:block;width:100%;}}section{{width:100%;margin-bottom:28px;}}body{{overflow:auto;}}}}
+      @media(max-width:768px){{.grid{{display:block;width:100%;}}section{{width:100%;min-width:0;margin-bottom:28px;}}body{{overflow:auto;}}}}
     </style></head><body tabindex='-1'><div class='grid'>{''.join(cards)}</div></body></html>
     """
 
@@ -157,4 +157,4 @@ def _report_html(delta_map: dict[tuple[str, str], int]) -> str:
 def page_own_product_status():
     st.title("자사제품 조회")
     st.caption(f"기준일자: {_today_text()} · 전일수량 = 현재수량 - 금일 입고/출고/사업장 이동 증감")
-    components.html(_report_html(_today_delta_map()), height=420, scrolling=False)
+    components.html(_report_html(_today_delta_map()), height=900, scrolling=False)
