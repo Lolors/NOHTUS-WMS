@@ -28,15 +28,6 @@ def _order_has_history_sql(alias_order="o"):
     """
 
 
-def _status_text_html(status):
-    status = str(status or "저장됨")
-    if status == "취소됨":
-        return "<span style='color:#dc2626;font-weight:800;'>취소됨</span>"
-    if status == "수정됨":
-        return "<span style='color:#16a34a;font-weight:800;'>수정됨</span>"
-    return "<span style='color:#475569;font-weight:800;'>저장됨</span>"
-
-
 def _cell(content, *, title="", class_name=""):
     title_attr = f" title='{escape(str(title))}'" if title else ""
     return f"<div class='saved-order-cell {class_name}'{title_attr}>{content}</div>"
@@ -171,13 +162,12 @@ def _render_saved_orders(orders_df, selected_order_id):
     st.markdown(
         f"""
         <style>
-        .saved-order-head-clean{{display:grid;grid-template-columns:.45fr .85fr 1.35fr 3.1fr .75fr;gap:6px;align-items:center;padding:5px 6px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:12px;font-weight:800;}}
+        .saved-order-head-clean{{display:grid;grid-template-columns:.45fr .85fr 1.35fr 3.4fr;gap:6px;align-items:center;padding:5px 6px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:12px;font-weight:800;}}
         .saved-order-cell{{min-height:{ROW_H}px;display:flex;align-items:center;min-width:0;color:#111827;font-size:12.5px;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.18;word-break:keep-all;overflow-wrap:anywhere;}}
-        .saved-order-status{{justify-content:center;text-align:center;word-break:keep-all;font-size:12px;}}
         .saved-order-sep{{height:1px;background:#f6f7f9;margin:0;}}
         </style>
         <div class='saved-order-head-clean'>
-          <div>번호</div><div>날짜</div><div>사업장</div><div>출고지시서 제목</div><div style='text-align:center;'>상태</div>
+          <div>번호</div><div>날짜</div><div>사업장</div><div>출고지시서 제목</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -186,11 +176,10 @@ def _render_saved_orders(orders_df, selected_order_id):
         oid = int(getattr(r, "id"))
         created = str(getattr(r, "order_date", "") or getattr(r, "created_at", ""))[:10]
         company_text = _order_company_summary(oid)
-        status = str(getattr(r, "status", "저장됨") or "저장됨")
         display_no = str(getattr(r, "display_no", "") or getattr(r, "daily_no", "") or oid)
         order_title = str(getattr(r, "title", "") or "").strip() or _order_items_summary(oid)
         selected = int(selected_order_id or 0) == oid
-        cols = st.columns([0.45, 0.85, 1.35, 3.1, 0.75], gap="small")
+        cols = st.columns([0.45, 0.85, 1.35, 3.4], gap="small")
         with cols[0]:
             if st.button(display_no, key=f"open_order_no_{oid}", use_container_width=False, type=("primary" if selected else "secondary")):
                 st.session_state["selected_saved_order_id"] = oid
@@ -202,8 +191,6 @@ def _render_saved_orders(orders_df, selected_order_id):
             st.markdown(_cell(escape(company_text), title=company_text), unsafe_allow_html=True)
         with cols[3]:
             st.markdown(_cell(escape(order_title), title=order_title), unsafe_allow_html=True)
-        with cols[4]:
-            st.markdown(_cell(_status_text_html(status), class_name="saved-order-status"), unsafe_allow_html=True)
         st.markdown("<div class='saved-order-sep'></div>", unsafe_allow_html=True)
 
 
@@ -344,7 +331,7 @@ def page_saved_outbound():
         unsafe_allow_html=True,
     )
 
-    list_col, sep_col, detail_col = st.columns([6, 0.15, 4], gap="medium")
+    list_col, sep_col, detail_col = st.columns([5.1, 0.15, 4.75], gap="medium")
     with list_col:
         st.markdown(f"#### 출고지시서 목록 {total}건")
         _render_saved_orders(orders, order_id)
