@@ -90,6 +90,28 @@ def _order_items_summary(order_id, max_items=3):
     return text
 
 
+def _order_company_summary(order_id, max_items=2):
+    df = saved_v2.q(
+        """
+        SELECT COALESCE(company, '') AS company, MIN(id) AS first_id
+        FROM outbound_order_items
+        WHERE order_id=?
+        GROUP BY COALESCE(company, '')
+        ORDER BY first_id
+        """,
+        (int(order_id),),
+    )
+    if df.empty:
+        return "-"
+    companies = [str(r.company or "-").strip() or "-" for r in df.itertuples(index=False)]
+    shown = companies[:max_items]
+    remain = max(0, len(companies) - len(shown))
+    text = ", ".join(shown)
+    if remain:
+        text += f" 외 {remain}"
+    return text
+
+
 def _load_orders():
     return saved_v2.q(
         f"""
@@ -155,7 +177,7 @@ def _render_saved_orders(orders_df, selected_order_id):
         .saved-order-sep{{height:1px;background:#f6f7f9;margin:0;}}
         </style>
         <div class='saved-order-head-clean'>
-          <div>번호</div><div>날짜</div><div>매출처</div><div>출고지시서 제목</div><div style='text-align:center;'>상태</div>
+          <div>번호</div><div>날짜</div><div>사업장</div><div>포함된 출고 제품</div><div style='text-align:center;'>상태</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -163,10 +185,10 @@ def _render_saved_orders(orders_df, selected_order_id):
     for r in orders_df.itertuples(index=False):
         oid = int(getattr(r, "id"))
         created = str(getattr(r, "order_date", "") or getattr(r, "created_at", ""))[:10]
-        customer = str(getattr(r, "customer_name", "") or "-")
+        company_text = _order_company_summary(oid)
         status = str(getattr(r, "status", "저장됨") or "저장됨")
         display_no = str(getattr(r, "display_no", "") or getattr(r, "daily_no", "") or oid)
-        order_title = str(getattr(r, "title", "") or "").strip() or _order_items_summary(oid)
+        items_text = _order_items_summary(oid)
         selected = int(selected_order_id or 0) == oid
         cols = st.columns([0.45, 0.85, 1.35, 3.1, 0.75], gap="small")
         with cols[0]:
@@ -177,9 +199,9 @@ def _render_saved_orders(orders_df, selected_order_id):
         with cols[1]:
             st.markdown(_cell(escape(created)), unsafe_allow_html=True)
         with cols[2]:
-            st.markdown(_cell(escape(customer), title=customer), unsafe_allow_html=True)
+            st.markdown(_cell(escape(company_text), title=company_text), unsafe_allow_html=True)
         with cols[3]:
-            st.markdown(_cell(escape(order_title), title=order_title), unsafe_allow_html=True)
+            st.markdown(_cell(escape(items_text), title=items_text), unsafe_allow_html=True)
         with cols[4]:
             st.markdown(_cell(_status_text_html(status), class_name="saved-order-status"), unsafe_allow_html=True)
         st.markdown("<div class='saved-order-sep'></div>", unsafe_allow_html=True)
