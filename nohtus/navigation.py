@@ -12,7 +12,9 @@ HIDDEN_PAGES = {
     "재고 찾기": "RC3.3: 모바일용 재고 찾기 메뉴는 임시 숨김. 기능 함수는 유지한다.",
 }
 
-ADMIN_ONLY_PAGES = {"출고가능 관리"}
+# 사이드바에서는 메뉴가 보이도록 두고, 실제 접근 제한은 application.py에서 처리한다.
+# 메뉴 자체를 숨기면 계정/세션 판정이 어긋났을 때 관리자가 기능을 찾을 수 없다.
+ADMIN_ONLY_PAGES = set()
 ADMIN_USERNAMES = {"hn", "admin"}
 
 DEFAULT_PAGE = "로케이션 맵"
