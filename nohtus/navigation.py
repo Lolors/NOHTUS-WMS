@@ -13,17 +13,29 @@ HIDDEN_PAGES = {
 }
 
 ADMIN_ONLY_PAGES = {"출고가능 관리"}
+ADMIN_USERNAMES = {"hn", "admin"}
 
 DEFAULT_PAGE = "로케이션 맵"
 
 
+def _current_user():
+    return st.session_state.get("current_user") or {}
+
+
 def _current_role():
-    user = st.session_state.get("current_user") or {}
-    return str(user.get("role") or "")
+    return str(_current_user().get("role") or "").strip().lower()
+
+
+def _current_username():
+    return str(_current_user().get("username") or "").strip().lower()
+
+
+def _is_admin():
+    return _current_role() == "admin" or _current_username() in ADMIN_USERNAMES
 
 
 def _is_admin_only_allowed(label):
-    return label not in ADMIN_ONLY_PAGES or _current_role() == "admin"
+    return label not in ADMIN_ONLY_PAGES or _is_admin()
 
 
 def apply_query_page_redirects():
@@ -46,7 +58,7 @@ def render_sidebar(app_title, version, allowed_pages=None):
     apply_query_page_redirects()
 
     def is_allowed(label):
-        role_allowed = allowed_pages is None or label in allowed_pages
+        role_allowed = allowed_pages is None or label in allowed_pages or (_is_admin() and label in ADMIN_ONLY_PAGES)
         return role_allowed and _is_admin_only_allowed(label)
 
     if not is_allowed(st.session_state.get("page", DEFAULT_PAGE)):
