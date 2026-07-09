@@ -8,10 +8,118 @@ from nohtus.db import connect
 
 
 _ALL_COMPANY_MANUAL_PICK_KEY = "out_all_company_manual_pick"
+_SHIPPABLE_COL = "is_shippable"
 
 
 def _hide_last_sale_importer():
     return None
+
+
+def _ensure_inventory_shippable_column():
+    """재고 행별 출고가능 여부 컬럼을 자동 보강한다."""
+    with connect() as con:
+        cur = con.cursor()
+        cols = {r[1] for r in cur.execute("PRAGMA table_info(inventory)").fetchall()}
+        if _SHIPPABLE_COL not in cols:
+            cur.execute(f"ALTER TABLE inventory ADD COLUMN {_SHIPPABLE_COL} INTEGER NOT NULL DEFAULT 1")
+        con.commit()
+
+
+def _inventory_scope_sql(selected_product, selected_company, ignore_company=False):
+    selected_product = str(selected_product or "").strip()
+    selected_company = str(selected_company or "").strip()
+    if not selected_product:
+        return None, ()
+    if ignore_company:
+        return (
+            """
+            SELECT *
+            FROM inventory
+            WHERE product_name=? AND qty>0
+            ORDER BY company, location, lot, exp_date
+            """,
+            (selected_product,),
+        )
+    if selected_company and selected_company in outbound_page.COMPANIES:
+        return (
+            """
+            SELECT *
+            FROM inventory
+            WHERE product_name=? AND company=? AND qty>0
+            ORDER BY location, lot, exp_date
+            """,
+            (selected_product, selected_company),
+        )
+    return None, ()
+
+
+def _load_inventory_scope(selected_product, selected_company, ignore_company=False):
+    _ensure_inventory_shippable_column()
+    sql, params = _inventory_scope_sql(selected_product, selected_company, ignore_company=ignore_company)
+    if not sql:
+        return pd.DataFrame()
+    return outbound_page.q(sql, params)
+
+
+def _render_shippable_editor(selected_product, selected_company, ignore_company=False):
+    stock_df = _load_inventory_scope(selected_product, selected_company, ignore_company=ignore_company)
+    if stock_df.empty:
+        return
+
+    with st.expander("출고가능 Y/N 설정", expanded=False):
+        st.caption("체크를 끄면 해당 재고 행은 재고조회에는 남지만 출고지시 후보와 추천에서는 제외됩니다.")
+        work = stock_df[["id", "company", "product_name", "lot", "exp_date", "location", "qty", _SHIPPABLE_COL]].copy()
+        work[_SHIPPABLE_COL] = work[_SHIPPABLE_COL].fillna(1).astype(int).astype(bool)
+        work["exp_date"] = work["exp_date"].apply(outbound_page.display_date_only)
+        work = work.rename(
+            columns={
+                "id": "ID",
+                "company": "사업장",
+                "product_name": "제품명",
+                "lot": "LOT",
+                "exp_date": "유통기한",
+                "location": "로케이션",
+                "qty": "수량",
+                _SHIPPABLE_COL: "출고가능",
+            }
+        ).reset_index(drop=True)
+        edited = st.data_editor(
+            work[["ID", "출고가능", "사업장", "로케이션", "제품명", "LOT", "유통기한", "수량"]],
+            hide_index=True,
+            use_container_width=True,
+            num_rows="fixed",
+            disabled=["ID", "사업장", "로케이션", "제품명", "LOT", "유통기한", "수량"],
+            column_config={
+                "ID": st.column_config.NumberColumn("ID", disabled=True, width="small"),
+                "출고가능": st.column_config.CheckboxColumn("출고가능"),
+            },
+            key="out_shippable_editor",
+        )
+        if st.button("출고가능 설정 저장", type="primary", use_container_width=True, key="out_shippable_save"):
+            updates = []
+            edited = edited.reset_index(drop=True)
+            for pos, row in edited.iterrows():
+                try:
+                    inv_id = int(row.get("ID"))
+                except Exception:
+                    if pos >= len(work):
+                        continue
+                    inv_id = int(work.iloc[pos].get("ID"))
+                is_shippable = 1 if bool(row.get("출고가능", True)) else 0
+                old_value = 1 if pos >= len(work) else (1 if bool(work.iloc[pos].get("출고가능", True)) else 0)
+                if is_shippable != old_value:
+                    updates.append((is_shippable, inv_id))
+            if not updates:
+                st.info("변경된 출고가능 설정이 없습니다.")
+                return
+            with connect() as con:
+                con.executemany(
+                    f"UPDATE inventory SET {_SHIPPABLE_COL}=? WHERE id=?",
+                    updates,
+                )
+                con.commit()
+            st.success(f"출고가능 설정을 {len(updates)}개 행에 반영했습니다.")
+            st.rerun()
 
 
 def _outbound_order_exists(order_id):
@@ -102,6 +210,7 @@ def page_outbound():
     original_markdown = st.markdown
     original_caption = st.caption
     original_manual_pick_rows = outbound_page._manual_pick_rows
+    original_inventory_query = outbound_page._inventory_query_for_outbound
 
     st.markdown(
         """
@@ -132,6 +241,14 @@ def page_outbound():
 
     def all_company_manual_pick_value():
         return bool(st.session_state.get(_ALL_COMPANY_MANUAL_PICK_KEY, False))
+
+    def patched_inventory_query(selected_product, selected_company, ignore_company=False):
+        _ensure_inventory_shippable_column()
+        _render_shippable_editor(selected_product, selected_company, ignore_company=ignore_company)
+        stock_df = _load_inventory_scope(selected_product, selected_company, ignore_company=ignore_company)
+        if stock_df.empty:
+            return stock_df
+        return stock_df[stock_df[_SHIPPABLE_COL].fillna(1).astype(int) == 1].copy()
 
     def patched_save_outbound_cart_with_customer(cart, title, customer_payload):
         outbound_page._ensure_outbound_customer_columns()
@@ -259,6 +376,7 @@ def page_outbound():
     outbound_page._render_last_sale_importer = _hide_last_sale_importer
     outbound_page._save_outbound_cart_with_customer = patched_save_outbound_cart_with_customer
     outbound_page._manual_pick_rows = original_manual_pick_rows
+    outbound_page._inventory_query_for_outbound = patched_inventory_query
     st.markdown = patched_markdown
     st.caption = patched_caption
     st.text_input = patched_text_input
@@ -270,6 +388,7 @@ def page_outbound():
         outbound_page._render_last_sale_importer = original_renderer
         outbound_page._save_outbound_cart_with_customer = original_save_with_customer
         outbound_page._manual_pick_rows = original_manual_pick_rows
+        outbound_page._inventory_query_for_outbound = original_inventory_query
         st.markdown = original_markdown
         st.caption = original_caption
         st.text_input = original_text_input
