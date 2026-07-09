@@ -22,6 +22,65 @@ from nohtus.pages.product_shortcuts import page_recent_products
 from nohtus.pages.saved_outbound_business_v4 import page_saved_outbound as page_saved_outbound_refactored
 from nohtus.pages.shippable_inventory import page_shippable_inventory
 from nohtus.pages.stocktake_business import page_stocktake
+from nohtus.services.kakao_order_parser import parse_kakao_order
+
+
+def _render_route_kakao_order_helper():
+    st.markdown("### 카톡 주문 자동 출고지시")
+    with st.container(border=True):
+        st.caption("카카오톡 주문내용을 붙여넣고 해석하면 출고지시의 매출처/제품/수량 검색값을 자동으로 채웁니다.")
+        raw_text = st.text_area(
+            "카카오톡 주문내용",
+            placeholder="한양재활\n콘쥬란 4통\n리쥬비넥스 10통\n\n부탁드려요",
+            height=120,
+            key="route_kakao_order_text",
+        )
+        if st.button("카톡 주문 해석", type="primary", use_container_width=True, key="route_kakao_order_parse_btn"):
+            parsed = parse_kakao_order(raw_text)
+            st.session_state["route_kakao_order_parsed"] = {
+                "customer_keyword": parsed.customer_keyword,
+                "items": [item.__dict__ for item in parsed.items],
+                "note": parsed.note,
+            }
+
+        parsed_data = st.session_state.get("route_kakao_order_parsed") or {}
+        if not parsed_data:
+            return
+
+        customer_keyword = str(parsed_data.get("customer_keyword") or "").strip()
+        items = parsed_data.get("items") or []
+        note = str(parsed_data.get("note") or "").strip()
+
+        if customer_keyword:
+            st.success(f"매출처 키워드: {customer_keyword}")
+        else:
+            st.warning("매출처 키워드를 찾지 못했습니다. 첫 줄에 매출처명을 넣으면 더 정확합니다.")
+
+        if not items:
+            st.warning("품목과 수량을 찾지 못했습니다. 예: 콘쥬란 4통")
+        else:
+            for idx, item in enumerate(items):
+                product = str(item.get("product_keyword") or "").strip()
+                qty = int(item.get("qty") or 1)
+                unit = str(item.get("unit") or "").strip()
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(f"{idx + 1}. {product} / {qty}{unit}")
+                with col2:
+                    if st.button("불러오기", use_container_width=True, key=f"route_kakao_load_item_{idx}"):
+                        if customer_keyword:
+                            st.session_state["out_customer_term"] = customer_keyword
+                            st.session_state["out_customer_direct"] = False
+                            st.session_state.pop("_out_customer_label", None)
+                        st.session_state["out_product_term"] = product
+                        st.session_state["out_req_qty"] = qty
+                        st.session_state.pop("out_rec_editor", None)
+                        st.session_state.pop("out_manual_editor", None)
+                        st.session_state["_outbound_last_success"] = "카톡 주문에서 추출한 매출처/제품/수량을 입력칸에 반영했습니다."
+                        st.rerun()
+
+        if note:
+            st.caption(f"메모로 인식한 내용: {note}")
 
 
 def main():
@@ -56,6 +115,7 @@ def main():
     elif menu == "최근 조회":
         page_recent_products()
     elif menu == "출고지시":
+        _render_route_kakao_order_helper()
         page_outbound()
     elif menu == "저장된 출고지시":
         page_saved_outbound_refactored()
