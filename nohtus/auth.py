@@ -169,7 +169,6 @@ def render_login():
         div[data-testid="stTextInput"],
         div[data-testid="stButton"],
         div[data-testid="stFormSubmitButton"],
-        div[data-testid="stAlert"],
         div[data-testid="stForm"] {
             width: 20vw !important;
             max-width: 420px !important;
@@ -194,13 +193,13 @@ def render_login():
         div[data-testid="stTextInput"],
         div[data-testid="stButton"],
         div[data-testid="stFormSubmitButton"],
-        div[data-testid="stAlert"],
         div[data-testid="stForm"] {
             width: 100% !important;
             max-width: 100% !important;
             min-width: 0 !important;
         }
     }
+    div[data-testid="stAlert"] {display:none !important;}
     .login-title {text-align:center;margin-top:1.2rem;margin-bottom:1.2rem;font-size:2.2rem;font-weight:700;}
     .login-account {text-align:center;color:#64748b;margin:0.25rem auto 0.9rem;font-size:0.92rem;}
     .login-notice {width:20vw;max-width:420px;min-width:320px;margin:8px auto 0 auto;color:#64748b;font-size:0.9rem;text-align:center;}
@@ -232,7 +231,7 @@ def render_login():
     password_hash = str(row.get("password_hash") or "")
 
     if not password_hash:
-        st.info("첫 접속입니다. 사용할 비밀번호를 설정하세요.")
+        _login_notice("첫 접속입니다. 사용할 비밀번호를 설정하세요.")
         with st.form("first_password_form", clear_on_submit=False):
             p1 = st.text_input("새 비밀번호", type="password", key="first_password_1")
             p2 = st.text_input("새 비밀번호 확인", type="password", key="first_password_2")
