@@ -1,7 +1,7 @@
 import streamlit as st
 
 from styles import apply_style
-from nohtus.auth import allowed_pages_for_current_user, can_access_page, render_user_box, require_login
+from nohtus.auth import allowed_pages_for_current_user, can_access_page, is_admin, render_user_box, require_login
 from nohtus.config import APP_TITLE, VERSION
 from nohtus.db_init import init_db
 from nohtus.device import is_mobile, sync_mobile_flag
@@ -20,6 +20,7 @@ from nohtus.pages.own_product_status import page_own_product_status
 from nohtus.pages.product_matching_business import page_product_matching
 from nohtus.pages.product_shortcuts import page_recent_products
 from nohtus.pages.saved_outbound_business_v4 import page_saved_outbound as page_saved_outbound_refactored
+from nohtus.pages.shippable_inventory import page_shippable_inventory
 from nohtus.pages.stocktake_business import page_stocktake
 
 
@@ -68,6 +69,11 @@ def main():
         page_move()
     elif menu == "재고 실사":
         page_stocktake()
+    elif menu == "출고가능 관리":
+        if not is_admin():
+            st.warning("admin 계정만 접근할 수 있습니다.")
+            return
+        page_shippable_inventory()
     elif menu == "제품 매칭 관리":
         page_product_matching()
     elif menu == "거래처 관리":
