@@ -364,7 +364,7 @@ def render_login():
     if row is None:
         with st.form("login_form_unknown_user", clear_on_submit=False):
             pw = st.text_input("비밀번호", type="password", key="login_password_unknown")
-            remember_login = st.checkbox("로그인 유지", key="remember_login_unknown")
+            st.checkbox("로그인 유지", key="remember_login_unknown")
             submitted = st.form_submit_button("로그인", type="primary", use_container_width=True)
         if submitted:
             if not username:
@@ -399,7 +399,7 @@ def render_login():
                 con.execute("UPDATE users SET password_hash=?, updated_at=? WHERE username=?", (new_hash, now, username))
                 con.commit()
             _login_user(username, row, remember_login=remember_login)
-            st.rerun()
+            return True
     else:
         with st.form("login_form", clear_on_submit=False):
             pw = st.text_input("비밀번호", type="password", key="login_password")
@@ -410,7 +410,7 @@ def render_login():
                 _login_notice("아이디 또는 비밀번호가 맞지 않습니다.")
                 return False
             _login_user(username, row, remember_login=remember_login)
-            st.rerun()
+            return True
     return False
 
 
@@ -420,8 +420,7 @@ def require_login():
         return True
     if _restore_login_from_cookie():
         return True
-    render_login()
-    return False
+    return render_login()
 
 
 def render_user_box():
