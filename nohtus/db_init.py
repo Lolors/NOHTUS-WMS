@@ -29,6 +29,9 @@ def init_db():
         updated_at TEXT
     )
     """)
+    inventory_cols = {r[1] for r in cur.execute("PRAGMA table_info(inventory)").fetchall()}
+    if "is_shippable" not in inventory_cols:
+        cur.execute("ALTER TABLE inventory ADD COLUMN is_shippable INTEGER NOT NULL DEFAULT 1")
     cur.execute("""
     CREATE TABLE IF NOT EXISTS transactions(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
