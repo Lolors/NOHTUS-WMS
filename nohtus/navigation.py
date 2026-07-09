@@ -4,7 +4,7 @@ import streamlit as st
 MENU_SECTIONS = [
     (None, ["로케이션 맵", "유통기한 임박", "자사제품 조회", "전체 조회"]),
     ("출고", ["출고지시", "저장된 출고지시", "마감"]),
-    ("재고", ["입고 등록", "이동 등록", "이력 조회", "재고 실사"]),
+    ("재고", ["입고 등록", "이동 등록", "이력 조회", "재고 실사", "출고가능 관리"]),
     ("기초", ["제품 매칭 관리", "거래처 관리"]),
 ]
 
@@ -12,7 +12,18 @@ HIDDEN_PAGES = {
     "재고 찾기": "RC3.3: 모바일용 재고 찾기 메뉴는 임시 숨김. 기능 함수는 유지한다.",
 }
 
+ADMIN_ONLY_PAGES = {"출고가능 관리"}
+
 DEFAULT_PAGE = "로케이션 맵"
+
+
+def _current_role():
+    user = st.session_state.get("current_user") or {}
+    return str(user.get("role") or "")
+
+
+def _is_admin_only_allowed(label):
+    return label not in ADMIN_ONLY_PAGES or _current_role() == "admin"
 
 
 def apply_query_page_redirects():
@@ -35,7 +46,8 @@ def render_sidebar(app_title, version, allowed_pages=None):
     apply_query_page_redirects()
 
     def is_allowed(label):
-        return allowed_pages is None or label in allowed_pages
+        role_allowed = allowed_pages is None or label in allowed_pages
+        return role_allowed and _is_admin_only_allowed(label)
 
     if not is_allowed(st.session_state.get("page", DEFAULT_PAGE)):
         st.session_state["page"] = DEFAULT_PAGE
