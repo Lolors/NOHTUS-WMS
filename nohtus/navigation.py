@@ -1,5 +1,7 @@
 import streamlit as st
 
+from nohtus.auth import is_admin
+
 
 MENU_SECTIONS = [
     (None, ["로케이션 맵", "유통기한 임박", "자사제품 조회", "전체 조회"]),
@@ -12,32 +14,13 @@ HIDDEN_PAGES = {
     "재고 찾기": "RC3.3: 모바일용 재고 찾기 메뉴는 임시 숨김. 기능 함수는 유지한다.",
 }
 
-# 사이드바에서는 메뉴가 보이도록 두고, 실제 접근 제한은 application.py에서 처리한다.
-# 메뉴 자체를 숨기면 계정/세션 판정이 어긋났을 때 관리자가 기능을 찾을 수 없다.
-ADMIN_ONLY_PAGES = set()
-ADMIN_USERNAMES = {"hn", "admin"}
+ADMIN_ONLY_PAGES = {"출고가능 관리"}
 
 DEFAULT_PAGE = "로케이션 맵"
 
 
-def _current_user():
-    return st.session_state.get("current_user") or {}
-
-
-def _current_role():
-    return str(_current_user().get("role") or "").strip().lower()
-
-
-def _current_username():
-    return str(_current_user().get("username") or "").strip().lower()
-
-
-def _is_admin():
-    return _current_role() == "admin" or _current_username() in ADMIN_USERNAMES
-
-
 def _is_admin_only_allowed(label):
-    return label not in ADMIN_ONLY_PAGES or _is_admin()
+    return label not in ADMIN_ONLY_PAGES or is_admin()
 
 
 def apply_query_page_redirects():
@@ -60,7 +43,7 @@ def render_sidebar(app_title, version, allowed_pages=None):
     apply_query_page_redirects()
 
     def is_allowed(label):
-        role_allowed = allowed_pages is None or label in allowed_pages or (_is_admin() and label in ADMIN_ONLY_PAGES)
+        role_allowed = allowed_pages is None or label in allowed_pages or (is_admin() and label in ADMIN_ONLY_PAGES)
         return role_allowed and _is_admin_only_allowed(label)
 
     if not is_allowed(st.session_state.get("page", DEFAULT_PAGE)):
