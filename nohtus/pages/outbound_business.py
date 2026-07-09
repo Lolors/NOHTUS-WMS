@@ -8,10 +8,20 @@ from nohtus.db import connect
 
 
 _ALL_COMPANY_MANUAL_PICK_KEY = "out_all_company_manual_pick"
+_SHIPPABLE_COL = "is_shippable"
 
 
 def _hide_last_sale_importer():
     return None
+
+
+def _ensure_inventory_shippable_column():
+    with connect() as con:
+        cur = con.cursor()
+        cols = {r[1] for r in cur.execute("PRAGMA table_info(inventory)").fetchall()}
+        if _SHIPPABLE_COL not in cols:
+            cur.execute(f"ALTER TABLE inventory ADD COLUMN {_SHIPPABLE_COL} INTEGER NOT NULL DEFAULT 1")
+        con.commit()
 
 
 def _outbound_order_exists(order_id):
@@ -96,6 +106,7 @@ def _upsert_wms_last_sale(customer_payload, order_date):
 def page_outbound():
     original_renderer = outbound_page._render_last_sale_importer
     original_save_with_customer = outbound_page._save_outbound_cart_with_customer
+    original_inventory_query = outbound_page._inventory_query_for_outbound
     original_text_input = st.text_input
     original_checkbox = st.checkbox
     original_data_editor = st.data_editor
@@ -132,6 +143,13 @@ def page_outbound():
 
     def all_company_manual_pick_value():
         return bool(st.session_state.get(_ALL_COMPANY_MANUAL_PICK_KEY, False))
+
+    def patched_inventory_query(selected_product, selected_company, ignore_company=False):
+        _ensure_inventory_shippable_column()
+        stock_df = original_inventory_query(selected_product, selected_company, ignore_company=ignore_company)
+        if stock_df is None or stock_df.empty or _SHIPPABLE_COL not in stock_df.columns:
+            return stock_df
+        return stock_df[stock_df[_SHIPPABLE_COL].fillna(1).astype(int) == 1].copy()
 
     def patched_save_outbound_cart_with_customer(cart, title, customer_payload):
         outbound_page._ensure_outbound_customer_columns()
@@ -258,6 +276,7 @@ def page_outbound():
 
     outbound_page._render_last_sale_importer = _hide_last_sale_importer
     outbound_page._save_outbound_cart_with_customer = patched_save_outbound_cart_with_customer
+    outbound_page._inventory_query_for_outbound = patched_inventory_query
     outbound_page._manual_pick_rows = original_manual_pick_rows
     st.markdown = patched_markdown
     st.caption = patched_caption
@@ -269,6 +288,7 @@ def page_outbound():
     finally:
         outbound_page._render_last_sale_importer = original_renderer
         outbound_page._save_outbound_cart_with_customer = original_save_with_customer
+        outbound_page._inventory_query_for_outbound = original_inventory_query
         outbound_page._manual_pick_rows = original_manual_pick_rows
         st.markdown = original_markdown
         st.caption = original_caption
