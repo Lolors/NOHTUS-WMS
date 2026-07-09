@@ -2,10 +2,71 @@ import pandas as pd
 import streamlit as st
 
 import nohtus.pages.outbound as outbound_page
+from nohtus.services.kakao_order_parser import parse_kakao_order
 
 
 def _hide_last_sale_importer():
     return None
+
+
+def _render_kakao_order_helper():
+    with st.expander("카톡 주문 붙여넣기", expanded=False):
+        st.caption("예: 한양재활 / 콘쥬란 4통 / 리쥬비넥스 10통 처럼 붙여넣으면 매출처와 품목 키워드를 추출합니다.")
+        raw_text = st.text_area(
+            "카카오톡 주문내용",
+            placeholder="한양재활\n콘쥬란 4통\n리쥬비넥스 10통\n\n부탁드려요",
+            height=150,
+            key="kakao_order_text",
+        )
+
+        if st.button("주문내용 해석", use_container_width=True, key="kakao_order_parse_btn"):
+            parsed = parse_kakao_order(raw_text)
+            st.session_state["kakao_order_parsed"] = {
+                "customer_keyword": parsed.customer_keyword,
+                "items": [item.__dict__ for item in parsed.items],
+                "note": parsed.note,
+            }
+
+        parsed_data = st.session_state.get("kakao_order_parsed") or {}
+        items = parsed_data.get("items") or []
+        customer_keyword = str(parsed_data.get("customer_keyword") or "").strip()
+        note = str(parsed_data.get("note") or "").strip()
+
+        if parsed_data:
+            if customer_keyword:
+                st.success(f"매출처 키워드: {customer_keyword}")
+            else:
+                st.warning("매출처 키워드를 찾지 못했습니다. 첫 줄에 매출처명을 넣으면 더 정확합니다.")
+
+            if items:
+                preview = pd.DataFrame(items).rename(
+                    columns={
+                        "product_keyword": "제품 키워드",
+                        "qty": "수량",
+                        "unit": "단위",
+                        "raw_line": "원문",
+                    }
+                )
+                st.dataframe(preview[["제품 키워드", "수량", "단위", "원문"]], hide_index=True, use_container_width=True)
+                st.caption("아래 버튼을 누르면 기존 출고지시 입력칸에 검색어와 수량이 들어갑니다. 재고 추천을 확인한 뒤 장바구니에 담으세요.")
+                for idx, item in enumerate(items):
+                    label = f"{idx + 1}. {item.get('product_keyword')} {item.get('qty')}{item.get('unit') or ''} 불러오기"
+                    if st.button(label, use_container_width=True, key=f"kakao_load_item_{idx}"):
+                        if customer_keyword:
+                            st.session_state["out_customer_term"] = customer_keyword
+                            st.session_state["out_customer_direct"] = False
+                            st.session_state.pop("_out_customer_label", None)
+                        st.session_state["out_product_term"] = str(item.get("product_keyword") or "").strip()
+                        st.session_state["out_req_qty"] = int(item.get("qty") or 1)
+                        st.session_state.pop("out_rec_editor", None)
+                        st.session_state.pop("out_manual_editor", None)
+                        st.session_state["_outbound_last_success"] = "카톡 주문에서 추출한 매출처/제품/수량을 입력칸에 반영했습니다."
+                        st.rerun()
+            else:
+                st.warning("품목과 수량을 찾지 못했습니다. 예: 콘쥬란 4통")
+
+            if note:
+                st.caption(f"메모로 인식한 내용: {note}")
 
 
 def page_outbound():
@@ -25,6 +86,8 @@ def page_outbound():
         """,
         unsafe_allow_html=True,
     )
+
+    _render_kakao_order_helper()
 
     checkbox_skip_values = {}
     manual_source_df = {"df": None}
