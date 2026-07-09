@@ -15,6 +15,7 @@ DEFAULT_USERS = {
     "jg": {"display_name": "노진국", "role": "viewer"},
 }
 
+ADMIN_USERNAMES = {"hn", "admin"}
 LEGACY_USERNAMES = ["khn", "kjw", "shj", "ngw", "njg"]
 
 ROLE_PAGES = {
@@ -132,7 +133,7 @@ def can_access_page(page_name: str) -> bool:
 
 
 def is_admin():
-    return current_role() == "admin"
+    return current_role().strip().lower() == "admin" or current_username().strip().lower() in ADMIN_USERNAMES
 
 
 def logout():
