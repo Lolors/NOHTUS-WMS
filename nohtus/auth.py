@@ -32,7 +32,7 @@ ROLE_PAGES = {
 }
 
 REMEMBER_COOKIE_KEY = "remember_login_token"
-REMEMBER_COOKIE_PREFIX = "nohtus_wms/"
+REMEMBER_COOKIE_PREFIX = "nohtus_wms_"
 REMEMBER_DAYS = 30
 COOKIE_PASSWORD_ENV = "NOHTUS_COOKIE_SECRET"
 COOKIE_PASSWORD_FALLBACK = "NOHTUS-WMS-remember-login-cookie-v1"
@@ -363,7 +363,7 @@ def render_login():
     # 제출 후에도 빨간 alert 대신 작은 일반 안내문으로 처리한다.
     if row is None:
         with st.form("login_form_unknown_user", clear_on_submit=False):
-            pw = st.text_input("비밀번호", type="password", key="login_password_unknown")
+            st.text_input("비밀번호", type="password", key="login_password_unknown")
             st.checkbox("로그인 유지", key="remember_login_unknown")
             submitted = st.form_submit_button("로그인", type="primary", use_container_width=True)
         if submitted:
@@ -399,7 +399,7 @@ def render_login():
                 con.execute("UPDATE users SET password_hash=?, updated_at=? WHERE username=?", (new_hash, now, username))
                 con.commit()
             _login_user(username, row, remember_login=remember_login)
-            return True
+            st.rerun()
     else:
         with st.form("login_form", clear_on_submit=False):
             pw = st.text_input("비밀번호", type="password", key="login_password")
@@ -410,7 +410,7 @@ def render_login():
                 _login_notice("아이디 또는 비밀번호가 맞지 않습니다.")
                 return False
             _login_user(username, row, remember_login=remember_login)
-            return True
+            st.rerun()
     return False
 
 
@@ -420,7 +420,8 @@ def require_login():
         return True
     if _restore_login_from_cookie():
         return True
-    return render_login()
+    render_login()
+    return False
 
 
 def render_user_box():
