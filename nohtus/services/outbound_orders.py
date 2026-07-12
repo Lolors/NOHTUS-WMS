@@ -12,6 +12,10 @@ from nohtus.db import connect
 from datetime import datetime
 
 
+OUTBOUND_REDEDUCT_TX_TYPE = '출고지시 재차감'
+TITLE_EDIT_TX_TYPE = '출고지시 제목수정'
+
+
 def _norm(value):
     return str(value or '').strip()
 
@@ -154,6 +158,14 @@ def _init_running_final(cur, running_final, src):
     return key
 
 
+def _requested_by_inventory(cart):
+    result = {}
+    for item in cart or []:
+        inv_key = int(item.get('id'))
+        result[inv_key] = result.get(inv_key, 0) + int(item.get('요청수량', 0) or 0)
+    return result
+
+
 def save_outbound_order(cart, title='', memo=''):
     """장바구니를 출고지시서로 저장한다.
     출고지시 저장 시점에 inventory 현재고를 즉시 차감한다.
@@ -170,10 +182,7 @@ def save_outbound_order(cart, title='', memo=''):
         cur = con.cursor()
         valid_cart = _resolve_cart_inventory_ids(cur, valid_cart, action_label='저장')
         inv_ids = sorted({int(item.get('id')) for item in valid_cart})
-        requested_by_inv = {}
-        for item in valid_cart:
-            inv_key = int(item.get('id'))
-            requested_by_inv[inv_key] = requested_by_inv.get(inv_key, 0) + int(item.get('요청수량', 0) or 0)
+        requested_by_inv = _requested_by_inventory(valid_cart)
         placeholders = ','.join(['?'] * len(inv_ids))
         rows = cur.execute(f'SELECT * FROM inventory WHERE id IN ({placeholders})', inv_ids).fetchall()
         cols = [d[0] for d in cur.description]
@@ -225,9 +234,9 @@ def update_outbound_order(order_id, title_or_cart, maybe_cart=None):
 
     운영 기준:
     - 저장된 출고지시는 이미 inventory에서 차감된 상태다.
-    - 수정 저장 시 기존 지시 수량을 먼저 원복한 뒤 새 장바구니 수량을 다시 차감한다.
-    - 제조번호/유통기한/로케이션까지 같은 inventory_id 기준으로만 처리한다.
-    - 장바구니 또는 과거 저장행의 inventory_id가 비어 있거나 깨진 경우에는 제품명/사업장/로케이션/LOT/유통기한으로 재연결한다.
+    - 수정 저장 시 기존 지시와 새 장바구니의 차이만 재고에 반영한다.
+    - 이력도 변경된 품목/수량만 '출고지시 재차감'으로 남긴다.
+    - 제목만 바뀐 경우 재고 이력 없이 제목 수정 이력만 남긴다.
     """
     if maybe_cart is None:
         title = None
@@ -240,19 +249,20 @@ def update_outbound_order(order_id, title_or_cart, maybe_cart=None):
     valid_cart = [item for item in cart or [] if int(item.get('요청수량', 0) or 0) > 0]
     if not valid_cart:
         raise ValueError('저장할 출고지시 품목이 없습니다.')
+
     with connect() as con:
         cur = con.cursor()
-        order = cur.execute('SELECT id, status FROM outbound_orders WHERE id=?', (order_id,)).fetchone()
+        order = cur.execute('SELECT id, status, COALESCE(title, "") AS title FROM outbound_orders WHERE id=?', (order_id,)).fetchone()
         if not order:
             raise ValueError('수정할 출고지시서를 찾을 수 없습니다.')
         if str(order[1] or '') == '취소됨':
             raise ValueError('취소된 출고지시서는 수정할 수 없습니다.')
+        old_title = str(order[2] or '').strip()
+        new_title = str(title if title is not None else old_title).strip() or f'출고지시서 #{order_id}'
+        title_changed = title is not None and old_title != new_title
 
         valid_cart = _resolve_cart_inventory_ids(cur, valid_cart, action_label='수정')
-        new_requested_by_inv = {}
-        for item in valid_cart:
-            inv_key = int(item.get('id'))
-            new_requested_by_inv[inv_key] = new_requested_by_inv.get(inv_key, 0) + int(item.get('요청수량', 0) or 0)
+        new_requested_by_inv = _requested_by_inventory(valid_cart)
 
         old_rows = cur.execute('SELECT inventory_id, location, product_name, lot, exp_date, qty, company, warehouse_name\n                                  FROM outbound_order_items WHERE order_id=? ORDER BY id', (order_id,)).fetchall()
         old_by_inv = {}
@@ -300,47 +310,95 @@ def update_outbound_order(order_id, title_or_cart, maybe_cart=None):
         if missing_after_resolve:
             raise ValueError(f'현재고 DB에서 찾을 수 없는 재고ID가 있습니다: {missing_after_resolve}')
 
-        for inv_key, new_qty in new_requested_by_inv.items():
+        changed_deltas = {}
+        for inv_key in all_inv_ids:
+            old_qty = int(old_by_inv.get(inv_key, 0) or 0)
+            new_qty = int(new_requested_by_inv.get(inv_key, 0) or 0)
+            delta = new_qty - old_qty
+            if delta:
+                changed_deltas[inv_key] = delta
+
+        for inv_key, delta in changed_deltas.items():
             src = inv_map.get(inv_key)
             if not src:
                 raise ValueError(f'현재고 DB에서 찾을 수 없는 재고ID가 있습니다: {inv_key}')
-            available_after_restore = int(src.get('qty', 0) or 0) + int(old_by_inv.get(inv_key, 0) or 0)
-            if new_qty > available_after_restore:
+            before_qty = int(src.get('qty', 0) or 0)
+            after_qty = before_qty - int(delta)
+            if after_qty < 0:
                 product = src.get('product_name', '-')
                 loc = src.get('location', '-')
                 lot = src.get('lot', '-')
                 exp = display_date_only(src.get('exp_date', '-'))
-                raise ValueError(f'{product} / {loc} / {lot} / {exp} 재고가 부족합니다. 원복 후 가능 {available_after_restore}EA, 요청 {new_qty}EA')
-        for inv_key, old_qty in old_by_inv.items():
-            src = inv_map.get(inv_key)
-            if src:
-                restored = int(src.get('qty', 0) or 0) + int(old_qty or 0)
-                cur.execute('UPDATE inventory SET qty=?, updated_at=? WHERE id=?', (restored, now, inv_key))
-                src['qty'] = restored
-        running_final = {}
-        for inv_key in new_requested_by_inv:
-            _init_running_final(cur, running_final, inv_map[inv_key])
-        cur.execute('DELETE FROM outbound_order_items WHERE order_id=?', (order_id,))
-        for inv_key, new_qty in new_requested_by_inv.items():
-            src = inv_map[inv_key]
-            final_stock = int(src.get('qty', 0) or 0) - int(new_qty or 0)
-            cur.execute('UPDATE inventory SET qty=?, updated_at=? WHERE id=?', (final_stock, now, inv_key))
-        for item in valid_cart:
-            qty = int(item.get('요청수량', 0) or 0)
-            inv_key = int(item.get('id'))
-            src = inv_map[inv_key]
-            company = src.get('company', item.get('사업장', ''))
-            wh = src.get('warehouse_name', item.get('전산상 명칭', ''))
-            loc = src.get('location', item.get('로케이션', ''))
-            product = src.get('product_name', item.get('제품명', ''))
-            lot = src.get('lot', item.get('LOT', '-'))
-            exp = src.get('exp_date', item.get('유통기한', '-'))
-            cur.execute('INSERT INTO outbound_order_items(order_id, inventory_id, location, product_name, lot, exp_date, qty, company, warehouse_name)\n                           VALUES(?,?,?,?,?,?,?,?,?)', (order_id, inv_key, loc, product, lot, exp, qty, company, wh))
-            key = _stock_key(company, product, lot, exp)
-            running_final[key] = int(running_final.get(key, 0) or 0) - qty
-            insert_transaction_log(cur, created_at=now, tx_type='출고지시수정', product_name=product, warehouse_name=wh, lot=lot, exp_date=exp, from_company=company, from_location=loc, to_company=None, to_location=None, qty=qty, memo=f'출고지시서 #{order_id} 수정 / 재고 재차감', final_stock=running_final[key])
+                raise ValueError(f'{product} / {loc} / {lot} / {exp} 재고가 부족합니다. 현재 {before_qty}EA, 추가 요청 {delta}EA')
+            cur.execute('UPDATE inventory SET qty=?, updated_at=? WHERE id=?', (after_qty, now, inv_key))
+            src['qty'] = after_qty
+
+            company = src.get('company', '')
+            wh = src.get('warehouse_name', '')
+            loc = src.get('location', '')
+            product = src.get('product_name', '')
+            lot = src.get('lot', '-')
+            exp = src.get('exp_date', '-')
+            final_stock = stock_key_final_qty(cur, company=company, product_name=product, lot=lot, exp_date=exp)
+            if delta > 0:
+                change_desc = f'수량 증가 / 추가 재차감 {delta}EA'
+            else:
+                change_desc = f'수량 감소 또는 품목 제거 / {-delta}EA 원복'
+            insert_transaction_log(
+                cur,
+                created_at=now,
+                tx_type=OUTBOUND_REDEDUCT_TX_TYPE,
+                product_name=product,
+                warehouse_name=wh,
+                lot=lot,
+                exp_date=exp,
+                from_company=company,
+                from_location=loc,
+                to_company=None,
+                to_location=None,
+                qty=delta,
+                memo=f'출고지시서 #{order_id} 수정 / {change_desc}',
+                final_stock=final_stock,
+            )
+
+        if changed_deltas:
+            cur.execute('DELETE FROM outbound_order_items WHERE order_id=?', (order_id,))
+            for item in valid_cart:
+                qty = int(item.get('요청수량', 0) or 0)
+                inv_key = int(item.get('id'))
+                src = inv_map[inv_key]
+                company = src.get('company', item.get('사업장', ''))
+                wh = src.get('warehouse_name', item.get('전산상 명칭', ''))
+                loc = src.get('location', item.get('로케이션', ''))
+                product = src.get('product_name', item.get('제품명', ''))
+                lot = src.get('lot', item.get('LOT', '-'))
+                exp = src.get('exp_date', item.get('유통기한', '-'))
+                cur.execute('INSERT INTO outbound_order_items(order_id, inventory_id, location, product_name, lot, exp_date, qty, company, warehouse_name)\n                           VALUES(?,?,?,?,?,?,?,?,?)', (order_id, inv_key, loc, product, lot, exp, qty, company, wh))
+
+        memo_parts = []
+        if title_changed:
+            insert_transaction_log(
+                cur,
+                created_at=now,
+                tx_type=TITLE_EDIT_TX_TYPE,
+                product_name='출고지시서 제목',
+                warehouse_name=None,
+                lot=None,
+                exp_date=None,
+                from_company=None,
+                from_location=None,
+                to_company=None,
+                to_location=None,
+                qty=0,
+                memo=f"출고지시서 #{order_id} 제목 수정: '{old_title}' → '{new_title}'",
+                final_stock=None,
+            )
+            memo_parts.append('제목 수정')
+        if changed_deltas:
+            memo_parts.append('품목/수량 수정')
+
         if title is not None:
-            cur.execute("UPDATE outbound_orders SET title=?, status='수정됨', memo=IFNULL(memo,'') || ? WHERE id=?", (title or f'출고지시서 #{order_id}', '\n' + now + ' 수정', order_id))
+            cur.execute("UPDATE outbound_orders SET title=?, status='수정됨', memo=IFNULL(memo,'') || ? WHERE id=?", (new_title, '\n' + now + ' ' + (' / '.join(memo_parts) or '수정'), order_id))
         else:
-            cur.execute("UPDATE outbound_orders SET status='수정됨', memo=IFNULL(memo,'') || ? WHERE id=?", ('\n' + now + ' 수정', order_id))
+            cur.execute("UPDATE outbound_orders SET status='수정됨', memo=IFNULL(memo,'') || ? WHERE id=?", ('\n' + now + ' ' + (' / '.join(memo_parts) or '수정'), order_id))
         con.commit()
