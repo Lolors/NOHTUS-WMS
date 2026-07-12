@@ -252,7 +252,7 @@ def update_outbound_order(order_id, title_or_cart, maybe_cart=None):
 
     with connect() as con:
         cur = con.cursor()
-        order = cur.execute('SELECT id, status, COALESCE(title, "") AS title FROM outbound_orders WHERE id=?', (order_id,)).fetchone()
+        order = cur.execute("SELECT id, status, COALESCE(title, '') AS title FROM outbound_orders WHERE id=?", (order_id,)).fetchone()
         if not order:
             raise ValueError('수정할 출고지시서를 찾을 수 없습니다.')
         if str(order[1] or '') == '취소됨':
