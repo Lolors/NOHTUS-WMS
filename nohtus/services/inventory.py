@@ -12,6 +12,9 @@ from datetime import date, datetime
 from nohtus.db import connect, q
 
 
+OUTBOUND_DEDUCT_TYPES = ["출고지시", "출고", "출고지시수정", "출고확정", "출고지시 재차감"]
+
+
 def first_nonblank(*values):
     for v in values:
         if v is None:
@@ -63,7 +66,7 @@ def _infer_transaction_stock_company(tx_type, from_company, to_company):
     tx_type = str(tx_type or "").strip()
     if tx_type in ["입고", "출고지시취소", "재고조사불러오기", "기준재고", "전산재고", "재고조정", "재고실사", "재고정보수정"]:
         return to_company or from_company
-    if tx_type in ["출고지시", "출고", "출고지시수정", "출고확정"]:
+    if tx_type in OUTBOUND_DEDUCT_TYPES:
         return from_company or to_company
     return to_company or from_company
 
@@ -115,7 +118,7 @@ def _transaction_stock_delta(tx_type, qty, from_company=None, to_company=None):
     qty = int(qty or 0)
     if tx_type in ["입고", "출고지시취소", "재고조사불러오기", "기준재고", "전산재고"]:
         return qty
-    if tx_type in ["출고지시", "출고", "출고지시수정", "출고확정"]:
+    if tx_type in OUTBOUND_DEDUCT_TYPES:
         return -qty
     if tx_type in ["재고조정", "재고실사", "재고정보수정"]:
         return qty
@@ -231,49 +234,11 @@ def move_inventory(src_id, to_company, to_location, qty, memo=""):
         else:
             cur.execute("""INSERT INTO inventory(company,product_name,warehouse_name,lot,exp_date,location,qty,updated_at)
                            VALUES(?,?,?,?,?,?,?,?)""", (to_company, product_name, dest_warehouse, src["lot"], src["exp_date"], to_location, qty, now))
-        tx_type = "사업장+위치이동"
-        if src["company"] == to_company and src["location"] != to_location:
-            tx_type = "위치이동"
-        elif src["company"] != to_company and src["location"] == to_location:
-            tx_type = "사업장이동"
-        if src["company"] != "비자료" and to_company == "비자료":
-            tx_type = "비자료전환"
 
-        move_memo = str(memo or "").strip()
-        if str(old_warehouse or "").strip() != str(dest_warehouse or "").strip():
-            erp_note = f"전산상명칭 변경: {old_warehouse or '-'} → {dest_warehouse or '-'}"
-            move_memo = f"{move_memo} / {erp_note}" if move_memo else erp_note
-        if src["company"] != to_company:
-            dest_stock_key_qty = stock_key_final_qty(cur, company=to_company, product_name=product_name, lot=src["lot"], exp_date=src["exp_date"])
-            stock_note = f"이동 후 {to_company} 해당 LOT 재고: {dest_stock_key_qty}EA"
-            move_memo = f"{move_memo} / {stock_note}" if move_memo else stock_note
-
-        insert_transaction_log(cur, created_at=now, tx_type=tx_type, product_name=product_name, warehouse_name=dest_warehouse,
-                               lot=src["lot"], exp_date=src["exp_date"], from_company=src["company"], from_location=src["location"],
-                               to_company=to_company, to_location=to_location, qty=qty, memo=move_memo)
+        from_company = src["company"]
+        tx_type = "위치이동" if from_company == to_company else "사업장+위치이동"
+        insert_transaction_log(cur, created_at=now, tx_type=tx_type, product_name=product_name,
+                               warehouse_name=old_warehouse, lot=src["lot"], exp_date=src["exp_date"],
+                               from_company=from_company, from_location=src["location"],
+                               to_company=to_company, to_location=to_location, qty=qty, memo=memo)
         con.commit()
-
-
-def adjust_inventory(inv_id, actual_qty, reason, memo=""):
-    """실사 결과 기준으로 해당 재고 행의 수량을 실제 수량으로 조정한다."""
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with connect() as con:
-        import sqlite3 as _sqlite3
-        con.row_factory = _sqlite3.Row
-        cur = con.cursor()
-        src = cur.execute("SELECT * FROM inventory WHERE id=?", (inv_id,)).fetchone()
-        if not src:
-            raise ValueError("조정할 재고를 찾을 수 없습니다.")
-        actual_qty = int(actual_qty)
-        if actual_qty < 0:
-            raise ValueError("실물수량은 0 이상이어야 합니다.")
-        before = int(src["qty"])
-        diff = actual_qty - before
-        cur.execute("UPDATE inventory SET qty=?, updated_at=? WHERE id=?", (actual_qty, now, inv_id))
-        reason_memo = reason if not memo else f"{reason} / {memo}"
-        final_stock = stock_key_final_qty(cur, company=src["company"], product_name=src["product_name"], lot=src["lot"], exp_date=src["exp_date"])
-        insert_transaction_log(cur, created_at=now, tx_type="재고조정", product_name=src["product_name"], warehouse_name=src["warehouse_name"],
-                               lot=src["lot"], exp_date=src["exp_date"], from_company=src["company"], from_location=src["location"],
-                               to_company=src["company"], to_location=src["location"], qty=diff, memo=reason_memo, final_stock=final_stock)
-        con.commit()
-        return before, actual_qty, diff
