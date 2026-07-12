@@ -1,18 +1,9 @@
 from __future__ import annotations
 
 import hashlib
-import html
-import os
-import secrets
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import streamlit as st
-import streamlit.components.v1 as components
-
-try:
-    from streamlit_cookies_manager import EncryptedCookieManager
-except Exception:  # pragma: no cover - optional dependency 안내용
-    EncryptedCookieManager = None
 
 from nohtus.db import connect, q
 
@@ -33,152 +24,14 @@ ROLE_PAGES = {
     "viewer": {"로케이션 맵", "유통기한 임박", "자사제품 조회", "전체 조회"},
 }
 
-REMEMBER_COOKIE_KEY = "remember_login_token"
-REMEMBER_COOKIE_PREFIX = "nohtus_wms_"
-REMEMBER_QUERY_KEY = "remember_token"
-REMEMBER_STORAGE_KEY = "nohtus_wms_remember_token"
-REMEMBER_DAYS = 30
-COOKIE_PASSWORD_ENV = "NOHTUS_COOKIE_SECRET"
-COOKIE_PASSWORD_FALLBACK = "NOHTUS-WMS-remember-login-cookie-v1"
-
-
-def _now_str() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _expires_str(days: int = REMEMBER_DAYS) -> str:
-    return (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-
 
 def _hash_password(username: str, password: str) -> str:
     raw = f"NOHTUS-WMS::{username}::{password}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
 
 
-def _hash_login_token(token: str) -> str:
-    raw = f"NOHTUS-WMS-LOGIN-TOKEN::{token}".encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()
-
-
-def _get_query_param(key: str) -> str:
-    try:
-        value = st.query_params.get(key, "")
-    except Exception:
-        value = st.experimental_get_query_params().get(key, [""])
-    if isinstance(value, list):
-        value = value[0] if value else ""
-    return str(value or "")
-
-
-def _clear_remember_query_param():
-    try:
-        if REMEMBER_QUERY_KEY in st.query_params:
-            del st.query_params[REMEMBER_QUERY_KEY]
-    except Exception:
-        try:
-            params = st.experimental_get_query_params()
-            params.pop(REMEMBER_QUERY_KEY, None)
-            st.experimental_set_query_params(**params)
-        except Exception:
-            pass
-
-
-def _get_cookie_manager():
-    if EncryptedCookieManager is None:
-        return None
-    if "_nohtus_cookie_manager" not in st.session_state:
-        st.session_state["_nohtus_cookie_manager"] = EncryptedCookieManager(
-            prefix=REMEMBER_COOKIE_PREFIX,
-            password=os.environ.get(COOKIE_PASSWORD_ENV, COOKIE_PASSWORD_FALLBACK),
-        )
-    cookies = st.session_state["_nohtus_cookie_manager"]
-    if not cookies.ready():
-        st.stop()
-    return cookies
-
-
-def _delete_remember_cookie():
-    cookies = _get_cookie_manager()
-    if cookies is None:
-        return
-    if REMEMBER_COOKIE_KEY in cookies:
-        del cookies[REMEMBER_COOKIE_KEY]
-        cookies.save()
-
-
-def _render_storage_bootstrap():
-    components.html(
-        f"""
-        <script>
-        (function() {{
-            try {{
-                const storageKey = {REMEMBER_STORAGE_KEY!r};
-                const queryKey = {REMEMBER_QUERY_KEY!r};
-                const token = window.parent.localStorage.getItem(storageKey);
-                const url = new URL(window.parent.location.href);
-                if (token && !url.searchParams.get(queryKey)) {{
-                    url.searchParams.set(queryKey, token);
-                    window.parent.location.replace(url.toString());
-                }}
-            }} catch (e) {{}}
-        }})();
-        </script>
-        """,
-        height=0,
-    )
-
-
-def _store_token_in_browser_and_reload(token: str):
-    safe_token = html.escape(token, quote=True)
-    st.markdown("<div class='login-notice'>로그인 정보를 저장하는 중입니다.</div>", unsafe_allow_html=True)
-    components.html(
-        f"""
-        <script>
-        (function() {{
-            try {{
-                const storageKey = {REMEMBER_STORAGE_KEY!r};
-                const queryKey = {REMEMBER_QUERY_KEY!r};
-                const token = {safe_token!r};
-                window.parent.localStorage.setItem(storageKey, token);
-                const url = new URL(window.parent.location.href);
-                url.searchParams.set(queryKey, token);
-                window.parent.location.replace(url.toString());
-            }} catch (e) {{
-                window.parent.location.reload();
-            }}
-        }})();
-        </script>
-        """,
-        height=0,
-    )
-    st.stop()
-
-
-def _clear_browser_token_and_reload():
-    components.html(
-        f"""
-        <script>
-        (function() {{
-            try {{
-                const storageKey = {REMEMBER_STORAGE_KEY!r};
-                const queryKey = {REMEMBER_QUERY_KEY!r};
-                window.parent.localStorage.removeItem(storageKey);
-                const url = new URL(window.parent.location.href);
-                url.searchParams.delete(queryKey);
-                window.parent.location.replace(url.toString());
-            }} catch (e) {{
-                window.parent.location.reload();
-            }}
-        }})();
-        </script>
-        """,
-        height=0,
-    )
-    st.stop()
-
-
 def ensure_auth_tables():
-    now = _now_str()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with connect() as con:
         cur = con.cursor()
         cur.execute(
@@ -205,19 +58,6 @@ def ensure_auth_tables():
         }.items():
             if col not in user_cols:
                 cur.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
-
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS login_tokens(
-                token_hash TEXT PRIMARY KEY,
-                username TEXT NOT NULL,
-                expires_at TEXT NOT NULL,
-                created_at TEXT,
-                last_used_at TEXT
-            )
-            """
-        )
-        cur.execute("DELETE FROM login_tokens WHERE expires_at < ?", (now,))
 
         cur.execute(
             """
@@ -257,7 +97,6 @@ def ensure_auth_tables():
             cur.execute("DELETE FROM users WHERE username=?", (old_username,))
             cur.execute("DELETE FROM favorite_products WHERE username=?", (old_username,))
             cur.execute("DELETE FROM recent_product_views WHERE username=?", (old_username,))
-            cur.execute("DELETE FROM login_tokens WHERE username=?", (old_username,))
             try:
                 cur.execute("DELETE FROM mobile_favorite_products WHERE username=?", (old_username,))
             except Exception:
@@ -297,117 +136,10 @@ def is_admin():
     return current_role().strip().lower() == "admin" or current_username().strip().lower() in ADMIN_USERNAMES
 
 
-def _user_dict_from_row(username: str, row) -> dict:
-    return {
-        "username": username,
-        "display_name": str(row.get("display_name") or username),
-        "role": str(row.get("role") or "user"),
-    }
-
-
-def _create_login_token(username: str) -> str:
-    token = secrets.token_urlsafe(32)
-    token_hash = _hash_login_token(token)
-    now = _now_str()
-    expires_at = _expires_str()
-    with connect() as con:
-        con.execute(
-            "INSERT INTO login_tokens(token_hash, username, expires_at, created_at, last_used_at) VALUES(?,?,?,?,?)",
-            (token_hash, username, expires_at, now, now),
-        )
-        con.commit()
-    return token
-
-
-def _save_remember_login(username: str) -> str:
-    token = _create_login_token(username)
-    cookies = _get_cookie_manager()
-    if cookies is not None:
-        cookies[REMEMBER_COOKIE_KEY] = token
-        cookies.save()
-    return token
-
-
-def _login_user(username: str, row, remember_login: bool = False):
-    st.session_state["current_user"] = _user_dict_from_row(username, row)
-    if remember_login:
-        return _save_remember_login(username)
-    return ""
-
-
-def _restore_login_with_token(token: str) -> bool:
-    token = str(token or "").strip()
-    if not token:
-        return False
-    token_hash = _hash_login_token(token)
-    df = q(
-        """
-        SELECT t.username, u.display_name, u.role
-        FROM login_tokens t
-        JOIN users u ON u.username = t.username
-        WHERE t.token_hash=?
-          AND t.expires_at >= ?
-          AND COALESCE(u.active,1)=1
-        """,
-        (token_hash, _now_str()),
-    )
-    if df.empty:
-        return False
-
-    row = df.iloc[0]
-    username = str(row.get("username") or "").strip().lower()
-    if not username:
-        return False
-
-    st.session_state["current_user"] = _user_dict_from_row(username, row)
-    with connect() as con:
-        con.execute("UPDATE login_tokens SET last_used_at=? WHERE token_hash=?", (_now_str(), token_hash))
-        con.commit()
-    return True
-
-
-def _restore_login_from_query() -> bool:
-    token = _get_query_param(REMEMBER_QUERY_KEY)
-    if not token:
-        return False
-    ok = _restore_login_with_token(token)
-    if ok:
-        _clear_remember_query_param()
-        return True
-    _clear_remember_query_param()
-    _delete_remember_cookie()
-    _clear_browser_token_and_reload()
-    return False
-
-
-def _restore_login_from_cookie() -> bool:
-    cookies = _get_cookie_manager()
-    if cookies is None:
-        return False
-
-    token = cookies.get(REMEMBER_COOKIE_KEY)
-    if not token:
-        return False
-
-    ok = _restore_login_with_token(str(token))
-    if not ok:
-        _delete_remember_cookie()
-    return ok
-
-
 def logout():
-    token = _get_query_param(REMEMBER_QUERY_KEY)
-    cookies = _get_cookie_manager()
-    if not token and cookies is not None:
-        token = cookies.get(REMEMBER_COOKIE_KEY) or ""
-    if token:
-        with connect() as con:
-            con.execute("DELETE FROM login_tokens WHERE token_hash=?", (_hash_login_token(str(token)),))
-            con.commit()
-    _delete_remember_cookie()
-    for key in ["current_user", "page", "login_cookie_warning"]:
+    for key in ["current_user", "page"]:
         st.session_state.pop(key, None)
-    _clear_browser_token_and_reload()
+    st.rerun()
 
 
 def _load_user(username: str):
@@ -435,7 +167,6 @@ def render_login():
     <style>
     @media (min-width: 769px) {
         div[data-testid="stTextInput"],
-        div[data-testid="stCheckbox"],
         div[data-testid="stButton"],
         div[data-testid="stFormSubmitButton"],
         div[data-testid="stForm"] {
@@ -460,7 +191,6 @@ def render_login():
     }
     @media (max-width: 768px) {
         div[data-testid="stTextInput"],
-        div[data-testid="stCheckbox"],
         div[data-testid="stButton"],
         div[data-testid="stFormSubmitButton"],
         div[data-testid="stForm"] {
@@ -478,10 +208,6 @@ def render_login():
     """, unsafe_allow_html=True)
     st.markdown("<div class='login-title'>NOHTUS WMS 로그인</div>", unsafe_allow_html=True)
 
-    warning = st.session_state.pop("login_cookie_warning", "")
-    if warning:
-        _login_notice(warning)
-
     username = st.text_input("아이디", key="login_username_input").strip().lower()
     row = _load_user(username) if username else None
 
@@ -490,7 +216,6 @@ def render_login():
     if row is None:
         with st.form("login_form_unknown_user", clear_on_submit=False):
             st.text_input("비밀번호", type="password", key="login_password_unknown")
-            st.checkbox("로그인 유지", key="remember_login_unknown")
             submitted = st.form_submit_button("로그인", type="primary", use_container_width=True)
         if submitted:
             if not username:
@@ -510,7 +235,6 @@ def render_login():
         with st.form("first_password_form", clear_on_submit=False):
             p1 = st.text_input("새 비밀번호", type="password", key="first_password_1")
             p2 = st.text_input("새 비밀번호 확인", type="password", key="first_password_2")
-            remember_login = st.checkbox("로그인 유지", key="remember_login_first")
             submitted = st.form_submit_button("비밀번호 설정 후 로그인", type="primary", use_container_width=True)
         if submitted:
             if not p1 or len(p1) < 4:
@@ -520,26 +244,21 @@ def render_login():
                 _login_notice("비밀번호 확인이 일치하지 않습니다.")
                 return False
             new_hash = _hash_password(username, p1)
-            now = _now_str()
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             with connect() as con:
                 con.execute("UPDATE users SET password_hash=?, updated_at=? WHERE username=?", (new_hash, now, username))
                 con.commit()
-            token = _login_user(username, row, remember_login=remember_login)
-            if token:
-                _store_token_in_browser_and_reload(token)
+            st.session_state["current_user"] = {"username": username, "display_name": str(row.get("display_name") or username), "role": str(row.get("role") or "user")}
             st.rerun()
     else:
         with st.form("login_form", clear_on_submit=False):
             pw = st.text_input("비밀번호", type="password", key="login_password")
-            remember_login = st.checkbox("로그인 유지", key="remember_login")
             submitted = st.form_submit_button("로그인", type="primary", use_container_width=True)
         if submitted:
             if _hash_password(username, pw) != password_hash:
                 _login_notice("아이디 또는 비밀번호가 맞지 않습니다.")
                 return False
-            token = _login_user(username, row, remember_login=remember_login)
-            if token:
-                _store_token_in_browser_and_reload(token)
+            st.session_state["current_user"] = {"username": username, "display_name": str(row.get("display_name") or username), "role": str(row.get("role") or "user")}
             st.rerun()
     return False
 
@@ -548,11 +267,6 @@ def require_login():
     ensure_auth_tables()
     if get_current_user():
         return True
-    if _restore_login_from_query():
-        return True
-    if _restore_login_from_cookie():
-        return True
-    _render_storage_bootstrap()
     render_login()
     return False
 
