@@ -6,6 +6,7 @@ app.py safely during gradual refactoring.
 
 from __future__ import annotations
 
+import calendar
 from datetime import date, datetime
 
 import pandas as pd
@@ -15,6 +16,8 @@ def normalize_exp_date(value) -> str:
     """Normalize common expiry-date inputs to YYYY-MM-DD.
 
     Empty values are stored as '-'. Two-digit years are treated as 20xx.
+    When only year/month is entered, store one day before that month's final day.
+    Example: 28/3 -> 2028-03-30.
     """
     if value is None:
         return "-"
@@ -31,23 +34,25 @@ def normalize_exp_date(value) -> str:
     try:
         if compact.isdigit() and len(compact) == 8:
             y, m, d = int(compact[:4]), int(compact[4:6]), int(compact[6:8])
-            return f"{y:04d}-{m:02d}-{d:02d}"
+            return date(y, m, d).strftime("%Y-%m-%d")
 
         if compact.isdigit() and len(compact) == 6:
             y, m, d = int(compact[:2]), int(compact[2:4]), int(compact[4:6])
             y = 2000 + y if y < 100 else y
-            return f"{y:04d}-{m:02d}-{d:02d}"
+            return date(y, m, d).strftime("%Y-%m-%d")
 
         parts = [x for x in compact.split(".") if x]
         if len(parts) == 3:
             y, m, d = map(int, parts)
             y = 2000 + y if y < 100 else y
-            return f"{y:04d}-{m:02d}-{d:02d}"
+            return date(y, m, d).strftime("%Y-%m-%d")
 
         if len(parts) == 2:
             y, m = map(int, parts)
             y = 2000 + y if y < 100 else y
-            return f"{y:04d}-{m:02d}-01"
+            last_day = calendar.monthrange(y, m)[1]
+            target_day = max(1, last_day - 1)
+            return date(y, m, target_day).strftime("%Y-%m-%d")
     except Exception:
         pass
 
