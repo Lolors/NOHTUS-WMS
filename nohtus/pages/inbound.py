@@ -137,7 +137,12 @@ def page_inbound():
 
     with top_right:
         lot = st.text_input("LOT/제조번호", value="", placeholder="미입력 시 '-' 저장", key="inbound_lot")
-        exp = st.text_input("유통기한", value="", placeholder="예: 28/3/2, 28.3.2, 2028-03-02 / 미입력 시 '-' 저장", key="inbound_exp")
+        exp = st.text_input(
+            "유통기한",
+            value="",
+            placeholder="예) 28/3 → 2028-03-30, 28.3.2 → 2028-03-02 / 미입력 시 '-' 저장",
+            key="inbound_exp",
+        )
 
     st.markdown("---")
     map_col, pos_col = st.columns([7.3, 2.7], gap="large")
