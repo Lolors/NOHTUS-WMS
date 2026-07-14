@@ -67,6 +67,26 @@ def init_db():
     )
     """)
     cur.execute("""
+    CREATE TABLE IF NOT EXISTS purchase_history(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        business_name TEXT NOT NULL,
+        purchase_date TEXT NOT NULL,
+        supplier_name TEXT NOT NULL,
+        erp_product_name TEXT NOT NULL,
+        specification TEXT,
+        quantity REAL,
+        unit_price REAL,
+        note TEXT,
+        standard_product_name TEXT,
+        source_file TEXT,
+        imported_at TEXT,
+        duplicate_key TEXT UNIQUE
+    )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_purchase_history_standard ON purchase_history(standard_product_name)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_purchase_history_erp_name ON purchase_history(erp_product_name)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_purchase_history_date ON purchase_history(purchase_date)")
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS erp_ambiguous_candidates(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         erp_company TEXT NOT NULL,
