@@ -156,6 +156,33 @@ def _delete_transaction_ids(tx_ids):
     return len(rows)
 
 
+def _append_history_keyword_filter(conditions, params, keyword):
+    """Apply keyword search to the whole date-filtered transaction set before pagination."""
+    term = str(keyword or "").strip()
+    if not term:
+        return
+
+    searchable_columns = [
+        "created_at",
+        "actor",
+        "tx_type",
+        "product_name",
+        "warehouse_name",
+        "lot",
+        "exp_date",
+        "from_company",
+        "from_location",
+        "to_company",
+        "to_location",
+        "memo",
+    ]
+    like = f"%{term}%"
+    conditions.append(
+        "(" + " OR ".join([f"IFNULL({col}, '') LIKE ?" for col in searchable_columns] + ["CAST(qty AS TEXT) LIKE ?", "CAST(final_stock AS TEXT) LIKE ?"]) + ")"
+    )
+    params.extend([like] * (len(searchable_columns) + 2))
+
+
 def page_history():
     from nohtus.services.closing import _infer_customer_from_title
     st.title("이력 조회")
@@ -179,9 +206,14 @@ def page_history():
 
     search_col, customer_col = st.columns(2)
     with search_col:
-        term = st.text_input("제품명/로케이션 검색", placeholder="제품명, LOT, 로케이션 일부 입력", key="history_search_term")
+        term = st.text_input(
+            "검색어 (설정 기간 전체)",
+            placeholder="제품명, LOT, 로케이션, 사용자, 사업장, 메모 일부 입력",
+            key="history_search_term",
+        )
     with customer_col:
         customer_term = st.text_input("매출처 검색", placeholder="매출처명 일부 입력", key="history_customer_term")
+    st.caption("검색어는 현재 표시된 페이지가 아니라 설정한 기간의 전체 이력에 먼저 적용한 뒤, 검색 결과를 페이지로 나눠 표시합니다.")
 
     filter_key = f"{company}|{tx_label}|{start_date}|{end_date}|{term.strip()}|{customer_term.strip()}"
     if st.session_state.get("history_filter_key") != filter_key:
@@ -209,10 +241,7 @@ def page_history():
             params.append(tx_label)
     else:
         conditions.append("tx_type NOT IN ('재고조사불러오기','ERP비교','출고','출고확정')")
-    if term.strip():
-        like = f"%{term.strip()}%"
-        conditions.append("(product_name LIKE ? OR lot LIKE ? OR from_location LIKE ? OR to_location LIKE ? OR memo LIKE ?)")
-        params.extend([like, like, like, like, like])
+    _append_history_keyword_filter(conditions, params, term)
     if customer_term.strip():
         matched_order_ids = []
         try:
@@ -260,7 +289,8 @@ def page_history():
 
     start_no = offset + 1
     end_no = min(offset + len(df), total_count)
-    st.caption(f"총 {total_count:,}건 / {current_page:,}페이지/{total_pages:,}페이지 / 현재 {start_no:,}~{end_no:,}건 표시")
+    result_label = "검색결과" if term.strip() or customer_term.strip() else "총"
+    st.caption(f"{result_label} {total_count:,}건 / {current_page:,}페이지/{total_pages:,}페이지 / 현재 {start_no:,}~{end_no:,}건 표시")
 
     final_values = []
     qty_values = []
