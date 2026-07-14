@@ -277,6 +277,18 @@ def _ensure_query_items():
         st.session_state["purchase_query_items"] = [""]
 
 
+def _filter_product_options(options, keyword, current=""):
+    keyword = _clean_text(keyword).replace(" ", "").lower()
+    if not keyword:
+        filtered = list(options)
+    else:
+        filtered = [name for name in options if keyword in name.replace(" ", "").lower()]
+
+    if current and current not in filtered and current in options:
+        filtered.insert(0, current)
+    return filtered
+
+
 def _render_query_items(options):
     _ensure_query_items()
 
@@ -288,13 +300,23 @@ def _render_query_items(options):
     with clear_col:
         if st.button("전체 초기화", use_container_width=True):
             st.session_state["purchase_query_items"] = [""]
+            for key in list(st.session_state.keys()):
+                if str(key).startswith("purchase_query_search_"):
+                    st.session_state.pop(key, None)
             st.rerun()
 
     selected = []
     for idx, current in enumerate(st.session_state["purchase_query_items"]):
-        c1, c2 = st.columns([8, 2])
-        with c1:
-            option_list = [""] + options
+        search_col, select_col, delete_col = st.columns([3, 7, 2])
+        with search_col:
+            keyword = st.text_input(
+                f"{idx + 1}번 검색",
+                key=f"purchase_query_search_{idx}",
+                placeholder="제품명 검색",
+            )
+        with select_col:
+            filtered_options = _filter_product_options(options, keyword, current)
+            option_list = [""] + filtered_options
             index = option_list.index(current) if current in option_list else 0
             value = st.selectbox(
                 f"{idx + 1}번 품목",
@@ -306,10 +328,11 @@ def _render_query_items(options):
             st.session_state["purchase_query_items"][idx] = value
             if value:
                 selected.append((idx + 1, value))
-        with c2:
+        with delete_col:
             st.write("")
             if len(st.session_state["purchase_query_items"]) > 1 and st.button("삭제", key=f"purchase_query_delete_{idx}", use_container_width=True):
                 st.session_state["purchase_query_items"].pop(idx)
+                st.session_state.pop(f"purchase_query_search_{idx}", None)
                 st.rerun()
 
     return selected
