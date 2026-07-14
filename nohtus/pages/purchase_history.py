@@ -349,16 +349,19 @@ def page_purchase_history():
         st.info("제품 매칭표에 등록된 제품이 없습니다. 먼저 제품 매칭표를 업로드해 주세요.")
         return
 
-    st.markdown("### 조회 품목")
-    d1, d2 = st.columns(2)
-    with d1:
-        start = st.date_input("시작일", value=date(2020, 1, 1), key="purchase_start_date")
-    with d2:
-        end = st.date_input("종료일", value=date.today(), key="purchase_end_date")
+    query_col, _spacer = st.columns([1, 1], gap="large")
+    with query_col:
+        st.markdown("### 조회 품목")
+        d1, d2 = st.columns(2)
+        with d1:
+            start = st.date_input("시작일", value=date(2020, 1, 1), key="purchase_start_date")
+        with d2:
+            end = st.date_input("종료일", value=date.today(), key="purchase_end_date")
 
-    selected = _render_query_items(options)
+        selected = _render_query_items(options)
+        run_query = st.button("매입가 조회", type="primary", use_container_width=True)
 
-    if st.button("매입가 조회", type="primary", use_container_width=True):
+    if run_query:
         if not selected:
             st.warning("조회할 품목을 1개 이상 선택해 주세요.")
             return
