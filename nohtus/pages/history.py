@@ -13,21 +13,134 @@ from nohtus.db import connect, q
 from nohtus.dates import display_date_only
 
 
+ERP_NAME_COLUMN_BY_COMPANY = {
+    "노투스팜": "erp_nohtuspharm_name",
+    "노투스": "erp_nohtus_name",
+    "NOH": "erp_noh_name",
+    "비자료": "bidata_name",
+}
+
+
 def _norm(value, fallback="-"):
     text = str(value if value is not None else "").strip()
     return text if text else fallback
 
 
+def _resolved_inventory_warehouse_name(cur, company, product_name, fallback=""):
+    """Return the ERP/display name that belongs to the inventory row's company."""
+    company = _norm(company, "")
+    product_name = _norm(product_name, "")
+    fallback = _norm(fallback, "")
+    mapping_col = ERP_NAME_COLUMN_BY_COMPANY.get(company)
+
+    if mapping_col and product_name:
+        row = cur.execute(
+            f"SELECT TRIM(COALESCE({mapping_col}, '')) FROM products WHERE standard_name=? LIMIT 1",
+            (product_name,),
+        ).fetchone()
+        mapped_name = _norm(row[0] if row else "", "")
+        if mapped_name and mapped_name != "-":
+            return mapped_name
+
+    existing = cur.execute(
+        """
+        SELECT TRIM(COALESCE(warehouse_name, '')) AS warehouse_name
+        FROM inventory
+        WHERE company=? AND product_name=?
+          AND TRIM(COALESCE(warehouse_name, '')) <> ''
+          AND TRIM(COALESCE(warehouse_name, '')) <> product_name
+        ORDER BY qty DESC, id DESC
+        LIMIT 1
+        """,
+        (company, product_name),
+    ).fetchone()
+    existing_name = _norm(existing[0] if existing else "", "")
+    if existing_name and existing_name != "-":
+        return existing_name
+
+    return fallback or product_name
+
+
+def _merge_legacy_inventory_name(cur, *, company, product_name, warehouse_name, lot, exp_date, location):
+    """Merge rows created with standard_name as ERP name into the proper ERP-name row."""
+    if not warehouse_name or warehouse_name == product_name:
+        return
+
+    legacy_rows = cur.execute(
+        """
+        SELECT id, qty
+        FROM inventory
+        WHERE company=? AND product_name=? AND lot=? AND exp_date=? AND location=?
+          AND (
+              TRIM(COALESCE(warehouse_name, '')) = ''
+              OR TRIM(COALESCE(warehouse_name, '')) = ?
+          )
+        ORDER BY id
+        """,
+        (company, product_name, lot, exp_date, location, product_name),
+    ).fetchall()
+    if not legacy_rows:
+        return
+
+    target = cur.execute(
+        """
+        SELECT id, qty
+        FROM inventory
+        WHERE company=? AND product_name=? AND IFNULL(warehouse_name,'')=?
+          AND lot=? AND exp_date=? AND location=?
+        ORDER BY id
+        LIMIT 1
+        """,
+        (company, product_name, warehouse_name, lot, exp_date, location),
+    ).fetchone()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if target:
+        target_id, target_qty = int(target[0]), int(target[1] or 0)
+        legacy_qty = sum(int(row[1] or 0) for row in legacy_rows if int(row[0]) != target_id)
+        if legacy_qty:
+            cur.execute(
+                "UPDATE inventory SET qty=?, updated_at=? WHERE id=?",
+                (target_qty + legacy_qty, now, target_id),
+            )
+        legacy_ids = [int(row[0]) for row in legacy_rows if int(row[0]) != target_id]
+        if legacy_ids:
+            placeholders = ",".join(["?"] * len(legacy_ids))
+            cur.execute(f"DELETE FROM inventory WHERE id IN ({placeholders})", tuple(legacy_ids))
+    else:
+        keep_id, keep_qty = int(legacy_rows[0][0]), int(legacy_rows[0][1] or 0)
+        extra_qty = sum(int(row[1] or 0) for row in legacy_rows[1:])
+        cur.execute(
+            "UPDATE inventory SET warehouse_name=?, qty=?, updated_at=? WHERE id=?",
+            (warehouse_name, keep_qty + extra_qty, now, keep_id),
+        )
+        extra_ids = [int(row[0]) for row in legacy_rows[1:]]
+        if extra_ids:
+            placeholders = ",".join(["?"] * len(extra_ids))
+            cur.execute(f"DELETE FROM inventory WHERE id IN ({placeholders})", tuple(extra_ids))
+
+
 def _adjust_inventory_qty(cur, *, company, product_name, warehouse_name, lot, exp_date, location, delta):
     company = _norm(company, "")
     product_name = _norm(product_name, "")
-    warehouse_name = _norm(warehouse_name, "")
+    warehouse_name = _resolved_inventory_warehouse_name(cur, company, product_name, warehouse_name)
     lot = _norm(lot)
     exp_date = _norm(exp_date)
     location = _norm(location, "")
     delta = int(delta or 0)
     if not company or not product_name or not location or delta == 0:
         return
+
+    _merge_legacy_inventory_name(
+        cur,
+        company=company,
+        product_name=product_name,
+        warehouse_name=warehouse_name,
+        lot=lot,
+        exp_date=exp_date,
+        location=location,
+    )
+
     row = cur.execute(
         """
         SELECT id, qty FROM inventory
