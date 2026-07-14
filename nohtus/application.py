@@ -19,6 +19,7 @@ from nohtus.pages.outbound_date_fix import page_outbound
 from nohtus.pages.own_product_status import page_own_product_status
 from nohtus.pages.product_matching_business import page_product_matching
 from nohtus.pages.product_shortcuts import page_recent_products
+from nohtus.pages.purchase_history import page_purchase_history
 from nohtus.pages.saved_outbound_date_fix import page_saved_outbound as page_saved_outbound_refactored
 from nohtus.pages.shippable_inventory import page_shippable_inventory
 from nohtus.pages.stocktake_business import page_stocktake
@@ -78,5 +79,7 @@ def main():
         page_product_matching()
     elif menu == "거래처 관리":
         page_customer_master()
+    elif menu == "매입가 조회":
+        page_purchase_history()
     elif menu == "이력 조회":
         page_history()
