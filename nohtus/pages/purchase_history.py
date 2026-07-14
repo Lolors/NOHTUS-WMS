@@ -1,4 +1,5 @@
 import hashlib
+import re
 from datetime import date, datetime
 
 import pandas as pd
@@ -36,6 +37,26 @@ def _normalize_money(value):
 def _normalize_date(value):
     if pd.isna(value) or str(value).strip() == "":
         return ""
+
+    text = _clean_text(value)
+    if text.endswith(".0"):
+        text = text[:-2]
+
+    digits = re.sub(r"[^0-9]", "", text)
+    if len(digits) == 8 and digits[:2] in ["19", "20"]:
+        try:
+            return datetime.strptime(digits, "%Y%m%d").strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    short_match = re.fullmatch(r"(\d{2})[.\-/](\d{1,2})[.\-/](\d{1,2})", text)
+    if short_match:
+        yy, mm, dd = short_match.groups()
+        try:
+            return date(2000 + int(yy), int(mm), int(dd)).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
     parsed = pd.to_datetime(value, errors="coerce")
     if pd.isna(parsed):
         return ""
