@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 import nohtus.pages.closing as closing_page
-from nohtus.pages.erp_stock_compare_live import page_erp_stock_compare as page_erp_stock_compare_live
+from nohtus.pages.erp_stock_compare_inventory import page_erp_stock_compare as page_erp_stock_compare_live
 
 
 _VALID_HISTORY_TYPES = (
@@ -48,7 +48,7 @@ def _replace_transaction_history_gate(sql):
 
 
 def page_closing():
-    """출고일자 보정과 실시간 ERP/WMS 비교를 적용한 마감 페이지."""
+    """출고일자 보정과 inventory 기준 ERP/WMS 비교를 적용한 마감 페이지."""
     original_q = closing_page.q
     original_erp_compare = closing_page.page_erp_stock_compare
 
