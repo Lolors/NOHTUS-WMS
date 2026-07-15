@@ -17,6 +17,7 @@ SESSION_KEYS = [
     "erp_compare_live_file_signature",
     "erp_compare_live_compared_at",
     "erp_compare_live_source_rows",
+    "erp_compare_live_wms_fingerprint",
 ]
 
 
@@ -95,6 +96,42 @@ def _load_live_wms_stock():
             }
         )
     )
+
+
+def _wms_fingerprint(wms_live):
+    if wms_live is None or wms_live.empty:
+        return "empty"
+    stable = wms_live.sort_values(["사업장", "매칭키"]).fillna("")
+    payload = stable.to_csv(index=False).encode("utf-8")
+    return hashlib.sha1(payload).hexdigest()
+
+
+def _ambiguous_mapping_rows():
+    products = q(
+        """
+        SELECT standard_name, erp_nohtuspharm_name, erp_noh_name, erp_nohtus_name
+        FROM products
+        WHERE TRIM(COALESCE(standard_name,''))<>''
+        """
+    )
+    if products.empty:
+        return []
+
+    company_columns = {
+        "노투스팜": "erp_nohtuspharm_name",
+        "NOH": "erp_noh_name",
+        "노투스": "erp_nohtus_name",
+    }
+    ambiguous = []
+    for company, column in company_columns.items():
+        work = products[["standard_name", column]].copy()
+        work[column] = work[column].apply(closing_service.clean_excel_text)
+        work = work[work[column] != ""]
+        for standard_name, group in work.groupby("standard_name"):
+            names = sorted(set(group[column].tolist()))
+            if len(names) > 1:
+                ambiguous.append((company, str(standard_name), names))
+    return ambiguous
 
 
 def _prepare_erp_snapshot(erp_sum):
@@ -177,10 +214,12 @@ def page_erp_stock_compare():
     if run_compare:
         erp_sum, source_rows = closing_service.read_and_sum_erp_current_stock(uploaded_files)
         snapshot = _prepare_erp_snapshot(erp_sum)
+        wms_at_compare = _load_live_wms_stock()
         st.session_state["erp_compare_live_erp_rows"] = snapshot.to_dict("records")
         st.session_state["erp_compare_live_file_signature"] = signature
         st.session_state["erp_compare_live_compared_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         st.session_state["erp_compare_live_source_rows"] = int(source_rows)
+        st.session_state["erp_compare_live_wms_fingerprint"] = _wms_fingerprint(wms_at_compare)
 
     stored_rows = st.session_state.get("erp_compare_live_erp_rows")
     if stored_rows is None:
@@ -188,6 +227,17 @@ def page_erp_stock_compare():
 
     erp_snapshot = pd.DataFrame(stored_rows)
     wms_live = _load_live_wms_stock()
+    current_fingerprint = _wms_fingerprint(wms_live)
+    compared_fingerprint = st.session_state.get("erp_compare_live_wms_fingerprint")
+    if compared_fingerprint and compared_fingerprint != current_fingerprint:
+        st.warning("비교 실행 이후 WMS 재고가 변경되었습니다. 아래 결과는 변경된 최신 WMS 재고로 자동 재계산되었습니다.")
+
+    ambiguous = _ambiguous_mapping_rows()
+    if ambiguous:
+        preview = ", ".join(f"{company} · {standard}" for company, standard, _ in ambiguous[:5])
+        suffix = f" 외 {len(ambiguous) - 5}건" if len(ambiguous) > 5 else ""
+        st.warning(f"제품매칭표에서 한 표준제품명에 ERP명이 여러 개 연결된 항목이 {len(ambiguous)}건 있습니다: {preview}{suffix}")
+
     result = _compare(erp_snapshot, wms_live)
 
     compared_at = st.session_state.get("erp_compare_live_compared_at", "-")
