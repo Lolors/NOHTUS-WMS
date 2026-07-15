@@ -10,6 +10,7 @@ from nohtus.pages.all_inventory import page_all_inventory
 from nohtus.pages.closing_date_fix import page_closing
 from nohtus.pages.expiry_alerts import page_expiry_alerts
 from nohtus.pages.export_waiting import page_export_waiting
+from nohtus.pages.saved_export_waiting import page_saved_export_waiting
 from nohtus.pages.history_business import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.location_map_business import page_map
@@ -31,10 +32,8 @@ def main():
     init_db()
     apply_style()
     sync_mobile_flag()
-
     if not require_login():
         return
-
     if is_mobile():
         page_mobile_stock_finder()
         return
@@ -42,47 +41,30 @@ def main():
     allowed_pages = allowed_pages_for_current_user()
     menu = render_sidebar(APP_TITLE, VERSION, allowed_pages=allowed_pages)
     render_user_box()
-
     if not can_access_page(menu):
         st.warning("이 계정은 해당 메뉴에 접근할 수 없습니다.")
         return
 
-    if menu == "로케이션 맵":
-        page_map()
-    elif menu == "유통기한 임박":
-        page_expiry_alerts()
-    elif menu == "자사제품 조회":
-        page_own_product_status()
-    elif menu == "전체 조회":
-        page_all_inventory()
-    elif menu == "최근 조회":
-        page_recent_products()
-    elif menu == "출고지시":
-        page_outbound()
-    elif menu == "저장된 출고지시":
-        page_saved_outbound_refactored()
-    elif menu == "수출대기 등록":
-        page_export_waiting()
-    elif menu == "마감":
-        page_closing()
-    elif menu == "재고 찾기":
-        page_mobile_stock_finder()
-    elif menu == "입고 등록":
-        page_inbound_refactored()
-    elif menu == "이동 등록":
-        page_move()
-    elif menu == "재고 실사":
-        page_stocktake()
+    if menu == "로케이션 맵": page_map()
+    elif menu == "유통기한 임박": page_expiry_alerts()
+    elif menu == "자사제품 조회": page_own_product_status()
+    elif menu == "전체 조회": page_all_inventory()
+    elif menu == "최근 조회": page_recent_products()
+    elif menu == "출고지시": page_outbound()
+    elif menu == "저장된 출고지시": page_saved_outbound_refactored()
+    elif menu == "수출대기 등록": page_export_waiting()
+    elif menu == "저장된 수출대기": page_saved_export_waiting()
+    elif menu == "마감": page_closing()
+    elif menu == "재고 찾기": page_mobile_stock_finder()
+    elif menu == "입고 등록": page_inbound_refactored()
+    elif menu == "이동 등록": page_move()
+    elif menu == "재고 실사": page_stocktake()
     elif menu == "출고가능 관리":
         if not is_admin():
             st.warning("admin 계정만 접근할 수 있습니다.")
             return
         page_shippable_inventory()
-    elif menu == "제품 매칭 관리":
-        page_product_matching()
-    elif menu == "거래처 관리":
-        page_customer_master()
-    elif menu == "매입가 조회":
-        page_purchase_history()
-    elif menu == "이력 조회":
-        page_history()
+    elif menu == "제품 매칭 관리": page_product_matching()
+    elif menu == "거래처 관리": page_customer_master()
+    elif menu == "매입가 조회": page_purchase_history()
+    elif menu == "이력 조회": page_history()
