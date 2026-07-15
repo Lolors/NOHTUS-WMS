@@ -111,9 +111,9 @@ def page_export_waiting():
         if key in {"out_customer_term", "out_customer_manual_name"}:
             return ""
         if isinstance(label, str) and label == "출고지시서 제목":
+            st.session_state["export_waiting_auto_title"] = _export_title()
             return original_text_input(
                 "수출대기 제목",
-                value=_export_title(),
                 disabled=True,
                 key="export_waiting_auto_title",
             )
