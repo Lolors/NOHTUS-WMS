@@ -22,8 +22,13 @@ def ensure_export_waiting_tables(cur=None):
         id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, source_inventory_id INTEGER,
         company TEXT NOT NULL, product_name TEXT NOT NULL, warehouse_name TEXT, lot TEXT, exp_date TEXT,
         source_location TEXT NOT NULL, waiting_location TEXT NOT NULL DEFAULT 'P', qty INTEGER NOT NULL,
+        moved_at TEXT,
         FOREIGN KEY(order_id) REFERENCES export_waiting_orders(id))""")
+    item_cols = {r[1] for r in c.execute("PRAGMA table_info(export_waiting_items)").fetchall()}
+    if "moved_at" not in item_cols:
+        c.execute("ALTER TABLE export_waiting_items ADD COLUMN moved_at TEXT")
     c.execute("CREATE INDEX IF NOT EXISTS idx_export_waiting_items_order ON export_waiting_items(order_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_export_waiting_items_moved_at ON export_waiting_items(moved_at)")
     if own:
         con.commit(); con.close()
 
@@ -89,8 +94,8 @@ def _take_p(cur, item, now):
 
 def _items(cur, order_id):
     rows = cur.execute("""SELECT source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
-        source_location,waiting_location,qty FROM export_waiting_items WHERE order_id=? ORDER BY id""", (int(order_id),)).fetchall()
-    keys = ["source_inventory_id","company","product_name","warehouse_name","lot","exp_date","source_location","waiting_location","qty"]
+        source_location,waiting_location,qty,moved_at FROM export_waiting_items WHERE order_id=? ORDER BY id""", (int(order_id),)).fetchall()
+    keys = ["source_inventory_id","company","product_name","warehouse_name","lot","exp_date","source_location","waiting_location","qty","moved_at"]
     return [dict(zip(keys, r)) for r in rows]
 
 
@@ -131,9 +136,9 @@ def save_export_waiting_order(cart, *, country, export_no, editing_order_id=None
         for inventory_id, qty in grouped.items():
             s = _take_source(cur, inventory_id, qty, now); _add(cur, s, P, qty, now, 0)
             cur.execute("""INSERT INTO export_waiting_items(order_id,source_inventory_id,company,product_name,
-                warehouse_name,lot,exp_date,source_location,waiting_location,qty) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                warehouse_name,lot,exp_date,source_location,waiting_location,qty,moved_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 (order_id,inventory_id,s.get("company", ""),s.get("product_name", ""),s.get("warehouse_name", "") or "",
-                 s.get("lot", "-") or "-",s.get("exp_date", "-") or "-",s.get("location", ""),P,qty))
+                 s.get("lot", "-") or "-",s.get("exp_date", "-") or "-",s.get("location", ""),P,qty,now))
             insert_transaction_log(cur, created_at=now, tx_type="위치이동", product_name=s.get("product_name", ""),
                 warehouse_name=s.get("warehouse_name", "") or "", lot=s.get("lot", "-"), exp_date=s.get("exp_date", "-"),
                 from_company=s.get("company", ""), from_location=s.get("location", ""), to_company=s.get("company", ""),
