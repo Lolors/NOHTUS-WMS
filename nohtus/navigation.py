@@ -5,7 +5,7 @@ from nohtus.auth import is_admin
 
 MENU_SECTIONS = [
     (None, ["로케이션 맵", "유통기한 임박", "자사제품 조회", "전체 조회"]),
-    ("출고", ["출고지시", "저장된 출고지시", "마감"]),
+    ("출고", ["출고지시", "저장된 출고지시", "수출대기 등록", "마감"]),
     ("재고", ["입고 등록", "이동 등록", "이력 조회", "재고 실사", "출고가능 관리"]),
     ("기초", ["제품 매칭 관리", "거래처 관리", "매입가 조회"]),
 ]
@@ -16,10 +16,43 @@ HIDDEN_PAGES = {
 
 ADMIN_ONLY_PAGES = {"출고가능 관리"}
 DEFAULT_PAGE = "로케이션 맵"
+_OUTBOUND_WORK_PAGES = {"출고지시", "수출대기 등록"}
+_OUTBOUND_STATE_KEYS = [
+    "outbound_cart",
+    "outbound_order_date",
+    "out_customer_term",
+    "out_customer_select",
+    "_out_customer_label",
+    "out_selected_customer",
+    "out_customer_direct",
+    "out_customer_manual_name",
+    "out_product_term",
+    "out_req_qty",
+    "out_rec_editor",
+    "out_manual_editor",
+    "out_ignore_company",
+    "out_manual_pick",
+    "out_all_company_manual_pick",
+    "out_expiry_short_first",
+    "pending_outbound_save",
+    "pending_outbound_expiry_warnings",
+    "pending_outbound_add_rows",
+    "pending_outbound_add_warnings",
+    "editing_order_id",
+    "editing_order_title",
+]
 
 
 def _is_admin_only_allowed(label):
     return label not in ADMIN_ONLY_PAGES or is_admin()
+
+
+def _reset_outbound_work_state():
+    for key in _OUTBOUND_STATE_KEYS:
+        st.session_state.pop(key, None)
+    st.session_state["outbound_cart"] = []
+    st.session_state["out_cart_editor_token"] = int(st.session_state.get("out_cart_editor_token", 0) or 0) + 1
+    st.session_state["_outbound_reset_inputs_pending"] = True
 
 
 def apply_query_page_redirects():
@@ -51,6 +84,10 @@ def render_sidebar(app_title, version, allowed_pages=None):
     def nav_button(label):
         active = st.session_state.get("page") == label
         if st.sidebar.button(label, use_container_width=True, type="primary" if active else "secondary"):
+            current_page = st.session_state.get("page")
+            if label in _OUTBOUND_WORK_PAGES and current_page != label:
+                _reset_outbound_work_state()
+                st.session_state["_outbound_screen_mode"] = "export_waiting" if label == "수출대기 등록" else "outbound"
             st.session_state["page"] = label
             if label == "로케이션 맵":
                 st.session_state["_scroll_map_top"] = True
