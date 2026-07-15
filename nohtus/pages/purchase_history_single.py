@@ -6,36 +6,30 @@ import nohtus.pages.purchase_history as purchase_page
 import nohtus.pages.purchase_history_all_products as all_products
 
 
-def _render_single_query_item(options):
-    """매입가 조회는 한 번에 제품 하나만 선택한다."""
-    current = str(st.session_state.get("purchase_single_item") or "")
-    search_col, select_col = st.columns([3, 7])
+def _render_search_matches(options):
+    """선택박스 없이 검색어와 일치하는 모든 제품을 한 번에 조회한다."""
+    keyword = st.text_input(
+        "제품 검색",
+        key="purchase_single_search",
+        placeholder="제품명 일부 입력",
+    )
 
-    with search_col:
-        keyword = st.text_input(
-            "제품 검색",
-            key="purchase_single_search",
-            placeholder="제품명 검색",
-        )
+    if not str(keyword or "").strip():
+        st.caption("제품명을 입력하면 일치하는 모든 과거 매입내역을 조회합니다.")
+        return []
 
-    with select_col:
-        filtered = purchase_page._filter_product_options(options, keyword, current)
-        option_list = [""] + filtered
-        index = option_list.index(current) if current in option_list else 0
-        selected = st.selectbox(
-            "조회 품목",
-            option_list,
-            index=index,
-            key="purchase_single_item",
-            format_func=lambda value: "제품을 선택하세요" if value == "" else value,
-        )
+    matched = purchase_page._filter_product_options(options, keyword)
+    if not matched:
+        st.caption("검색어와 일치하는 제품명이 없습니다.")
+        return []
 
-    return [(1, selected)] if selected else []
+    st.caption(f"검색된 제품 {len(matched)}개 · 조회 시 관련 매입내역을 모두 표시합니다.")
+    return [(idx + 1, product_name) for idx, product_name in enumerate(matched)]
 
 
 def page_purchase_history():
     original_render_query_items = purchase_page._render_query_items
-    purchase_page._render_query_items = _render_single_query_item
+    purchase_page._render_query_items = _render_search_matches
     try:
         return all_products.page_purchase_history()
     finally:
