@@ -19,6 +19,16 @@ OWN_PRODUCTS = [
     "마이클리어 (10 EA)",
     "하이바이 (5EA)",
 ]
+OWN_PRODUCTS_BY_COMPANY = {
+    "노투스팜": OWN_PRODUCTS + ["바이리쥬 2ml"],
+    "NOH": OWN_PRODUCTS,
+    "노투스": OWN_PRODUCTS,
+}
+ALL_OWN_PRODUCTS = list(dict.fromkeys(
+    product
+    for company in COMPANIES
+    for product in OWN_PRODUCTS_BY_COMPANY[company]
+))
 INBOUND_TYPES = {"입고", "출고지시취소"}
 OUTBOUND_TYPES = {"출고지시", "출고지시수정", "출고", "출고확정"}
 MOVE_TYPES = {"사업장이동", "사업장+위치이동", "비자료전환", "이동"}
@@ -29,7 +39,8 @@ def _today_text():
 
 
 def _company_current_stock(company: str) -> pd.DataFrame:
-    placeholders = ",".join(["?"] * len(OWN_PRODUCTS))
+    products = OWN_PRODUCTS_BY_COMPANY[company]
+    placeholders = ",".join(["?"] * len(products))
     return q(
         f"""
         SELECT product_name, COALESCE(SUM(qty),0) AS qty
@@ -37,12 +48,12 @@ def _company_current_stock(company: str) -> pd.DataFrame:
         WHERE company=? AND product_name IN ({placeholders})
         GROUP BY product_name
         """,
-        tuple([company] + OWN_PRODUCTS),
+        tuple([company] + products),
     )
 
 
 def _today_transactions() -> pd.DataFrame:
-    product_placeholders = ",".join(["?"] * len(OWN_PRODUCTS))
+    product_placeholders = ",".join(["?"] * len(ALL_OWN_PRODUCTS))
     tx_types = sorted(INBOUND_TYPES | OUTBOUND_TYPES | MOVE_TYPES)
     tx_placeholders = ",".join(["?"] * len(tx_types))
     return q(
@@ -53,12 +64,16 @@ def _today_transactions() -> pd.DataFrame:
           AND product_name IN ({product_placeholders})
           AND tx_type IN ({tx_placeholders})
         """,
-        tuple([_today_text()] + OWN_PRODUCTS + tx_types),
+        tuple([_today_text()] + ALL_OWN_PRODUCTS + tx_types),
     )
 
 
 def _today_delta_map() -> dict[tuple[str, str], int]:
-    deltas = {(company, product): 0 for company in COMPANIES for product in OWN_PRODUCTS}
+    deltas = {
+        (company, product): 0
+        for company in COMPANIES
+        for product in OWN_PRODUCTS_BY_COMPANY[company]
+    }
     tx_df = _today_transactions()
     if tx_df.empty:
         return deltas
@@ -69,14 +84,20 @@ def _today_delta_map() -> dict[tuple[str, str], int]:
         to_company = str(row.get("to_company") or "").strip()
         qty = int(row.get("qty") or 0)
         if tx_type in INBOUND_TYPES and to_company in COMPANIES:
-            deltas[(to_company, product)] += qty
+            key = (to_company, product)
+            if key in deltas:
+                deltas[key] += qty
         elif tx_type in OUTBOUND_TYPES and from_company in COMPANIES:
-            deltas[(from_company, product)] -= qty
+            key = (from_company, product)
+            if key in deltas:
+                deltas[key] -= qty
         elif tx_type in MOVE_TYPES and from_company != to_company:
-            if from_company in COMPANIES:
-                deltas[(from_company, product)] -= qty
-            if to_company in COMPANIES:
-                deltas[(to_company, product)] += qty
+            from_key = (from_company, product)
+            to_key = (to_company, product)
+            if from_key in deltas:
+                deltas[from_key] -= qty
+            if to_key in deltas:
+                deltas[to_key] += qty
     return deltas
 
 
@@ -95,7 +116,8 @@ def _fmt_delta(value) -> str:
 
 
 def _company_table(company: str, delta_map: dict[tuple[str, str], int]) -> pd.DataFrame:
-    base = pd.DataFrame({"표준제품명": OWN_PRODUCTS})
+    products = OWN_PRODUCTS_BY_COMPANY[company]
+    base = pd.DataFrame({"표준제품명": products})
     current = _company_current_stock(company)
     if not current.empty:
         current = current.rename(columns={"product_name": "표준제품명", "qty": "현재수량"})
