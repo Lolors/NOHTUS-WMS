@@ -9,6 +9,7 @@ from nohtus.navigation import render_sidebar
 from nohtus.pages.all_inventory import page_all_inventory
 from nohtus.pages.closing_date_fix import page_closing
 from nohtus.pages.expiry_alerts import page_expiry_alerts
+from nohtus.pages.export_waiting import page_export_waiting
 from nohtus.pages.history_business import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.location_map_business import page_map
@@ -60,6 +61,8 @@ def main():
         page_outbound()
     elif menu == "저장된 출고지시":
         page_saved_outbound_refactored()
+    elif menu == "수출대기 등록":
+        page_export_waiting()
     elif menu == "마감":
         page_closing()
     elif menu == "재고 찾기":
