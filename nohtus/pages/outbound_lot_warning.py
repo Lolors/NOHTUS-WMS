@@ -60,8 +60,11 @@ def _asset_candidates(lot: str, suffix: str):
     return [
         _PROJECT_ROOT / "assets" / "shipment_warnings" / "arke_wound_dressing" / lot / f"{suffix}.jpg",
         _PROJECT_ROOT / "assets" / "shipment_warnings" / "arke_wound_dressing" / f"{lot}_{suffix}.jpg",
+        _PROJECT_ROOT / "assets" / "shipment_warnings" / lot / f"{suffix}.jpg",
+        _PROJECT_ROOT / "assets" / "shipment_warnings" / f"{lot}_{suffix}.jpg",
         _PROJECT_ROOT / "assets" / "outbound_warnings" / "arke" / f"{lot}_{suffix}.jpg",
         _PROJECT_ROOT / "assets" / "outbound_warnings" / "arke" / lot / f"{suffix}.jpg",
+        _PROJECT_ROOT / "assets" / f"{lot}_{suffix}.jpg",
     ]
 
 
@@ -152,7 +155,7 @@ def _warning_html(rows) -> str:
 def _render_save_dialog(rows):
     dialog_api = getattr(st, "dialog", None) or getattr(st, "experimental_dialog", None)
     if dialog_api:
-        @dialog_api("⚠ 출고 전 확인", width="large")
+        @dialog_api("⚠ 출고 전 확인")
         def _dialog():
             st.markdown(_warning_html(rows), unsafe_allow_html=True)
             cancel_col, confirm_col = st.columns(2)
