@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import base64
+import mimetypes
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from nohtus.services.outbound_cart import get_cart
 
@@ -21,6 +24,7 @@ _original_button = st.button
 
 _PENDING_ROWS_KEY = "_pending_arke_outbound_save_rows"
 _CONFIRMED_KEY = "_arke_outbound_save_confirmed_once"
+_IMAGE_VIEWER_KEY = "_arke_outbound_original_image"
 
 
 def _normalise(value) -> str:
@@ -75,7 +79,6 @@ def _find_asset(lot: str, suffix: str) -> Path | None:
         if path.is_file():
             return path
 
-    # 사용자가 GitHub Desktop에서 폴더명을 다르게 정리한 경우에도 파일명으로 찾는다.
     assets = _PROJECT_ROOT / "assets"
     if assets.exists():
         wanted_flat = {
@@ -87,7 +90,6 @@ def _find_asset(lot: str, suffix: str) -> Path | None:
             if path.is_file() and path.name.lower() in wanted_flat:
                 return path
 
-        # 제조번호 폴더 아래 top/side 파일도 재귀적으로 찾는다.
         wanted_names = {f"{suffix}.jpg", f"{suffix}.jpeg", f"{suffix}.png"}
         for lot_dir in assets.rglob("*"):
             if not lot_dir.is_dir() or lot_dir.name.upper() != lot:
@@ -99,8 +101,69 @@ def _find_asset(lot: str, suffix: str) -> Path | None:
     return None
 
 
+def _open_original_image(path: Path, lot: str, caption: str):
+    st.session_state[_IMAGE_VIEWER_KEY] = {
+        "path": str(path),
+        "lot": lot,
+        "caption": caption,
+    }
+    st.rerun()
+
+
+def _render_original_image(path: Path):
+    """브라우저 축소 없이 원본 픽셀 크기로 표시하고 넘치는 부분은 스크롤한다."""
+    mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    components.html(
+        f"""
+        <div style="width:100%;height:680px;overflow:auto;background:#f8fafc;border:1px solid #d7dee8;border-radius:10px;padding:12px;box-sizing:border-box;">
+          <img src="data:{mime};base64,{encoded}" style="display:block;width:auto;max-width:none;height:auto;max-height:none;" alt="원본 이미지">
+        </div>
+        """,
+        height=710,
+        scrolling=False,
+    )
+
+
+def _render_image_viewer_dialog():
+    viewer = st.session_state.get(_IMAGE_VIEWER_KEY) or {}
+    path = Path(str(viewer.get("path") or ""))
+    lot = _normalise(viewer.get("lot"))
+    caption = _normalise(viewer.get("caption")) or "사진"
+
+    dialog_api = getattr(st, "dialog", None) or getattr(st, "experimental_dialog", None)
+    if not dialog_api:
+        st.subheader(f"{lot} · {caption} 원본")
+        if path.is_file():
+            _render_original_image(path)
+        else:
+            st.error("원본 이미지 파일을 찾을 수 없습니다.")
+        if _original_button("원본 보기 닫기", use_container_width=True, key="arke_original_close_inline"):
+            st.session_state.pop(_IMAGE_VIEWER_KEY, None)
+            st.rerun()
+        return
+
+    try:
+        decorator = dialog_api(f"🔍 {lot} · {caption} 원본", width="large")
+    except TypeError:
+        decorator = dialog_api(f"🔍 {lot} · {caption} 원본")
+
+    @decorator
+    def _viewer_dialog():
+        st.caption("사진은 원본 픽셀 크기로 표시됩니다. 큰 사진은 안쪽 영역을 스크롤해서 확인하세요.")
+        if path.is_file():
+            _render_original_image(path)
+        else:
+            st.error("원본 이미지 파일을 찾을 수 없습니다.")
+        if _original_button("닫기", use_container_width=True, key="arke_original_close"):
+            st.session_state.pop(_IMAGE_VIEWER_KEY, None)
+            st.rerun()
+
+    _viewer_dialog()
+
+
 def _render_warning_row(row, index: int):
-    """HTML 없이 Streamlit 기본 요소로 경고와 사진을 렌더링한다."""
+    """Streamlit 기본 요소로 경고와 사진을 렌더링한다."""
     lot = _normalise(row.get("LOT")).upper()
     expiry = _normalise(row.get("유통기한")) or "DB 유통기한 미등록"
     year = _manufacture_year(lot)
@@ -119,8 +182,12 @@ def _render_warning_row(row, index: int):
         st.caption("박스 상단")
         if top_path:
             st.image(str(top_path), use_container_width=True)
-            with st.expander("박스 상단 크게 보기"):
-                st.image(str(top_path), use_container_width=True)
+            if _original_button(
+                "🔍 원본 크기 보기",
+                use_container_width=True,
+                key=f"arke_original_top_{lot}_{index}",
+            ):
+                _open_original_image(top_path, lot, "박스 상단")
         else:
             st.warning("박스 상단 이미지 파일을 찾을 수 없습니다.")
 
@@ -128,8 +195,12 @@ def _render_warning_row(row, index: int):
         st.caption("박스 측면")
         if side_path:
             st.image(str(side_path), use_container_width=True)
-            with st.expander("박스 측면 크게 보기"):
-                st.image(str(side_path), use_container_width=True)
+            if _original_button(
+                "🔍 원본 크기 보기",
+                use_container_width=True,
+                key=f"arke_original_side_{lot}_{index}",
+            ):
+                _open_original_image(side_path, lot, "박스 측면")
         else:
             st.warning("박스 측면 이미지 파일을 찾을 수 없습니다.")
 
@@ -138,6 +209,10 @@ def _render_warning_row(row, index: int):
 
 
 def _render_save_dialog(rows):
+    if st.session_state.get(_IMAGE_VIEWER_KEY):
+        _render_image_viewer_dialog()
+        return
+
     dialog_api = getattr(st, "dialog", None) or getattr(st, "experimental_dialog", None)
     if dialog_api:
         @dialog_api("⚠ 출고 전 확인")
