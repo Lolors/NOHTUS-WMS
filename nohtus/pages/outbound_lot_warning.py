@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import html
 from pathlib import Path
 
 import streamlit as st
@@ -56,10 +54,14 @@ def _manufacture_year(lot: str) -> str:
 
 
 def _asset_candidates(lot: str, suffix: str):
-    """기존 평면 구조와 제조번호별 폴더 구조를 모두 지원한다."""
+    """평면 구조와 제조번호별 폴더 구조를 모두 지원한다."""
     return [
         _PROJECT_ROOT / "assets" / "shipment_warnings" / "arke_wound_dressing" / lot / f"{suffix}.jpg",
+        _PROJECT_ROOT / "assets" / "shipment_warnings" / "arke_wound_dressing" / lot / f"{suffix}.jpeg",
+        _PROJECT_ROOT / "assets" / "shipment_warnings" / "arke_wound_dressing" / lot / f"{suffix}.png",
         _PROJECT_ROOT / "assets" / "shipment_warnings" / "arke_wound_dressing" / f"{lot}_{suffix}.jpg",
+        _PROJECT_ROOT / "assets" / "shipment_warnings" / "arke_wound_dressing" / f"{lot}_{suffix}.jpeg",
+        _PROJECT_ROOT / "assets" / "shipment_warnings" / "arke_wound_dressing" / f"{lot}_{suffix}.png",
         _PROJECT_ROOT / "assets" / "shipment_warnings" / lot / f"{suffix}.jpg",
         _PROJECT_ROOT / "assets" / "shipment_warnings" / f"{lot}_{suffix}.jpg",
         _PROJECT_ROOT / "assets" / "outbound_warnings" / "arke" / f"{lot}_{suffix}.jpg",
@@ -70,86 +72,69 @@ def _asset_candidates(lot: str, suffix: str):
 
 def _find_asset(lot: str, suffix: str) -> Path | None:
     for path in _asset_candidates(lot, suffix):
-        if path.exists():
+        if path.is_file():
             return path
+
+    # 사용자가 GitHub Desktop에서 폴더명을 다르게 정리한 경우에도 파일명으로 찾는다.
+    assets = _PROJECT_ROOT / "assets"
+    if assets.exists():
+        wanted_flat = {
+            f"{lot}_{suffix}.jpg".lower(),
+            f"{lot}_{suffix}.jpeg".lower(),
+            f"{lot}_{suffix}.png".lower(),
+        }
+        for path in assets.rglob("*"):
+            if path.is_file() and path.name.lower() in wanted_flat:
+                return path
+
+        # 제조번호 폴더 아래 top/side 파일도 재귀적으로 찾는다.
+        wanted_names = {f"{suffix}.jpg", f"{suffix}.jpeg", f"{suffix}.png"}
+        for lot_dir in assets.rglob("*"):
+            if not lot_dir.is_dir() or lot_dir.name.upper() != lot:
+                continue
+            for name in wanted_names:
+                candidate = lot_dir / name
+                if candidate.is_file():
+                    return candidate
     return None
 
 
-def _data_uri(path: Path | None) -> str:
-    if path is None:
-        return ""
-    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-    return f"data:image/jpeg;base64,{encoded}"
+def _render_warning_row(row, index: int):
+    """HTML 없이 Streamlit 기본 요소로 경고와 사진을 렌더링한다."""
+    lot = _normalise(row.get("LOT")).upper()
+    expiry = _normalise(row.get("유통기한")) or "DB 유통기한 미등록"
+    year = _manufacture_year(lot)
 
+    st.markdown(f"### 제조번호 {lot}")
+    st.write(f"해당 제품은 {year}년에 생산되었으며")
+    st.write("박스에는 유효기간이 제조일로부터 2년으로 표기되어 있습니다.")
+    st.write(f"실제 허가받은 유효기간은 {expiry} 입니다.")
+    st.write("거래처에서 문의가 들어올 수 있으므로 확인 후 출고하십시오.")
 
-def _image_card(lot: str, suffix: str, caption: str) -> str:
-    uri = _data_uri(_find_asset(lot, suffix))
-    safe_caption = html.escape(caption)
-    if not uri:
-        return f"""
-        <div class="arke-photo-missing">
-          <strong>{safe_caption}</strong><br>
-          이미지 파일을 찾을 수 없습니다.
-        </div>
-        """
-    return f"""
-    <details class="arke-photo-card">
-      <summary title="사진을 클릭하면 확대됩니다">
-        <img src="{uri}" alt="{safe_caption}">
-        <span>{safe_caption} · 클릭하여 확대</span>
-      </summary>
-      <div class="arke-photo-expanded">
-        <img src="{uri}" alt="{safe_caption} 확대 이미지">
-        <div>사진을 다시 클릭하면 접힙니다.</div>
-      </div>
-    </details>
-    """
+    top_path = _find_asset(lot, "top")
+    side_path = _find_asset(lot, "side")
+    left, right = st.columns(2)
 
+    with left:
+        st.caption("박스 상단")
+        if top_path:
+            st.image(str(top_path), use_container_width=True)
+            with st.expander("박스 상단 크게 보기"):
+                st.image(str(top_path), use_container_width=True)
+        else:
+            st.warning("박스 상단 이미지 파일을 찾을 수 없습니다.")
 
-def _warning_html(rows) -> str:
-    sections = []
-    for row in rows:
-        lot = _normalise(row.get("LOT")).upper()
-        expiry = _normalise(row.get("유통기한")) or "DB 유통기한 미등록"
-        year = _manufacture_year(lot)
-        sections.append(
-            f"""
-            <section class="arke-warning-section">
-              <div class="arke-warning-lot">제조번호 {html.escape(lot)}</div>
-              <div class="arke-warning-copy">
-                해당 제품은 <strong>{html.escape(year)}년에 생산</strong>되었으며<br>
-                박스에는 유효기간이 <strong>제조일로부터 2년</strong>으로 표기되어 있습니다.<br>
-                실제 허가받은 유효기간은 <strong>{html.escape(expiry)}</strong> 입니다.<br>
-                거래처에서 문의가 들어올 수 있으므로 확인 후 출고하십시오.
-              </div>
-              <div class="arke-photo-grid">
-                {_image_card(lot, "top", "박스 상단")}
-                {_image_card(lot, "side", "박스 측면")}
-              </div>
-            </section>
-            """
-        )
+    with right:
+        st.caption("박스 측면")
+        if side_path:
+            st.image(str(side_path), use_container_width=True)
+            with st.expander("박스 측면 크게 보기"):
+                st.image(str(side_path), use_container_width=True)
+        else:
+            st.warning("박스 측면 이미지 파일을 찾을 수 없습니다.")
 
-    return f"""
-    <style>
-      .arke-warning-section{{padding:4px 0 16px;border-bottom:1px solid #e2e8f0}}
-      .arke-warning-section:last-child{{border-bottom:0}}
-      .arke-warning-lot{{font-size:18px;font-weight:800;color:#b45309;margin-bottom:8px}}
-      .arke-warning-copy{{font-size:16px;line-height:1.75;color:#334155;margin-bottom:14px}}
-      .arke-photo-grid{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
-      .arke-photo-card{{border:1px solid #d7dee8;border-radius:12px;background:#fff;overflow:hidden}}
-      .arke-photo-card summary{{cursor:zoom-in;list-style:none;padding:8px}}
-      .arke-photo-card summary::-webkit-details-marker{{display:none}}
-      .arke-photo-card summary img{{display:block;width:100%;height:180px;object-fit:cover;border-radius:8px}}
-      .arke-photo-card summary span{{display:block;text-align:center;font-size:13px;font-weight:700;color:#475569;padding:7px 3px 2px}}
-      .arke-photo-expanded{{padding:10px;background:#f8fafc;text-align:center}}
-      .arke-photo-expanded img{{display:block;width:100%;height:auto;max-height:72vh;object-fit:contain;border-radius:8px;cursor:zoom-out}}
-      .arke-photo-expanded div{{font-size:12px;color:#64748b;margin-top:7px}}
-      .arke-photo-missing{{display:flex;min-height:180px;align-items:center;justify-content:center;text-align:center;border:1px dashed #cbd5e1;border-radius:12px;color:#64748b;background:#f8fafc}}
-      @media (max-width:700px){{.arke-photo-grid{{grid-template-columns:1fr}}.arke-photo-card summary img{{height:160px}}}}
-    </style>
-    {''.join(sections)}
-    """
+    if index >= 0:
+        st.divider()
 
 
 def _render_save_dialog(rows):
@@ -157,7 +142,8 @@ def _render_save_dialog(rows):
     if dialog_api:
         @dialog_api("⚠ 출고 전 확인")
         def _dialog():
-            st.markdown(_warning_html(rows), unsafe_allow_html=True)
+            for index, row in enumerate(rows):
+                _render_warning_row(row, index)
             cancel_col, confirm_col = st.columns(2)
             with cancel_col:
                 if _original_button("취소", use_container_width=True, key="arke_save_cancel"):
@@ -172,7 +158,8 @@ def _render_save_dialog(rows):
         return
 
     st.warning("출고 전 아르케 창상피복재의 박스 유효기간 표기를 확인하십시오.")
-    st.markdown(_warning_html(rows), unsafe_allow_html=True)
+    for index, row in enumerate(rows):
+        _render_warning_row(row, index)
     cancel_col, confirm_col = st.columns(2)
     with cancel_col:
         if _original_button("취소", use_container_width=True, key="arke_save_cancel_inline"):
