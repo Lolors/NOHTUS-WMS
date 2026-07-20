@@ -100,13 +100,18 @@ def page_map():
 
     def patched_text_input(label, *args, **kwargs):
         if isinstance(label, str) and label == "제품명 검색":
-            st.checkbox(
-                "가용재고만 보기",
-                value=bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False)),
-                key=_AVAILABLE_ONLY_KEY,
-                help="수출대기(P) 재고를 총재고와 재고 분포에서 제외합니다.",
-            )
-            st.caption("수출대기(P) 제외")
+            search_col, filter_col = st.columns([7, 3], gap="small")
+            with search_col:
+                value = original_text_input(label, *args, **kwargs)
+            with filter_col:
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                st.checkbox(
+                    "수출대기(P) 제외",
+                    value=bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False)),
+                    key=_AVAILABLE_ONLY_KEY,
+                    help="수출대기(P) 재고를 총재고와 재고 분포에서 제외합니다.",
+                )
+            return value
         return original_text_input(label, *args, **kwargs)
 
     location_map_page.page_map_search_results = _page_map_search_results_with_available_filter
