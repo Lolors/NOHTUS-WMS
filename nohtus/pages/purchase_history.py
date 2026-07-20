@@ -1,6 +1,7 @@
 import hashlib
 import re
 from datetime import date, datetime
+from io import BytesIO
 
 import pandas as pd
 import streamlit as st
@@ -15,6 +16,7 @@ PRODUCT_COLUMNS_BY_COMPANY = {
     "노투스": "erp_nohtus_name",
     "NOH": "erp_noh_name",
 }
+PURCHASE_RESET_MIGRATION = "purchase_history_reset_file_hash_v1"
 
 
 def _clean_text(value):
@@ -63,8 +65,59 @@ def _normalize_date(value):
     return parsed.strftime("%Y-%m-%d")
 
 
-def _read_purchase_excel(uploaded_file):
-    sheets = pd.read_excel(uploaded_file, sheet_name=None)
+def _ensure_purchase_storage():
+    """업로드 파일 이력 테이블을 만들고 기존 매입가 데이터는 한 번만 초기화한다."""
+    with connect() as con:
+        cur = con.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS purchase_uploads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                business_name TEXT NOT NULL,
+                file_name TEXT,
+                file_hash TEXT NOT NULL,
+                file_size INTEGER NOT NULL DEFAULT 0,
+                row_count INTEGER NOT NULL DEFAULT 0,
+                imported_at TEXT NOT NULL,
+                UNIQUE(business_name, file_hash)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_data_migrations (
+                migration_key TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            )
+            """
+        )
+        applied = cur.execute(
+            "SELECT 1 FROM app_data_migrations WHERE migration_key=?",
+            (PURCHASE_RESET_MIGRATION,),
+        ).fetchone()
+        if not applied:
+            cur.execute("DELETE FROM purchase_history")
+            cur.execute("DELETE FROM purchase_uploads")
+            cur.execute(
+                "INSERT INTO app_data_migrations(migration_key, applied_at) VALUES (?, ?)",
+                (PURCHASE_RESET_MIGRATION, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+        con.commit()
+
+
+def _uploaded_file_payload(uploaded_file):
+    try:
+        payload = uploaded_file.getvalue()
+    except Exception:
+        uploaded_file.seek(0)
+        payload = uploaded_file.read()
+    if not isinstance(payload, bytes):
+        payload = bytes(payload)
+    return payload
+
+
+def _read_purchase_excel(payload):
+    sheets = pd.read_excel(BytesIO(payload), sheet_name=None)
     frames = []
     for sheet_name, frame in sheets.items():
         if frame is None or frame.empty:
@@ -72,6 +125,7 @@ def _read_purchase_excel(uploaded_file):
         frame = frame.copy()
         frame.columns = [_normalize_header(c) for c in frame.columns]
         frame["업로드시트"] = sheet_name
+        frame["업로드행번호"] = range(2, len(frame) + 2)
         frames.append(frame)
     if not frames:
         return pd.DataFrame()
@@ -112,16 +166,15 @@ def _standard_name_for(erp_product_name, match_map):
     return match_map.get(name, match_map.get(name.replace(" ", ""), ""))
 
 
-def _duplicate_key(*parts):
-    raw = "|".join(_clean_text(p) for p in parts)
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
-
-
 def _import_purchase_history(uploaded_file, company):
+    _ensure_purchase_storage()
+
     source = getattr(uploaded_file, "name", "")
-    raw = _read_purchase_excel(uploaded_file)
+    payload = _uploaded_file_payload(uploaded_file)
+    file_hash = hashlib.sha256(payload).hexdigest()
+    raw = _read_purchase_excel(payload)
     if raw.empty:
-        return {"total": 0, "inserted": 0, "duplicates": 0, "skipped": 0, "matched": 0, "unmatched": 0}
+        return {"total": 0, "inserted": 0, "file_duplicate": False, "skipped": 0, "matched": 0, "unmatched": 0}
 
     required = ["매입일자", "거래처명", "제품명", "수량", "실단가"]
     missing = [col for col in required if col not in raw.columns]
@@ -129,11 +182,26 @@ def _import_purchase_history(uploaded_file, company):
         raise ValueError(f"필수 컬럼이 없습니다: {', '.join(missing)}")
 
     match_map = _load_product_match_map(company)
-    inserted = duplicates = skipped = matched = unmatched = 0
+    inserted = skipped = matched = unmatched = 0
+    imported_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     with connect() as con:
         cur = con.cursor()
-        for row in raw.itertuples(index=False):
+        duplicate_file = cur.execute(
+            "SELECT 1 FROM purchase_uploads WHERE business_name=? AND file_hash=?",
+            (company, file_hash),
+        ).fetchone()
+        if duplicate_file:
+            return {
+                "total": len(raw),
+                "inserted": 0,
+                "file_duplicate": True,
+                "skipped": 0,
+                "matched": 0,
+                "unmatched": 0,
+            }
+
+        for source_index, row in enumerate(raw.itertuples(index=False), start=1):
             item = row._asdict()
 
             purchase_date = _normalize_date(item.get("매입일자"))
@@ -154,38 +222,49 @@ def _import_purchase_history(uploaded_file, company):
             else:
                 unmatched += 1
 
-            key = _duplicate_key(company, purchase_date, supplier, erp_product, specification, quantity, unit_price, note)
-            cur.execute("""
-                INSERT OR IGNORE INTO purchase_history(
+            # 기존 duplicate_key UNIQUE 제약을 유지하면서도 모든 원본 행을 보존한다.
+            # 키는 거래 내용이 아니라 파일 해시와 원본 행 순서로 만든다.
+            row_key = f"{company}:{file_hash}:{source_index}"
+            cur.execute(
+                """
+                INSERT INTO purchase_history(
                     business_name, purchase_date, supplier_name, erp_product_name,
                     specification, quantity, unit_price, note, standard_product_name,
                     source_file, imported_at, duplicate_key
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                company,
-                purchase_date,
-                supplier,
-                erp_product,
-                specification,
-                float(quantity),
-                float(unit_price),
-                note,
-                standard_name,
-                source,
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                key,
-            ))
-            if cur.rowcount:
-                inserted += 1
-            else:
-                duplicates += 1
+                """,
+                (
+                    company,
+                    purchase_date,
+                    supplier,
+                    erp_product,
+                    specification,
+                    float(quantity),
+                    float(unit_price),
+                    note,
+                    standard_name,
+                    source,
+                    imported_at,
+                    row_key,
+                ),
+            )
+            inserted += 1
+
+        cur.execute(
+            """
+            INSERT INTO purchase_uploads(
+                business_name, file_name, file_hash, file_size, row_count, imported_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (company, source, file_hash, len(payload), inserted, imported_at),
+        )
         con.commit()
 
     return {
         "total": len(raw),
         "inserted": inserted,
-        "duplicates": duplicates,
+        "file_duplicate": False,
         "skipped": skipped,
         "matched": matched,
         "unmatched": unmatched,
@@ -240,7 +319,7 @@ def _query_purchase_rows(item_no, standard_name, start_date, end_date):
         FROM purchase_history
         WHERE {where}
           AND purchase_date BETWEEN ? AND ?
-        ORDER BY purchase_date DESC, business_name, supplier_name
+        ORDER BY purchase_date DESC, business_name, supplier_name, id
     """, params)
 
     if df.empty:
@@ -253,21 +332,25 @@ def _query_purchase_rows(item_no, standard_name, start_date, end_date):
 
 def _render_import_box():
     with st.expander("매입가 엑셀 업로드", expanded=False):
-        st.caption("업로드 시 '제  품  명' 컬럼은 공백을 제거해 '제품명'으로 읽습니다.")
+        st.caption(
+            "원본 행은 내용이 같아도 모두 저장합니다. 같은 사업장에 완전히 동일한 파일을 다시 올린 경우에만 중복 파일로 차단합니다."
+        )
         company = st.selectbox("업로드 사업장", PURCHASE_COMPANIES, key="purchase_import_company")
         uploaded = st.file_uploader("매입내역 엑셀 업로드", type=["xlsx"], key="purchase_history_upload")
         if uploaded is not None and st.button("DB에 업로드", type="primary", use_container_width=True):
             try:
                 result = _import_purchase_history(uploaded, company)
-                st.success("매입내역 업로드 완료")
-                st.markdown(f"""
-                - 전체 행 : **{result['total']}건**
-                - 신규 저장 : **{result['inserted']}건**
-                - 중복 제외 : **{result['duplicates']}건**
-                - 필수값 누락 제외 : **{result['skipped']}건**
-                - 제품매칭 성공 : **{result['matched']}건**
-                - 제품매칭 실패 : **{result['unmatched']}건**
-                """)
+                if result["file_duplicate"]:
+                    st.warning("같은 사업장에 이미 업로드한 동일 파일입니다. 기존 데이터는 변경하지 않았습니다.")
+                else:
+                    st.success("매입내역 업로드 완료")
+                    st.markdown(f"""
+                    - 전체 행 : **{result['total']}건**
+                    - 신규 저장 : **{result['inserted']}건**
+                    - 필수값 누락 제외 : **{result['skipped']}건**
+                    - 제품매칭 성공 : **{result['matched']}건**
+                    - 제품매칭 실패 : **{result['unmatched']}건**
+                    """)
             except Exception as exc:
                 st.error(f"업로드 실패: {exc}")
 
@@ -339,6 +422,8 @@ def _render_query_items(options):
 
 
 def page_purchase_history():
+    _ensure_purchase_storage()
+
     st.title("매입가 조회")
     st.caption("표준제품명을 선택하면 노투스팜·노투스·NOH ERP명까지 함께 찾아 과거 매입가를 조회합니다.")
 
