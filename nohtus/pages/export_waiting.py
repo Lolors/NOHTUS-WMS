@@ -9,6 +9,13 @@ from nohtus.pages.outbound_business import page_outbound as _page_outbound
 from nohtus.services.export_waiting import ensure_export_waiting_tables, save_export_waiting_order
 
 
+_ALL_COMPANY_SELECTION_KEYS = (
+    "out_all_company_manual_pick",
+    "out_ignore_company",
+    "out_manual_pick",
+)
+
+
 def _export_title():
     country = str(st.session_state.get("export_waiting_country") or "").strip()
     export_no = str(st.session_state.get("export_waiting_number") or "").strip()
@@ -43,6 +50,11 @@ def page_export_waiting():
     """출고지시 화면을 재사용하되 완료 시 재고를 추적 가능한 수출대기 건으로 저장한다."""
     ensure_export_waiting_tables()
     _load_editing_order()
+
+    # 수출은 매출처 사업장과 무관하게 실제 출고할 사업장·로케이션 재고를 직접 선택한다.
+    # 화면 표시값뿐 아니라 outbound_business 내부 판단이 사용하는 세션값도 항상 True로 둔다.
+    for key in _ALL_COMPANY_SELECTION_KEYS:
+        st.session_state[key] = True
 
     original_save_outbound_order = outbound_page.save_outbound_order
     original_update_outbound_order = outbound_page.update_outbound_order
@@ -129,7 +141,8 @@ def page_export_waiting():
         key = kwargs.get("key")
         if key == "out_customer_direct":
             return False
-        if key in {"out_ignore_company", "out_manual_pick"}:
+        if key in _ALL_COMPANY_SELECTION_KEYS:
+            st.session_state[key] = True
             return True
         if isinstance(label, str) and label == "사업장 구분 없이 특정 재고 선택":
             return True
