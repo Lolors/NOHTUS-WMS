@@ -5,57 +5,15 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import nohtus.pages.location_map as location_map_page
-from nohtus.db import q
 from nohtus.pages.location_map import page_map as _page_map
-from nohtus.services.products import product_options
 
 
 _ORIGINAL_MAP_SEARCH_RESULTS = location_map_page.page_map_search_results
 _AVAILABLE_ONLY_KEY = "map_search_available_only"
 
 
-def _search_has_export_waiting_stock(term):
-    opts = product_options((term or "").strip())
-    if opts is None or opts.empty or "standard_name" not in opts.columns:
-        return False
-    product_names = [
-        str(x).strip()
-        for x in opts["standard_name"].dropna().astype(str).drop_duplicates().tolist()
-        if str(x).strip()
-    ]
-    if not product_names:
-        return False
-    placeholders = ",".join("?" for _ in product_names)
-    found = q(
-        f"""
-        SELECT 1
-        FROM inventory
-        WHERE qty > 0
-          AND location = 'P'
-          AND product_name IN ({placeholders})
-        LIMIT 1
-        """,
-        tuple(product_names),
-    )
-    return found is not None and not found.empty
-
-
 def _page_map_search_results_with_available_filter(term, compact: bool = False):
-    has_p_stock = _search_has_export_waiting_stock(term)
-    available_only = False
-
-    if has_p_stock:
-        with st.container(border=True):
-            available_only = st.checkbox(
-                "가용재고만 보기",
-                value=bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False)),
-                key=_AVAILABLE_ONLY_KEY,
-                help="수출대기 로케이션 P의 재고를 총재고와 재고 분포에서 제외합니다.",
-            )
-            st.caption("끄면 P를 포함한 전체 재고, 켜면 출고 가능한 재고만 표시됩니다.")
-    else:
-        st.session_state[_AVAILABLE_ONLY_KEY] = False
-
+    available_only = bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False))
     original_q = location_map_page.q
 
     def filtered_q(sql, params=()):
@@ -138,9 +96,24 @@ def _inject_gm_medic_special_location():
 
 def page_map():
     original_search_results = location_map_page.page_map_search_results
+    original_text_input = st.text_input
+
+    def patched_text_input(label, *args, **kwargs):
+        if isinstance(label, str) and label == "제품명 검색":
+            st.checkbox(
+                "가용재고만 보기",
+                value=bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False)),
+                key=_AVAILABLE_ONLY_KEY,
+                help="수출대기(P) 재고를 총재고와 재고 분포에서 제외합니다.",
+            )
+            st.caption("수출대기(P) 제외")
+        return original_text_input(label, *args, **kwargs)
+
     location_map_page.page_map_search_results = _page_map_search_results_with_available_filter
+    st.text_input = patched_text_input
     try:
         _page_map()
     finally:
         location_map_page.page_map_search_results = original_search_results
+        st.text_input = original_text_input
     _inject_gm_medic_special_location()
