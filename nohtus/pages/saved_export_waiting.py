@@ -40,6 +40,17 @@ def _order_items(order_id):
     return df
 
 
+def _style_cancelled_rows(display_df, statuses):
+    cancelled = {idx for idx, value in statuses.items() if str(value) == "cancelled"}
+
+    def row_style(row):
+        if row.name in cancelled:
+            return ["background-color: #f1f3f5; color: #6b7280"] * len(row)
+        return [""] * len(row)
+
+    return display_df.style.apply(row_style, axis=1)
+
+
 def page_saved_export_waiting():
     ensure_export_waiting_tables()
     st.title("저장된 수출대기")
@@ -47,7 +58,7 @@ def page_saved_export_waiting():
     msg = st.session_state.pop("_export_waiting_message", None)
     if msg: st.success(msg)
 
-    orders = q("""SELECT id,export_no,country,title,status,erp_company,erp_customer_name,
+    orders = q("""SELECT id,export_no,country,shipping_method,title,status,erp_company,erp_customer_name,
                          created_at,updated_at,confirmed_at,cancelled_at
                   FROM export_waiting_orders ORDER BY id DESC""")
     if orders.empty:
@@ -55,16 +66,22 @@ def page_saved_export_waiting():
 
     view = orders.copy()
     view["상태"] = view["status"].map(STATUS_LABELS).fillna(view["status"])
-    view = view.rename(columns={"id":"번호","country":"국가","export_no":"수출번호","title":"제목",
+    view = view.rename(columns={"id":"번호","country":"바이어","shipping_method":"운송방식","export_no":"수출번호","title":"제목",
                                 "erp_company":"ERP사업장","erp_customer_name":"ERP매출처","created_at":"등록일"})
-    st.dataframe(view[["번호","상태","국가","수출번호","제목","ERP사업장","ERP매출처","등록일"]], hide_index=True, use_container_width=True)
+    table_columns = ["번호","상태","바이어","운송방식","수출번호","제목","ERP사업장","ERP매출처","등록일"]
+    table_df = view[table_columns]
+    styled_table = _style_cancelled_rows(table_df, orders["status"])
+    st.dataframe(styled_table, hide_index=True, use_container_width=True)
 
     labels = [f"#{int(r.id)} | {STATUS_LABELS.get(r.status,r.status)} | {r.title}" for r in orders.itertuples()]
     selected = orders.iloc[labels.index(st.selectbox("수출대기 건 선택", labels))]
     order_id, status = int(selected["id"]), str(selected["status"])
     st.markdown(f"### {selected['title']}")
-    c1,c2,c3 = st.columns(3)
-    c1.metric("상태", STATUS_LABELS.get(status,status)); c2.metric("국가", str(selected["country"] or "-")); c3.metric("수출번호", str(selected["export_no"] or "-"))
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("상태", STATUS_LABELS.get(status,status))
+    c2.metric("바이어", str(selected["country"] or "-"))
+    c3.metric("운송방식", str(selected["shipping_method"] or "-"))
+    c4.metric("수출번호", str(selected["export_no"] or "-"))
     items = _order_items(order_id)
     st.dataframe(items, hide_index=True, use_container_width=True)
     total_qty = int(items["수량"].sum()) if not items.empty else 0
