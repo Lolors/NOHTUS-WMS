@@ -111,13 +111,13 @@ def _restore(cur, order_id, now, memo):
 
 def save_export_waiting_order(cart, *, country, export_no, editing_order_id=None):
     country, export_no = str(country or "").strip(), str(export_no or "").strip()
-    if not country: raise ValueError("국가를 입력하세요.")
     if not export_no: raise ValueError("수출번호를 입력하세요.")
     grouped = defaultdict(int)
     for x in cart or []:
         if int(x.get("요청수량") or 0) > 0: grouped[int(x.get("id"))] += int(x.get("요청수량"))
     if not grouped: raise ValueError("수출대기 등록할 품목이 없습니다.")
-    now, title = datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"{country}_{export_no}"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    title = f"{country}_{export_no}" if country else export_no
     with connect() as con:
         cur = con.cursor(); ensure_export_waiting_tables(cur)
         if editing_order_id:
