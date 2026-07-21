@@ -6,7 +6,7 @@ import streamlit as st
 import nohtus.pages.outbound as outbound_page
 from nohtus.db import q
 from nohtus.pages.outbound_business import page_outbound as _page_outbound
-from nohtus.services.export_waiting import ensure_export_waiting_tables, save_export_waiting_order
+from nohtus.services.export_waiting import TRANSPORT_METHODS, ensure_export_waiting_tables, save_export_waiting_order
 
 
 _ALL_COMPANY_SELECTION_KEYS = (
@@ -19,8 +19,8 @@ _ALL_COMPANY_SELECTION_KEYS = (
 def _export_title():
     country = str(st.session_state.get("export_waiting_country") or "").strip()
     buyer = str(st.session_state.get("export_waiting_buyer") or "").strip()
-    export_no = str(st.session_state.get("export_waiting_number") or "").strip()
-    parts = [part for part in (country, buyer, export_no) if part]
+    transport_method = str(st.session_state.get("export_waiting_transport_method") or "").strip()
+    parts = [part for part in (country, buyer, transport_method) if part]
     return "-".join(parts) or "수출대기"
 
 
@@ -29,7 +29,7 @@ def _load_editing_order():
     if not order_id or st.session_state.get("_export_edit_loaded") == int(order_id):
         return
     ensure_export_waiting_tables()
-    order = q("SELECT country,buyer,export_no,title,status FROM export_waiting_orders WHERE id=?", (int(order_id),))
+    order = q("SELECT country,buyer,transport_method,export_no,title,status FROM export_waiting_orders WHERE id=?", (int(order_id),))
     if order.empty or str(order.iloc[0]["status"]) != "waiting":
         st.session_state.pop("export_editing_order_id", None)
         return
@@ -41,6 +41,8 @@ def _load_editing_order():
     )
     st.session_state["export_waiting_country"] = str(order.iloc[0]["country"] or "")
     st.session_state["export_waiting_buyer"] = str(order.iloc[0].get("buyer") or "")
+    transport_method = str(order.iloc[0].get("transport_method") or "").strip()
+    st.session_state["export_waiting_transport_method"] = transport_method if transport_method in TRANSPORT_METHODS else TRANSPORT_METHODS[0]
     st.session_state["export_waiting_number"] = str(order.iloc[0]["export_no"] or "")
     st.session_state["outbound_cart"] = items.to_dict("records") if not items.empty else []
     st.session_state["out_cart_editor_token"] = int(st.session_state.get("out_cart_editor_token", 0) or 0) + 1
@@ -80,6 +82,7 @@ def page_export_waiting():
             cart,
             country=st.session_state.get("export_waiting_country"),
             buyer=st.session_state.get("export_waiting_buyer"),
+            transport_method=st.session_state.get("export_waiting_transport_method"),
             export_no=st.session_state.get("export_waiting_number"),
             editing_order_id=st.session_state.get("export_editing_order_id"),
         )
@@ -119,12 +122,18 @@ def page_export_waiting():
                 result = original_markdown("### 수출 정보", *args, **kwargs)
                 if not export_fields_rendered["done"]:
                     export_fields_rendered["done"] = True
-                    c1, c2, c3 = st.columns(3, gap="medium")
+                    c1, c2, c3, c4 = st.columns(4, gap="medium")
                     with c1:
                         original_text_input("국가", placeholder="국가를 입력하세요", key="export_waiting_country")
                     with c2:
                         original_text_input("바이어", placeholder="바이어명을 입력하세요", key="export_waiting_buyer")
                     with c3:
+                        st.selectbox(
+                            "운송방식",
+                            TRANSPORT_METHODS,
+                            key="export_waiting_transport_method",
+                        )
+                    with c4:
                         original_text_input("수출번호", placeholder="수출번호를 입력하세요", key="export_waiting_number")
                 return result
             body = body.replace("### 출고지시 장바구니", "### 수출대기 장바구니")
@@ -169,7 +178,7 @@ def page_export_waiting():
         if export_completed["done"]:
             st.session_state["_outbound_last_success"] = export_completed["message"]
             export_completed["done"] = False
-            for key in ["export_waiting_number", "export_waiting_country", "export_waiting_buyer", "export_waiting_auto_title", "export_editing_order_id", "_export_edit_loaded"]:
+            for key in ["export_waiting_number", "export_waiting_country", "export_waiting_buyer", "export_waiting_transport_method", "export_waiting_auto_title", "export_editing_order_id", "_export_edit_loaded"]:
                 st.session_state.pop(key, None)
         return original_rerun(*args, **kwargs)
 
