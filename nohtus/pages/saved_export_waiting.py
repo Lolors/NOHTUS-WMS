@@ -7,76 +7,22 @@ import streamlit.components.v1 as components
 from nohtus.config import COMPANIES
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only
-from nohtus.services.export_waiting import (
-    cancel_export_waiting_order,
-    confirm_export_waiting_items,
-    ensure_export_waiting_tables,
-)
+from nohtus.services.export_waiting import cancel_export_waiting_order, confirm_export_waiting_items, ensure_export_waiting_tables
 
-STATUS_LABELS = {
-    "waiting": "수출대기",
-    "partial": "일부 확정",
-    "confirmed": "수출확정",
-    "cancelled": "취소됨",
-}
+STATUS_LABELS = {"waiting": "수출대기", "partial": "일부 확정", "confirmed": "수출확정", "cancelled": "취소됨"}
+_SELECTED_ORDER_KEY = "saved_export_waiting_selected_order_id"
 
 
 def _fit_summary_metric_values():
-    """Shrink metric value text only when it is wider than its card."""
-    st.markdown(
-        """
-        <style>
-        div[data-testid="stMetricValue"] {
-            overflow: visible !important;
-        }
-        div[data-testid="stMetricValue"] > div {
-            max-width: 100% !important;
-            overflow: visible !important;
-            text-overflow: clip !important;
-            white-space: nowrap !important;
-            line-height: 1.15 !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    components.html(
-        """
-        <script>
-        (function () {
-          function fitMetricValues() {
-            try {
-              const doc = window.parent.document;
-              const values = Array.from(doc.querySelectorAll('[data-testid="stMetricValue"] > div'));
-              values.forEach(function (value) {
-                const box = value.parentElement;
-                if (!box || !value.textContent.trim()) return;
-
-                value.style.fontSize = '';
-                const computed = window.parent.getComputedStyle(value);
-                let size = parseFloat(computed.fontSize) || 32;
-                const minimum = 13;
-                const available = Math.max(0, box.clientWidth - 2);
-
-                while (size > minimum && value.scrollWidth > available) {
-                  size -= 1;
-                  value.style.fontSize = size + 'px';
-                }
-              });
-            } catch (error) {}
-          }
-
-          fitMetricValues();
-          setTimeout(fitMetricValues, 80);
-          setTimeout(fitMetricValues, 250);
-          setTimeout(fitMetricValues, 700);
-          window.parent.addEventListener('resize', fitMetricValues);
-        })();
-        </script>
-        """,
-        height=0,
-        scrolling=False,
-    )
+    st.markdown("""
+    <style>
+    div[data-testid="stMetricValue"]{overflow:visible!important}
+    div[data-testid="stMetricValue"]>div{max-width:100%!important;overflow:visible!important;text-overflow:clip!important;white-space:nowrap!important;line-height:1.15!important}
+    </style>
+    """, unsafe_allow_html=True)
+    components.html("""
+    <script>(function(){function fit(){try{const d=window.parent.document;d.querySelectorAll('[data-testid="stMetricValue"] > div').forEach(v=>{const b=v.parentElement;if(!b||!v.textContent.trim())return;v.style.fontSize='';let s=parseFloat(window.parent.getComputedStyle(v).fontSize)||32;const a=Math.max(0,b.clientWidth-2);while(s>13&&v.scrollWidth>a){s-=1;v.style.fontSize=s+'px';}})}catch(e){}}fit();setTimeout(fit,80);setTimeout(fit,250);setTimeout(fit,700);window.parent.addEventListener('resize',fit)})();</script>
+    """, height=0, scrolling=False)
 
 
 def _customer_options(company, term):
@@ -93,9 +39,7 @@ def _customer_options(company, term):
         clauses.append("company=?"); params.append(company)
     if str(term or "").strip():
         clauses.append("customer_name LIKE ?"); params.append(f"%{str(term).strip()}%")
-    sql = (f"SELECT {select_code} AS customer_code, customer_name, {select_company} AS company "
-           f"FROM customers WHERE {' AND '.join(clauses)} ORDER BY customer_name LIMIT 100")
-    return q(sql, tuple(params))
+    return q(f"SELECT {select_code} AS customer_code, customer_name, {select_company} AS company FROM customers WHERE {' AND '.join(clauses)} ORDER BY customer_name LIMIT 100", tuple(params))
 
 
 def _order_items(order_id):
@@ -108,16 +52,22 @@ def _order_items(order_id):
              ORDER BY COALESCE(confirmed,0),company,product_name,lot,exp_date,source_location""", (int(order_id),))
     if not df.empty:
         df["유통기한"] = df["유통기한"].apply(display_date_only)
-        df["확정상태"] = df["confirmed"].apply(lambda value: "확정완료" if int(value or 0) else "수출대기")
+        df["확정상태"] = df["confirmed"].apply(lambda v: "확정완료" if int(v or 0) else "수출대기")
         for col in ["확정사업장", "확정매출처", "확정일시"]:
             df[col] = df[col].fillna("").astype(str).replace("", "-")
     return df
 
 
+def _cancelled_row_style(row):
+    if str(row.get("__status", "")) == "cancelled":
+        return ["background-color:#f1f3f5;color:#6b7280" for _ in row]
+    return ["" for _ in row]
+
+
 def page_saved_export_waiting():
     ensure_export_waiting_tables()
     st.title("저장된 수출대기")
-    st.caption("품목을 나누어 선택한 뒤 ERP 매출 사업장별로 수출확정할 수 있습니다.")
+    st.caption("표에서 수출대기 건 한 행을 선택하면 아래에 상세 내용이 표시됩니다.")
     msg = st.session_state.pop("_export_waiting_message", None)
     if msg:
         st.success(msg)
@@ -128,8 +78,7 @@ def page_saved_export_waiting():
                          SUM(CASE WHEN COALESCE(i.confirmed,0)=1 THEN 1 ELSE 0 END) AS confirmed_items
                   FROM export_waiting_orders o
                   LEFT JOIN export_waiting_items i ON i.order_id=o.id
-                  GROUP BY o.id
-                  ORDER BY o.id DESC""")
+                  GROUP BY o.id ORDER BY o.id DESC""")
     if orders.empty:
         st.info("저장된 수출대기 건이 없습니다.")
         return
@@ -139,37 +88,43 @@ def page_saved_export_waiting():
     view = orders.copy()
     view["상태"] = view["status"].map(STATUS_LABELS).fillna(view["status"])
     view["진행상황"] = view.apply(lambda r: f"{int(r['confirmed_items'])} / {int(r['total_items'])} 품목 확정", axis=1)
-    view = view.rename(columns={
-        "id":"번호","country":"국가","buyer":"바이어","transport_method":"운송방식",
-        "export_no":"수출번호","title":"제목","erp_company":"최근 ERP사업장",
-        "erp_customer_name":"최근 ERP매출처","created_at":"등록일",
-    })
+    view = view.rename(columns={"id":"번호","country":"국가","buyer":"바이어","transport_method":"운송방식","export_no":"수출번호","title":"제목","erp_company":"최근 ERP사업장","erp_customer_name":"최근 ERP매출처","created_at":"등록일"})
     view["바이어"] = view["바이어"].fillna("").astype(str).replace("", "미지정")
     view["운송방식"] = view["운송방식"].fillna("").astype(str).replace("", "미지정")
-    st.dataframe(
-        view[["번호","상태","진행상황","국가","바이어","운송방식","수출번호","제목","최근 ERP사업장","최근 ERP매출처","등록일"]],
+    view["__status"] = orders["status"].astype(str).values
+    table_columns = ["번호","상태","진행상황","국가","바이어","운송방식","수출번호","제목","최근 ERP사업장","최근 ERP매출처","등록일","__status"]
+    table = view[table_columns].reset_index(drop=True)
+    styled = table.style.apply(_cancelled_row_style, axis=1)
+    event = st.dataframe(
+        styled,
         hide_index=True,
         use_container_width=True,
+        key="saved_export_waiting_orders_table",
+        on_select="rerun",
+        selection_mode="single-row",
+        column_config={"__status": None},
     )
 
-    labels = [
-        f"#{int(r.id)} | {STATUS_LABELS.get(r.status,r.status)} | "
-        f"{int(r.confirmed_items)}/{int(r.total_items)} 확정 | {r.title}"
-        for r in orders.itertuples()
-    ]
-    selected = orders.iloc[labels.index(st.selectbox("수출대기 건 선택", labels))]
-    order_id, status = int(selected["id"]), str(selected["status"])
-    confirmed_count = int(selected["confirmed_items"] or 0)
-    total_count = int(selected["total_items"] or 0)
+    selected_rows = list(getattr(getattr(event, "selection", None), "rows", []) or [])
+    if selected_rows:
+        row_index = int(selected_rows[0])
+        if 0 <= row_index < len(orders):
+            st.session_state[_SELECTED_ORDER_KEY] = int(orders.iloc[row_index]["id"])
+    selected_id = int(st.session_state.get(_SELECTED_ORDER_KEY) or orders.iloc[0]["id"])
+    matched = orders.index[orders["id"].astype(int) == selected_id].tolist()
+    if not matched:
+        selected_id = int(orders.iloc[0]["id"])
+        st.session_state[_SELECTED_ORDER_KEY] = selected_id
+        matched = [orders.index[0]]
+    selected = orders.loc[matched[0]]
 
+    order_id, status = int(selected["id"]), str(selected["status"])
+    confirmed_count, total_count = int(selected["confirmed_items"] or 0), int(selected["total_items"] or 0)
     st.markdown(f"### {selected['title']}")
     c1,c2,c3,c4,c5,c6 = st.columns(6)
-    c1.metric("상태", STATUS_LABELS.get(status,status))
-    c2.metric("진행상황", f"{confirmed_count} / {total_count}")
-    c3.metric("국가", str(selected["country"] or "-"))
-    c4.metric("바이어", str(selected["buyer"] or "미지정"))
-    c5.metric("운송방식", str(selected["transport_method"] or "미지정"))
-    c6.metric("수출번호", str(selected["export_no"] or "-"))
+    c1.metric("상태", STATUS_LABELS.get(status,status)); c2.metric("진행상황", f"{confirmed_count} / {total_count}")
+    c3.metric("국가", str(selected["country"] or "-")); c4.metric("바이어", str(selected["buyer"] or "미지정"))
+    c5.metric("운송방식", str(selected["transport_method"] or "미지정")); c6.metric("수출번호", str(selected["export_no"] or "-"))
     _fit_summary_metric_values()
     if total_count:
         st.progress(confirmed_count / total_count, text=f"{confirmed_count} / {total_count} 품목 확정")
@@ -178,7 +133,6 @@ def page_saved_export_waiting():
     total_qty = int(items["수량"].sum()) if not items.empty else 0
     remaining_items = items[items["confirmed"] == 0].copy() if not items.empty else pd.DataFrame()
     remaining_qty = int(remaining_items["수량"].sum()) if not remaining_items.empty else 0
-
     display_cols = ["확정상태","사업장","제품명","LOT","유통기한","수량","원래로케이션","현재로케이션","확정사업장","확정매출처","확정일시"]
     st.dataframe(items[display_cols], hide_index=True, use_container_width=True)
     st.caption(f"전체 {len(items)}개 재고행 / {total_qty}EA · 남은 수출대기 {len(remaining_items)}개 / {remaining_qty}EA")
@@ -190,7 +144,7 @@ def page_saved_export_waiting():
         st.success("모든 품목의 수출확정이 완료되었습니다.")
         return
 
-    edit_col,cancel_col = st.columns(2)
+    edit_col, cancel_col = st.columns(2)
     with edit_col:
         if status == "waiting":
             if st.button("수출대기 수정", type="primary", use_container_width=True):
@@ -206,7 +160,7 @@ def page_saved_export_waiting():
 
     if st.session_state.get("confirm_export_cancel_id") == order_id:
         st.warning("이미 확정된 품목은 유지되고, 아직 확정되지 않은 품목만 원래 로케이션으로 돌아갑니다.")
-        no_col,yes_col = st.columns(2)
+        no_col, yes_col = st.columns(2)
         with no_col:
             if st.button("취소하지 않기", use_container_width=True):
                 st.session_state.pop("confirm_export_cancel_id", None); st.rerun()
@@ -223,20 +177,9 @@ def page_saved_export_waiting():
     st.markdown("---")
     st.markdown("### 선택 품목 수출확정")
     st.caption("아직 확정되지 않은 품목을 체크하고, 해당 품목에 적용할 ERP 매출 사업장과 매출처를 선택하세요.")
-
     selection_source = remaining_items[["id","사업장","제품명","LOT","유통기한","수량","원래로케이션"]].copy()
     selection_source.insert(0, "선택", False)
-    edited = st.data_editor(
-        selection_source,
-        hide_index=True,
-        use_container_width=True,
-        key=f"export_confirm_items_{order_id}_{confirmed_count}",
-        disabled=["id","사업장","제품명","LOT","유통기한","수량","원래로케이션"],
-        column_config={
-            "선택": st.column_config.CheckboxColumn("선택", help="이번에 같은 ERP 사업장으로 확정할 품목"),
-            "id": None,
-        },
-    )
+    edited = st.data_editor(selection_source, hide_index=True, use_container_width=True, key=f"export_confirm_items_{order_id}_{confirmed_count}", disabled=["id","사업장","제품명","LOT","유통기한","수량","원래로케이션"], column_config={"선택": st.column_config.CheckboxColumn("선택", help="이번에 같은 ERP 사업장으로 확정할 품목"), "id": None})
     selected_rows = edited[edited["선택"] == True] if not edited.empty else pd.DataFrame()  # noqa: E712
     selected_ids = selected_rows["id"].astype(int).tolist() if not selected_rows.empty else []
     selected_qty = int(selected_rows["수량"].sum()) if not selected_rows.empty else 0
@@ -250,24 +193,14 @@ def page_saved_export_waiting():
     if customers.empty:
         st.warning("해당 사업장의 ERP 매출처가 없습니다. 거래처 관리에서 ERP 매출처 목록을 먼저 등록하거나 갱신하세요.")
         return
-    customer_labels = [f"{str(r.customer_code or '').strip() or '-'} | {r.customer_name}" for r in customers.itertuples()]
-    customer = customers.iloc[customer_labels.index(st.selectbox("ERP 수출 매출처", customer_labels, key=f"export_customer_select_{order_id}_{confirmed_count}"))]
+    labels = [f"{str(r.customer_code or '').strip() or '-'} | {r.customer_name}" for r in customers.itertuples()]
+    customer = customers.iloc[labels.index(st.selectbox("ERP 수출 매출처", labels, key=f"export_customer_select_{order_id}_{confirmed_count}"))]
     st.info(f"선택 품목 {len(selected_ids)}개 / {selected_qty}EA → {erp_company} / {customer['customer_name']}")
-
     if st.button("선택 품목 수출확정", type="primary", use_container_width=True, disabled=not bool(selected_ids)):
         try:
-            result = confirm_export_waiting_items(
-                order_id,
-                selected_ids,
-                erp_company=erp_company,
-                customer_code=customer.get("customer_code", ""),
-                customer_name=customer.get("customer_name", ""),
-            )
+            result = confirm_export_waiting_items(order_id, selected_ids, erp_company=erp_company, customer_code=customer.get("customer_code", ""), customer_name=customer.get("customer_name", ""))
             status_text = "전체 확정 완료" if result["status"] == "confirmed" else "일부 확정"
-            st.session_state["_export_waiting_message"] = (
-                f"{selected['title']} {status_text}: 이번 {result['selected_count']}개, "
-                f"누적 {result['confirmed_count']} / {result['total_count']} 품목 확정"
-            )
+            st.session_state["_export_waiting_message"] = f"{selected['title']} {status_text}: 이번 {result['selected_count']}개, 누적 {result['confirmed_count']} / {result['total_count']} 품목 확정"
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
