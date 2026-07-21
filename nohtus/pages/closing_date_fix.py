@@ -75,6 +75,34 @@ def _export_waiting_rows(original_q, ds):
     )
 
 
+def _natural_location_key(value):
+    """A1, A2, A10 순서처럼 로케이션의 숫자 부분을 실제 숫자로 정렬한다."""
+    text = str(value or "").strip().upper()
+    if not text:
+        return ((2, ""),)
+    parts = re.findall(r"\d+|[^\d]+", text)
+    key = []
+    for part in parts:
+        if part.isdigit():
+            key.append((0, int(part)))
+        else:
+            key.append((1, part))
+    return tuple(key)
+
+
+def _sort_checklist_items(items):
+    if items is None or items.empty or "로케이션" not in items.columns:
+        return items
+    sorted_items = items.copy()
+    sorted_items["_location_sort"] = sorted_items["로케이션"].apply(_natural_location_key)
+    sort_cols = ["_location_sort"]
+    for column in ["사업장", "표준제품명", "제조번호", "유통기한", "출고지시서ID"]:
+        if column in sorted_items.columns:
+            sort_cols.append(column)
+    sorted_items = sorted_items.sort_values(sort_cols, kind="stable").drop(columns=["_location_sort"])
+    return sorted_items.reset_index(drop=True)
+
+
 def _location_final_stock_map(items, query_func):
     """출고·수출대기 후 각 출발 로케이션에 실제로 남은 현재 수량을 계산한다."""
     if items is None or items.empty:
@@ -100,6 +128,7 @@ def _location_final_stock_map(items, query_func):
 
 
 def _location_aware_html(items, *, include_style=True):
+    items = _sort_checklist_items(items)
     group_cols = ["사업장", "로케이션", "표준제품명", "제조번호", "유통기한"]
     final_map = _location_final_stock_map(items, closing_page.q)
     html = []
@@ -146,6 +175,7 @@ def _location_aware_pdf(items, ds):
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
+    items = _sort_checklist_items(items)
     bio = BytesIO()
     font_name = "Helvetica"
     font_path = closing_page._find_korean_font()
@@ -223,11 +253,12 @@ def page_closing():
             return result
         ds = params[0] if params else ""
         export_rows = _export_waiting_rows(original_q, ds)
-        if export_rows is None or export_rows.empty:
-            return result
-        if result is None or result.empty:
-            return export_rows
-        return pd.concat([result, export_rows], ignore_index=True)
+        if export_rows is not None and not export_rows.empty:
+            if result is None or result.empty:
+                result = export_rows
+            else:
+                result = pd.concat([result, export_rows], ignore_index=True)
+        return _sort_checklist_items(result)
 
     closing_page.q = patched_q
     closing_page.page_erp_stock_compare = page_erp_stock_compare_live
