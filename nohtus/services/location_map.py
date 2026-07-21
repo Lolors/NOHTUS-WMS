@@ -49,18 +49,21 @@ def _product_image_data_uris():
 
 
 def _export_waiting_groups():
-    ensure_export_waiting_tables()
-    rows = q(
-        """
-        SELECT o.id AS order_id, o.country, o.export_no, o.title,
-               i.company, i.product_name, i.warehouse_name, i.lot, i.exp_date,
-               i.qty, i.waiting_location
-        FROM export_waiting_orders o
-        JOIN export_waiting_items i ON i.order_id=o.id
-        WHERE o.status='waiting' AND i.waiting_location='P'
-        ORDER BY o.created_at, o.id, i.id
-        """
-    )
+    try:
+        ensure_export_waiting_tables()
+        rows = q(
+            """
+            SELECT o.id AS order_id, o.country, o.export_no, o.title,
+                   i.company, i.product_name, i.warehouse_name, i.lot, i.exp_date,
+                   i.qty, i.waiting_location
+            FROM export_waiting_orders o
+            JOIN export_waiting_items i ON i.order_id=o.id
+            WHERE o.status='waiting' AND i.waiting_location='P'
+            ORDER BY o.created_at, o.id, i.id
+            """
+        )
+    except Exception:
+        return []
     if rows.empty:
         return []
     result = []
@@ -99,38 +102,39 @@ def render_location_map():
             1,
         )
         html = html.replace(
-            "function productCardsHtml(rows){{",
-            """function exportWaitingCardsHtml(){{
-  const orders={{}};
-  exportWaitingItems.forEach(item=>{{
+            "function productCardsHtml(rows){",
+            """function exportWaitingCardsHtml(fallbackRows){
+  const orders={};
+  exportWaitingItems.forEach(item=>{
     const key=String(item.order_id||'');
-    if(!orders[key]) orders[key]={{country:item.country||'-',export_no:item.export_no||'-',items:[]}};
+    if(!key) return;
+    if(!orders[key]) orders[key]={country:item.country||'-',export_no:item.export_no||'-',items:[]};
     orders[key].items.push(item);
-  }});
+  });
   const entries=Object.values(orders);
-  if(!entries.length) return '<div class=\"muted\">등록된 수출대기 건이 없습니다.</div>';
-  return entries.map(order=>{{
+  if(!entries.length) return productCardsHtml(fallbackRows||[]);
+  return entries.map(order=>{
     const total=order.items.reduce((sum,item)=>sum+(Number(item.qty)||0),0);
-    const productGroups={{}};
-    order.items.forEach(item=>{{
+    const productGroups={};
+    order.items.forEach(item=>{
       const name=item.product_name||'-';
       if(!productGroups[name]) productGroups[name]=[];
       productGroups[name].push(item);
-    }});
-    const products=Object.entries(productGroups).map(([name,items])=>{{
+    });
+    const products=Object.entries(productGroups).map(([name,items])=>{
       const qty=items.reduce((sum,item)=>sum+(Number(item.qty)||0),0);
-      const lines=items.map(item=>`<div class=\"lot-exp\">${{esc(item.company||'-')}} · ${{Number(item.qty)||0}}EA&nbsp;&nbsp;${{esc(item.lot||'-')}} | ${{esc(cleanDate(item.exp_date||'-'))}}</div>`).join('');
-      return `<div class=\"export-product-row\"><div class=\"card-top\"><span class=\"product-title\">${{esc(name)}}</span><span class=\"qty-text\">${{qty}} EA</span></div>${{lines}}<button class=\"prod-btn\" type=\"button\" data-product=\"${{esc(name)}}\">제품 상세 보기</button></div>`;
-    }}).join('');
-    return `<div class=\"detail-card export-order-card\"><div class=\"export-order-title\">${{esc(order.country)}} - ${{esc(order.export_no)}}</div><div class=\"muted\">수출대기 총수량: ${{total}} EA</div>${{products}}</div>`;
-  }}).join('');
-}}
-function productCardsHtml(rows){{""",
+      const lines=items.map(item=>`<div class="lot-exp">${esc(item.company||'-')} · ${Number(item.qty)||0}EA&nbsp;&nbsp;${esc(item.lot||'-')} | ${esc(cleanDate(item.exp_date||'-'))}</div>`).join('');
+      return `<div class="export-product-row"><div class="card-top"><span class="product-title">${esc(name)}</span><span class="qty-text">${qty} EA</span></div>${lines}<button class="prod-btn" type="button" data-product="${esc(name)}">제품 상세 보기</button></div>`;
+    }).join('');
+    return `<div class="detail-card export-order-card"><div class="export-order-title">${esc(order.country)} - ${esc(order.export_no)}</div><div class="muted">수출대기 총수량: ${total} EA</div>${products}</div>`;
+  }).join('');
+}
+function productCardsHtml(rows){""",
             1,
         )
         html = html.replace(
             "html+=productCardsHtml(grouped[lvl]);",
-            "html+=(loc==='P' ? exportWaitingCardsHtml() : productCardsHtml(grouped[lvl]));",
+            "html+=(loc==='P' ? exportWaitingCardsHtml(grouped[lvl]) : productCardsHtml(grouped[lvl]));",
             1,
         )
         html = html.replace(
