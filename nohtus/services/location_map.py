@@ -58,7 +58,9 @@ def _export_waiting_groups():
                    i.qty, i.waiting_location
             FROM export_waiting_orders o
             JOIN export_waiting_items i ON i.order_id=o.id
-            WHERE o.status='waiting' AND i.waiting_location='P'
+            WHERE o.status IN ('waiting','partial')
+              AND i.waiting_location='P'
+              AND COALESCE(i.confirmed,0)=0
             ORDER BY o.created_at, o.id, i.id
             """
         )
@@ -126,7 +128,7 @@ def render_location_map():
       const lines=items.map(item=>`<div class="lot-exp">${esc(item.company||'-')} · ${Number(item.qty)||0}EA&nbsp;&nbsp;${esc(item.lot||'-')} | ${esc(cleanDate(item.exp_date||'-'))}</div>`).join('');
       return `<div class="export-product-row"><div class="card-top"><span class="product-title">${esc(name)}</span><span class="qty-text">${qty} EA</span></div>${lines}</div>`;
     }).join('');
-    return `<div class="detail-card export-order-card"><div class="export-order-title">${esc(order.country)}-${esc(order.buyer)}-${esc(order.transport_method)}</div><div class="muted">수출대기 총수량: ${total} EA</div>${products}</div>`;
+    return `<div class="detail-card export-order-card"><div class="export-order-title">${esc(order.country)}-${esc(order.buyer)}-${esc(order.transport_method)}</div><div class="muted">남은 수출대기 총수량: ${total} EA</div>${products}</div>`;
   }).join('');
 }
 function productCardsHtml(rows){""",
