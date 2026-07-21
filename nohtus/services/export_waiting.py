@@ -7,7 +7,7 @@ from nohtus.db import connect
 from nohtus.services.inventory import insert_transaction_log
 
 P = "P"
-TRANSPORT_METHODS = ("항공", "해상", "핸드캐리")
+TRANSPORT_METHODS = ("미지정", "항공", "해상", "핸드캐리")
 
 
 def ensure_export_waiting_tables(cur=None):
@@ -136,25 +136,32 @@ def _restore(cur, order_id, now, memo):
             to_location=item["source_location"], qty=item["qty"], memo=memo)
 
 
-def save_export_waiting_order(cart, *, country, buyer, transport_method, export_no, editing_order_id=None):
+def save_export_waiting_order(cart, *, country, buyer="", transport_method="미지정", export_no, editing_order_id=None):
     country = str(country or "").strip()
     buyer = str(buyer or "").strip()
-    transport_method = str(transport_method or "").strip()
+    transport_method = str(transport_method or "").strip() or "미지정"
     export_no = str(export_no or "").strip()
-    if not country: raise ValueError("국가를 입력하세요.")
-    if not buyer: raise ValueError("바이어를 입력하세요.")
-    if transport_method not in TRANSPORT_METHODS: raise ValueError("운송방식을 항공, 해상, 핸드캐리 중에서 선택하세요.")
-    if not export_no: raise ValueError("수출번호를 입력하세요.")
+    if not country:
+        raise ValueError("국가를 입력하세요.")
+    if transport_method not in TRANSPORT_METHODS:
+        raise ValueError("운송방식을 항공, 해상, 핸드캐리, 미지정 중에서 선택하세요.")
+    if not export_no:
+        raise ValueError("수출번호를 입력하세요.")
     grouped = defaultdict(int)
     for x in cart or []:
-        if int(x.get("요청수량") or 0) > 0: grouped[int(x.get("id"))] += int(x.get("요청수량"))
-    if not grouped: raise ValueError("수출대기 등록할 품목이 없습니다.")
-    now, title = datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"{country}-{buyer}-{transport_method}"
+        if int(x.get("요청수량") or 0) > 0:
+            grouped[int(x.get("id"))] += int(x.get("요청수량"))
+    if not grouped:
+        raise ValueError("수출대기 등록할 품목이 없습니다.")
+    buyer_title = buyer or "미지정"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    title = f"{country}-{buyer_title}-{transport_method}"
     with connect() as con:
         cur = con.cursor(); ensure_export_waiting_tables(cur)
         if editing_order_id:
             row = cur.execute("SELECT status FROM export_waiting_orders WHERE id=?", (int(editing_order_id),)).fetchone()
-            if not row or row[0] != "waiting": raise ValueError("일부 확정되었거나 완료된 수출대기 건은 수정할 수 없습니다.")
+            if not row or row[0] != "waiting":
+                raise ValueError("일부 확정되었거나 완료된 수출대기 건은 수정할 수 없습니다.")
             _restore(cur, editing_order_id, now, f"수출대기 수정 원복 / {title}")
             cur.execute("DELETE FROM export_waiting_items WHERE order_id=?", (int(editing_order_id),))
             cur.execute("UPDATE export_waiting_orders SET export_no=?,country=?,buyer=?,transport_method=?,title=?,updated_at=? WHERE id=?",
@@ -259,5 +266,5 @@ def confirm_export_waiting_order(order_id, *, erp_company, customer_code, custom
 def move_cart_to_export_waiting(cart, *, title="", customer_name=""):
     title=str(title or "").strip()
     country, export_no = title.split("_",1) if "_" in title else ("수출",title or "미지정")
-    buyer = str(customer_name or "").strip() or "미지정"
-    return save_export_waiting_order(cart,country=country,buyer=buyer,transport_method="항공",export_no=export_no)
+    buyer = str(customer_name or "").strip()
+    return save_export_waiting_order(cart,country=country,buyer=buyer,transport_method="미지정",export_no=export_no)
