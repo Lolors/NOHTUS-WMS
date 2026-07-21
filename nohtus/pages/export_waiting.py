@@ -18,10 +18,10 @@ _ALL_COMPANY_SELECTION_KEYS = (
 
 def _export_title():
     country = str(st.session_state.get("export_waiting_country") or "").strip()
+    buyer = str(st.session_state.get("export_waiting_buyer") or "").strip()
     export_no = str(st.session_state.get("export_waiting_number") or "").strip()
-    if country and export_no:
-        return f"{country}_{export_no}"
-    return country or export_no or "수출대기"
+    parts = [part for part in (country, buyer, export_no) if part]
+    return "-".join(parts) or "수출대기"
 
 
 def _load_editing_order():
@@ -29,7 +29,7 @@ def _load_editing_order():
     if not order_id or st.session_state.get("_export_edit_loaded") == int(order_id):
         return
     ensure_export_waiting_tables()
-    order = q("SELECT country,export_no,title,status FROM export_waiting_orders WHERE id=?", (int(order_id),))
+    order = q("SELECT country,buyer,export_no,title,status FROM export_waiting_orders WHERE id=?", (int(order_id),))
     if order.empty or str(order.iloc[0]["status"]) != "waiting":
         st.session_state.pop("export_editing_order_id", None)
         return
@@ -40,6 +40,7 @@ def _load_editing_order():
         (int(order_id),),
     )
     st.session_state["export_waiting_country"] = str(order.iloc[0]["country"] or "")
+    st.session_state["export_waiting_buyer"] = str(order.iloc[0].get("buyer") or "")
     st.session_state["export_waiting_number"] = str(order.iloc[0]["export_no"] or "")
     st.session_state["outbound_cart"] = items.to_dict("records") if not items.empty else []
     st.session_state["out_cart_editor_token"] = int(st.session_state.get("out_cart_editor_token", 0) or 0) + 1
@@ -51,8 +52,6 @@ def page_export_waiting():
     ensure_export_waiting_tables()
     _load_editing_order()
 
-    # 수출은 매출처 사업장과 무관하게 실제 출고할 사업장·로케이션 재고를 직접 선택한다.
-    # 화면 표시값뿐 아니라 outbound_business 내부 판단이 사용하는 세션값도 항상 True로 둔다.
     for key in _ALL_COMPANY_SELECTION_KEYS:
         st.session_state[key] = True
 
@@ -80,6 +79,7 @@ def page_export_waiting():
         result = save_export_waiting_order(
             cart,
             country=st.session_state.get("export_waiting_country"),
+            buyer=st.session_state.get("export_waiting_buyer"),
             export_no=st.session_state.get("export_waiting_number"),
             editing_order_id=st.session_state.get("export_editing_order_id"),
         )
@@ -119,11 +119,13 @@ def page_export_waiting():
                 result = original_markdown("### 수출 정보", *args, **kwargs)
                 if not export_fields_rendered["done"]:
                     export_fields_rendered["done"] = True
-                    c1, c2 = st.columns(2, gap="medium")
+                    c1, c2, c3 = st.columns(3, gap="medium")
                     with c1:
-                        original_text_input("수출번호", placeholder="수출번호를 입력하세요", key="export_waiting_number")
-                    with c2:
                         original_text_input("국가", placeholder="국가를 입력하세요", key="export_waiting_country")
+                    with c2:
+                        original_text_input("바이어", placeholder="바이어명을 입력하세요", key="export_waiting_buyer")
+                    with c3:
+                        original_text_input("수출번호", placeholder="수출번호를 입력하세요", key="export_waiting_number")
                 return result
             body = body.replace("### 출고지시 장바구니", "### 수출대기 장바구니")
         return original_markdown(body, *args, **kwargs)
@@ -167,7 +169,7 @@ def page_export_waiting():
         if export_completed["done"]:
             st.session_state["_outbound_last_success"] = export_completed["message"]
             export_completed["done"] = False
-            for key in ["export_waiting_number", "export_waiting_country", "export_waiting_auto_title", "export_editing_order_id", "_export_edit_loaded"]:
+            for key in ["export_waiting_number", "export_waiting_country", "export_waiting_buyer", "export_waiting_auto_title", "export_editing_order_id", "_export_edit_loaded"]:
                 st.session_state.pop(key, None)
         return original_rerun(*args, **kwargs)
 
