@@ -1,4 +1,4 @@
-"""Location map service with product-photo support."""
+"""Location map service with product-photo and export-waiting grouping support."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import mimetypes
 from pathlib import Path
 
 from nohtus.db import q
+from nohtus.services.export_waiting import ensure_export_waiting_tables
 from . import location_map_legacy as _legacy
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -47,14 +48,44 @@ def _product_image_data_uris():
     return images
 
 
+def _export_waiting_groups():
+    ensure_export_waiting_tables()
+    rows = q(
+        """
+        SELECT o.id AS order_id, o.country, o.export_no, o.title,
+               i.company, i.product_name, i.warehouse_name, i.lot, i.exp_date,
+               i.qty, i.waiting_location
+        FROM export_waiting_orders o
+        JOIN export_waiting_items i ON i.order_id=o.id
+        WHERE o.status='waiting' AND i.waiting_location='P'
+        ORDER BY o.created_at, o.id, i.id
+        """
+    )
+    if rows.empty:
+        return []
+    result = []
+    for row in rows.to_dict("records"):
+        clean = {}
+        for key, value in row.items():
+            if value is None:
+                clean[key] = ""
+            elif key in {"order_id", "qty"}:
+                clean[key] = int(value or 0)
+            else:
+                clean[key] = str(value)
+        result.append(clean)
+    return result
+
+
 def render_location_map():
     product_images = json.dumps(_product_image_data_uris(), ensure_ascii=False)
+    export_waiting = json.dumps(_export_waiting_groups(), ensure_ascii=False)
     original_html = _legacy.components.html
 
-    def photo_html(html, *args, **kwargs):
+    def enhanced_html(html, *args, **kwargs):
         html = html.replace(
             "const txData = DATA.tx || [];",
-            f"const txData = DATA.tx || [];\nconst productImages = {product_images};",
+            f"const txData = DATA.tx || [];\nconst productImages = {product_images};\nconst exportWaitingItems = {export_waiting};",
             1,
         )
         html = html.replace(
@@ -67,9 +98,49 @@ def render_location_map():
             '<div class="photo-box">${productImages[name] ? `<img src="${productImages[name]}" alt="${esc(name)}">` : "📷"}</div>',
             1,
         )
+        html = html.replace(
+            "function productCardsHtml(rows){{",
+            """function exportWaitingCardsHtml(){{
+  const orders={{}};
+  exportWaitingItems.forEach(item=>{{
+    const key=String(item.order_id||'');
+    if(!orders[key]) orders[key]={{country:item.country||'-',export_no:item.export_no||'-',items:[]}};
+    orders[key].items.push(item);
+  }});
+  const entries=Object.values(orders);
+  if(!entries.length) return '<div class=\"muted\">등록된 수출대기 건이 없습니다.</div>';
+  return entries.map(order=>{{
+    const total=order.items.reduce((sum,item)=>sum+(Number(item.qty)||0),0);
+    const productGroups={{}};
+    order.items.forEach(item=>{{
+      const name=item.product_name||'-';
+      if(!productGroups[name]) productGroups[name]=[];
+      productGroups[name].push(item);
+    }});
+    const products=Object.entries(productGroups).map(([name,items])=>{{
+      const qty=items.reduce((sum,item)=>sum+(Number(item.qty)||0),0);
+      const lines=items.map(item=>`<div class=\"lot-exp\">${{esc(item.company||'-')}} · ${{Number(item.qty)||0}}EA&nbsp;&nbsp;${{esc(item.lot||'-')}} | ${{esc(cleanDate(item.exp_date||'-'))}}</div>`).join('');
+      return `<div class=\"export-product-row\"><div class=\"card-top\"><span class=\"product-title\">${{esc(name)}}</span><span class=\"qty-text\">${{qty}} EA</span></div>${{lines}}<button class=\"prod-btn\" type=\"button\" data-product=\"${{esc(name)}}\">제품 상세 보기</button></div>`;
+    }}).join('');
+    return `<div class=\"detail-card export-order-card\"><div class=\"export-order-title\">${{esc(order.country)}} - ${{esc(order.export_no)}}</div><div class=\"muted\">수출대기 총수량: ${{total}} EA</div>${{products}}</div>`;
+  }}).join('');
+}}
+function productCardsHtml(rows){{""",
+            1,
+        )
+        html = html.replace(
+            "html+=productCardsHtml(grouped[lvl]);",
+            "html+=(loc==='P' ? exportWaitingCardsHtml() : productCardsHtml(grouped[lvl]));",
+            1,
+        )
+        html = html.replace(
+            "</style>",
+            ".export-order-card{border:1.5px solid #c7d2fe;background:#f8faff;padding:14px;margin-bottom:14px}.export-order-title{font-size:18px;font-weight:800;color:#1e3a8a;margin-bottom:5px}.export-product-row{border-top:1px solid #dbeafe;margin-top:12px;padding-top:12px}.export-product-row:first-of-type{border-top:0;margin-top:8px;padding-top:0}</style>",
+            1,
+        )
         return original_html(html, *args, **kwargs)
 
-    _legacy.components.html = photo_html
+    _legacy.components.html = enhanced_html
     try:
         return _legacy.render_location_map()
     finally:

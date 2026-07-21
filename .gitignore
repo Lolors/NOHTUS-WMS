@@ -31,5 +31,7 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local runtime data
 data/nohtus.db
-/data/product_images
+/data/product_images/
