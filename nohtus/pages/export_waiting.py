@@ -51,8 +51,6 @@ def page_export_waiting():
     ensure_export_waiting_tables()
     _load_editing_order()
 
-    # 수출은 매출처 사업장과 무관하게 실제 출고할 사업장·로케이션 재고를 직접 선택한다.
-    # 화면 표시값뿐 아니라 outbound_business 내부 판단이 사용하는 세션값도 항상 True로 둔다.
     for key in _ALL_COMPANY_SELECTION_KEYS:
         st.session_state[key] = True
 
@@ -123,7 +121,11 @@ def page_export_waiting():
                     with c1:
                         original_text_input("수출번호", placeholder="수출번호를 입력하세요", key="export_waiting_number")
                     with c2:
-                        original_text_input("국가", placeholder="국가를 입력하세요", key="export_waiting_country")
+                        original_text_input(
+                            "바이어 (선택)",
+                            placeholder="필요한 경우 바이어명을 입력하세요",
+                            key="export_waiting_country",
+                        )
                 return result
             body = body.replace("### 출고지시 장바구니", "### 수출대기 장바구니")
         return original_markdown(body, *args, **kwargs)
