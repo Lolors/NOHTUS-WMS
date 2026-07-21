@@ -201,8 +201,8 @@ def page_map_search_results(term, compact: bool = False):
     <style>
     .product-main-name{font-size:18px;font-weight:400;color:#111827;line-height:1.35;margin:14px 0 9px;word-break:keep-all;text-align:center;}
     .product-photo-panel{width:250px;height:250px;max-width:100%;border:1.5px dashed #d6dee9;border-radius:20px;background:linear-gradient(180deg,#ffffff,#f8fafc);display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:600;font-size:20px;line-height:1.55;margin:0 auto 10px;overflow:hidden;}
-    div[data-testid="stVerticalBlock"]:has(.photo-upload-button-marker) div[data-testid="stButton"] > button{width:250px;height:250px;max-width:100%;margin:0 auto 10px;border:1.5px dashed #d6dee9;border-radius:20px;background:linear-gradient(180deg,#ffffff,#f8fafc);color:#94a3b8;font-weight:600;font-size:20px;line-height:1.55;white-space:pre-line;display:flex;align-items:center;justify-content:center;box-shadow:none;}
-    div[data-testid="stVerticalBlock"]:has(.photo-upload-button-marker) div[data-testid="stButton"] > button:hover{border-color:#94a3b8;color:#64748b;background:#f8fafc;}
+    div[class*="st-key-photo_upload_trigger_"] div[data-testid="stButton"] > button{width:250px;height:250px;max-width:100%;margin:0 auto 10px;border:1.5px dashed #d6dee9;border-radius:20px;background:linear-gradient(180deg,#ffffff,#f8fafc);color:#94a3b8;font-weight:600;font-size:20px;line-height:1.55;white-space:pre-line;display:flex;align-items:center;justify-content:center;box-shadow:none;}
+    div[class*="st-key-photo_upload_trigger_"] div[data-testid="stButton"] > button:hover{border-color:#94a3b8;color:#64748b;background:#f8fafc;}
     .total-card-small{width:50%;min-width:180px;border:1.5px solid #e5e7eb;border-radius:20px;padding:12px 17px;margin:4px auto 48px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;background:#fafafa;box-shadow:0 2px 8px rgba(15,23,42,.025);}
     .total-label{font-size:15px;font-weight:500;color:#6b7280;text-align:center;}.total-value{font-size:24px;font-weight:800;color:#111827;text-align:center;}
     .dist-header{font-size:18px;font-weight:800;color:#111827;margin:2px 0 12px;}.dist-rule{height:1px;background:#e5e7eb;margin:0 0 14px;}
@@ -236,8 +236,8 @@ def page_map_search_results(term, compact: bool = False):
                     if st.button("📷 사진 변경", key=f"open_product_image_dialog_{product_name}", use_container_width=True):
                         _product_image_dialog(product_name, img_path)
                 else:
-                    with st.container():
-                        st.markdown("<span class='photo-upload-button-marker'></span>", unsafe_allow_html=True)
+                    photo_key = _safe_product_image_stem(product_name)
+                    with st.container(key=f"photo_upload_trigger_{photo_key}"):
                         if st.button(
                             "제품 사진\n(아래에서 업로드)",
                             key=f"open_product_image_dialog_{product_name}",
