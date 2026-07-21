@@ -61,7 +61,7 @@ def _export_waiting_groups():
             WHERE o.status IN ('waiting','partial')
               AND i.waiting_location='P'
               AND COALESCE(i.confirmed,0)=0
-            ORDER BY o.created_at, o.id, i.id
+            ORDER BY o.country, o.created_at, o.id, i.id
             """
         )
     except Exception:
@@ -90,7 +90,7 @@ def render_location_map():
     def enhanced_html(html, *args, **kwargs):
         html = html.replace(
             "const txData = DATA.tx || [];",
-            f"const txData = DATA.tx || [];\nconst productImages = {product_images};\nconst exportWaitingItems = {export_waiting};",
+            f"const rawTxData = DATA.tx || [];\nconst txData = rawTxData.filter(t => !String(t.tx_type || '').includes('재고조사불러오기') && !String(t.memo || '').includes('재고조사불러오기'));\nconst productImages = {product_images};\nconst exportWaitingItems = {export_waiting};",
             1,
         )
         html = html.replace(
@@ -113,7 +113,11 @@ def render_location_map():
     if(!orders[key]) orders[key]={country:item.country||'-',buyer:item.buyer||'미지정',transport_method:item.transport_method||'미지정',items:[]};
     orders[key].items.push(item);
   });
-  const entries=Object.values(orders);
+  const entries=Object.values(orders).sort((a,b)=>
+    String(a.country||'').localeCompare(String(b.country||''),'ko') ||
+    String(a.buyer||'').localeCompare(String(b.buyer||''),'ko') ||
+    String(a.transport_method||'').localeCompare(String(b.transport_method||''),'ko')
+  );
   if(!entries.length) return productCardsHtml(fallbackRows||[]);
   return entries.map(order=>{
     const total=order.items.reduce((sum,item)=>sum+(Number(item.qty)||0),0);
