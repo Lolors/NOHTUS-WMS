@@ -217,12 +217,19 @@ def page_map_search_results(term, compact: bool = False):
     .product-photo-panel{width:250px;height:250px;max-width:100%;border:1.5px dashed #d6dee9;border-radius:20px;background:linear-gradient(180deg,#ffffff,#f8fafc);display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:600;font-size:20px;line-height:1.55;margin:0 auto 10px;overflow:hidden;}
     div[class*="st-key-photo_upload_trigger_"] div[data-testid="stButton"] > button{width:250px;height:250px;max-width:100%;margin:0 auto 10px;border:1.5px dashed #d6dee9;border-radius:20px;background:linear-gradient(180deg,#ffffff,#f8fafc);color:#94a3b8;font-weight:600;font-size:20px;line-height:1.55;white-space:pre-line;display:flex;align-items:center;justify-content:center;box-shadow:none;}
     div[class*="st-key-photo_upload_trigger_"] div[data-testid="stButton"] > button:hover{border-color:#94a3b8;color:#64748b;background:#f8fafc;}
-    div[class*="st-key-photo_display_"]{position:relative;width:250px;max-width:100%;aspect-ratio:1/1;margin:0 auto 10px;overflow:hidden;border-radius:20px;background:#f8fafc;}
-    div[class*="st-key-photo_display_"] div[data-testid="stImage"]{height:100%;margin:0;}
-    div[class*="st-key-photo_display_"] div[data-testid="stImage"] img{width:100%!important;height:100%!important;aspect-ratio:1/1;object-fit:cover!important;object-position:center;display:block;border-radius:20px;}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"]{position:absolute;top:8px;right:8px;z-index:5;width:34px;height:34px;}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{width:34px!important;height:34px!important;min-height:34px!important;padding:0!important;border-radius:999px!important;border:1px solid rgba(255,255,255,.9)!important;background:rgba(15,23,42,.72)!important;color:#fff!important;box-shadow:0 3px 10px rgba(15,23,42,.28)!important;font-size:16px!important;line-height:1!important;}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button:hover{background:rgba(15,23,42,.9)!important;transform:scale(1.04);}
+
+    div[class*="st-key-photo_display_"]{position:relative;width:250px;max-width:100%;margin:0 auto 10px;overflow:visible;}
+    div[class*="st-key-photo_display_"] > div[data-testid="stVerticalBlock"]{position:relative;width:100%;gap:0;}
+    div[class*="st-key-photo_display_"] .product-photo-frame{position:relative;width:100%;aspect-ratio:1/1;overflow:hidden;border-radius:20px;background:#f8fafc;box-shadow:inset 0 0 0 1px rgba(203,213,225,.55);}
+    div[class*="st-key-photo_display_"] .product-photo-frame img{width:100%;height:100%;object-fit:cover;object-position:center;display:block;}
+    div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){position:absolute!important;top:8px;right:8px;width:36px!important;height:36px!important;z-index:20;opacity:0;pointer-events:none;transition:opacity .16s ease,transform .16s ease;transform:translateY(-2px);}
+    div[class*="st-key-photo_display_"]:hover div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){opacity:1;pointer-events:auto;transform:translateY(0);}
+    div[class*="st-key-photo_display_"] div[data-testid="stButton"],
+    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{width:36px!important;height:36px!important;min-height:36px!important;}
+    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{padding:0!important;border-radius:999px!important;border:1px solid rgba(255,255,255,.95)!important;background:rgba(15,23,42,.78)!important;color:#fff!important;box-shadow:0 3px 12px rgba(15,23,42,.34)!important;font-size:17px!important;line-height:1!important;display:flex!important;align-items:center!important;justify-content:center!important;}
+    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button:hover{background:rgba(15,23,42,.95)!important;transform:scale(1.05);}
+    @media (hover:none){div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){opacity:1;pointer-events:auto;transform:none;}}
+
     .total-card-small{width:50%;min-width:180px;border:1.5px solid #e5e7eb;border-radius:20px;padding:12px 17px;margin:4px auto 48px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;background:#fafafa;box-shadow:0 2px 8px rgba(15,23,42,.025);}
     .total-label{font-size:15px;font-weight:500;color:#6b7280;text-align:center;}.total-value{font-size:24px;font-weight:800;color:#111827;text-align:center;}
     .dist-header{font-size:18px;font-weight:800;color:#111827;margin:2px 0 12px;}.dist-rule{height:1px;background:#e5e7eb;margin:0 0 14px;}
@@ -233,7 +240,7 @@ def page_map_search_results(term, compact: bool = False):
     """, unsafe_allow_html=True)
 
     if compact:
-        st.markdown("""<style>.product-photo-panel{width:210px!important;height:210px!important;font-size:18px!important;border-radius:16px!important;}div[class*="st-key-photo_display_"]{width:210px!important;border-radius:16px!important;}div[class*="st-key-photo_display_"] div[data-testid="stImage"] img{border-radius:16px!important;}.product-main-name{font-size:16px!important;}.total-card-small{width:72%!important;min-width:145px!important;margin-bottom:26px!important;padding:10px 12px!important;border-radius:16px!important;}</style>""", unsafe_allow_html=True)
+        st.markdown("""<style>.product-photo-panel{width:210px!important;height:210px!important;font-size:18px!important;border-radius:16px!important;}div[class*="st-key-photo_display_"]{width:210px!important;}div[class*="st-key-photo_display_"] .product-photo-frame{border-radius:16px!important;}.product-main-name{font-size:16px!important;}.total-card-small{width:72%!important;min-width:145px!important;margin-bottom:26px!important;padding:10px 12px!important;border-radius:16px!important;}</style>""", unsafe_allow_html=True)
 
     company_order = {"노투스팜": 0, "노투스": 1, "NOH": 2, "비자료": 3}
     card_columns = [0.78, 3.05] if compact else [0.95, 2.35]
@@ -253,8 +260,15 @@ def page_map_search_results(term, compact: bool = False):
                 img_path = get_product_image_path(product_name)
                 photo_key = _safe_product_image_stem(product_name)
                 if img_path:
+                    image_uri = _image_data_uri(img_path)
                     with st.container(key=f"photo_display_{photo_key}"):
-                        st.image(img_path, use_container_width=True)
+                        if image_uri:
+                            st.markdown(
+                                f"<div class='product-photo-frame'><img src='{image_uri}' alt='{escape(product_name)}'></div>",
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.markdown("<div class='product-photo-panel'>제품 사진을 불러올 수 없습니다.</div>", unsafe_allow_html=True)
                         if st.button(
                             "✎",
                             key=f"open_product_image_dialog_{product_name}",
