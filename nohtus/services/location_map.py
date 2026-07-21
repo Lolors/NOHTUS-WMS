@@ -53,7 +53,7 @@ def _export_waiting_groups():
         ensure_export_waiting_tables()
         rows = q(
             """
-            SELECT o.id AS order_id, o.country, o.buyer, o.export_no, o.title,
+            SELECT o.id AS order_id, o.country, o.buyer, o.transport_method, o.title,
                    i.company, i.product_name, i.warehouse_name, i.lot, i.exp_date,
                    i.qty, i.waiting_location
             FROM export_waiting_orders o
@@ -108,7 +108,7 @@ def render_location_map():
   exportWaitingItems.forEach(item=>{
     const key=String(item.order_id||'');
     if(!key) return;
-    if(!orders[key]) orders[key]={country:item.country||'-',buyer:item.buyer||'미지정',export_no:item.export_no||'-',items:[]};
+    if(!orders[key]) orders[key]={country:item.country||'-',buyer:item.buyer||'미지정',transport_method:item.transport_method||'미지정',items:[]};
     orders[key].items.push(item);
   });
   const entries=Object.values(orders);
@@ -126,7 +126,7 @@ def render_location_map():
       const lines=items.map(item=>`<div class="lot-exp">${esc(item.company||'-')} · ${Number(item.qty)||0}EA&nbsp;&nbsp;${esc(item.lot||'-')} | ${esc(cleanDate(item.exp_date||'-'))}</div>`).join('');
       return `<div class="export-product-row"><div class="card-top"><span class="product-title">${esc(name)}</span><span class="qty-text">${qty} EA</span></div>${lines}</div>`;
     }).join('');
-    return `<div class="detail-card export-order-card"><div class="export-order-title">${esc(order.country)}-${esc(order.buyer)}-${esc(order.export_no)}</div><div class="muted">수출대기 총수량: ${total} EA</div>${products}</div>`;
+    return `<div class="detail-card export-order-card"><div class="export-order-title">${esc(order.country)}-${esc(order.buyer)}-${esc(order.transport_method)}</div><div class="muted">수출대기 총수량: ${total} EA</div>${products}</div>`;
   }).join('');
 }
 function productCardsHtml(rows){""",
