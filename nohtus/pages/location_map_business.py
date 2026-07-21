@@ -98,6 +98,16 @@ def page_map():
     original_search_results = location_map_page.page_map_search_results
     original_text_input = st.text_input
 
+    # 검색결과의 총재고 카드 아래 여백을 재고분포 제목 간격과 비슷하게 맞춘다.
+    st.markdown(
+        """
+        <style>
+        .total-card-small { margin-bottom: 12px !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     def patched_text_input(label, *args, **kwargs):
         if isinstance(label, str) and label == "제품명 검색":
             search_col, filter_col = st.columns([7, 3], gap="small")
