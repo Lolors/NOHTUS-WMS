@@ -14,6 +14,7 @@ _ALL_COMPANY_SELECTION_KEYS = (
     "out_ignore_company",
     "out_manual_pick",
 )
+_SHIPPING_METHOD_OPTIONS = ["항공", "해상", "핸드캐리", "미지정"]
 
 
 def _export_title():
@@ -41,7 +42,8 @@ def _load_editing_order():
     )
     st.session_state["export_waiting_country"] = str(order.iloc[0]["country"] or "")
     st.session_state["export_waiting_number"] = str(order.iloc[0]["export_no"] or "")
-    st.session_state["export_waiting_shipping_method"] = str(order.iloc[0]["shipping_method"] or "")
+    shipping_method = str(order.iloc[0]["shipping_method"] or "미지정").strip()
+    st.session_state["export_waiting_shipping_method"] = shipping_method if shipping_method in _SHIPPING_METHOD_OPTIONS else "미지정"
     st.session_state["outbound_cart"] = items.to_dict("records") if not items.empty else []
     st.session_state["out_cart_editor_token"] = int(st.session_state.get("out_cart_editor_token", 0) or 0) + 1
     st.session_state["_export_edit_loaded"] = int(order_id)
@@ -129,9 +131,15 @@ def page_export_waiting():
                             key="export_waiting_country",
                         )
                     with c3:
-                        original_text_input(
-                            "운송방식 (선택)",
-                            placeholder="예: AIR, SEA, 특송",
+                        current_method = str(st.session_state.get("export_waiting_shipping_method") or "미지정").strip()
+                        if current_method not in _SHIPPING_METHOD_OPTIONS:
+                            st.session_state["export_waiting_shipping_method"] = "미지정"
+                        st.selectbox(
+                            "운송방식",
+                            _SHIPPING_METHOD_OPTIONS,
+                            index=_SHIPPING_METHOD_OPTIONS.index(
+                                str(st.session_state.get("export_waiting_shipping_method") or "미지정")
+                            ),
                             key="export_waiting_shipping_method",
                         )
                 return result
