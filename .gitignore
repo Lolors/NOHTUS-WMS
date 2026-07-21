@@ -32,3 +32,4 @@ htmlcov/
 .DS_Store
 Thumbs.db
 data/nohtus.db
+/data/product_images
