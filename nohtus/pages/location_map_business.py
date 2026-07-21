@@ -97,6 +97,7 @@ def _inject_gm_medic_special_location():
 def page_map():
     original_search_results = location_map_page.page_map_search_results
     original_text_input = st.text_input
+    original_button = st.button
 
     # 검색결과의 총재고 카드 아래 여백을 재고분포 제목 간격과 비슷하게 맞춘다.
     st.markdown(
@@ -124,11 +125,18 @@ def page_map():
             return value
         return original_text_input(label, *args, **kwargs)
 
+    def patched_button(label, *args, **kwargs):
+        if isinstance(label, str) and label == "제품 사진\n(아래에서 업로드)":
+            label = "클릭해서 업로드"
+        return original_button(label, *args, **kwargs)
+
     location_map_page.page_map_search_results = _page_map_search_results_with_available_filter
     st.text_input = patched_text_input
+    st.button = patched_button
     try:
         _page_map()
     finally:
         location_map_page.page_map_search_results = original_search_results
         st.text_input = original_text_input
+        st.button = original_button
     _inject_gm_medic_special_location()
