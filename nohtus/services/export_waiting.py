@@ -15,9 +15,12 @@ def ensure_export_waiting_tables(cur=None):
     c = con.cursor() if own else cur
     c.execute("""CREATE TABLE IF NOT EXISTS export_waiting_orders(
         id INTEGER PRIMARY KEY AUTOINCREMENT, export_no TEXT NOT NULL, country TEXT NOT NULL,
-        title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'waiting', erp_company TEXT,
+        buyer TEXT, title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'waiting', erp_company TEXT,
         erp_customer_code TEXT, erp_customer_name TEXT, confirmed_at TEXT, cancelled_at TEXT,
         created_at TEXT NOT NULL, updated_at TEXT NOT NULL, created_by TEXT)""")
+    order_cols = {r[1] for r in c.execute("PRAGMA table_info(export_waiting_orders)").fetchall()}
+    if "buyer" not in order_cols:
+        c.execute("ALTER TABLE export_waiting_orders ADD COLUMN buyer TEXT")
     c.execute("""CREATE TABLE IF NOT EXISTS export_waiting_items(
         id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, source_inventory_id INTEGER,
         company TEXT NOT NULL, product_name TEXT NOT NULL, warehouse_name TEXT, lot TEXT, exp_date TEXT,
@@ -109,15 +112,18 @@ def _restore(cur, order_id, now, memo):
             to_location=item["source_location"], qty=item["qty"], memo=memo)
 
 
-def save_export_waiting_order(cart, *, country, export_no, editing_order_id=None):
-    country, export_no = str(country or "").strip(), str(export_no or "").strip()
+def save_export_waiting_order(cart, *, country, buyer, export_no, editing_order_id=None):
+    country = str(country or "").strip()
+    buyer = str(buyer or "").strip()
+    export_no = str(export_no or "").strip()
     if not country: raise ValueError("국가를 입력하세요.")
+    if not buyer: raise ValueError("바이어를 입력하세요.")
     if not export_no: raise ValueError("수출번호를 입력하세요.")
     grouped = defaultdict(int)
     for x in cart or []:
         if int(x.get("요청수량") or 0) > 0: grouped[int(x.get("id"))] += int(x.get("요청수량"))
     if not grouped: raise ValueError("수출대기 등록할 품목이 없습니다.")
-    now, title = datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"{country}_{export_no}"
+    now, title = datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"{country}-{buyer}-{export_no}"
     with connect() as con:
         cur = con.cursor(); ensure_export_waiting_tables(cur)
         if editing_order_id:
@@ -125,12 +131,12 @@ def save_export_waiting_order(cart, *, country, export_no, editing_order_id=None
             if not row or row[0] != "waiting": raise ValueError("수정할 수출대기 건이 없거나 이미 처리되었습니다.")
             _restore(cur, editing_order_id, now, f"수출대기 수정 원복 / {title}")
             cur.execute("DELETE FROM export_waiting_items WHERE order_id=?", (int(editing_order_id),))
-            cur.execute("UPDATE export_waiting_orders SET export_no=?,country=?,title=?,updated_at=? WHERE id=?",
-                        (export_no,country,title,now,int(editing_order_id)))
+            cur.execute("UPDATE export_waiting_orders SET export_no=?,country=?,buyer=?,title=?,updated_at=? WHERE id=?",
+                        (export_no,country,buyer,title,now,int(editing_order_id)))
             order_id = int(editing_order_id)
         else:
-            cur.execute("""INSERT INTO export_waiting_orders(export_no,country,title,status,created_at,updated_at,created_by)
-                VALUES(?,?,?,'waiting',?,?,?)""", (export_no,country,title,now,now,_actor()))
+            cur.execute("""INSERT INTO export_waiting_orders(export_no,country,buyer,title,status,created_at,updated_at,created_by)
+                VALUES(?,?,?,?,'waiting',?,?,?)""", (export_no,country,buyer,title,now,now,_actor()))
             order_id = int(cur.lastrowid)
         total = 0
         for inventory_id, qty in grouped.items():
@@ -182,4 +188,5 @@ def confirm_export_waiting_order(order_id, *, erp_company, customer_code, custom
 def move_cart_to_export_waiting(cart, *, title="", customer_name=""):
     title=str(title or "").strip()
     country, export_no = title.split("_",1) if "_" in title else ("수출",title or "미지정")
-    return save_export_waiting_order(cart,country=country,export_no=export_no)
+    buyer = str(customer_name or "").strip() or "미지정"
+    return save_export_waiting_order(cart,country=country,buyer=buyer,export_no=export_no)
