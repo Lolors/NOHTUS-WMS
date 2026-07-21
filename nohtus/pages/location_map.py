@@ -77,6 +77,65 @@ def _delete_product_image(product_name: str) -> None:
             pass
 
 
+@st.dialog("제품 사진 관리", width="small")
+def _product_image_dialog(product_name: str, img_path: str) -> None:
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stDialog"] > div[role="dialog"] {
+            border:1px solid #b8c2cf;
+            border-radius:10px;
+            box-shadow:0 24px 70px rgba(15,23,42,.35);
+        }
+        div[data-testid="stDialog"] div[data-testid="stFileUploader"] {
+            border-radius:8px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption(product_name)
+    if img_path:
+        st.image(img_path, use_container_width=True)
+    else:
+        st.info("현재 등록된 제품 사진이 없습니다.")
+
+    uploaded = st.file_uploader(
+        "JPG, PNG 또는 WEBP 사진 선택",
+        type=["jpg", "jpeg", "png", "webp"],
+        key=f"product_image_upload_dialog_{product_name}",
+    )
+    st.caption("사진은 최대 8MB까지 등록할 수 있습니다.")
+
+    save_col, delete_col = st.columns(2)
+    with save_col:
+        if st.button(
+            "사진 저장",
+            key=f"save_product_image_dialog_{product_name}",
+            use_container_width=True,
+            disabled=uploaded is None,
+            type="primary",
+        ):
+            try:
+                _save_product_image(product_name, uploaded)
+                st.success("제품 사진을 저장했습니다.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(f"사진 저장 중 오류가 발생했습니다: {exc}")
+    with delete_col:
+        if st.button(
+            "사진 삭제",
+            key=f"delete_product_image_dialog_{product_name}",
+            use_container_width=True,
+            disabled=not bool(img_path),
+        ):
+            _delete_product_image(product_name)
+            st.success("제품 사진을 삭제했습니다.")
+            st.rerun()
+
+
 def _map_search_warehouse_name(value):
     text = str(value or "").strip()
     return text if text and text.lower() != "nan" else "-"
@@ -142,6 +201,8 @@ def page_map_search_results(term, compact: bool = False):
     <style>
     .product-main-name{font-size:18px;font-weight:400;color:#111827;line-height:1.35;margin:14px 0 9px;word-break:keep-all;text-align:center;}
     .product-photo-panel{width:250px;height:250px;max-width:100%;border:1.5px dashed #d6dee9;border-radius:20px;background:linear-gradient(180deg,#ffffff,#f8fafc);display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:600;font-size:20px;line-height:1.55;margin:0 auto 10px;overflow:hidden;}
+    div[data-testid="stVerticalBlock"]:has(.photo-upload-button-marker) div[data-testid="stButton"] > button{width:250px;height:250px;max-width:100%;margin:0 auto 10px;border:1.5px dashed #d6dee9;border-radius:20px;background:linear-gradient(180deg,#ffffff,#f8fafc);color:#94a3b8;font-weight:600;font-size:20px;line-height:1.55;white-space:pre-line;display:flex;align-items:center;justify-content:center;box-shadow:none;}
+    div[data-testid="stVerticalBlock"]:has(.photo-upload-button-marker) div[data-testid="stButton"] > button:hover{border-color:#94a3b8;color:#64748b;background:#f8fafc;}
     .total-card-small{width:50%;min-width:180px;border:1.5px solid #e5e7eb;border-radius:20px;padding:12px 17px;margin:4px auto 48px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;background:#fafafa;box-shadow:0 2px 8px rgba(15,23,42,.025);}
     .total-label{font-size:15px;font-weight:500;color:#6b7280;text-align:center;}.total-value{font-size:24px;font-weight:800;color:#111827;text-align:center;}
     .dist-header{font-size:18px;font-weight:800;color:#111827;margin:2px 0 12px;}.dist-rule{height:1px;background:#e5e7eb;margin:0 0 14px;}
@@ -172,31 +233,17 @@ def page_map_search_results(term, compact: bool = False):
                 img_path = get_product_image_path(product_name)
                 if img_path:
                     st.image(img_path, use_container_width=True)
+                    if st.button("📷 사진 변경", key=f"open_product_image_dialog_{product_name}", use_container_width=True):
+                        _product_image_dialog(product_name, img_path)
                 else:
-                    st.markdown("<div class='product-photo-panel'>제품 사진<br>(아래에서 업로드)</div>", unsafe_allow_html=True)
-
-                with st.expander("📷 제품 사진 관리", expanded=not bool(img_path)):
-                    uploaded = st.file_uploader(
-                        "JPG, PNG 또는 WEBP 사진 선택",
-                        type=["jpg", "jpeg", "png", "webp"],
-                        key=f"product_image_upload_{product_name}",
-                    )
-                    upload_col, delete_col = st.columns(2)
-                    with upload_col:
-                        if st.button("사진 저장", key=f"save_product_image_{product_name}", use_container_width=True, disabled=uploaded is None):
-                            try:
-                                _save_product_image(product_name, uploaded)
-                                st.success("제품 사진을 저장했습니다.")
-                                st.rerun()
-                            except ValueError as exc:
-                                st.error(str(exc))
-                            except Exception as exc:
-                                st.error(f"사진 저장 중 오류가 발생했습니다: {exc}")
-                    with delete_col:
-                        if st.button("사진 삭제", key=f"delete_product_image_{product_name}", use_container_width=True, disabled=not bool(img_path)):
-                            _delete_product_image(product_name)
-                            st.success("제품 사진을 삭제했습니다.")
-                            st.rerun()
+                    with st.container():
+                        st.markdown("<span class='photo-upload-button-marker'></span>", unsafe_allow_html=True)
+                        if st.button(
+                            "제품 사진\n(아래에서 업로드)",
+                            key=f"open_product_image_dialog_{product_name}",
+                            use_container_width=True,
+                        ):
+                            _product_image_dialog(product_name, img_path)
 
                 st.markdown(f"<div class='product-main-name'>{escape(product_name)}</div>", unsafe_allow_html=True)
                 st.markdown(f"<div class='total-card-small'><span class='total-label'>총 재고</span><span class='total-value'>{total_qty} EA</span></div>", unsafe_allow_html=True)
