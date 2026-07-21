@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from nohtus.config import COMPANIES
 from nohtus.db import connect, q
@@ -18,6 +19,64 @@ STATUS_LABELS = {
     "confirmed": "수출확정",
     "cancelled": "취소됨",
 }
+
+
+def _fit_summary_metric_values():
+    """Shrink metric value text only when it is wider than its card."""
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stMetricValue"] {
+            overflow: visible !important;
+        }
+        div[data-testid="stMetricValue"] > div {
+            max-width: 100% !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+            white-space: nowrap !important;
+            line-height: 1.15 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    components.html(
+        """
+        <script>
+        (function () {
+          function fitMetricValues() {
+            try {
+              const doc = window.parent.document;
+              const values = Array.from(doc.querySelectorAll('[data-testid="stMetricValue"] > div'));
+              values.forEach(function (value) {
+                const box = value.parentElement;
+                if (!box || !value.textContent.trim()) return;
+
+                value.style.fontSize = '';
+                const computed = window.parent.getComputedStyle(value);
+                let size = parseFloat(computed.fontSize) || 32;
+                const minimum = 13;
+                const available = Math.max(0, box.clientWidth - 2);
+
+                while (size > minimum && value.scrollWidth > available) {
+                  size -= 1;
+                  value.style.fontSize = size + 'px';
+                }
+              });
+            } catch (error) {}
+          }
+
+          fitMetricValues();
+          setTimeout(fitMetricValues, 80);
+          setTimeout(fitMetricValues, 250);
+          setTimeout(fitMetricValues, 700);
+          window.parent.addEventListener('resize', fitMetricValues);
+        })();
+        </script>
+        """,
+        height=0,
+        scrolling=False,
+    )
 
 
 def _customer_options(company, term):
@@ -111,6 +170,7 @@ def page_saved_export_waiting():
     c4.metric("바이어", str(selected["buyer"] or "미지정"))
     c5.metric("운송방식", str(selected["transport_method"] or "미지정"))
     c6.metric("수출번호", str(selected["export_no"] or "-"))
+    _fit_summary_metric_values()
     if total_count:
         st.progress(confirmed_count / total_count, text=f"{confirmed_count} / {total_count} 품목 확정")
 
