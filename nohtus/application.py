@@ -7,7 +7,7 @@ from nohtus.db_init import init_db
 from nohtus.device import is_mobile, sync_mobile_flag
 from nohtus.navigation import render_sidebar
 from nohtus.pages.all_inventory import page_all_inventory
-from nohtus.pages.closing_date_fix import page_closing
+from nohtus.pages.closing_print import page_closing
 from nohtus.pages.expiry_alerts import page_expiry_alerts
 from nohtus.pages.export_waiting import page_export_waiting
 from nohtus.pages.saved_export_waiting import page_saved_export_waiting
@@ -61,7 +61,7 @@ def main():
     elif menu == "재고 실사": page_stocktake()
     elif menu == "출고가능 관리":
         if not is_admin():
-            st.warning("admin 계정만 접근할 수 있습니다.")
+            st.warning("admin 계정만 접근할 수 없습니다.")
             return
         page_shippable_inventory()
     elif menu == "제품 매칭 관리": page_product_matching()
