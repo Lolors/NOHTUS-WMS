@@ -7,20 +7,74 @@ contains page rendering code.
 from __future__ import annotations
 
 from html import escape
+from pathlib import Path
+import re
 
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
 from nohtus.config import AREA_COLOR, AREA_CONFIG, COMPANIES
-from nohtus.db import q
+from nohtus.db import exec_sql, q
 from nohtus.dates import display_date_only
 from nohtus.locations import location_picking_key, parse_location
 from nohtus.pages.product_shortcuts import add_recent_product_view, is_favorite_product, toggle_favorite_product
 from nohtus.services.products import product_options
 
-# Some UI/map helper functions may still live in app.py until later steps.
-# The migration script injects runtime imports inside the moved page as needed.
+
+_IMAGE_DIR = Path(__file__).resolve().parents[2] / "data" / "product_images"
+_ALLOWED_IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+_MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+
+def _safe_product_image_stem(product_name: str) -> str:
+    stem = re.sub(r"[^0-9A-Za-z가-힣._-]+", "_", str(product_name or "").strip()).strip("._")
+    return stem[:80] or "product"
+
+
+def _save_product_image(product_name: str, uploaded_file) -> str:
+    if uploaded_file is None:
+        return ""
+    mime = str(getattr(uploaded_file, "type", "") or "").lower()
+    if mime not in _ALLOWED_IMAGE_TYPES:
+        raise ValueError("JPG, PNG, WEBP 형식만 업로드할 수 있습니다.")
+    data = uploaded_file.getvalue()
+    if not data:
+        raise ValueError("빈 파일은 업로드할 수 없습니다.")
+    if len(data) > _MAX_IMAGE_BYTES:
+        raise ValueError("사진은 8MB 이하만 업로드할 수 있습니다.")
+
+    _IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+    old = q("SELECT image_path FROM products WHERE standard_name=?", (product_name,))
+    old_path = str(old.iloc[0].get("image_path") or "") if not old.empty else ""
+    filename = f"{_safe_product_image_stem(product_name)}{_ALLOWED_IMAGE_TYPES[mime]}"
+    target = _IMAGE_DIR / filename
+    target.write_bytes(data)
+
+    relative_path = target.relative_to(Path(__file__).resolve().parents[2]).as_posix()
+    exec_sql("UPDATE products SET image_path=? WHERE standard_name=?", (relative_path, product_name))
+
+    if old_path and old_path != relative_path:
+        old_target = Path(__file__).resolve().parents[2] / old_path
+        try:
+            if old_target.is_file() and old_target.parent == _IMAGE_DIR:
+                old_target.unlink()
+        except OSError:
+            pass
+    return str(target)
+
+
+def _delete_product_image(product_name: str) -> None:
+    old = q("SELECT image_path FROM products WHERE standard_name=?", (product_name,))
+    old_path = str(old.iloc[0].get("image_path") or "") if not old.empty else ""
+    exec_sql("UPDATE products SET image_path='' WHERE standard_name=?", (product_name,))
+    if old_path:
+        target = Path(__file__).resolve().parents[2] / old_path
+        try:
+            if target.is_file() and target.parent == _IMAGE_DIR:
+                target.unlink()
+        except OSError:
+            pass
 
 
 def _map_search_warehouse_name(value):
@@ -46,12 +100,7 @@ def _map_search_product_groups(product_name, inv_df):
 
 
 def page_map_search_results(term, compact: bool = False):
-    """로케이션맵 > 제품명 검색 결과.
-
-    제품매칭표로 합쳐진 같은 표준제품명은 한 카드에 표시하고,
-    카드 안의 재고 분포에서 사업장별 ERP명을 함께 보여준다.
-    compact=True는 즐겨찾기/최근조회처럼 오른쪽 영역이 좁은 화면에서만 사용한다.
-    """
+    """로케이션맵 > 제품명 검색 결과."""
     try:
         from nohtus.services.location_map import get_product_image_path
     except Exception:
@@ -83,12 +132,7 @@ def page_map_search_results(term, compact: bool = False):
     if len(result_groups) >= 2:
         st.markdown("""
         <style>
-        .wms-floating-top{
-            position:fixed;right:28px;bottom:28px;width:46px;height:46px;border-radius:999px;
-            background:#0f172a;color:white!important;text-decoration:none!important;
-            display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:900;
-            box-shadow:0 10px 24px rgba(15,23,42,.28);z-index:9999;line-height:1;
-        }
+        .wms-floating-top{position:fixed;right:28px;bottom:28px;width:46px;height:46px;border-radius:999px;background:#0f172a;color:white!important;text-decoration:none!important;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:900;box-shadow:0 10px 24px rgba(15,23,42,.28);z-index:9999;line-height:1;}
         .wms-floating-top:hover{background:#2563eb;color:white!important;text-decoration:none!important;}
         </style>
         <a class="wms-floating-top" href="#wms-top-anchor" title="맨위로">↑</a>
@@ -97,46 +141,18 @@ def page_map_search_results(term, compact: bool = False):
     st.markdown("""
     <style>
     .product-main-name{font-size:18px;font-weight:400;color:#111827;line-height:1.35;margin:14px 0 9px;word-break:keep-all;text-align:center;}
-    .product-photo-panel{
-        width:250px;height:250px;max-width:100%;border:1.5px dashed #d6dee9;border-radius:20px;background:linear-gradient(180deg,#ffffff,#f8fafc);
-        display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:600;font-size:20px;line-height:1.55;
-        margin:0 auto 10px;overflow:hidden;
-    }
+    .product-photo-panel{width:250px;height:250px;max-width:100%;border:1.5px dashed #d6dee9;border-radius:20px;background:linear-gradient(180deg,#ffffff,#f8fafc);display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:600;font-size:20px;line-height:1.55;margin:0 auto 10px;overflow:hidden;}
     .total-card-small{width:50%;min-width:180px;border:1.5px solid #e5e7eb;border-radius:20px;padding:12px 17px;margin:4px auto 48px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;background:#fafafa;box-shadow:0 2px 8px rgba(15,23,42,.025);}
-    .total-label{font-size:15px;font-weight:500;color:#6b7280;text-align:center;}
-    .total-value{font-size:24px;font-weight:800;color:#111827;text-align:center;}
-    .dist-header{font-size:18px;font-weight:800;color:#111827;margin:2px 0 12px;}
-    .dist-rule{height:1px;background:#e5e7eb;margin:0 0 14px;}
-    .company-head{display:flex;align-items:center;gap:10px;margin:0 0 10px;flex-wrap:wrap;}
-    .company-pill{display:inline-flex;align-items:center;border-radius:12px;background:#e8f8ef;color:#118445;font-size:20px;font-weight:500;padding:7px 14px;white-space:nowrap;}
-    .company-erp-name{font-size:9pt;color:#808080;font-weight:400;white-space:nowrap;}
-    .company-total-blue{font-size:20px;color:#4f6fff;font-weight:700;white-space:nowrap;margin-left:2px;}
-    .no-stock-box{border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;padding:22px;color:#64748b;font-weight:800;}
-    .dist-cell-text{display:flex;align-items:center;height:28px;font-size:14px;font-weight:400;color:#111827;white-space:nowrap;}
-    .dist-cell-qty{display:flex;align-items:center;justify-content:flex-end;height:28px;font-size:14px;font-weight:400;color:#4f6fff;white-space:nowrap;}
-    .dist-row-streamlit div[data-testid="stButton"] > button[kind="secondary"]{text-decoration:none;min-height:28px;height:28px;padding:0 10px;border-radius:8px;font-size:13px;}
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button, section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="secondary"], section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="primary"]{background:transparent!important;color:white!important;border:0!important;min-height:auto!important;height:auto!important;padding:8px 10px!important;border-radius:10px!important;font-weight:800!important;font-size:123%!important;text-align:left!important;justify-content:flex-start!important;}
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button p{color:white!important;text-align:left!important;width:100%!important;}
+    .total-label{font-size:15px;font-weight:500;color:#6b7280;text-align:center;}.total-value{font-size:24px;font-weight:800;color:#111827;text-align:center;}
+    .dist-header{font-size:18px;font-weight:800;color:#111827;margin:2px 0 12px;}.dist-rule{height:1px;background:#e5e7eb;margin:0 0 14px;}
+    .company-head{display:flex;align-items:center;gap:10px;margin:0 0 10px;flex-wrap:wrap;}.company-pill{display:inline-flex;align-items:center;border-radius:12px;background:#e8f8ef;color:#118445;font-size:20px;font-weight:500;padding:7px 14px;white-space:nowrap;}.company-erp-name{font-size:9pt;color:#808080;font-weight:400;white-space:nowrap;}.company-total-blue{font-size:20px;color:#4f6fff;font-weight:700;white-space:nowrap;margin-left:2px;}
+    .no-stock-box{border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;padding:22px;color:#64748b;font-weight:800;}.dist-cell-text{display:flex;align-items:center;height:28px;font-size:14px;font-weight:400;color:#111827;white-space:nowrap;}.dist-cell-qty{display:flex;align-items:center;justify-content:flex-end;height:28px;font-size:14px;font-weight:400;color:#4f6fff;white-space:nowrap;}
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button{background:transparent!important;color:white!important;border:0!important;min-height:auto!important;height:auto!important;padding:8px 10px!important;border-radius:10px!important;font-weight:800!important;font-size:123%!important;text-align:left!important;justify-content:flex-start!important;}
     </style>
     """, unsafe_allow_html=True)
 
     if compact:
-        st.markdown("""
-        <style>
-        .product-photo-panel{width:210px!important;height:210px!important;font-size:18px!important;border-radius:16px!important;}
-        .product-main-name{font-size:16px!important;line-height:1.35!important;}
-        .total-card-small{width:72%!important;min-width:145px!important;margin-bottom:26px!important;padding:10px 12px!important;border-radius:16px!important;}
-        .total-label{font-size:13px!important;}
-        .total-value{font-size:21px!important;}
-        .dist-header{font-size:17px!important;margin-bottom:10px!important;}
-        .company-head{gap:8px!important;margin-bottom:8px!important;}
-        .company-pill{font-size:17px!important;padding:6px 11px!important;border-radius:10px!important;}
-        .company-total-blue{font-size:17px!important;}
-        .dist-cell-text{height:30px!important;font-size:13px!important;letter-spacing:-0.01em!important;}
-        .dist-cell-qty{height:30px!important;font-size:13px!important;justify-content:flex-start!important;}
-        div[data-testid="stButton"] > button{white-space:nowrap!important;}
-        </style>
-        """, unsafe_allow_html=True)
+        st.markdown("""<style>.product-photo-panel{width:210px!important;height:210px!important;font-size:18px!important;border-radius:16px!important;}.product-main-name{font-size:16px!important;}.total-card-small{width:72%!important;min-width:145px!important;margin-bottom:26px!important;padding:10px 12px!important;border-radius:16px!important;}</style>""", unsafe_allow_html=True)
 
     company_order = {"노투스팜": 0, "노투스": 1, "NOH": 2, "비자료": 3}
     card_columns = [0.78, 3.05] if compact else [0.95, 2.35]
@@ -155,17 +171,35 @@ def page_map_search_results(term, compact: bool = False):
             with left:
                 img_path = get_product_image_path(product_name)
                 if img_path:
-                    st.markdown(
-                        f"<div class='product-photo-panel' style=\"border-style:solid;padding:0;\"><img src='file:///{img_path}' style='width:100%;height:100%;object-fit:contain;display:block;' /></div>",
-                        unsafe_allow_html=True,
-                    )
+                    st.image(img_path, use_container_width=True)
                 else:
-                    st.markdown("<div class='product-photo-panel'>제품 사진<br>(업로드 가능)</div>", unsafe_allow_html=True)
+                    st.markdown("<div class='product-photo-panel'>제품 사진<br>(아래에서 업로드)</div>", unsafe_allow_html=True)
+
+                with st.expander("📷 제품 사진 관리", expanded=not bool(img_path)):
+                    uploaded = st.file_uploader(
+                        "JPG, PNG 또는 WEBP 사진 선택",
+                        type=["jpg", "jpeg", "png", "webp"],
+                        key=f"product_image_upload_{product_name}",
+                    )
+                    upload_col, delete_col = st.columns(2)
+                    with upload_col:
+                        if st.button("사진 저장", key=f"save_product_image_{product_name}", use_container_width=True, disabled=uploaded is None):
+                            try:
+                                _save_product_image(product_name, uploaded)
+                                st.success("제품 사진을 저장했습니다.")
+                                st.rerun()
+                            except ValueError as exc:
+                                st.error(str(exc))
+                            except Exception as exc:
+                                st.error(f"사진 저장 중 오류가 발생했습니다: {exc}")
+                    with delete_col:
+                        if st.button("사진 삭제", key=f"delete_product_image_{product_name}", use_container_width=True, disabled=not bool(img_path)):
+                            _delete_product_image(product_name)
+                            st.success("제품 사진을 삭제했습니다.")
+                            st.rerun()
+
                 st.markdown(f"<div class='product-main-name'>{escape(product_name)}</div>", unsafe_allow_html=True)
-                st.markdown(
-                    f"<div class='total-card-small'><span class='total-label'>총 재고</span><span class='total-value'>{total_qty} EA</span></div>",
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f"<div class='total-card-small'><span class='total-label'>총 재고</span><span class='total-value'>{total_qty} EA</span></div>", unsafe_allow_html=True)
 
             with right:
                 head_col, fav_col = st.columns(header_columns, gap="small")
@@ -188,15 +222,11 @@ def page_map_search_results(term, compact: bool = False):
                         erp_names = [x for x in cg["warehouse_name"].dropna().astype(str).str.strip().drop_duplicates().tolist() if x and x != "-"]
                         erp_text = " / ".join(erp_names)
                         erp_html = f"<span class='company-erp-name'>{escape(erp_text)}</span>" if erp_text else ""
-                        st.markdown(
-                            f"<div class='company-head'><span class='company-pill'>{escape(str(company))}</span>"
-                            f"{erp_html}<span class='company-total-blue'>{company_total} EA</span></div>",
-                            unsafe_allow_html=True,
-                        )
+                        st.markdown(f"<div class='company-head'><span class='company-pill'>{escape(str(company))}</span>{erp_html}<span class='company-total-blue'>{company_total} EA</span></div>", unsafe_allow_html=True)
                         cg = cg.sort_values(["location", "lot", "exp_date", "warehouse_name"])
                         for rr in cg.itertuples():
                             loc = str(rr.location)
-                            c_loc, c_lot, c_exp, c_qty, c_blank = st.columns(stock_row_columns, gap="small")
+                            c_loc, c_lot, c_exp, c_qty, _ = st.columns(stock_row_columns, gap="small")
                             with c_loc:
                                 if st.button(loc, key=f"map_dist_loc_{product_name}_{warehouse_name}_{rr.id}_{loc}", use_container_width=True):
                                     st.session_state["selected_location"] = loc
@@ -214,19 +244,8 @@ def page_map_search_results(term, compact: bool = False):
 def page_map():
     from nohtus.services.location_map import render_location_map
     if st.session_state.pop("_scroll_map_top", False):
-        components.html("""<script>
-        try { window.parent.scrollTo({top:0,left:0,behavior:'auto'}); } catch(e) {}
-        try { window.parent.document.documentElement.scrollTop = 0; window.parent.document.body.scrollTop = 0; } catch(e) {}
-        </script>""", height=0, scrolling=False)
-    st.markdown("""
-<style>
-/* RC3.3: 로케이션맵 타이틀/도면/상세영역 전체를 살짝 위로 이동 */
-div[data-testid="stVerticalBlock"]:has(#wms-top-anchor) {
-    margin-top: -15px !important;
-}
-</style>
-<div id='wms-top-anchor'></div>
-""", unsafe_allow_html=True)
+        components.html("""<script>try { window.parent.scrollTo({top:0,left:0,behavior:'auto'}); } catch(e) {}</script>""", height=0, scrolling=False)
+    st.markdown("""<style>div[data-testid="stVerticalBlock"]:has(#wms-top-anchor) {margin-top:-15px!important;}</style><div id='wms-top-anchor'></div>""", unsafe_allow_html=True)
     forced_search_term = ""
     try:
         qprod = st.session_state.pop("_map_forced_search_term", "") or st.session_state.pop("_pending_map_search_product", "") or st.query_params.get("map_search_product", "")
@@ -236,55 +255,40 @@ div[data-testid="stVerticalBlock"]:has(#wms-top-anchor) {
         if forced_search_term:
             st.session_state["map_view_mode"] = "search"
             st.session_state["_last_map_product_search"] = ""
-            # 제품 상세에서 표준제품명을 눌러 들어온 검색은 결과만 표시하고 입력칸은 비운다.
-            # 위젯 생성 전에만 session_state 값을 정리하므로 widget key 직접 수정 오류가 나지 않는다.
-            for _k in ["map_product_search", "map_product_search_forced_blank"]:
-                if _k in st.session_state:
-                    st.session_state[_k] = ""
+            for key in ["map_product_search", "map_product_search_forced_blank"]:
+                if key in st.session_state:
+                    st.session_state[key] = ""
             try:
                 del st.query_params["map_search_product"]
             except Exception:
                 pass
     except Exception:
         forced_search_term = ""
+
     h1, h2 = st.columns([1.2, 1.8], gap="large")
     with h1:
         st.title("📍로케이션 맵")
     with h2:
-        # form을 쓰면 같은 검색어가 남아 있는 상태에서도 Enter/검색 버튼으로 다시 검색결과 화면으로 돌아갈 수 있다.
         with st.form("map_product_search_form", clear_on_submit=False):
             search_col, btn_col = st.columns([8, 1], gap="small")
             with search_col:
-                term = st.text_input(
-                    "제품명 검색",
-                    value="",
-                    placeholder="제품명/ERP명/별칭 일부 입력",
-                    key="map_product_search_forced_blank" if forced_search_term else "map_product_search",
-                )
+                term = st.text_input("제품명 검색", value="", placeholder="제품명/ERP명/별칭 일부 입력", key="map_product_search_forced_blank" if forced_search_term else "map_product_search")
             with btn_col:
                 st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
                 search_submitted = st.form_submit_button("검색", use_container_width=True)
 
     if "map_view_mode" not in st.session_state:
         st.session_state["map_view_mode"] = "search"
-
     term_clean = forced_search_term or (term or "").strip()
     last_term = st.session_state.get("_last_map_product_search", "")
-
-    # 로케이션 버튼에서 넘어온 경우에는 맵을 보여주되, 검색창 값은 유지한다.
     if st.session_state.get("selected_location_from_search"):
         st.session_state["selected_location"] = st.session_state.pop("selected_location_from_search")
         st.session_state["map_view_mode"] = "map"
-
-    # 검색어가 비면 즉시 기본 로케이션맵으로 복귀한다.
     if not term_clean:
         st.session_state["map_view_mode"] = "search"
-    # 검색 버튼/Enter 또는 검색어 변경이 있으면 검색결과 화면으로 돌아간다.
     elif search_submitted or term_clean != last_term:
         st.session_state["map_view_mode"] = "search"
-
     st.session_state["_last_map_product_search"] = term_clean
-
     if term_clean and st.session_state.get("map_view_mode") != "map":
         page_map_search_results(term_clean)
     else:
