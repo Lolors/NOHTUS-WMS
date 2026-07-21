@@ -22,7 +22,7 @@ def _render_print_button(items, ds: str) -> None:
 <style>
 @page {{ size: A4 landscape; margin: 10mm; }}
 * {{ box-sizing: border-box; }}
-body {{ margin: 0; color: #111827; font-family: Arial, 'Malgun Gothic', sans-serif; }}
+html, body {{ margin: 0; padding: 0; color: #111827; font-family: Arial, 'Malgun Gothic', sans-serif; }}
 h1 {{ margin: 0 0 4px; font-size: 22px; }}
 .print-date {{ margin: 0 0 14px; color: #475569; font-size: 12px; }}
 .today-out-table {{ width: 100%; border-collapse: collapse; background: white; border: 1px solid #94a3b8; font-size: 10px; table-layout: auto; }}
@@ -37,12 +37,6 @@ tr {{ break-inside: avoid; page-break-inside: avoid; }}
 <h1>마감 체크리스트</h1>
 <div class="print-date">기준일: {ds}</div>
 {table_html}
-<script>
-window.addEventListener('load', function () {{
-  window.focus();
-  setTimeout(function () {{ window.print(); }}, 120);
-}});
-</script>
 </body>
 </html>"""
     document_json = json.dumps(printable_document, ensure_ascii=False)
@@ -66,15 +60,54 @@ window.addEventListener('load', function () {{
         <button class="print-button" id="closing-print-button" type="button">{_PRINT_BUTTON_LABEL}</button>
         <script>
         const printableDocument = {document_json};
-        document.getElementById('closing-print-button').addEventListener('click', function () {{
-            const printWindow = window.open('', '_blank', 'noopener,noreferrer');
-            if (!printWindow) {{
-                alert('인쇄창이 차단되었습니다. 브라우저의 팝업 차단을 해제한 뒤 다시 눌러주세요.');
-                return;
+        const button = document.getElementById('closing-print-button');
+
+        button.addEventListener('click', function () {{
+            button.disabled = true;
+            const oldFrame = document.getElementById('closing-print-frame');
+            if (oldFrame) oldFrame.remove();
+
+            const frame = document.createElement('iframe');
+            frame.id = 'closing-print-frame';
+            frame.setAttribute('title', '마감 체크리스트 인쇄');
+            frame.style.position = 'fixed';
+            frame.style.right = '0';
+            frame.style.bottom = '0';
+            frame.style.width = '1px';
+            frame.style.height = '1px';
+            frame.style.border = '0';
+            frame.style.opacity = '0';
+            frame.style.pointerEvents = 'none';
+            document.body.appendChild(frame);
+
+            try {{
+                const printDocument = frame.contentWindow.document;
+                printDocument.open();
+                printDocument.write(printableDocument);
+                printDocument.close();
+
+                const runPrint = function () {{
+                    try {{
+                        frame.contentWindow.focus();
+                        frame.contentWindow.print();
+                    }} catch (error) {{
+                        alert('인쇄창을 열지 못했습니다. 브라우저에서 인쇄 기능을 허용한 뒤 다시 시도해주세요.');
+                    }} finally {{
+                        button.disabled = false;
+                        setTimeout(function () {{ frame.remove(); }}, 1200);
+                    }}
+                }};
+
+                if (printDocument.readyState === 'complete') {{
+                    setTimeout(runPrint, 80);
+                }} else {{
+                    frame.onload = function () {{ setTimeout(runPrint, 80); }};
+                }}
+            }} catch (error) {{
+                button.disabled = false;
+                frame.remove();
+                alert('인쇄용 체크리스트를 만들지 못했습니다. 화면을 새로고침한 뒤 다시 시도해주세요.');
             }}
-            printWindow.document.open();
-            printWindow.document.write(printableDocument);
-            printWindow.document.close();
         }});
         </script>
         """,
