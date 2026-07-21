@@ -51,10 +51,36 @@ def _style_cancelled_rows(display_df, statuses):
     return display_df.style.apply(row_style, axis=1)
 
 
+def _selected_order_from_table(orders, table_event):
+    selected_rows = []
+    try:
+        selected_rows = list(table_event.selection.rows)
+    except Exception:
+        try:
+            selected_rows = list((table_event or {}).get("selection", {}).get("rows", []))
+        except Exception:
+            selected_rows = []
+
+    if selected_rows:
+        selected_index = int(selected_rows[0])
+        if 0 <= selected_index < len(orders):
+            st.session_state["selected_export_waiting_order_id"] = int(orders.iloc[selected_index]["id"])
+
+    selected_id = st.session_state.get("selected_export_waiting_order_id")
+    if selected_id is not None:
+        matched = orders[orders["id"].astype(int) == int(selected_id)]
+        if not matched.empty:
+            return matched.iloc[0]
+
+    selected = orders.iloc[0]
+    st.session_state["selected_export_waiting_order_id"] = int(selected["id"])
+    return selected
+
+
 def page_saved_export_waiting():
     ensure_export_waiting_tables()
     st.title("저장된 수출대기")
-    st.caption("수출대기 건을 수정·취소하거나 ERP 수출 매출처를 선택해 수출확정합니다.")
+    st.caption("표에서 수출대기 건을 선택하면 상세 내용이 바로 아래에 표시됩니다.")
     msg = st.session_state.pop("_export_waiting_message", None)
     if msg: st.success(msg)
 
@@ -71,10 +97,16 @@ def page_saved_export_waiting():
     table_columns = ["번호","상태","바이어","운송방식","수출번호","제목","ERP사업장","ERP매출처","등록일"]
     table_df = view[table_columns]
     styled_table = _style_cancelled_rows(table_df, orders["status"])
-    st.dataframe(styled_table, hide_index=True, use_container_width=True)
+    table_event = st.dataframe(
+        styled_table,
+        hide_index=True,
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="saved_export_waiting_table",
+    )
 
-    labels = [f"#{int(r.id)} | {STATUS_LABELS.get(r.status,r.status)} | {r.title}" for r in orders.itertuples()]
-    selected = orders.iloc[labels.index(st.selectbox("수출대기 건 선택", labels))]
+    selected = _selected_order_from_table(orders, table_event)
     order_id, status = int(selected["id"]), str(selected["status"])
     st.markdown(f"### {selected['title']}")
     c1,c2,c3,c4 = st.columns(4)
