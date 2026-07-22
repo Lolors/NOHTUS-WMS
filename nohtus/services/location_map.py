@@ -15,7 +15,16 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def get_product_image_path(product_name):
-    df = q("SELECT image_path FROM products WHERE standard_name=?", (product_name,))
+    df = q(
+        """
+        SELECT image_path
+        FROM products
+        WHERE standard_name=?
+          AND COALESCE(image_path, '') <> ''
+        LIMIT 1
+        """,
+        (product_name,),
+    )
     if df.empty:
         return ""
     value = str(df.iloc[0].get("image_path") or "").strip()
@@ -28,23 +37,48 @@ def get_product_image_path(product_name):
 
 
 def _product_image_data_uris():
+    """제품별 사진을 한 번만 읽어 로케이션맵에 전달한다.
+
+    제품매칭표에는 같은 표준제품명이 여러 ERP 매칭 행으로 존재할 수 있으므로,
+    동일 사진 경로가 여러 행에 저장되어 있어도 표준제품명별 한 건만 처리한다.
+    """
     images = {}
-    rows = q("SELECT standard_name, image_path FROM products WHERE COALESCE(image_path, '') <> ''")
+    rows = q(
+        """
+        SELECT standard_name, MAX(image_path) AS image_path
+        FROM products
+        WHERE COALESCE(image_path, '') <> ''
+        GROUP BY standard_name
+        """
+    )
     if rows.empty:
         return images
+
+    encoded_by_path = {}
     for row in rows.itertuples():
         name = str(row.standard_name or "").strip()
-        path = Path(str(row.image_path or "").strip())
+        raw_path = str(row.image_path or "").strip()
+        if not name or not raw_path:
+            continue
+
+        path = Path(raw_path)
         if not path.is_absolute():
             path = _PROJECT_ROOT / path
-        if not name or not path.is_file():
+        if not path.is_file():
             continue
-        mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
-        try:
-            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-        except OSError:
-            continue
-        images[name] = f"data:{mime};base64,{encoded}"
+
+        cache_key = str(path.resolve())
+        data_uri = encoded_by_path.get(cache_key)
+        if data_uri is None:
+            mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+            try:
+                encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+            except OSError:
+                continue
+            data_uri = f"data:{mime};base64,{encoded}"
+            encoded_by_path[cache_key] = data_uri
+
+        images[name] = data_uri
     return images
 
 
