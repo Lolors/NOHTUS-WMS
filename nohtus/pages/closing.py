@@ -255,8 +255,9 @@ def page_closing():
             out_raw[["출고처", "담당자"]] = out_raw["출고지시서제목"].apply(
                 lambda x: pd.Series(_infer_customer_from_title(x, customers_for_worklog))
             )
-            out = (out_raw.assign(내역=out_raw["표준제품명"].astype(str) + " * " + out_raw["수량"].astype(int).astype(str))
-                         .groupby(["출고처", "담당자"], as_index=False)["내역"]
+            out_raw["수량"] = pd.to_numeric(out_raw["수량"], errors="coerce").fillna(0).astype(int)
+            out = (out_raw.assign(내역=out_raw["표준제품명"].fillna("").astype(str) + " * " + out_raw["수량"].astype(str))
+                         .groupby(["출고처", "담당자"], as_index=False, dropna=False)["내역"]
                          .agg(lambda x: ", ".join(x)))
             tsv = out.to_csv(sep='\t', index=False, header=False)
             st.text_area("드래그해서 복사", value=tsv, height=140, key="worklog_out_tsv")
@@ -290,4 +291,4 @@ def page_closing():
             st.info("이동 업무일지 데이터가 없습니다.")
         else:
             tsv = moves.to_csv(sep='\t', index=False, header=False)
-            st.text_area("드래그해서 복사", value=tsv, height=120, key="worklog_move_tsv")
+            st.text_area("드래그해서 복사", value=tsv, height=140, key="worklog_move_tsv")
