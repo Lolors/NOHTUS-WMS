@@ -5,9 +5,9 @@ contains page rendering code.
 """
 
 from __future__ import annotations
-
 import base64
 from html import escape
+from io import BytesIO
 import mimetypes
 from pathlib import Path
 import re
@@ -25,8 +25,11 @@ from nohtus.services.products import product_options
 
 
 _IMAGE_DIR = Path(__file__).resolve().parents[2] / "data" / "product_images"
+_THUMB_DIR = _IMAGE_DIR / "thumbs"
 _ALLOWED_IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 _MAX_IMAGE_BYTES = 8 * 1024 * 1024
+_THUMB_SIZE = (400, 400)
+_THUMB_QUALITY = 78
 
 
 def _safe_product_image_stem(product_name: str) -> str:
@@ -44,6 +47,65 @@ def _image_data_uri(image_path: str) -> str:
         return ""
     mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
     return f"data:{mime};base64,{encoded}"
+
+
+def _thumbnail_path_for(original_path: str | Path) -> Path:
+    original = Path(str(original_path or ""))
+    return _THUMB_DIR / f"{original.stem}.jpg"
+
+
+def _create_thumbnail(original_path: str | Path) -> str:
+    original = Path(str(original_path or ""))
+    if not original.is_file():
+        return ""
+    target = _thumbnail_path_for(original)
+    try:
+        from PIL import Image, ImageOps
+
+        _THUMB_DIR.mkdir(parents=True, exist_ok=True)
+        with Image.open(original) as image:
+            image = ImageOps.exif_transpose(image)
+            if image.mode not in ("RGB", "L"):
+                background = Image.new("RGB", image.size, "white")
+                alpha = image.getchannel("A") if "A" in image.getbands() else None
+                background.paste(image.convert("RGB"), mask=alpha)
+                image = background
+            else:
+                image = image.convert("RGB")
+            image.thumbnail(_THUMB_SIZE)
+            canvas = Image.new("RGB", _THUMB_SIZE, "white")
+            x = (_THUMB_SIZE[0] - image.width) // 2
+            y = (_THUMB_SIZE[1] - image.height) // 2
+            canvas.paste(image, (x, y))
+            canvas.save(target, format="JPEG", quality=_THUMB_QUALITY, optimize=True)
+        return str(target)
+    except Exception:
+        return ""
+
+
+def _ensure_thumbnail(original_path: str | Path) -> str:
+    original = Path(str(original_path or ""))
+    if not original.is_file():
+        return ""
+    target = _thumbnail_path_for(original)
+    try:
+        if target.is_file() and target.stat().st_mtime >= original.stat().st_mtime:
+            return str(target)
+    except OSError:
+        pass
+    return _create_thumbnail(original)
+
+
+def _ensure_existing_product_thumbnails() -> None:
+    rows = q("SELECT DISTINCT image_path FROM products WHERE COALESCE(image_path, '') <> ''")
+    if rows.empty:
+        return
+    project_root = Path(__file__).resolve().parents[2]
+    for value in rows["image_path"].dropna().astype(str).tolist():
+        original = Path(value)
+        if not original.is_absolute():
+            original = project_root / original
+        _ensure_thumbnail(original)
 
 
 def _save_product_image(product_name: str, uploaded_file) -> str:
@@ -64,17 +126,20 @@ def _save_product_image(product_name: str, uploaded_file) -> str:
     filename = f"{_safe_product_image_stem(product_name)}{_ALLOWED_IMAGE_TYPES[mime]}"
     target = _IMAGE_DIR / filename
     target.write_bytes(data)
+    _create_thumbnail(target)
 
     relative_path = target.relative_to(Path(__file__).resolve().parents[2]).as_posix()
     exec_sql("UPDATE products SET image_path=? WHERE standard_name=?", (relative_path, product_name))
 
     if old_path and old_path != relative_path:
         old_target = Path(__file__).resolve().parents[2] / old_path
-        try:
-            if old_target.is_file() and old_target.parent == _IMAGE_DIR:
-                old_target.unlink()
-        except OSError:
-            pass
+        old_thumb = _thumbnail_path_for(old_target)
+        for stale in (old_target, old_thumb):
+            try:
+                if stale.is_file() and stale.parent in {_IMAGE_DIR, _THUMB_DIR}:
+                    stale.unlink()
+            except OSError:
+                pass
     return str(target)
 
 
@@ -84,11 +149,22 @@ def _delete_product_image(product_name: str) -> None:
     exec_sql("UPDATE products SET image_path='' WHERE standard_name=?", (product_name,))
     if old_path:
         target = Path(__file__).resolve().parents[2] / old_path
-        try:
-            if target.is_file() and target.parent == _IMAGE_DIR:
-                target.unlink()
-        except OSError:
-            pass
+        thumb = _thumbnail_path_for(target)
+        for candidate in (target, thumb):
+            try:
+                if candidate.is_file() and candidate.parent in {_IMAGE_DIR, _THUMB_DIR}:
+                    candidate.unlink()
+            except OSError:
+                pass
+
+
+@st.dialog("원본 제품 사진", width="large")
+def _product_original_image_dialog(product_name: str, img_path: str) -> None:
+    st.caption(product_name)
+    if img_path and Path(img_path).is_file():
+        st.image(img_path, use_container_width=True)
+    else:
+        st.info("원본 사진을 불러올 수 없습니다.")
 
 
 @st.dialog("제품 사진 관리", width="small")
@@ -110,7 +186,10 @@ def _product_image_dialog(product_name: str, img_path: str) -> None:
     )
     st.caption(product_name)
     if img_path:
-        st.image(img_path, use_container_width=True)
+        thumb_path = _ensure_thumbnail(img_path)
+        st.image(thumb_path or img_path, use_container_width=True)
+        if st.button("원본 사진 보기", key=f"view_original_dialog_{product_name}", use_container_width=True):
+            _product_original_image_dialog(product_name, img_path)
     else:
         st.info("현재 등록된 제품 사진이 없습니다.")
 
@@ -179,6 +258,7 @@ def page_map_search_results(term, compact: bool = False):
     except Exception:
         get_product_image_path = lambda _name: ""
 
+    _ensure_existing_product_thumbnails()
     term = (term or "").strip()
     st.markdown("### 제품 검색 결과")
     opts = product_options(term)
@@ -222,20 +302,14 @@ def page_map_search_results(term, compact: bool = False):
     div[class*="st-key-photo_display_"] > div[data-testid="stVerticalBlock"]{position:relative;width:100%;gap:0;}
     div[class*="st-key-photo_display_"] .product-photo-frame{position:relative;width:100%;aspect-ratio:1/1;overflow:hidden;border-radius:20px;background:#f8fafc;box-shadow:inset 0 0 0 1px rgba(203,213,225,.55);}
     div[class*="st-key-photo_display_"] .product-photo-frame img{width:100%;height:100%;object-fit:cover;object-position:center;display:block;}
-    div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){position:absolute!important;top:8px;right:8px;width:36px!important;height:36px!important;z-index:20;opacity:0;pointer-events:none;transition:opacity .16s ease,transform .16s ease;transform:translateY(-2px);}
-    div[class*="st-key-photo_display_"]:hover div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){opacity:1;pointer-events:auto;transform:translateY(0);}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"],
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{width:36px!important;height:36px!important;min-height:36px!important;}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{padding:0!important;border-radius:999px!important;border:1px solid rgba(255,255,255,.95)!important;background:rgba(15,23,42,.78)!important;color:#fff!important;box-shadow:0 3px 12px rgba(15,23,42,.34)!important;font-size:17px!important;line-height:1!important;display:flex!important;align-items:center!important;justify-content:center!important;}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button:hover{background:rgba(15,23,42,.95)!important;transform:scale(1.05);}
-    @media (hover:none){div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){opacity:1;pointer-events:auto;transform:none;}}
+    div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){margin-top:6px;}
+    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{width:100%;min-height:36px;border-radius:10px;}
 
     .total-card-small{width:50%;min-width:180px;border:1.5px solid #e5e7eb;border-radius:20px;padding:12px 17px;margin:4px auto 48px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;background:#fafafa;box-shadow:0 2px 8px rgba(15,23,42,.025);}
     .total-label{font-size:15px;font-weight:500;color:#6b7280;text-align:center;}.total-value{font-size:24px;font-weight:800;color:#111827;text-align:center;}
     .dist-header{font-size:18px;font-weight:800;color:#111827;margin:2px 0 12px;}.dist-rule{height:1px;background:#e5e7eb;margin:0 0 14px;}
     .company-head{display:flex;align-items:center;gap:10px;margin:0 0 10px;flex-wrap:wrap;}.company-pill{display:inline-flex;align-items:center;border-radius:12px;background:#e8f8ef;color:#118445;font-size:20px;font-weight:500;padding:7px 14px;white-space:nowrap;}.company-erp-name{font-size:9pt;color:#808080;font-weight:400;white-space:nowrap;}.company-total-blue{font-size:20px;color:#4f6fff;font-weight:700;white-space:nowrap;margin-left:2px;}
-    .no-stock-box{border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;padding:22px;color:#64748b;font-weight:800;}.dist-cell-text{display:flex;align-items:center;height:28px;font-size:14px;font-weight:400;color:#111827;white-space:nowrap;}.dist-cell-qty{display:flex;align-items:center;justify-content:flex-end;height:28px;font-size:14px;font-weight:400;color:#4f6fff;white-space:nowrap;}
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button{background:transparent!important;color:white!important;border:0!important;min-height:auto!important;height:auto!important;padding:8px 10px!important;border-radius:10px!important;font-weight:800!important;font-size:123%!important;text-align:left!important;justify-content:flex-start!important;}
+    .no-stock-box{border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;padding:22px;color:#64748b;font-weight:800;}.dist-cell-text{display:flex;align-items:center;height:28px;font-size:14px;color:#334155;}.dist-cell-qty{display:flex;align-items:center;justify-content:flex-end;height:28px;font-size:14px;font-weight:800;color:#111827;}
     </style>
     """, unsafe_allow_html=True)
 
@@ -260,7 +334,8 @@ def page_map_search_results(term, compact: bool = False):
                 img_path = get_product_image_path(product_name)
                 photo_key = _safe_product_image_stem(product_name)
                 if img_path:
-                    image_uri = _image_data_uri(img_path)
+                    thumb_path = _ensure_thumbnail(img_path)
+                    image_uri = _image_data_uri(thumb_path or img_path)
                     with st.container(key=f"photo_display_{photo_key}"):
                         if image_uri:
                             st.markdown(
@@ -269,11 +344,9 @@ def page_map_search_results(term, compact: bool = False):
                             )
                         else:
                             st.markdown("<div class='product-photo-panel'>제품 사진을 불러올 수 없습니다.</div>", unsafe_allow_html=True)
-                        if st.button(
-                            "✎",
-                            key=f"open_product_image_dialog_{product_name}",
-                            help="제품 사진 변경",
-                        ):
+                        if st.button("원본 사진 보기", key=f"view_original_{product_name}", use_container_width=True):
+                            _product_original_image_dialog(product_name, img_path)
+                        if st.button("사진 변경", key=f"open_product_image_dialog_{product_name}", use_container_width=True):
                             _product_image_dialog(product_name, img_path)
                 else:
                     with st.container(key=f"photo_upload_trigger_{photo_key}"):
