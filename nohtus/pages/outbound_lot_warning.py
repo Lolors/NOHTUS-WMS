@@ -22,12 +22,14 @@ ARKE_TWO_YEAR_LOTS = {
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _PATCH_MARKER = "_nohtus_arke_warning_patch"
 
-# 모듈 재로드 시 이미 패치된 함수를 다시 원본으로 저장하지 않는다.
+# 모듈 재로드 시 기존 패치 체인을 풀어 실제 Streamlit 원본 버튼을 사용한다.
 _current_button = st.button
-if getattr(_current_button, _PATCH_MARKER, False):
-    _original_button = getattr(_current_button, "_nohtus_original_button", _current_button)
-else:
-    _original_button = _current_button
+_original_button = getattr(_current_button, "_nohtus_original_button", _current_button)
+while getattr(_original_button, _PATCH_MARKER, False):
+    next_button = getattr(_original_button, "_nohtus_original_button", None)
+    if next_button is None or next_button is _original_button:
+        break
+    _original_button = next_button
 
 _PENDING_ROWS_KEY = "_pending_arke_outbound_save_rows"
 _CONFIRMED_KEY = "_arke_outbound_save_confirmed_once"
@@ -132,60 +134,6 @@ def _render_original_image(path: Path):
     )
 
 
-def _dialog_decorator(dialog_api, title: str, *, width: str | None = None, key: str):
-    """Streamlit 버전에 따라 key/width 지원 여부가 달라도 안전하게 생성한다."""
-    kwargs = {"key": key}
-    if width:
-        kwargs["width"] = width
-    try:
-        return dialog_api(title, **kwargs)
-    except TypeError:
-        kwargs.pop("width", None)
-        try:
-            return dialog_api(title, **kwargs)
-        except TypeError:
-            return dialog_api(title)
-
-
-def _render_image_viewer_dialog():
-    viewer = st.session_state.get(_IMAGE_VIEWER_KEY) or {}
-    path = Path(str(viewer.get("path") or ""))
-    lot = _normalise(viewer.get("lot"))
-    caption = _normalise(viewer.get("caption")) or "사진"
-
-    dialog_api = getattr(st, "dialog", None) or getattr(st, "experimental_dialog", None)
-    if not dialog_api:
-        st.subheader(f"{lot} · {caption} 원본")
-        if path.is_file():
-            _render_original_image(path)
-        else:
-            st.error("원본 이미지 파일을 찾을 수 없습니다.")
-        if _original_button("원본 보기 닫기", use_container_width=True, key="arke_original_close_inline"):
-            st.session_state.pop(_IMAGE_VIEWER_KEY, None)
-            st.rerun()
-        return
-
-    decorator = _dialog_decorator(
-        dialog_api,
-        f"🔍 {lot} · {caption} 원본",
-        width="large",
-        key=f"arke_original_dialog_{lot}_{caption}",
-    )
-
-    @decorator
-    def _viewer_dialog():
-        st.caption("사진은 원본 픽셀 크기로 표시됩니다. 큰 사진은 안쪽 영역을 스크롤해서 확인하세요.")
-        if path.is_file():
-            _render_original_image(path)
-        else:
-            st.error("원본 이미지 파일을 찾을 수 없습니다.")
-        if _original_button("닫기", use_container_width=True, key="arke_original_close"):
-            st.session_state.pop(_IMAGE_VIEWER_KEY, None)
-            st.rerun()
-
-    _viewer_dialog()
-
-
 def _render_warning_row(row, index: int):
     """Streamlit 기본 요소로 경고와 사진을 렌더링한다."""
     lot = _normalise(row.get("LOT")).upper()
@@ -232,34 +180,83 @@ def _render_warning_row(row, index: int):
         st.divider()
 
 
+def _render_save_dialog_body():
+    rows = st.session_state.get(_PENDING_ROWS_KEY) or []
+    for index, row in enumerate(rows):
+        _render_warning_row(row, index)
+    cancel_col, confirm_col = st.columns(2)
+    with cancel_col:
+        if _original_button("취소", use_container_width=True, key="arke_save_cancel"):
+            st.session_state.pop(_PENDING_ROWS_KEY, None)
+            st.rerun()
+    with confirm_col:
+        if _original_button("확인 후 출고", type="primary", use_container_width=True, key="arke_save_confirm"):
+            st.session_state.pop(_PENDING_ROWS_KEY, None)
+            st.session_state[_CONFIRMED_KEY] = True
+            st.rerun()
+
+
+def _render_viewer_dialog_body():
+    viewer = st.session_state.get(_IMAGE_VIEWER_KEY) or {}
+    path = Path(str(viewer.get("path") or ""))
+    lot = _normalise(viewer.get("lot"))
+    caption = _normalise(viewer.get("caption")) or "사진"
+    st.caption("사진은 원본 픽셀 크기로 표시됩니다. 큰 사진은 안쪽 영역을 스크롤해서 확인하세요.")
+    if path.is_file():
+        _render_original_image(path)
+    else:
+        st.error("원본 이미지 파일을 찾을 수 없습니다.")
+    if _original_button("닫기", use_container_width=True, key="arke_original_close"):
+        st.session_state.pop(_IMAGE_VIEWER_KEY, None)
+        st.rerun()
+
+
+_dialog_api = getattr(st, "dialog", None) or getattr(st, "experimental_dialog", None)
+if _dialog_api:
+    try:
+        _arke_save_dialog = _dialog_api("⚠ 출고 전 확인", key="arke_outbound_save_warning_dialog")(_render_save_dialog_body)
+    except TypeError:
+        _arke_save_dialog = _dialog_api("⚠ 출고 전 확인")(_render_save_dialog_body)
+
+    try:
+        _arke_viewer_dialog = _dialog_api("🔍 원본 이미지", width="large", key="arke_original_image_dialog")(_render_viewer_dialog_body)
+    except TypeError:
+        try:
+            _arke_viewer_dialog = _dialog_api("🔍 원본 이미지", key="arke_original_image_dialog")(_render_viewer_dialog_body)
+        except TypeError:
+            _arke_viewer_dialog = _dialog_api("🔍 원본 이미지")(_render_viewer_dialog_body)
+else:
+    _arke_save_dialog = None
+    _arke_viewer_dialog = None
+
+
+def _render_image_viewer_dialog():
+    viewer = st.session_state.get(_IMAGE_VIEWER_KEY) or {}
+    path = Path(str(viewer.get("path") or ""))
+    lot = _normalise(viewer.get("lot"))
+    caption = _normalise(viewer.get("caption")) or "사진"
+
+    if _arke_viewer_dialog:
+        _arke_viewer_dialog()
+        return
+
+    st.subheader(f"{lot} · {caption} 원본")
+    if path.is_file():
+        _render_original_image(path)
+    else:
+        st.error("원본 이미지 파일을 찾을 수 없습니다.")
+    if _original_button("원본 보기 닫기", use_container_width=True, key="arke_original_close_inline"):
+        st.session_state.pop(_IMAGE_VIEWER_KEY, None)
+        st.rerun()
+
+
 def _render_save_dialog(rows):
     if st.session_state.get(_IMAGE_VIEWER_KEY):
         _render_image_viewer_dialog()
         return
 
-    dialog_api = getattr(st, "dialog", None) or getattr(st, "experimental_dialog", None)
-    if dialog_api:
-        decorator = _dialog_decorator(
-            dialog_api,
-            "⚠ 출고 전 확인",
-            key="arke_outbound_save_warning_dialog",
-        )
-
-        @decorator
-        def _dialog():
-            for index, row in enumerate(rows):
-                _render_warning_row(row, index)
-            cancel_col, confirm_col = st.columns(2)
-            with cancel_col:
-                if _original_button("취소", use_container_width=True, key="arke_save_cancel"):
-                    st.session_state.pop(_PENDING_ROWS_KEY, None)
-                    st.rerun()
-            with confirm_col:
-                if _original_button("확인 후 출고", type="primary", use_container_width=True, key="arke_save_confirm"):
-                    st.session_state.pop(_PENDING_ROWS_KEY, None)
-                    st.session_state[_CONFIRMED_KEY] = True
-                    st.rerun()
-        _dialog()
+    if _arke_save_dialog:
+        _arke_save_dialog()
         return
 
     st.warning("출고 전 아르케 창상피복재의 박스 유효기간 표기를 확인하십시오.")
@@ -302,6 +299,5 @@ def _button_with_arke_save_warning(label, *args, **kwargs):
 setattr(_button_with_arke_save_warning, _PATCH_MARKER, True)
 setattr(_button_with_arke_save_warning, "_nohtus_original_button", _original_button)
 
-# 이미 같은 패치가 적용된 경우 다시 감싸지 않는다.
-if not getattr(st.button, _PATCH_MARKER, False):
-    st.button = _button_with_arke_save_warning
+# 기존에 남아 있는 래퍼 체인을 제거한 뒤 현재 구현 하나만 적용한다.
+st.button = _button_with_arke_save_warning
