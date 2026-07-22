@@ -58,8 +58,11 @@ def _order_items(order_id):
     return df
 
 
-def _cancelled_row_style(row):
-    if str(row.get("__status", "")) == "cancelled":
+def _order_row_style(row):
+    status = str(row.get("__status", ""))
+    if status == "confirmed":
+        return ["background-color:#dcfce7;color:#166534" for _ in row]
+    if status == "cancelled":
         return ["background-color:#f1f3f5;color:#6b7280" for _ in row]
     return ["" for _ in row]
 
@@ -94,7 +97,7 @@ def page_saved_export_waiting():
     view["__status"] = orders["status"].astype(str).values
     table_columns = ["번호","상태","진행상황","국가","바이어","운송방식","수출번호","제목","최근 ERP사업장","최근 ERP매출처","등록일","__status"]
     table = view[table_columns].reset_index(drop=True)
-    styled = table.style.apply(_cancelled_row_style, axis=1)
+    styled = table.style.apply(_order_row_style, axis=1)
     event = st.dataframe(
         styled,
         hide_index=True,
@@ -195,12 +198,10 @@ def page_saved_export_waiting():
         return
     labels = [f"{str(r.customer_code or '').strip() or '-'} | {r.customer_name}" for r in customers.itertuples()]
     customer = customers.iloc[labels.index(st.selectbox("ERP 수출 매출처", labels, key=f"export_customer_select_{order_id}_{confirmed_count}"))]
-    st.info(f"선택 품목 {len(selected_ids)}개 / {selected_qty}EA → {erp_company} / {customer['customer_name']}")
-    if st.button("선택 품목 수출확정", type="primary", use_container_width=True, disabled=not bool(selected_ids)):
+    if st.button("선택 품목 수출확정", type="primary", use_container_width=True, disabled=not selected_ids):
         try:
-            result = confirm_export_waiting_items(order_id, selected_ids, erp_company=erp_company, customer_code=customer.get("customer_code", ""), customer_name=customer.get("customer_name", ""))
-            status_text = "전체 확정 완료" if result["status"] == "confirmed" else "일부 확정"
-            st.session_state["_export_waiting_message"] = f"{selected['title']} {status_text}: 이번 {result['selected_count']}개, 누적 {result['confirmed_count']} / {result['total_count']} 품목 확정"
+            confirm_export_waiting_items(order_id, selected_ids, erp_company=erp_company, customer_code=customer["customer_code"], customer_name=customer["customer_name"])
+            st.session_state["_export_waiting_message"] = f"{selected['title']}에서 {len(selected_ids)}개 품목 / {selected_qty}EA를 수출확정했습니다."
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
