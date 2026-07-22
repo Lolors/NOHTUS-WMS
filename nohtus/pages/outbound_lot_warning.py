@@ -20,7 +20,14 @@ ARKE_TWO_YEAR_LOTS = {
 }
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_original_button = st.button
+_PATCH_MARKER = "_nohtus_arke_warning_patch"
+
+# 모듈 재로드 시 이미 패치된 함수를 다시 원본으로 저장하지 않는다.
+_current_button = st.button
+if getattr(_current_button, _PATCH_MARKER, False):
+    _original_button = getattr(_current_button, "_nohtus_original_button", _current_button)
+else:
+    _original_button = _current_button
 
 _PENDING_ROWS_KEY = "_pending_arke_outbound_save_rows"
 _CONFIRMED_KEY = "_arke_outbound_save_confirmed_once"
@@ -125,6 +132,21 @@ def _render_original_image(path: Path):
     )
 
 
+def _dialog_decorator(dialog_api, title: str, *, width: str | None = None, key: str):
+    """Streamlit 버전에 따라 key/width 지원 여부가 달라도 안전하게 생성한다."""
+    kwargs = {"key": key}
+    if width:
+        kwargs["width"] = width
+    try:
+        return dialog_api(title, **kwargs)
+    except TypeError:
+        kwargs.pop("width", None)
+        try:
+            return dialog_api(title, **kwargs)
+        except TypeError:
+            return dialog_api(title)
+
+
 def _render_image_viewer_dialog():
     viewer = st.session_state.get(_IMAGE_VIEWER_KEY) or {}
     path = Path(str(viewer.get("path") or ""))
@@ -143,10 +165,12 @@ def _render_image_viewer_dialog():
             st.rerun()
         return
 
-    try:
-        decorator = dialog_api(f"🔍 {lot} · {caption} 원본", width="large")
-    except TypeError:
-        decorator = dialog_api(f"🔍 {lot} · {caption} 원본")
+    decorator = _dialog_decorator(
+        dialog_api,
+        f"🔍 {lot} · {caption} 원본",
+        width="large",
+        key=f"arke_original_dialog_{lot}_{caption}",
+    )
 
     @decorator
     def _viewer_dialog():
@@ -215,7 +239,13 @@ def _render_save_dialog(rows):
 
     dialog_api = getattr(st, "dialog", None) or getattr(st, "experimental_dialog", None)
     if dialog_api:
-        @dialog_api("⚠ 출고 전 확인")
+        decorator = _dialog_decorator(
+            dialog_api,
+            "⚠ 출고 전 확인",
+            key="arke_outbound_save_warning_dialog",
+        )
+
+        @decorator
         def _dialog():
             for index, row in enumerate(rows):
                 _render_warning_row(row, index)
@@ -269,6 +299,9 @@ def _button_with_arke_save_warning(label, *args, **kwargs):
     return False
 
 
-# pages 패키지가 초기화될 때 한 번 등록되며, 다른 버튼에는 영향을 주지 않는다.
-if st.button is not _button_with_arke_save_warning:
+setattr(_button_with_arke_save_warning, _PATCH_MARKER, True)
+setattr(_button_with_arke_save_warning, "_nohtus_original_button", _original_button)
+
+# 이미 같은 패치가 적용된 경우 다시 감싸지 않는다.
+if not getattr(st.button, _PATCH_MARKER, False):
     st.button = _button_with_arke_save_warning
