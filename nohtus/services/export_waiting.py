@@ -254,8 +254,17 @@ def confirm_export_waiting_items(order_id, item_ids, *, erp_company, customer_co
                 WHERE id=?""", (erp_company,customer_code,customer_name,now,int(item["id"])))
 
         remaining = cur.execute("SELECT COUNT(*) FROM export_waiting_items WHERE order_id=? AND COALESCE(confirmed,0)=0", (int(order_id),)).fetchone()[0]
+        total_count = cur.execute("SELECT COUNT(*) FROM export_waiting_items WHERE order_id=?", (int(order_id),)).fetchone()[0]
+        confirmed_count = int(total_count or 0) - int(remaining or 0)
         status = "confirmed" if int(remaining or 0) == 0 else "partial"
         cur.execute("""UPDATE export_waiting_orders
             SET status=?,erp_company=?,erp_customer_code=?,erp_customer_name=?,confirmed_at=?,updated_at=?
             WHERE id=?""", (status,erp_company,customer_code,customer_name,now,now,int(order_id)))
         con.commit()
+
+    return {
+        "status": status,
+        "selected_count": len(selected_ids),
+        "confirmed_count": confirmed_count,
+        "total_count": int(total_count or 0),
+    }
