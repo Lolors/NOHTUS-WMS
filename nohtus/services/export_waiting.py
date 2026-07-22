@@ -90,16 +90,69 @@ def _add(cur, s, location, qty, now, shippable):
     return int(cur.lastrowid)
 
 
-def _take_source(cur, inventory_id, qty, now):
-    s = _dict_row(cur, "SELECT * FROM inventory WHERE id=?", (int(inventory_id),))
+def _cart_source_hint(row):
+    return {
+        "company": str(row.get("사업장") or row.get("company") or "").strip(),
+        "product_name": str(row.get("제품명") or row.get("product_name") or "").strip(),
+        "warehouse_name": str(row.get("warehouse_name") or "").strip(),
+        "lot": str(row.get("LOT") or row.get("lot") or "-").strip() or "-",
+        "exp_date": str(row.get("유통기한") or row.get("exp_date") or "-").strip() or "-",
+        "location": str(row.get("로케이션") or row.get("source_location") or row.get("location") or "").strip(),
+    }
+
+
+def _resolve_source_row(cur, inventory_id, fallback=None):
+    source_id = int(inventory_id or 0)
+    if source_id:
+        row = _dict_row(cur, "SELECT * FROM inventory WHERE id=?", (source_id,))
+        if row:
+            return row
+
+    hint = fallback or {}
+    company = str(hint.get("company") or "").strip()
+    product_name = str(hint.get("product_name") or "").strip()
+    lot = str(hint.get("lot") or "-").strip() or "-"
+    exp_date = str(hint.get("exp_date") or "-").strip() or "-"
+    location = str(hint.get("location") or hint.get("source_location") or "").strip()
+    warehouse_name = str(hint.get("warehouse_name") or "").strip()
+    if not company or not product_name or not location:
+        return None
+
+    if warehouse_name:
+        row = _dict_row(cur, """SELECT * FROM inventory
+            WHERE company=? AND product_name=? AND IFNULL(warehouse_name,'')=?
+              AND IFNULL(lot,'-')=? AND IFNULL(exp_date,'-')=? AND location=?
+            ORDER BY qty DESC,id LIMIT 1""",
+            (company, product_name, warehouse_name, lot, exp_date, location))
+        if row:
+            return row
+
+    return _dict_row(cur, """SELECT * FROM inventory
+        WHERE company=? AND product_name=? AND IFNULL(lot,'-')=?
+          AND IFNULL(exp_date,'-')=? AND location=?
+        ORDER BY qty DESC,id LIMIT 1""",
+        (company, product_name, lot, exp_date, location))
+
+
+def _take_source(cur, inventory_id, qty, now, fallback=None):
+    s = _resolve_source_row(cur, inventory_id, fallback)
     if not s:
-        raise ValueError(f"재고 #{inventory_id}를 찾을 수 없습니다.")
+        hint = fallback or {}
+        label = " / ".join(x for x in [
+            str(hint.get("company") or "").strip(),
+            str(hint.get("location") or hint.get("source_location") or "").strip(),
+            str(hint.get("product_name") or "").strip(),
+        ] if x)
+        suffix = f" ({label})" if label else ""
+        raise ValueError(f"재고 #{inventory_id}를 찾을 수 없습니다.{suffix}")
     available = int(s.get("qty") or 0)
     if qty <= 0 or qty > available:
         raise ValueError(f"{s.get('product_name','제품')} 재고 부족: 요청 {qty}EA / 현재 {available}EA")
     if str(s.get("location") or "").strip() == P:
         raise ValueError(f"{s.get('product_name','제품')}은 이미 수출대기 위치 P에 있습니다.")
-    cur.execute("UPDATE inventory SET qty=?,updated_at=? WHERE id=?", (available - qty, now, int(inventory_id)))
+    resolved_id = int(s.get("id") or 0)
+    cur.execute("UPDATE inventory SET qty=?,updated_at=? WHERE id=?", (available - qty, now, resolved_id))
+    s["_resolved_inventory_id"] = resolved_id
     return s
 
 
@@ -154,17 +207,32 @@ def save_export_waiting_order(cart, *, country, buyer="", transport_method="미�
         raise ValueError("운송방식을 항공, 해상, 핸드캐리, 미지정 중에서 선택하세요.")
     if not export_no:
         raise ValueError("수출번호를 입력하세요.")
+
     grouped = defaultdict(int)
+    source_hints = {}
     for x in cart or []:
-        if int(x.get("요청수량") or 0) > 0:
-            grouped[int(x.get("id"))] += int(x.get("요청수량"))
+        qty = int(x.get("요청수량") or 0)
+        if qty <= 0:
+            continue
+        inventory_id = int(x.get("id") or 0)
+        grouped[inventory_id] += qty
+        source_hints.setdefault(inventory_id, _cart_source_hint(x))
     if not grouped:
         raise ValueError("수출대기 등록할 품목이 없습니다.")
+
     buyer_title = buyer or "미지정"
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     title = f"{country}-{buyer_title}-{transport_method}"
     with connect() as con:
         cur = con.cursor(); ensure_export_waiting_tables(cur)
+
+        # 수정 원복 과정에서 같은 재고행이 합쳐지거나 새 ID로 복원될 수 있으므로,
+        # 원복 전에 장바구니 재고의 실제 식별 정보를 보존한다.
+        for inventory_id in grouped:
+            current = _resolve_source_row(cur, inventory_id, source_hints.get(inventory_id))
+            if current:
+                source_hints[inventory_id] = current
+
         items_changed = True
         if editing_order_id:
             row = cur.execute("SELECT status FROM export_waiting_orders WHERE id=?", (int(editing_order_id),)).fetchone()
@@ -183,13 +251,16 @@ def save_export_waiting_order(cart, *, country, buyer="", transport_method="미�
             cur.execute("""INSERT INTO export_waiting_orders(export_no,country,buyer,transport_method,title,status,created_at,updated_at,created_by)
                 VALUES(?,?,?,?,?,'waiting',?,?,?)""", (export_no,country,buyer,transport_method,title,now,now,_actor()))
             order_id = int(cur.lastrowid)
+
         total = 0
         for inventory_id, qty in grouped.items():
-            s = _take_source(cur, inventory_id, qty, now); _add(cur, s, P, qty, now, 0)
+            s = _take_source(cur, inventory_id, qty, now, source_hints.get(inventory_id))
+            resolved_inventory_id = int(s.get("_resolved_inventory_id") or s.get("id") or inventory_id)
+            _add(cur, s, P, qty, now, 0)
             cur.execute("""INSERT INTO export_waiting_items(order_id,source_inventory_id,company,product_name,
                 warehouse_name,lot,exp_date,source_location,waiting_location,qty,moved_at,confirmed)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,0)""",
-                (order_id,inventory_id,s.get("company", ""),s.get("product_name", ""),s.get("warehouse_name", "") or "",
+                (order_id,resolved_inventory_id,s.get("company", ""),s.get("product_name", ""),s.get("warehouse_name", "") or "",
                  s.get("lot", "-") or "-",s.get("exp_date", "-") or "-",s.get("location", ""),P,qty,now))
             insert_transaction_log(cur, created_at=now, tx_type="위치이동", product_name=s.get("product_name", ""),
                 warehouse_name=s.get("warehouse_name", "") or "", lot=s.get("lot", "-"), exp_date=s.get("exp_date", "-"),
