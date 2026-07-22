@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 from pathlib import Path
 
 from nohtus.db import q
@@ -10,6 +12,7 @@ from nohtus.services.export_waiting import ensure_export_waiting_tables
 from . import location_map_legacy as _legacy
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_THUMB_DIR = _PROJECT_ROOT / "data" / "product_images" / "thumbs"
 
 
 def get_product_image_path(product_name):
@@ -32,6 +35,49 @@ def get_product_image_path(product_name):
     if not path.is_absolute():
         path = _PROJECT_ROOT / path
     return str(path) if path.is_file() else ""
+
+
+def _product_thumbnail_data_uris():
+    """Load only compact product thumbnails for the map detail panel."""
+    images = {}
+    rows = q(
+        """
+        SELECT standard_name, MAX(image_path) AS image_path
+        FROM products
+        WHERE COALESCE(image_path, '') <> ''
+        GROUP BY standard_name
+        """
+    )
+    if rows.empty:
+        return images
+
+    encoded_by_path = {}
+    for row in rows.itertuples():
+        name = str(row.standard_name or "").strip()
+        raw_path = str(row.image_path or "").strip()
+        if not name or not raw_path:
+            continue
+
+        original = Path(raw_path)
+        if not original.is_absolute():
+            original = _PROJECT_ROOT / original
+        thumb = _THUMB_DIR / f"{original.stem}.jpg"
+        path = thumb if thumb.is_file() else None
+        if path is None:
+            continue
+
+        cache_key = str(path.resolve())
+        data_uri = encoded_by_path.get(cache_key)
+        if data_uri is None:
+            mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+            try:
+                encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+            except OSError:
+                continue
+            data_uri = f"data:{mime};base64,{encoded}"
+            encoded_by_path[cache_key] = data_uri
+        images[name] = data_uri
+    return images
 
 
 def _export_waiting_groups():
@@ -69,19 +115,24 @@ def _export_waiting_groups():
 
 
 def render_location_map():
-    """Render the map without preloading product image bytes.
-
-    Product photos are available in the product search view. The map detail panel
-    intentionally keeps a lightweight placeholder so opening the map does not read
-    and embed every uploaded image into one large HTML payload.
-    """
+    product_images = json.dumps(_product_thumbnail_data_uris(), ensure_ascii=False)
     export_waiting = json.dumps(_export_waiting_groups(), ensure_ascii=False)
     original_html = _legacy.components.html
 
     def enhanced_html(html, *args, **kwargs):
         html = html.replace(
             "const txData = DATA.tx || [];",
-            f"const rawTxData = DATA.tx || [];\nconst txData = rawTxData.filter(t => !String(t.tx_type || '').includes('재고조사불러오기') && !String(t.memo || '').includes('재고조사불러오기'));\nconst exportWaitingItems = {export_waiting};",
+            f"const rawTxData = DATA.tx || [];\nconst txData = rawTxData.filter(t => !String(t.tx_type || '').includes('재고조사불러오기') && !String(t.memo || '').includes('재고조사불러오기'));\nconst productImages = {product_images};\nconst exportWaitingItems = {export_waiting};",
+            1,
+        )
+        html = html.replace(
+            ".prod-box{border-top:1px solid #e2e8f0;margin-top:14px;padding-top:14px;text-align:center;} .photo-box{width:150px;height:150px;margin:0 auto 10px;border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:700;}",
+            ".prod-box{border-top:1px solid #e2e8f0;margin-top:14px;padding-top:14px;text-align:center;} .photo-box{width:150px;height:150px;margin:0 auto 10px;border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:700;overflow:hidden;} .photo-box img{width:100%;height:100%;object-fit:cover;object-position:center;display:block;}",
+            1,
+        )
+        html = html.replace(
+            '<div class="photo-box">📷</div>',
+            '<div class="photo-box">${productImages[name] ? `<img src="${productImages[name]}" alt="${esc(name)}">` : "📷"}</div>',
             1,
         )
         html = html.replace(
