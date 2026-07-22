@@ -78,6 +78,7 @@ def import_product_master_excel(uploaded_file):
     - 같은 표준제품명에 ERP명이 여러 개 존재할 수 있다.
     - 표준제품명만 기준으로 중복 제거하지 않는다.
     - 완전히 같은 행만 중복으로 보며, 서로 다른 ERP명/코드/비자료명은 별도 매칭으로 보존한다.
+    - 제품 사진은 표준제품명 기준으로 보존하며, 제품매칭표를 다시 올려도 삭제하지 않는다.
     """
     df = pd.read_excel(uploaded_file, dtype=str).fillna("")
     rename = {
@@ -131,10 +132,28 @@ def import_product_master_excel(uploaded_file):
         rows_to_insert.append((code, name, name, aliases, erp_np, erp_nt, erp_noh, erp_noh_code, bidata_name))
     with connect() as con:
         cur = con.cursor()
+
+        # 기존 products 행을 교체하기 전에 표준제품명별 사진 경로를 따로 보존한다.
+        # 동일 표준제품명에 여러 매칭 행이 있어도 등록된 사진 경로 하나를 재사용한다.
+        cur.execute("SELECT standard_name, image_path FROM products WHERE COALESCE(image_path, '') <> ''")
+        image_paths = {}
+        for standard_name, image_path in cur.fetchall():
+            name = _clean_text(standard_name)
+            path = _clean_text(image_path)
+            if name and path and name not in image_paths:
+                image_paths[name] = path
+
         cur.execute("DELETE FROM products")
         for row in rows_to_insert:
-            cur.execute("""INSERT INTO products(product_code,standard_name,warehouse_name,aliases,erp_nohtuspharm_name,erp_nohtus_name,erp_noh_name,erp_noh_code,bidata_name)
-                           VALUES(?,?,?,?,?,?,?,?,?)""", row)
+            image_path = image_paths.get(row[1], "")
+            cur.execute(
+                """INSERT INTO products(
+                       product_code,standard_name,warehouse_name,aliases,
+                       erp_nohtuspharm_name,erp_nohtus_name,erp_noh_name,
+                       erp_noh_code,bidata_name,image_path
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (*row, image_path),
+            )
             inserted += 1
         con.commit()
     return 0, inserted, skipped
