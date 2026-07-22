@@ -7,7 +7,6 @@ contains page rendering code.
 from __future__ import annotations
 import base64
 from html import escape
-from io import BytesIO
 import mimetypes
 from pathlib import Path
 import re
@@ -72,12 +71,8 @@ def _create_thumbnail(original_path: str | Path) -> str:
                 image = background
             else:
                 image = image.convert("RGB")
-            image.thumbnail(_THUMB_SIZE)
-            canvas = Image.new("RGB", _THUMB_SIZE, "white")
-            x = (_THUMB_SIZE[0] - image.width) // 2
-            y = (_THUMB_SIZE[1] - image.height) // 2
-            canvas.paste(image, (x, y))
-            canvas.save(target, format="JPEG", quality=_THUMB_QUALITY, optimize=True)
+            image = ImageOps.fit(image, _THUMB_SIZE, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+            image.save(target, format="JPEG", quality=_THUMB_QUALITY, optimize=True)
         return str(target)
     except Exception:
         return ""
@@ -302,8 +297,15 @@ def page_map_search_results(term, compact: bool = False):
     div[class*="st-key-photo_display_"] > div[data-testid="stVerticalBlock"]{position:relative;width:100%;gap:0;}
     div[class*="st-key-photo_display_"] .product-photo-frame{position:relative;width:100%;aspect-ratio:1/1;overflow:hidden;border-radius:20px;background:#f8fafc;box-shadow:inset 0 0 0 1px rgba(203,213,225,.55);}
     div[class*="st-key-photo_display_"] .product-photo-frame img{width:100%;height:100%;object-fit:cover;object-position:center;display:block;}
-    div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){margin-top:6px;}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{width:100%;min-height:36px;border-radius:10px;}
+    div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){position:absolute!important;top:8px;width:36px!important;height:36px!important;z-index:20;opacity:0;pointer-events:none;transition:opacity .16s ease,transform .16s ease;transform:translateY(-2px);margin:0!important;}
+    div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(button[kind="secondary"]):nth-of-type(2){right:50px;}
+    div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(button[kind="secondary"]):nth-of-type(3){right:8px;}
+    div[class*="st-key-photo_display_"]:hover div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){opacity:1;pointer-events:auto;transform:translateY(0);}
+    div[class*="st-key-photo_display_"] div[data-testid="stButton"],
+    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{width:36px!important;height:36px!important;min-height:36px!important;}
+    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{padding:0!important;border-radius:999px!important;border:1px solid rgba(255,255,255,.95)!important;background:rgba(15,23,42,.78)!important;color:#fff!important;box-shadow:0 3px 12px rgba(15,23,42,.34)!important;font-size:16px!important;line-height:1!important;display:flex!important;align-items:center!important;justify-content:center!important;}
+    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button:hover{background:rgba(15,23,42,.95)!important;transform:scale(1.05);}
+    @media (hover:none){div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){opacity:1;pointer-events:auto;transform:none;}}
 
     .total-card-small{width:50%;min-width:180px;border:1.5px solid #e5e7eb;border-radius:20px;padding:12px 17px;margin:4px auto 48px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;background:#fafafa;box-shadow:0 2px 8px rgba(15,23,42,.025);}
     .total-label{font-size:15px;font-weight:500;color:#6b7280;text-align:center;}.total-value{font-size:24px;font-weight:800;color:#111827;text-align:center;}
@@ -344,9 +346,9 @@ def page_map_search_results(term, compact: bool = False):
                             )
                         else:
                             st.markdown("<div class='product-photo-panel'>제품 사진을 불러올 수 없습니다.</div>", unsafe_allow_html=True)
-                        if st.button("원본 사진 보기", key=f"view_original_{product_name}", use_container_width=True):
+                        if st.button("🔍", key=f"view_original_{product_name}", help="원본 사진 보기"):
                             _product_original_image_dialog(product_name, img_path)
-                        if st.button("사진 변경", key=f"open_product_image_dialog_{product_name}", use_container_width=True):
+                        if st.button("✎", key=f"open_product_image_dialog_{product_name}", help="사진 변경"):
                             _product_image_dialog(product_name, img_path)
                 else:
                     with st.container(key=f"photo_upload_trigger_{photo_key}"):
