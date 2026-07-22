@@ -136,6 +136,13 @@ def _restore(cur, order_id, now, memo):
             to_location=item["source_location"], qty=item["qty"], memo=memo)
 
 
+def _current_item_signature(cur, order_id):
+    grouped = defaultdict(int)
+    for item in _items(cur, order_id, confirmed=False):
+        grouped[int(item.get("source_inventory_id") or 0)] += int(item.get("qty") or 0)
+    return dict(grouped)
+
+
 def save_export_waiting_order(cart, *, country, buyer="", transport_method="미지정", export_no, editing_order_id=None):
     country = str(country or "").strip()
     buyer = str(buyer or "").strip()
@@ -158,15 +165,20 @@ def save_export_waiting_order(cart, *, country, buyer="", transport_method="미�
     title = f"{country}-{buyer_title}-{transport_method}"
     with connect() as con:
         cur = con.cursor(); ensure_export_waiting_tables(cur)
+        items_changed = True
         if editing_order_id:
             row = cur.execute("SELECT status FROM export_waiting_orders WHERE id=?", (int(editing_order_id),)).fetchone()
             if not row or row[0] != "waiting":
                 raise ValueError("일부 확정되었거나 완료된 수출대기 건은 수정할 수 없습니다.")
-            _restore(cur, editing_order_id, now, f"수출대기 수정 원복 / {title}")
-            cur.execute("DELETE FROM export_waiting_items WHERE order_id=?", (int(editing_order_id),))
+            items_changed = _current_item_signature(cur, editing_order_id) != dict(grouped)
             cur.execute("UPDATE export_waiting_orders SET export_no=?,country=?,buyer=?,transport_method=?,title=?,updated_at=? WHERE id=?",
                         (export_no,country,buyer,transport_method,title,now,int(editing_order_id)))
             order_id = int(editing_order_id)
+            if not items_changed:
+                con.commit()
+                return {"order_id":order_id,"row_count":len(grouped),"total_qty":sum(grouped.values()),"title":title}
+            _restore(cur, editing_order_id, now, f"수출대기 수정 원복 / {title}")
+            cur.execute("DELETE FROM export_waiting_items WHERE order_id=?", (int(editing_order_id),))
         else:
             cur.execute("""INSERT INTO export_waiting_orders(export_no,country,buyer,transport_method,title,status,created_at,updated_at,created_by)
                 VALUES(?,?,?,?,?,'waiting',?,?,?)""", (export_no,country,buyer,transport_method,title,now,now,_actor()))
@@ -229,42 +241,21 @@ def confirm_export_waiting_items(order_id, item_ids, *, erp_company, customer_co
                 "confirmed_customer_code","confirmed_customer_name","confirmed_at"]
         items = [dict(zip(keys, row)) for row in rows]
         if len(items) != len(selected_ids):
-            raise ValueError("선택 품목 중 이미 확정되었거나 찾을 수 없는 항목이 있습니다. 화면을 새로고침하세요.")
+            raise ValueError("선택 품목 중 이미 확정되었거나 찾을 수 없는 항목이 있습니다.")
 
         for item in items:
             _take_p(cur, item, now)
-            insert_transaction_log(cur,created_at=now,tx_type="수출확정",product_name=item["product_name"],
-                warehouse_name=item.get("warehouse_name", ""),lot=item.get("lot", "-"),exp_date=item.get("exp_date", "-"),
-                from_company=item["company"],from_location=P,to_company=None,to_location=None,qty=item["qty"],
-                memo=f"수출확정 / {order[0]} / ERP사업장: {erp_company} / ERP매출처: {customer_name}")
-            cur.execute("""UPDATE export_waiting_items SET confirmed=1,confirmed_company=?,
-                confirmed_customer_code=?,confirmed_customer_name=?,confirmed_at=? WHERE id=?""",
-                (erp_company,customer_code,customer_name,now,int(item["id"])))
+            insert_transaction_log(cur, created_at=now, tx_type="출고", product_name=item["product_name"],
+                warehouse_name=item.get("warehouse_name", ""), lot=item.get("lot", "-"), exp_date=item.get("exp_date", "-"),
+                from_company=item["company"], from_location=P, to_company=erp_company,
+                to_location="", qty=item["qty"], memo=f"수출확정 / {order[0]} / {customer_name}")
+            cur.execute("""UPDATE export_waiting_items
+                SET confirmed=1,confirmed_company=?,confirmed_customer_code=?,confirmed_customer_name=?,confirmed_at=?
+                WHERE id=?""", (erp_company,customer_code,customer_name,now,int(item["id"])))
 
-        total_count = int(cur.execute("SELECT COUNT(*) FROM export_waiting_items WHERE order_id=?", (int(order_id),)).fetchone()[0])
-        confirmed_count = int(cur.execute("SELECT COUNT(*) FROM export_waiting_items WHERE order_id=? AND COALESCE(confirmed,0)=1", (int(order_id),)).fetchone()[0])
-        new_status = "confirmed" if total_count and confirmed_count == total_count else "partial"
-        confirmed_at = now if new_status == "confirmed" else None
-        cur.execute("""UPDATE export_waiting_orders SET status=?,erp_company=?,erp_customer_code=?,
-            erp_customer_name=?,confirmed_at=?,updated_at=? WHERE id=?""",
-            (new_status,erp_company,customer_code,customer_name,confirmed_at,now,int(order_id)))
+        remaining = cur.execute("SELECT COUNT(*) FROM export_waiting_items WHERE order_id=? AND COALESCE(confirmed,0)=0", (int(order_id),)).fetchone()[0]
+        status = "confirmed" if int(remaining or 0) == 0 else "partial"
+        cur.execute("""UPDATE export_waiting_orders
+            SET status=?,erp_company=?,erp_customer_code=?,erp_customer_name=?,confirmed_at=?,updated_at=?
+            WHERE id=?""", (status,erp_company,customer_code,customer_name,now,now,int(order_id)))
         con.commit()
-    return {"selected_count": len(items), "confirmed_count": confirmed_count, "total_count": total_count, "status": new_status}
-
-
-def confirm_export_waiting_order(order_id, *, erp_company, customer_code, customer_name):
-    with connect() as con:
-        cur = con.cursor(); ensure_export_waiting_tables(cur)
-        item_ids = [r[0] for r in cur.execute(
-            "SELECT id FROM export_waiting_items WHERE order_id=? AND COALESCE(confirmed,0)=0 ORDER BY id",
-            (int(order_id),),
-        ).fetchall()]
-    return confirm_export_waiting_items(order_id, item_ids, erp_company=erp_company,
-                                        customer_code=customer_code, customer_name=customer_name)
-
-
-def move_cart_to_export_waiting(cart, *, title="", customer_name=""):
-    title=str(title or "").strip()
-    country, export_no = title.split("_",1) if "_" in title else ("수출",title or "미지정")
-    buyer = str(customer_name or "").strip()
-    return save_export_waiting_order(cart,country=country,buyer=buyer,transport_method="미지정",export_no=export_no)
