@@ -3,7 +3,6 @@
 Migrated from app.py. This module intentionally imports Streamlit because it
 contains page rendering code.
 """
-
 from __future__ import annotations
 import base64
 from html import escape
@@ -27,7 +26,7 @@ _IMAGE_DIR = Path(__file__).resolve().parents[2] / "data" / "product_images"
 _THUMB_DIR = _IMAGE_DIR / "thumbs"
 _ALLOWED_IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 _MAX_IMAGE_BYTES = 8 * 1024 * 1024
-_THUMB_SIZE = (400, 400)
+_THUMB_SIZE = (500, 500)
 _THUMB_QUALITY = 78
 
 
@@ -84,9 +83,13 @@ def _ensure_thumbnail(original_path: str | Path) -> str:
         return ""
     target = _thumbnail_path_for(original)
     try:
-        if target.is_file() and target.stat().st_mtime >= original.stat().st_mtime:
-            return str(target)
-    except OSError:
+        if target.is_file():
+            from PIL import Image
+            with Image.open(target) as thumb:
+                correct_size = tuple(thumb.size) == _THUMB_SIZE
+            if correct_size and target.stat().st_mtime >= original.stat().st_mtime:
+                return str(target)
+    except Exception:
         pass
     return _create_thumbnail(original)
 
@@ -303,7 +306,9 @@ def page_map_search_results(term, compact: bool = False):
     div[class*="st-key-photo_display_"]:hover div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){opacity:1;pointer-events:auto;transform:translateY(0);}
     div[class*="st-key-photo_display_"] div[data-testid="stButton"],
     div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{width:36px!important;height:36px!important;min-height:36px!important;}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{padding:0!important;border-radius:999px!important;border:1px solid rgba(255,255,255,.95)!important;background:rgba(15,23,42,.78)!important;color:#fff!important;box-shadow:0 3px 12px rgba(15,23,42,.34)!important;font-size:16px!important;line-height:1!important;display:flex!important;align-items:center!important;justify-content:center!important;}
+    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{padding:0!important;border-radius:999px!important;border:1px solid rgba(255,255,255,.95)!important;background:rgba(15,23,42,.78)!important;color:#fff!important;box-shadow:0 3px 12px rgba(15,23,42,.34)!important;font-size:16px!important;line-height:1!important;display:flex!important;align-items:center!important;justify-content:center!important;text-align:center!important;}
+    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button p,
+    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button span{display:flex!important;align-items:center!important;justify-content:center!important;width:100%!important;height:100%!important;margin:0!important;padding:0!important;line-height:1!important;text-align:center!important;}
     div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button:hover{background:rgba(15,23,42,.95)!important;transform:scale(1.05);}
     @media (hover:none){div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){opacity:1;pointer-events:auto;transform:none;}}
 
