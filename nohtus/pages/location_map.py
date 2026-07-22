@@ -308,7 +308,7 @@ def page_map_search_results(term, compact: bool = False):
     div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{width:36px!important;height:36px!important;min-height:36px!important;}
     div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{padding:0!important;border-radius:999px!important;border:1px solid rgba(255,255,255,.95)!important;background:rgba(15,23,42,.78)!important;color:#fff!important;box-shadow:0 3px 12px rgba(15,23,42,.34)!important;font-size:16px!important;line-height:1!important;display:flex!important;align-items:center!important;justify-content:center!important;text-align:center!important;}
     div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button p,
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button span{display:flex!important;align-items:center!important;justify-content:center!important;width:100%!important;height:100%!important;margin:0!important;padding:0!important;line-height:1!important;text-align:center!important;transform:translateX(-20%)!important;}
+    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button span{display:flex!important;align-items:center!important;justify-content:center!important;width:100%!important;height:100%!important;margin:0!important;padding:0!important;line-height:1!important;text-align:center!important;transform:translateX(40%)!important;}
     div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button:hover{background:rgba(15,23,42,.95)!important;transform:scale(1.05);}
     @media (hover:none){div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){opacity:1;pointer-events:auto;transform:none;}}
 
