@@ -253,7 +253,7 @@ def _delete_transaction_ids(tx_ids):
         rows = cur.execute(
             f"""
             SELECT id, tx_type, product_name, warehouse_name, lot, exp_date,
-                   from_company, from_location, to_company, to_location, qty, final_stock
+                   from_company, from_location, to_company, to_location, qty, final_stock, memo
             FROM transactions
             WHERE id IN ({placeholders})
             ORDER BY id DESC
@@ -261,10 +261,27 @@ def _delete_transaction_ids(tx_ids):
             tuple(tx_ids),
         ).fetchall()
         cols = [d[0] for d in cur.description]
+        deleted_order_ids = set()
         for raw in rows:
             tx = dict(zip(cols, raw))
+            memo = str(tx.get("memo") or "")
+            match = re.search(r"출고지시서\s*#(\d+)", memo)
+            if match and str(tx.get("tx_type") or "") in {"출고지시", "출고", "출고지시수정"}:
+                deleted_order_ids.add(int(match.group(1)))
             _reverse_transaction(cur, tx)
         cur.execute(f"DELETE FROM transactions WHERE id IN ({placeholders})", tuple(tx_ids))
+        for order_id in deleted_order_ids:
+            remaining = cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM transactions
+                WHERE memo LIKE ?
+                  AND tx_type IN ('출고지시','출고지시수정','출고')
+                """,
+                (f"%출고지시서 #{order_id}%",),
+            ).fetchone()[0]
+            if int(remaining or 0) == 0:
+                cur.execute("UPDATE outbound_orders SET status='삭제됨' WHERE id=?", (order_id,))
         con.commit()
     return len(rows)
 
