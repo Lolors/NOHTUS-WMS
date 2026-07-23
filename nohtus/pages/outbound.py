@@ -83,306 +83,145 @@ def _stored_customer_for_editing_order():
 
 
 def _prefill_customer_from_saved_order():
-    """수정 진입 시 저장된 매출처 정보를 화면에 복원한다.
-
-    새로 저장되는 지시서는 outbound_orders.customer_name/customer_company를 사용한다.
-    과거 저장 데이터처럼 컬럼 값이 비어 있는 경우에만 제목에서 보조 복원한다.
-    """
-    if not st.session_state.get("editing_order_id"):
+    if st.session_state.get("_outbound_customer_prefilled"):
         return
-    if str(st.session_state.get("out_customer_term") or "").strip() or str(st.session_state.get("out_customer_manual_name") or "").strip():
-        return
-
-    stored = _stored_customer_for_editing_order()
-    customer = str(stored.get("customer_name") or "").strip()
-    company = str(stored.get("company") or "").strip()
-
-    if not customer:
-        title = str(st.session_state.get("editing_order_title") or "").strip()
-        customer = title.split(" - ", 1)[0].strip() if title else ""
-
+    customer = _stored_customer_for_editing_order()
     if customer:
-        st.session_state["out_customer_term"] = customer
-        st.session_state["out_customer_manual_name"] = customer
-    if customer or company:
-        st.session_state["out_selected_customer"] = {
-            "customer_name": customer,
-            "company": company,
-        }
-
-
-def _current_customer_payload(selected_customer=None):
-    """현재 화면 또는 수정 저장 시 유지할 매출처 정보를 만든다."""
-    if bool(st.session_state.get("out_customer_direct")):
-        return {
-            "customer_name": str(st.session_state.get("out_customer_manual_name") or "").strip(),
-            "company": "",
-        }
-    if selected_customer is not None:
-        return {
-            "customer_name": str(selected_customer.get("customer_name") or "").strip(),
-            "company": str(selected_customer.get("company") or "").strip(),
-        }
-    saved = st.session_state.get("out_selected_customer", {}) or {}
-    return {
-        "customer_name": str(saved.get("customer_name") or "").strip(),
-        "company": str(saved.get("company") or "").strip(),
-    }
+        st.session_state["out_selected_customer"] = customer
+        st.session_state["out_customer_term"] = customer.get("customer_name", "")
+    st.session_state["_outbound_customer_prefilled"] = True
 
 
 def _save_outbound_customer(order_id, customer_payload):
     _ensure_outbound_customer_columns()
-    customer_name = str((customer_payload or {}).get("customer_name") or "").strip()
-    customer_company = str((customer_payload or {}).get("company") or "").strip()
     with connect() as con:
         con.execute(
-            """
-            UPDATE outbound_orders
-            SET customer_name=?, customer_company=?
-            WHERE id=?
-            """,
-            (customer_name, customer_company, int(order_id)),
+            "UPDATE outbound_orders SET customer_name=?, customer_company=? WHERE id=?",
+            (
+                str((customer_payload or {}).get("customer_name") or "").strip(),
+                str((customer_payload or {}).get("company") or "").strip(),
+                int(order_id),
+            ),
         )
         con.commit()
 
 
+def _current_customer_payload(selected_customer):
+    selected_customer = selected_customer or st.session_state.get("out_selected_customer") or {}
+    return {
+        "customer_name": str(selected_customer.get("customer_name") or "").strip(),
+        "company": str(selected_customer.get("company") or "").strip(),
+    }
+
+
 def _save_outbound_cart_with_customer(cart, title, customer_payload):
-    """장바구니 저장/수정 시 매출처 정보를 출고지시서에 함께 저장한다."""
-
-
-    _ensure_outbound_customer_columns()
     editing_id = st.session_state.get("editing_order_id")
     if editing_id:
         update_outbound_order(int(editing_id), title, cart)
         _save_outbound_customer(int(editing_id), customer_payload)
-        msg = f"출고지시서 #{int(editing_id)} 수정 저장 완료"
-        st.session_state.pop("editing_order_id", None)
-        st.session_state.pop("editing_order_title", None)
+        oid = int(editing_id)
     else:
-        oid = save_outbound_order(cart, title)
-        _save_outbound_customer(int(oid), customer_payload)
-        msg = f"출고지시서 #{int(oid)} 저장 완료"
-
-    for k in [
-        "outbound_cart", "out_customer_term", "out_customer_select", "_out_customer_label",
-        "out_selected_customer", "out_customer_direct", "out_customer_manual_name",
-        "out_product_term", "out_req_qty", "out_rec_editor", "out_manual_editor",
-        "out_ignore_company", "out_manual_pick", "pending_outbound_save",
-        "pending_outbound_expiry_warnings",
-    ]:
-        st.session_state.pop(k, None)
+        oid = int(save_outbound_order(cart, title))
+        _save_outbound_customer(oid, customer_payload)
     st.session_state["outbound_cart"] = []
-    st.session_state["out_cart_editor_token"] = int(st.session_state.get("out_cart_editor_token", 0) or 0) + 1
-    st.session_state["_outbound_reset_inputs_pending"] = True
-    st.session_state["_outbound_last_success"] = msg
+    st.session_state.pop("editing_order_id", None)
+    st.session_state.pop("editing_order_title", None)
+    st.session_state["_outbound_last_success"] = f"출고지시서 #{oid} 저장 완료"
     st.rerun()
 
 
-def _normalize_customer_name(value):
-    return str(value or "").strip()
-
-
-def _parse_sales_excel(uploaded_file, *, company, header_row, date_col, customer_col):
-    """매출 엑셀에서 거래처별 최근거래일을 추출한다."""
-    if uploaded_file is None:
-        return pd.DataFrame(columns=["customer_name", "company", "last_sale_date"])
-    df = pd.read_excel(uploaded_file, header=header_row, dtype=object)
-    df.columns = [str(c).strip() for c in df.columns]
-    if date_col not in df.columns or customer_col not in df.columns:
-        raise ValueError(f"{company} 매출 파일에서 '{date_col}', '{customer_col}' 컬럼을 찾을 수 없습니다. 현재 컬럼: {', '.join(df.columns)}")
-
-    work = df[[date_col, customer_col]].copy()
-    work[customer_col] = work[customer_col].apply(_normalize_customer_name)
-    work = work[work[customer_col] != ""]
-    work[date_col] = pd.to_datetime(work[date_col], errors="coerce")
-    work = work.dropna(subset=[date_col])
-    if work.empty:
-        return pd.DataFrame(columns=["customer_name", "company", "last_sale_date"])
-
-    result = (
-        work.groupby(customer_col, as_index=False)[date_col]
-            .max()
-            .rename(columns={customer_col: "customer_name", date_col: "last_sale_date"})
-    )
-    result["company"] = company
-    result["last_sale_date"] = result["last_sale_date"].dt.strftime("%Y-%m-%d")
-    return result[["customer_name", "company", "last_sale_date"]]
-
-
-def _upsert_customer_last_sales(rows_df):
-    _ensure_customer_last_sales_table()
-    if rows_df is None or rows_df.empty:
-        return 0
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    count = 0
-    with connect() as con:
-        cur = con.cursor()
-        for r in rows_df.itertuples(index=False):
-            customer_name = _normalize_customer_name(getattr(r, "customer_name", ""))
-            company = str(getattr(r, "company", "") or "").strip()
-            last_sale_date = str(getattr(r, "last_sale_date", "") or "").strip()
-            if not customer_name or not last_sale_date:
-                continue
-            old = cur.execute(
-                "SELECT id, last_sale_date FROM customer_last_sales WHERE customer_name=? AND company=?",
-                (customer_name, company),
-            ).fetchone()
-            if old:
-                old_date = str(old[1] or "")
-                final_date = max(old_date, last_sale_date) if old_date else last_sale_date
-                cur.execute(
-                    """
-                    UPDATE customer_last_sales
-                    SET last_sale_date=?, source_company=?, updated_at=?
-                    WHERE id=?
-                    """,
-                    (final_date, company, now, int(old[0])),
-                )
-            else:
-                cur.execute(
-                    """
-                    INSERT INTO customer_last_sales(customer_name, company, last_sale_date, source_company, updated_at)
-                    VALUES(?,?,?,?,?)
-                    """,
-                    (customer_name, company, last_sale_date, company, now),
-                )
-            count += 1
-        con.commit()
-    return count
+def _render_last_sale_importer():
+    return None
 
 
 def _customer_last_sale_maps():
     _ensure_customer_last_sales_table()
-    df = q(
-        """
-        SELECT customer_name, company, last_sale_date
-        FROM customer_last_sales
-        WHERE TRIM(COALESCE(customer_name,''))<>''
-          AND TRIM(COALESCE(last_sale_date,''))<>''
-        """
-    )
-    exact = {}
-    by_name = {}
-    if df.empty:
-        return exact, by_name
-    for r in df.itertuples(index=False):
-        customer = _normalize_customer_name(getattr(r, "customer_name", ""))
-        company = str(getattr(r, "company", "") or "").strip()
-        last_date = str(getattr(r, "last_sale_date", "") or "").strip()
-        if not customer or not last_date:
-            continue
-        exact[(customer, company)] = max(exact.get((customer, company), ""), last_date)
-        by_name[customer] = max(by_name.get(customer, ""), last_date)
-    return exact, by_name
-
-
-def _days_ago_label(date_text):
-    try:
-        d = datetime.strptime(str(date_text), "%Y-%m-%d").date()
-    except Exception:
-        return ""
-    days = (date.today() - d).days
-    if days < 0:
-        return "예정"
-    if days == 0:
-        return "오늘"
-    return f"{days}일 전"
-
-
-def _last_sale_text(customer_name, company, exact_map, name_map):
-    customer = _normalize_customer_name(customer_name)
-    company = str(company or "").strip()
-    last_date = exact_map.get((customer, company)) or name_map.get(customer) or ""
-    if not last_date:
-        return "최근거래 없음"
-    ago = _days_ago_label(last_date)
-    return f"최근거래 {last_date} ({ago})" if ago else f"최근거래 {last_date}"
+    df = q("SELECT customer_name, company, last_sale_date FROM customer_last_sales")
+    exact_map, name_map = {}, {}
+    if not df.empty:
+        for _, row in df.iterrows():
+            name = str(row.get("customer_name") or "").strip()
+            company = str(row.get("company") or "").strip()
+            dt = str(row.get("last_sale_date") or "").strip()
+            if not name:
+                continue
+            exact_map[(name, company)] = dt
+            name_map[name] = max(name_map.get(name, ""), dt)
+    return exact_map, name_map
 
 
 def _customer_select_label(row, exact_map, name_map):
-    customer = str(getattr(row, "customer_name", "") or "").strip()
+    name = str(getattr(row, "customer_name", "") or "").strip()
     company = str(getattr(row, "company", "") or "").strip()
-    return f"{customer} | {company or '-'} | {_last_sale_text(customer, company, exact_map, name_map)}"
-
-
-def _render_last_sale_importer():
-    with st.expander("최근거래일 갱신", expanded=False):
-        st.caption("노투스팜 매출은 1행 헤더, 노투스 매출은 7행 헤더 기준으로 거래처별 마지막 거래일만 저장합니다.")
-        np_file = st.file_uploader("노투스팜 매출 파일", type=["xls", "xlsx"], key="last_sale_np_file")
-        nt_file = st.file_uploader("노투스 매출 파일", type=["xls", "xlsx"], key="last_sale_nt_file")
-        if st.button("최근거래일 갱신", use_container_width=True, key="last_sale_import_btn"):
-            try:
-                frames = []
-                if np_file is not None:
-                    frames.append(_parse_sales_excel(np_file, company="노투스팜", header_row=0, date_col="매출일자", customer_col="거래처명"))
-                if nt_file is not None:
-                    frames.append(_parse_sales_excel(nt_file, company="노투스", header_row=6, date_col="거래일자", customer_col="거래처명"))
-                if not frames:
-                    st.warning("갱신할 매출 파일을 업로드하세요.")
-                else:
-                    merged = pd.concat(frames, ignore_index=True)
-                    count = _upsert_customer_last_sales(merged)
-                    st.success(f"최근거래일 갱신 완료: {count}개 거래처 반영")
-                    st.rerun()
-            except Exception as e:
-                st.error(str(e))
+    manager = str(getattr(row, "manager", "") or "").strip()
+    last_sale = exact_map.get((name, company)) or name_map.get(name) or "-"
+    parts = [name]
+    if company:
+        parts.append(company)
+    if manager:
+        parts.append(manager)
+    parts.append(f"최근거래 {last_sale}")
+    return " | ".join(parts)
 
 
 def _inventory_query_for_outbound(selected_product, selected_company, ignore_company=False):
-    selected_product = str(selected_product or "").strip()
-    selected_company = str(selected_company or "").strip()
-    if not selected_product:
+    params = [selected_product]
+    where = ["product_name=?", "COALESCE(qty,0)>0", "location<>'P'"]
+    if not ignore_company:
+        if not selected_company:
+            return pd.DataFrame()
+        where.append("company=?")
+        params.append(selected_company)
+    return q(
+        f"""SELECT id,company,product_name,warehouse_name,lot,exp_date,location,qty,
+                    COALESCE(is_shippable,1) AS is_shippable
+             FROM inventory
+             WHERE {' AND '.join(where)}
+             ORDER BY company,exp_date,lot,location""",
+        tuple(params),
+    )
+
+
+def _manual_pick_rows(pick_df):
+    if pick_df is None or pick_df.empty:
         return pd.DataFrame()
-    if ignore_company:
-        return q(
-            """
-            SELECT *
-            FROM inventory
-            WHERE product_name=? AND qty>0
-            ORDER BY company, location, lot, exp_date
-            """,
-            (selected_product,),
-        )
-    if selected_company and selected_company in COMPANIES:
-        return q(
-            """
-            SELECT *
-            FROM inventory
-            WHERE product_name=? AND company=? AND qty>0
-            ORDER BY location, lot, exp_date
-            """,
-            (selected_product, selected_company),
-        )
-    return pd.DataFrame()
+    rows = pick_df.copy()
+    rows = rows.rename(
+        columns={
+            "company": "사업장",
+            "product_name": "제품명",
+            "lot": "LOT",
+            "exp_date": "유통기한",
+            "location": "로케이션",
+            "qty": "현재수량",
+        }
+    )
+    rows["유통기한"] = rows["유통기한"].apply(display_date_only)
+    rows.insert(0, "선택", False)
+    rows["요청수량"] = 0
+    return rows[["선택", "id", "사업장", "제품명", "LOT", "유통기한", "로케이션", "현재수량", "요청수량"]]
 
 
-def _manual_pick_rows(pick_df, edited):
-    rows = []
-    if pick_df is None or pick_df.empty or edited is None or edited.empty:
-        return rows
-    for idx, row in edited.iterrows():
-        if not bool(row.get("선택", False)):
-            continue
-        qty = _safe_int(row.get("요청수량"), 0)
-        if qty <= 0:
-            continue
-        if idx not in pick_df.index:
-            continue
-        src = pick_df.loc[idx]
-        available = _safe_int(src.get("qty"), 0)
-        qty = min(qty, available)
-        if qty <= 0:
-            continue
-        rows.append({
-            "id": int(src["id"]),
-            "로케이션": src.get("location", ""),
-            "사업장": src.get("company", ""),
-            "제품명": src.get("product_name", ""),
-            "LOT": src.get("lot", "-") or "-",
-            "유통기한": display_date_only(src.get("exp_date", "-") or "-"),
-            "요청수량": qty,
-        })
-    return rows
+def _recommended_rows(pick_df, req, expiry_short_first=True):
+    if pick_df is None or pick_df.empty:
+        return pd.DataFrame()
+    recommended = recommend_picks(pick_df, int(req or 0), expiry_short_first=expiry_short_first)
+    if recommended is None or recommended.empty:
+        return pd.DataFrame()
+    rows = recommended.copy()
+    rows = rows.rename(
+        columns={
+            "company": "사업장",
+            "product_name": "제품명",
+            "lot": "LOT",
+            "exp_date": "유통기한",
+            "location": "로케이션",
+            "qty": "현재수량",
+            "pick_qty": "요청수량",
+        }
+    )
+    rows["유통기한"] = rows["유통기한"].apply(display_date_only)
+    return rows[["id", "사업장", "제품명", "LOT", "유통기한", "로케이션", "현재수량", "요청수량"]]
 
 
 def page_outbound():
@@ -392,65 +231,74 @@ def page_outbound():
     st.title("출고지시")
     st.caption("매출처와 제품을 선택하면 재고를 추천합니다. 출고지시 저장 시 선택 재고가 즉시 차감됩니다.")
 
-    if st.session_state.pop("_outbound_last_success", None):
-        st.success(st.session_state.pop("_outbound_last_success", None))
+    last_success = st.session_state.pop("_outbound_last_success", None)
+    if last_success:
+        st.success(last_success)
 
-    st.markdown("### 매출처")
-    _render_last_sale_importer()
-    customers = q("SELECT customer_name, company, manager FROM customers ORDER BY customer_name")
-    exact_map, name_map = _customer_last_sale_maps()
-    direct = st.checkbox("직접입력 매출처", value=False, key="out_customer_direct")
+    left_input, right_input = st.columns([1, 1], gap="large")
+
     selected_customer = None
-    if direct:
-        manual_customer_name = st.text_input("매출처 직접입력", key="out_customer_manual_name")
-        selected_customer = {"customer_name": manual_customer_name, "company": ""} if manual_customer_name else None
-    else:
-        term = st.text_input("매출처 검색", key="out_customer_term", placeholder="거래처명 일부 입력")
-        if term:
-            matched = customers[customers["customer_name"].astype(str).str.contains(term, case=False, na=False)]
-            if matched.empty:
-                st.info("검색된 매출처가 없습니다.")
-            else:
-                labels = [_customer_select_label(r, exact_map, name_map) for r in matched.itertuples(index=False)]
-                selected_label = st.selectbox("매출처 선택", labels, key="out_customer_select")
-                if selected_label:
-                    idx = labels.index(selected_label)
-                    row = matched.iloc[idx]
-                    selected_customer = {
-                        "customer_name": str(row.get("customer_name") or "").strip(),
-                        "company": str(row.get("company") or "").strip(),
-                    }
-                    st.session_state["out_selected_customer"] = selected_customer
-        else:
-            selected_customer = st.session_state.get("out_selected_customer")
+    selected_product = None
+    req = 0
+    pick_df = pd.DataFrame()
+    ignore_company = False
+    manual_pick = False
+    expiry_short_first = True
 
-    st.markdown("### 재고 선택 옵션")
-    ignore_company = st.checkbox("매출처 사업장과 관계없이 전체 사업장 재고에서 선택", value=False, key="out_ignore_company")
-    manual_pick = st.checkbox("유통기한 우선 추천 없이 특정 재고 직접 선택", value=False, key="out_manual_pick")
+    with left_input:
+        st.markdown("### 매출처")
+        _render_last_sale_importer()
+        customers = q("SELECT customer_name, company, manager FROM customers ORDER BY customer_name")
+        exact_map, name_map = _customer_last_sale_maps()
+        direct = st.checkbox("직접입력 매출처", value=False, key="out_customer_direct")
+        if direct:
+            manual_customer_name = st.text_input("매출처 직접입력", key="out_customer_manual_name")
+            selected_customer = {"customer_name": manual_customer_name, "company": ""} if manual_customer_name else None
+        else:
+            term = st.text_input("매출처 검색", key="out_customer_term", placeholder="거래처명 일부 입력")
+            if term:
+                matched = customers[customers["customer_name"].astype(str).str.contains(term, case=False, na=False)]
+                if matched.empty:
+                    st.info("검색된 매출처가 없습니다.")
+                else:
+                    labels = [_customer_select_label(r, exact_map, name_map) for r in matched.itertuples(index=False)]
+                    selected_label = st.selectbox("매출처 선택", labels, key="out_customer_select")
+                    if selected_label:
+                        idx = labels.index(selected_label)
+                        row = matched.iloc[idx]
+                        selected_customer = {
+                            "customer_name": str(row.get("customer_name") or "").strip(),
+                            "company": str(row.get("company") or "").strip(),
+                        }
+                        st.session_state["out_selected_customer"] = selected_customer
+            else:
+                selected_customer = st.session_state.get("out_selected_customer")
+
+    with right_input:
+        st.markdown("### 제품 선택")
+        ignore_company = st.checkbox("매출처 사업장과 관계없이 전체 사업장 재고에서 선택", value=False, key="out_ignore_company")
+        manual_pick = st.checkbox("유통기한 우선 추천 없이 특정 재고 직접 선택", value=False, key="out_manual_pick")
+        products = product_options()
+        if products:
+            pcol, qcol = st.columns([4, 1])
+            with pcol:
+                selected_product = st.selectbox("제품", products, key="out_product_term", label_visibility="collapsed")
+            with qcol:
+                req = st.number_input("출고 요청 수량", min_value=1, step=1, key="out_req_qty", label_visibility="collapsed")
+            if not manual_pick:
+                expiry_short_first = st.checkbox("유통기한 짧은 것 먼저", value=True, key="out_expiry_short_first")
 
     selected_company = str((selected_customer or {}).get("company") or "").strip()
     st.caption(f"추천 범위: {'전체 사업장 재고' if ignore_company else (selected_company or '매출처 사업장 미선택')}")
 
-    st.markdown("### 제품 선택")
-    products = product_options()
-    selected_product = None
-    req = 0
-    pick_df = pd.DataFrame()
-    if products:
-        pcol, qcol = st.columns([4, 1])
-        with pcol:
-            selected_product = st.selectbox("제품", products, key="out_product_term", label_visibility="collapsed")
-        with qcol:
-            req = st.number_input("출고 요청 수량", min_value=1, step=1, key="out_req_qty", label_visibility="collapsed")
-            if not manual_pick:
-                expiry_short_first = st.checkbox("유통기한 짧은 것 먼저", value=True, key="out_expiry_short_first")
+    if selected_product:
+        pick_df = _inventory_query_for_outbound(selected_product, selected_company, ignore_company=ignore_company)
 
     stock_left, rec_right = st.columns([1, 1], gap="large")
 
     with stock_left:
         st.markdown("### 현재 출고 가능 재고")
         if selected_product:
-            pick_df = _inventory_query_for_outbound(selected_product, selected_company, ignore_company=ignore_company)
             if pick_df.empty:
                 if ignore_company:
                     st.warning("전체 사업장에 출고 지시 가능한 재고가 없습니다.")
@@ -460,7 +308,7 @@ def page_outbound():
                     st.info("매출처를 선택하면 해당 사업장 재고가 표시됩니다. 직접입력 매출처는 사업장 정보가 없으므로 필요한 경우 '사업장 구분 없이'를 체크하세요.")
             else:
                 view = pick_df[["company", "lot", "exp_date", "location", "qty"]].copy()
-                view = view.rename(columns={"company":"사업장", "lot":"LOT", "exp_date":"유통기한", "location":"로케이션", "qty":"수량"})
+                view = view.rename(columns={"company": "사업장", "lot": "LOT", "exp_date": "유통기한", "location": "로케이션", "qty": "수량"})
                 view["유통기한"] = view["유통기한"].apply(display_date_only)
                 view = view.sort_values(["사업장", "LOT", "유통기한", "로케이션"])
                 st.dataframe(view, hide_index=True, use_container_width=True)
@@ -469,64 +317,64 @@ def page_outbound():
 
     with rec_right:
         if manual_pick:
-            st.markdown("### 특정 재고 선택")
-            if selected_product and not pick_df.empty:
-                manual = pick_df[["company", "lot", "exp_date", "location", "qty"]].copy().reset_index(drop=True)
-                manual.insert(0, "선택", False)
-                manual["요청수량"] = 0
-                manual = manual.rename(columns={"company":"사업장", "lot":"LOT", "exp_date":"유통기한", "location":"로케이션", "qty":"현재수량"})
-                manual["유통기한"] = manual["유통기한"].apply(display_date_only)
+            st.markdown("### 특정 재고 직접 선택")
+            manual = _manual_pick_rows(pick_df)
+            if not manual.empty:
                 edited = st.data_editor(
-                    manual[["선택", "사업장", "로케이션", "LOT", "유통기한", "현재수량", "요청수량"]],
+                    manual,
                     hide_index=True,
                     use_container_width=True,
-                    num_rows="fixed",
-                    disabled=["사업장", "로케이션", "LOT", "유통기한", "현재수량"],
+                    disabled=["id", "사업장", "제품명", "LOT", "유통기한", "로케이션", "현재수량"],
                     column_config={
                         "선택": st.column_config.CheckboxColumn("선택"),
+                        "id": None,
                         "요청수량": st.column_config.NumberColumn("요청수량", min_value=0, step=1),
                     },
                     key="out_manual_editor",
                 )
                 if st.button("선택 재고 장바구니에 담기", type="primary", use_container_width=True):
-                    pending_rows = _manual_pick_rows(pick_df, edited)
-                    if not pending_rows:
-                        st.warning("선택된 재고 또는 요청수량이 없습니다.")
+                    pending_rows = []
+                    for _, row in edited.iterrows():
+                        qty2 = int(row.get("요청수량") or 0)
+                        if bool(row.get("선택")) and qty2 > 0:
+                            pending_rows.append({
+                                "id": int(row["id"]),
+                                "로케이션": row["로케이션"],
+                                "사업장": row["사업장"],
+                                "제품명": row["제품명"],
+                                "LOT": row["LOT"],
+                                "유통기한": row["유통기한"],
+                                "요청수량": qty2,
+                            })
+                    warn_rows = _cart_expiry_warnings(pending_rows)
+                    if warn_rows:
+                        st.session_state["pending_outbound_add_rows"] = pending_rows
+                        st.session_state["pending_outbound_add_warnings"] = warn_rows
+                        st.rerun()
                     else:
-                        warn_rows = _cart_expiry_warnings(pending_rows)
-                        if warn_rows:
-                            st.session_state["pending_outbound_add_rows"] = pending_rows
-                            st.session_state["pending_outbound_add_warnings"] = warn_rows
-                            st.rerun()
-                        else:
-                            added = _add_rows_to_outbound_cart(pending_rows)
-                            st.success(f"{added}개 행을 출고지시 장바구니에 담았습니다.")
-                            st.rerun()
+                        added = _add_rows_to_outbound_cart(pending_rows)
+                        st.success(f"{added}개 행을 출고지시 장바구니에 담았습니다.")
+                        st.rerun()
             else:
-                st.info("제품과 재고가 표시되면 원하는 재고를 직접 선택할 수 있습니다.")
+                st.info("직접 선택할 재고가 없습니다.")
         else:
-            st.markdown("### 이번 품목 출고 추천")
-            if selected_product and not pick_df.empty and req:
-                available = int(pick_df["qty"].sum())
-                if available < int(req):
-                    st.error(f"재고 부족: 요청 {int(req)}EA / 가능 {available}EA / 부족 {int(req)-available}EA")
-                rec_rows, shortage = recommend_picks(pick_df, int(req), expiry_short_first=expiry_short_first)
-                if rec_rows:
-                    rec = pd.DataFrame(rec_rows)
-                    rec_display_cols = ["로케이션", "사업장", "제품명", "LOT", "유통기한", "요청수량"]
+            st.markdown("### 추천 출고 재고")
+            if selected_product and req:
+                rec = _recommended_rows(pick_df, req, expiry_short_first=expiry_short_first)
+                if not rec.empty:
                     edited = st.data_editor(
-                        rec[rec_display_cols],
+                        rec,
                         hide_index=True,
                         use_container_width=True,
                         num_rows="fixed",
-                        disabled=["로케이션", "사업장", "제품명", "LOT", "유통기한"],
-                        column_config={"요청수량": st.column_config.NumberColumn("요청수량", min_value=0, step=1)},
+                        disabled=["id", "사업장", "제품명", "LOT", "유통기한", "로케이션", "현재수량"],
+                        column_config={"id": None, "요청수량": st.column_config.NumberColumn("요청수량", min_value=0, step=1)},
                         key="out_rec_editor",
                     )
                     if st.button("장바구니에 담기", type="primary", use_container_width=True):
                         pending_rows = []
-                        for idx, row in rec.iterrows():
-                            qty2 = int(edited.iloc[idx]["요청수량"] or 0)
+                        for _, row in edited.iterrows():
+                            qty2 = int(row.get("요청수량") or 0)
                             if qty2 > 0:
                                 pending_rows.append({
                                     "id": int(row["id"]),
@@ -678,5 +526,5 @@ def page_outbound():
                     added = _add_rows_to_outbound_cart(pending_rows)
                     st.session_state.pop("pending_outbound_add_rows", None)
                     st.session_state.pop("pending_outbound_add_warnings", None)
-                    st.success(f"{added}개 행을 출고지시 장바구니에 담았습니다.")
+                    st.session_state["_outbound_last_success"] = f"{added}개 행을 출고지시 장바구니에 담았습니다."
                     st.rerun()
