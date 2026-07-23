@@ -9,6 +9,7 @@ from nohtus.navigation import render_sidebar
 from nohtus.pages.all_inventory import page_all_inventory
 from nohtus.pages.closing_print import page_closing
 from nohtus.pages.expiry_alerts import page_expiry_alerts
+import nohtus.pages.export_waiting as export_waiting_page
 from nohtus.pages.export_waiting import page_export_waiting as _page_export_waiting
 from nohtus.pages.saved_export_waiting import page_saved_export_waiting
 from nohtus.pages.history_business import page_history
@@ -37,6 +38,7 @@ def page_export_waiting():
     original_manual_pick_rows = getattr(outbound_page, "_manual_pick_rows", None)
     original_last_sale_text = getattr(outbound_page, "_last_sale_text", None)
     original_days_ago_label = getattr(outbound_page, "_days_ago_label", None)
+    original_export_renderer = export_waiting_page._page_outbound
 
     if original_customer_payload is not None:
         def compatible_current_customer_payload(selected_customer=None):
@@ -92,9 +94,15 @@ def page_export_waiting():
     outbound_page._days_ago_label = compatible_days_ago_label
     outbound_page._last_sale_text = compatible_last_sale_text
 
+    # 수출대기 전용 화면은 outbound_business의 UI 재패치를 거치면
+    # 수출대기용 제목/주문정보 패치가 덮어써지므로 기본 출고 렌더러를 직접 사용한다.
+    export_waiting_page._page_outbound = outbound_page.page_outbound
+
     try:
         return _page_export_waiting()
     finally:
+        export_waiting_page._page_outbound = original_export_renderer
+
         if original_customer_payload is not None:
             outbound_page._current_customer_payload = original_customer_payload
         if original_manual_pick_rows is not None:
