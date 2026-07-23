@@ -32,14 +32,13 @@ def _inject_mobile_search_css():
                 padding-top: 0 !important;
             }
 
-            /* 전역 스타일이 다시 만든 상단 공백까지 강제로 제거한다. */
             [data-testid="stMainBlockContainer"],
             section.main > div.block-container,
             div[data-testid="stAppViewContainer"] .main .block-container {
                 padding: 0 .65rem 1.5rem !important;
                 margin-top: 0 !important;
-                transform: translateY(-140px) !important;
-                margin-bottom: -140px !important;
+                transform: translateY(-62px) !important;
+                margin-bottom: -62px !important;
             }
 
             div[data-testid="stTabs"] [data-baseweb="tab-list"] {
@@ -62,7 +61,6 @@ def _inject_mobile_search_css():
                 padding-top: 0 !important;
             }
 
-            /* 모바일에서도 결과 한 행을 사진 / 정보 / 수량 / 열기로 고정한다. */
             div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlockBorderWrapper"] {
                 border: 1px solid #e2e6ed !important;
                 border-radius: 12px !important;
@@ -74,10 +72,10 @@ def _inject_mobile_search_css():
             }
             div[class*="st-key-mobile_result_row_"] div[data-testid="stHorizontalBlock"] {
                 display: grid !important;
-                grid-template-columns: 52px minmax(0, 1fr) 84px 48px !important;
+                grid-template-columns: 100px minmax(0, 1fr) 84px 48px !important;
                 align-items: center !important;
-                column-gap: 7px !important;
-                min-height: 76px !important;
+                column-gap: 8px !important;
+                min-height: 112px !important;
                 padding: 8px 10px !important;
             }
             div[class*="st-key-mobile_result_row_"] div[data-testid="column"] {
@@ -88,25 +86,25 @@ def _inject_mobile_search_css():
                 padding: 0 !important;
             }
             div[class*="st-key-mobile_result_row_"] div[data-testid="stImage"] {
-                width: 48px !important;
-                height: 48px !important;
+                width: 96px !important;
+                height: 96px !important;
                 margin: 0 !important;
             }
             div[class*="st-key-mobile_result_row_"] div[data-testid="stImage"] img {
-                width: 48px !important;
-                height: 48px !important;
+                width: 96px !important;
+                height: 96px !important;
                 object-fit: contain !important;
-                border-radius: 8px !important;
+                border-radius: 10px !important;
                 background: #fff !important;
             }
             .mobile-empty-thumb {
-                width: 48px;
-                height: 48px;
-                border-radius: 8px;
+                width: 96px;
+                height: 96px;
+                border-radius: 10px;
                 background: #f8fafc;
             }
             .mobile-result-name {
-                margin: 0 0 4px;
+                margin: 0 0 5px;
                 overflow: hidden;
                 font-size: 14px;
                 font-weight: 750;
@@ -151,23 +149,23 @@ def _inject_mobile_search_css():
 
             div[class*="st-key-recent_stock_"] div[data-testid="stButton"],
             div[class*="st-key-recent_expiry_"] div[data-testid="stButton"] {
-                margin: -6px 0 !important;
+                margin: -2px 0 !important;
             }
             div[class*="st-key-recent_stock_"] div[data-testid="stButton"] button,
             div[class*="st-key-recent_expiry_"] div[data-testid="stButton"] button {
-                min-height: 21px !important;
-                height: 21px !important;
-                padding: 0 !important;
-                line-height: 1 !important;
+                min-height: 30px !important;
+                height: 30px !important;
+                padding: 3px 9px !important;
+                line-height: 1.15 !important;
+                border-radius: 7px !important;
             }
 
-            /* 임박재고 검색창 바로 아래에 체크박스를 붙인다. */
             div[class*="st-key-mobile_expiry_search_live"] {
-                margin-bottom: -16px !important;
+                margin-bottom: -8px !important;
             }
             div[class*="st-key-mobile_expiry_check_row"] {
-                margin-top: -12px !important;
-                margin-bottom: -2px !important;
+                margin-top: -6px !important;
+                margin-bottom: 0 !important;
             }
             div[class*="st-key-mobile_expiry_check_row"] div[data-testid="stHorizontalBlock"] {
                 align-items: center !important;
@@ -182,6 +180,54 @@ def _inject_mobile_search_css():
                 white-space: nowrap !important;
                 font-size: 13px !important;
             }
+
+            .mobile-detail-header {
+                display: grid;
+                grid-template-columns: 104px minmax(0, 1fr) auto;
+                gap: 12px;
+                align-items: center;
+                margin: 2px 0 10px;
+            }
+            .mobile-detail-photo {
+                width: 96px;
+                height: 96px;
+                border-radius: 12px;
+                overflow: hidden;
+                background: #f8fafc;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .mobile-detail-photo img {
+                width: 100%;
+                height: 100%;
+                object-fit: contain;
+                background: #fff;
+            }
+            .mobile-detail-name {
+                font-size: 21px;
+                line-height: 1.25;
+                font-weight: 850;
+                color: #172033;
+                word-break: keep-all;
+                margin-bottom: 8px;
+            }
+            .mobile-detail-company {
+                font-size: 13px;
+                line-height: 1.55;
+                color: #687386;
+            }
+            .mobile-detail-total {
+                font-size: 23px;
+                line-height: 1;
+                font-weight: 900;
+                color: #172033;
+                white-space: nowrap;
+                text-align: right;
+            }
+            .mobile-detail-table-gap {
+                height: 10px;
+            }
         }
         </style>
         """,
@@ -195,14 +241,14 @@ def _render_result_list(candidates, meta_getter, state_key, key_prefix):
         row_key = f"mobile_result_row_{key_prefix}_{index}_{_safe_key(name)}"
         with st.container(border=True, key=row_key):
             photo_col, info_col, qty_col, open_col = st.columns(
-                [0.72, 3.25, 1.15, 0.78],
+                [1.2, 3.25, 1.15, 0.78],
                 gap="small",
                 vertical_alignment="center",
             )
             with photo_col:
                 thumbnail_uri = base._product_thumbnail_uri(name)
                 if thumbnail_uri:
-                    st.image(thumbnail_uri, width=48)
+                    st.image(thumbnail_uri, width=96)
                 else:
                     st.markdown('<div class="mobile-empty-thumb"></div>', unsafe_allow_html=True)
             with info_col:
@@ -232,10 +278,88 @@ def _render_recent_links(names, state_key, key_prefix):
             st.rerun()
 
 
+def _detail_header(product_name, rows):
+    total_qty = int(rows["qty"].sum()) if not rows.empty else 0
+    company_totals = rows.groupby("company")["qty"].sum().sort_index() if not rows.empty else []
+    company_html = " · ".join(
+        f"{html.escape(str(company))} {int(qty):,}개" for company, qty in getattr(company_totals, "items", lambda: [])()
+    ) or "재고 없음"
+    thumb = base._product_thumbnail_uri(product_name)
+    photo_html = f'<img src="{thumb}" alt="{html.escape(product_name)}">' if thumb else ""
+    st.markdown(
+        f"""
+        <div class="mobile-detail-header">
+            <div class="mobile-detail-photo">{photo_html}</div>
+            <div>
+                <div class="mobile-detail-name">{html.escape(product_name)}</div>
+                <div class="mobile-detail-company">{company_html}</div>
+            </div>
+            <div class="mobile-detail-total">{total_qty:,}개</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_stock_detail(product_name):
+    rows = mobile_stock.mobile_stock_rows(product_name)
+    _detail_header(product_name, rows)
+    if rows.empty:
+        st.warning("현재 재고가 없습니다.")
+        return
+    detail = rows.copy()
+    detail["유통기한"] = detail["exp_date"].apply(mobile_stock.display_date_only)
+    detail = detail.rename(
+        columns={"company": "사업장", "location": "로케이션", "lot": "제조번호", "qty": "수량"}
+    )
+    st.markdown('<div class="mobile-detail-table-gap"></div>', unsafe_allow_html=True)
+    st.dataframe(
+        detail[["사업장", "로케이션", "제조번호", "유통기한", "수량"]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def _render_stock_detail_view(product_name):
+    st.markdown('<div class="mobile-back-button">', unsafe_allow_html=True)
+    go_back = st.button("‹ 검색 결과", key="mobile_search_back")
+    st.markdown("</div>", unsafe_allow_html=True)
+    if go_back:
+        st.session_state.pop(base.DETAIL_STATE_KEY, None)
+        st.rerun()
+    _render_stock_detail(product_name)
+
+
+def _render_expiry_detail(product_name, source_df):
+    st.markdown('<div class="mobile-back-button">', unsafe_allow_html=True)
+    go_back = st.button("‹ 검색 결과", key="mobile_expiry_back")
+    st.markdown("</div>", unsafe_allow_html=True)
+    if go_back:
+        st.session_state.pop(base.EXPIRY_DETAIL_STATE_KEY, None)
+        st.rerun()
+
+    rows = source_df[source_df["product_name"].astype(str) == str(product_name)].copy()
+    _detail_header(product_name, rows)
+    if rows.empty:
+        st.info("조건에 맞는 임박재고가 없습니다.")
+        return
+    rows = rows.sort_values(["_expiry", "company", "location", "lot"])
+    rows["유통기한"] = rows["_expiry"].dt.strftime("%Y.%m.%d")
+    rows = rows.rename(
+        columns={"company": "사업장", "location": "로케이션", "lot": "제조번호", "qty": "수량"}
+    )
+    st.markdown('<div class="mobile-detail-table-gap"></div>', unsafe_allow_html=True)
+    st.dataframe(
+        rows[["사업장", "로케이션", "제조번호", "유통기한", "수량"]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
 def _render_stock_tab():
     detail_product = str(st.session_state.get(base.DETAIL_STATE_KEY, "") or "").strip()
     if detail_product:
-        base._render_detail_view("기본", detail_product)
+        _render_stock_detail_view(detail_product)
         return
 
     term = base._live_input(
@@ -288,7 +412,7 @@ def _render_expiry_tab():
     df = base._filtered_expiry_df(period, exclude_bidata)
     detail_product = str(st.session_state.get(base.EXPIRY_DETAIL_STATE_KEY, "") or "").strip()
     if detail_product:
-        base._render_expiry_detail(detail_product, df)
+        _render_expiry_detail(detail_product, df)
         return
 
     if df.empty:
