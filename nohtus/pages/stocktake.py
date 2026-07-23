@@ -15,6 +15,7 @@ from nohtus.db import q
 from nohtus.dates import display_date_only
 from nohtus.services.inventory import adjust_inventory
 
+
 # Several Excel/import helper functions still live in app.py until later steps.
 # The migration script injects runtime imports inside page_stocktake as needed.
 
@@ -145,14 +146,7 @@ def _render_stock_comparison():
     )
 
 
-def page_stocktake():
-    from nohtus.services.stocktake import current_baseline_stock_excel_bytes, full_inventory_excel_bytes, import_stock_survey_excel
-    st.title("재고 실사")
-    st.caption("WMS 재고를 ERP 및 외부창고 실사재고와 비교하고, 필요한 재고를 직접 조정하거나 실사용 엑셀을 관리합니다.")
-
-    _render_stock_comparison()
-
-    st.markdown("---")
+def _render_stock_adjustment():
     st.subheader("재고조정")
     adj_df = q("""
         SELECT id, location, company, product_name, warehouse_name, lot, exp_date, qty
@@ -162,81 +156,85 @@ def page_stocktake():
     """)
     if adj_df.empty:
         st.info("조정할 현재 재고가 없습니다.")
-    else:
-        adjust_area, _adjust_blank = st.columns([7, 3], gap="large")
-        with adjust_area:
-            form_left, form_right = st.columns(2, gap="large")
+        return
 
-            with form_left:
-                search = st.text_input("조정 대상 제품 검색", placeholder="제품명/전산상 명칭/LOT/로케이션 일부를 입력하세요", key="stock_adjust_search")
-                filtered = adj_df.copy()
-                if search.strip():
-                    term = search.strip().lower()
-                    filtered = filtered[
-                        filtered["product_name"].fillna("").str.lower().str.contains(term, regex=False)
-                        | filtered["warehouse_name"].fillna("").str.lower().str.contains(term, regex=False)
-                        | filtered["lot"].fillna("").str.lower().str.contains(term, regex=False)
-                        | filtered["location"].fillna("").str.lower().str.contains(term, regex=False)
-                    ]
+    adjust_area, _adjust_blank = st.columns([7, 3], gap="large")
+    with adjust_area:
+        form_left, form_right = st.columns(2, gap="large")
 
-                if filtered.empty:
-                    st.warning("검색어와 일치하는 재고가 없습니다.")
-                    return
+        with form_left:
+            search = st.text_input("조정 대상 제품 검색", placeholder="제품명/전산상 명칭/LOT/로케이션 일부를 입력하세요", key="stock_adjust_search")
+            filtered = adj_df.copy()
+            if search.strip():
+                term = search.strip().lower()
+                filtered = filtered[
+                    filtered["product_name"].fillna("").str.lower().str.contains(term, regex=False)
+                    | filtered["warehouse_name"].fillna("").str.lower().str.contains(term, regex=False)
+                    | filtered["lot"].fillna("").str.lower().str.contains(term, regex=False)
+                    | filtered["location"].fillna("").str.lower().str.contains(term, regex=False)
+                ]
 
-                products = filtered["product_name"].dropna().astype(str).drop_duplicates().tolist()
-                product = st.selectbox("제품명", products, key="stock_adjust_product")
-                lot_df = filtered[filtered["product_name"] == product].copy()
+            if filtered.empty:
+                st.warning("검색어와 일치하는 재고가 없습니다.")
+                return
 
-                lots = lot_df["lot"].fillna("-").astype(str).drop_duplicates().tolist()
-                lot = st.selectbox("LOT/제조번호", lots, key=f"stock_adjust_lot_{product}")
+            products = filtered["product_name"].dropna().astype(str).drop_duplicates().tolist()
+            product = st.selectbox("제품명", products, key="stock_adjust_product")
+            lot_df = filtered[filtered["product_name"] == product].copy()
 
-                exp_df = lot_df[lot_df["lot"].fillna("-").astype(str) == lot].copy()
-                exps = exp_df["exp_date"].fillna("-").astype(str).drop_duplicates().tolist()
-                exp = st.selectbox("유통기한", exps, key=f"stock_adjust_exp_{product}_{lot}", format_func=display_date_only)
+            lots = lot_df["lot"].fillna("-").astype(str).drop_duplicates().tolist()
+            lot = st.selectbox("LOT/제조번호", lots, key=f"stock_adjust_lot_{product}")
 
-            target_df = exp_df[exp_df["exp_date"].fillna("-").astype(str) == exp].copy()
-            labels = []
-            id_by_label = {}
-            for r in target_df.itertuples():
-                label = f"{r.location} / {r.company} / 현재 {int(r.qty)}EA"
-                labels.append(label)
-                id_by_label[label] = int(r.id)
+            exp_df = lot_df[lot_df["lot"].fillna("-").astype(str) == lot].copy()
+            exps = exp_df["exp_date"].fillna("-").astype(str).drop_duplicates().tolist()
+            exp = st.selectbox("유통기한", exps, key=f"stock_adjust_exp_{product}_{lot}", format_func=display_date_only)
 
-            with form_right:
-                selected = st.selectbox("조정 대상 로케이션", labels, key=f"stock_adjust_inv_{product}_{lot}_{exp}")
-                inv_id = id_by_label[selected]
-                row = target_df[target_df["id"] == inv_id].iloc[0]
+        target_df = exp_df[exp_df["exp_date"].fillna("-").astype(str) == exp].copy()
+        labels = []
+        id_by_label = {}
+        for r in target_df.itertuples():
+            label = f"{r.location} / {r.company} / 현재 {int(r.qty)}EA"
+            labels.append(label)
+            id_by_label[label] = int(r.id)
 
-                actual = st.number_input("실물수량", min_value=0, value=int(row["qty"]), step=1, key=f"stock_adjust_actual_{inv_id}")
-                reason = st.selectbox("사유", ["실사차이", "파손", "유통기한만료", "오출고", "기타"], key=f"stock_adjust_reason_{inv_id}")
-                memo = st.text_input("메모", placeholder="필요 시 입력", key=f"stock_adjust_memo_{inv_id}")
+        with form_right:
+            selected = st.selectbox("조정 대상 로케이션", labels, key=f"stock_adjust_inv_{product}_{lot}_{exp}")
+            inv_id = id_by_label[selected]
+            row = target_df[target_df["id"] == inv_id].iloc[0]
 
-            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-            btn_left, btn_mid, btn_right = st.columns([1, 1, 1])
-            with btn_mid:
-                if st.button("재고조정 저장", type="primary", use_container_width=False, key=f"stock_adjust_submit_{inv_id}"):
-                    try:
-                        before, after, diff = adjust_inventory(int(inv_id), int(actual), reason, memo)
-                        st.session_state["_stock_adjust_success_msg"] = f"재고조정 완료: {before}EA → {after}EA ({diff:+d}EA)"
-                        st.rerun()
-                    except Exception as e:
-                        st.error(str(e))
+            actual = st.number_input("실물수량", min_value=0, value=int(row["qty"]), step=1, key=f"stock_adjust_actual_{inv_id}")
+            reason = st.selectbox("사유", ["실사차이", "파손", "유통기한만료", "오출고", "기타"], key=f"stock_adjust_reason_{inv_id}")
+            memo = st.text_input("메모", placeholder="필요 시 입력", key=f"stock_adjust_memo_{inv_id}")
 
-            st.markdown("#### 선택 재고")
-            show = target_df[["id", "location", "company", "product_name", "warehouse_name", "lot", "exp_date", "qty"]].copy()
-            show = show.rename(columns={
-                "id": "ID", "location": "로케이션", "company": "사업장", "product_name": "표준제품명",
-                "warehouse_name": "전산상명칭", "lot": "제조번호", "exp_date": "유통기한", "qty": "수량"
-            })
-            show["유통기한"] = show["유통기한"].apply(display_date_only)
-            st.dataframe(show, hide_index=True, use_container_width=True)
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+        btn_left, btn_mid, btn_right = st.columns([1, 1, 1])
+        with btn_mid:
+            if st.button("재고조정 저장", type="primary", use_container_width=False, key=f"stock_adjust_submit_{inv_id}"):
+                try:
+                    before, after, diff = adjust_inventory(int(inv_id), int(actual), reason, memo)
+                    st.session_state["_stock_adjust_success_msg"] = f"재고조정 완료: {before}EA → {after}EA ({diff:+d}EA)"
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
 
-        stock_adjust_msg = st.session_state.pop("_stock_adjust_success_msg", None)
-        if stock_adjust_msg:
-            st.success(stock_adjust_msg)
+        st.markdown("#### 선택 재고")
+        show = target_df[["id", "location", "company", "product_name", "warehouse_name", "lot", "exp_date", "qty"]].copy()
+        show = show.rename(columns={
+            "id": "ID", "location": "로케이션", "company": "사업장", "product_name": "표준제품명",
+            "warehouse_name": "전산상명칭", "lot": "제조번호", "exp_date": "유통기한", "qty": "수량"
+        })
+        show["유통기한"] = show["유통기한"].apply(display_date_only)
+        st.dataframe(show, hide_index=True, use_container_width=True)
 
-    st.markdown("---")
-    st.subheader("실사/기준재고 파일")
+    stock_adjust_msg = st.session_state.pop("_stock_adjust_success_msg", None)
+    if stock_adjust_msg:
+        st.success(stock_adjust_msg)
+
+
+def _render_stocktake_files():
+    from nohtus.services.stocktake import current_baseline_stock_excel_bytes, full_inventory_excel_bytes, import_stock_survey_excel
+
+    st.subheader("재고실사 및 기준재고")
     file_area, _file_blank = st.columns([6, 4], gap="large")
     with file_area:
         file_left, file_right = st.columns(2, gap="large")
@@ -278,3 +276,19 @@ def page_stocktake():
                         st.rerun()
                     except Exception as e:
                         st.error(f"반영 실패: {e}")
+
+
+def page_stocktake():
+    st.title("재고 실사")
+    st.caption("WMS 재고를 ERP 및 외부창고 실사재고와 비교하고, 필요한 재고를 직접 조정하거나 실사용 엑셀을 관리합니다.")
+
+    tab_adjust, tab_compare, tab_files = st.tabs(["재고조정", "데이터 비교", "재고실사 및 기준재고"])
+
+    with tab_adjust:
+        _render_stock_adjustment()
+
+    with tab_compare:
+        _render_stock_comparison()
+
+    with tab_files:
+        _render_stocktake_files()
