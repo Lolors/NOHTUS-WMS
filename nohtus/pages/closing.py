@@ -268,16 +268,16 @@ def _confirmed_export_business_log(ds, customers_df):
     )
     rows = []
     for r in exported.itertuples(index=False):
-        partner = str(getattr(r, "customer_name", "") or "").strip()
+        confirmed_at = str(getattr(r, "confirmed_at", "") or "")
+        customer_name = str(getattr(r, "customer_name", "") or "").strip()
         manager = ""
-        if customers_df is not None and not customers_df.empty and partner:
-            matched = customers_df[customers_df["customer_name"].astype(str).str.strip() == partner]
+        if customer_name and customers_df is not None and not customers_df.empty:
+            matched = customers_df[customers_df["customer_name"].astype(str).str.strip() == customer_name]
             if not matched.empty:
                 manager = str(matched.iloc[0].get("manager") or "")
-        confirmed_at = str(getattr(r, "confirmed_at", "") or "")
-        title = str(getattr(r, "title", "") or "")
-        export_no = str(getattr(r, "export_no", "") or "")
         memo_parts = ["수출확정"]
+        export_no = str(getattr(r, "export_no", "") or "").strip()
+        title = str(getattr(r, "title", "") or "").strip()
         if export_no:
             memo_parts.append(f"수출번호: {export_no}")
         if title:
@@ -286,7 +286,7 @@ def _confirmed_export_business_log(ds, customers_df):
             "시간": confirmed_at[11:16] if len(confirmed_at) >= 16 else "",
             "유형": "출고지시",
             "사업장": str(getattr(r, "company", "") or ""),
-            "거래처(매출처/입고처)": partner,
+            "거래처(매출처/입고처)": customer_name,
             "담당자": manager,
             "제품명": str(getattr(r, "product_name", "") or ""),
             "제조번호": str(getattr(r, "lot", "-") or "-"),
@@ -363,10 +363,9 @@ def page_closing():
                from_company, from_location, to_company, to_location, qty, memo
         FROM transactions
         WHERE substr(created_at, 1, 10)=?
-          AND tx_type NOT IN (
-              '출고지시', '출고지시수정', '출고지시 재차감', '출고',
-              '위치이동', '사업장이동', '사업장+위치이동', '사업장 이동', '이동'
-          )
+          AND tx_type NOT IN ('출고지시', '출고지시수정', '출고지시 재차감', '출고')
+          AND COALESCE(tx_type, '') NOT LIKE '%이동%'
+          AND COALESCE(tx_type, '') <> '재고조사불러오기'
         ORDER BY created_at, id
         """,
         (ds,),
@@ -378,7 +377,11 @@ def page_closing():
         customers_for_log = pd.DataFrame(columns=["customer_name", "manager"])
 
     rows = _scheduled_outbound_business_log(ds, customers_for_log)
-    rows.extend(_confirmed_export_business_log(ds, customers_for_log))
+    try:
+        rows.extend(_confirmed_export_business_log(ds, customers_for_log))
+    except Exception:
+        pass
+
     for r in history.itertuples(index=False):
         memo = str(getattr(r, "memo", "") or "")
         company, partner, manager = _business_log_company_and_partner(r, memo, customers_for_log)
