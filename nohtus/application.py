@@ -16,7 +16,7 @@ from nohtus.pages.history_business import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.location_map_business import page_map
 from nohtus.pages.customer_master_business import page_customer_master
-from nohtus.pages.mobile_stock_live_fix import page_mobile_stock_finder
+from nohtus.pages.mobile_stock_layout_patch import page_mobile_stock_finder
 from nohtus.pages.move import page_move
 from nohtus.pages.outbound_date_fix import page_outbound
 from nohtus.pages.own_product_status import page_own_product_status
@@ -26,6 +26,36 @@ from nohtus.pages.purchase_history_single import page_purchase_history
 from nohtus.pages.saved_outbound_date_fix import page_saved_outbound as page_saved_outbound_refactored
 from nohtus.pages.shippable_inventory import page_shippable_inventory
 from nohtus.pages.stocktake_business import page_stocktake
+
+
+def _inject_mobile_login_css():
+    st.markdown(
+        """
+        <style>
+        @media (max-width: 768px) {
+            div[data-testid="stForm"],
+            div[data-testid="stForm"] > div,
+            div[data-testid="stForm"] form {
+                border: 0 !important;
+                border-radius: 0 !important;
+                background: transparent !important;
+                box-shadow: none !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+            .login-account { display: none !important; }
+            .login-title {
+                margin-top: .35rem !important;
+                margin-bottom: 1rem !important;
+                font-size: 1.65rem !important;
+            }
+            div[data-testid="stTextInput"] { margin-bottom: .15rem !important; }
+            div[data-testid="stFormSubmitButton"] { margin-top: .2rem !important; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def page_export_waiting():
@@ -130,11 +160,16 @@ def main():
     init_db()
     apply_style()
     sync_mobile_flag()
+
+    force_mobile = str(st.query_params.get("mobile", "")).strip().lower() in {"1", "true", "yes", "on"}
+    mobile_view = is_mobile() or force_mobile
+    if mobile_view:
+        _inject_mobile_login_css()
+
     if not require_login():
         return
 
-    force_mobile = str(st.query_params.get("mobile", "")).strip().lower() in {"1", "true", "yes", "on"}
-    if is_mobile() or force_mobile:
+    if mobile_view:
         page_mobile_stock_finder()
         return
 
