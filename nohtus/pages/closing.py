@@ -281,6 +281,8 @@ def page_closing():
         memo = str(getattr(r, "memo", "") or "")
         company, partner = _business_log_company_and_partner(r, memo, customers_for_log)
         rows.append({
+            "일시": str(getattr(r, "created_at", "") or ""),
+            "유형": str(getattr(r, "tx_type", "") or ""),
             "사업장": company,
             "거래처(매출처/입고처)": partner,
             "제품명": str(getattr(r, "product_name", "") or ""),
@@ -289,7 +291,10 @@ def page_closing():
             "메모": memo,
         })
     st.dataframe(
-        pd.DataFrame(rows, columns=["사업장", "거래처(매출처/입고처)", "제품명", "제조번호", "수량", "메모"]),
+        pd.DataFrame(
+            rows,
+            columns=["일시", "유형", "사업장", "거래처(매출처/입고처)", "제품명", "제조번호", "수량", "메모"],
+        ),
         hide_index=True,
         use_container_width=True,
     )
