@@ -364,8 +364,15 @@ def _render_expiry_inventory():
         label_visibility="collapsed",
         key="mobile_expiry_period",
     )
+    exclude_bidata = st.checkbox(
+        "비자료 제외",
+        value=True,
+        key="mobile_expiry_exclude_bidata",
+    )
     limits = {"3개월 이내": 90, "6개월 이내": 180, "1년 이내": 365}
     df = _expiry_inventory(days_limit=365)
+    if exclude_bidata and not df.empty:
+        df = df[df["company"].astype(str).str.strip() != "비자료"]
     if filter_label == "만료":
         df = df[df["남은일수"] < 0]
     elif filter_label in limits:
