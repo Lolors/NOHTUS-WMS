@@ -7,6 +7,7 @@ import streamlit as st
 
 import nohtus.pages.purchase_history as purchase_page
 import nohtus.pages.purchase_history_all_products as all_products
+from nohtus.db import connect
 
 
 NOTUS_COLUMN_ALIASES = {
@@ -63,6 +64,14 @@ def _read_purchase_excel_for_company(payload, company):
     return pd.concat(frames, ignore_index=True)
 
 
+def _replace_company_purchase_data(company):
+    """새 파일 업로드 전에 선택 사업장의 기존 매입가 데이터와 업로드 이력을 삭제한다."""
+    with connect() as con:
+        con.execute("DELETE FROM purchase_history WHERE business_name=?", (company,))
+        con.execute("DELETE FROM purchase_uploads WHERE business_name=?", (company,))
+        con.commit()
+
+
 def page_purchase_history():
     original_render_query_items = purchase_page._render_query_items
     original_file_uploader = st.file_uploader
@@ -81,6 +90,7 @@ def page_purchase_history():
 
         purchase_page._read_purchase_excel = company_reader
         try:
+            _replace_company_purchase_data(company)
             return original_import_purchase_history(uploaded_file, company)
         finally:
             purchase_page._read_purchase_excel = original_reader
