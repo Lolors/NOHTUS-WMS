@@ -6,7 +6,9 @@ import streamlit as st
 from nohtus.config_runtime import COMPANIES
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only, expiry_status
-from nohtus.services.products import product_options
+
+
+RECENT_SEARCH_LIMIT = 6
 
 
 def mobile_favorite_users():
@@ -22,12 +24,15 @@ def mobile_favorite_users():
 def mobile_favorites_for_user(username):
     username = (username or "").strip() or "기본"
     try:
-        return q("""
+        return q(
+            """
             SELECT product_name, COALESCE(sort_order, 0) AS sort_order
             FROM mobile_favorites
             WHERE username=?
             ORDER BY sort_order, product_name
-        """, (username,))
+            """,
+            (username,),
+        )
     except Exception:
         return pd.DataFrame(columns=["product_name", "sort_order"])
 
@@ -38,7 +43,10 @@ def mobile_is_favorite(username, product_name):
     if not product_name:
         return False
     try:
-        df = q("SELECT 1 FROM mobile_favorites WHERE username=? AND product_name=? LIMIT 1", (username, product_name))
+        df = q(
+            "SELECT 1 FROM mobile_favorites WHERE username=? AND product_name=? LIMIT 1",
+            (username, product_name),
+        )
         return not df.empty
     except Exception:
         return False
@@ -52,12 +60,18 @@ def mobile_add_favorite(username, product_name):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with connect() as con:
         cur = con.cursor()
-        row = cur.execute("SELECT COALESCE(MAX(sort_order), -1) FROM mobile_favorites WHERE username=?", (username,)).fetchone()
+        row = cur.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) FROM mobile_favorites WHERE username=?",
+            (username,),
+        ).fetchone()
         next_order = int((row[0] if row else -1) or -1) + 1
-        cur.execute("""
+        cur.execute(
+            """
             INSERT OR IGNORE INTO mobile_favorites(username, product_name, sort_order, created_at)
             VALUES(?,?,?,?)
-        """, (username, product_name, next_order, now))
+            """,
+            (username, product_name, next_order, now),
+        )
         con.commit()
 
 
@@ -65,7 +79,10 @@ def mobile_remove_favorite(username, product_name):
     username = (username or "").strip() or "기본"
     product_name = (product_name or "").strip()
     with connect() as con:
-        con.execute("DELETE FROM mobile_favorites WHERE username=? AND product_name=?", (username, product_name))
+        con.execute(
+            "DELETE FROM mobile_favorites WHERE username=? AND product_name=?",
+            (username, product_name),
+        )
         con.commit()
     mobile_reindex_favorites(username)
 
@@ -75,8 +92,11 @@ def mobile_reindex_favorites(username):
     df = mobile_favorites_for_user(username)
     with connect() as con:
         cur = con.cursor()
-        for i, r in enumerate(df.itertuples(index=False)):
-            cur.execute("UPDATE mobile_favorites SET sort_order=? WHERE username=? AND product_name=?", (i, username, getattr(r, "product_name")))
+        for i, row in enumerate(df.itertuples(index=False)):
+            cur.execute(
+                "UPDATE mobile_favorites SET sort_order=? WHERE username=? AND product_name=?",
+                (i, username, getattr(row, "product_name")),
+            )
         con.commit()
 
 
@@ -95,15 +115,39 @@ def mobile_move_favorite(username, product_name, direction):
     with connect() as con:
         cur = con.cursor()
         for i, name in enumerate(names):
-            cur.execute("UPDATE mobile_favorites SET sort_order=? WHERE username=? AND product_name=?", (i, username, name))
+            cur.execute(
+                "UPDATE mobile_favorites SET sort_order=? WHERE username=? AND product_name=?",
+                (i, username, name),
+            )
         con.commit()
 
 
 def mobile_product_candidates(term="", limit=30):
-    """표준제품명/ERP명/비자료명/별칭으로 검색하되 표시값은 표준제품명만 반환."""
-    df = product_options(term)
+    """제품명과 별칭만 검색하고 표준제품명을 반환한다."""
+    term = (term or "").strip().lower()
+    if not term:
+        return []
+    df = q(
+        """
+        SELECT standard_name, aliases
+        FROM products
+        WHERE COALESCE(standard_name, '') <> ''
+        ORDER BY standard_name, id
+        """
+    )
     if df.empty:
         return []
+
+    def matches(row):
+        standard_name = str(row.get("standard_name", "") or "").lower()
+        aliases = str(row.get("aliases", "") or "").lower()
+        return term in standard_name or term in aliases
+
+    df = df[df.apply(matches, axis=1)].copy()
+    if df.empty:
+        return []
+    df["_starts"] = df["standard_name"].astype(str).str.lower().str.startswith(term)
+    df = df.sort_values(["_starts", "standard_name"], ascending=[False, True])
     return df["standard_name"].dropna().astype(str).drop_duplicates().head(limit).tolist()
 
 
@@ -117,12 +161,15 @@ def mobile_stock_rows(product_name, company_filter="전체", expiry_filter="전�
         conditions.append("company=?")
         params.append(company_filter)
     where = " AND ".join(conditions)
-    df = q(f"""
+    df = q(
+        f"""
         SELECT company, location, lot, exp_date, qty
         FROM inventory
         WHERE {where}
         ORDER BY company, exp_date, location, lot
-    """, tuple(params))
+        """,
+        tuple(params),
+    )
     if df.empty:
         return df
     df["상태"] = df["exp_date"].apply(expiry_status)
@@ -131,134 +178,259 @@ def mobile_stock_rows(product_name, company_filter="전체", expiry_filter="전�
     return df
 
 
-def page_mobile_stock_finder():
-    st.markdown("""
-    <style>
-    @media (max-width: 768px) {
-        div[data-testid="stAppViewContainer"] .main .block-container {
-            padding-top: 0.65rem !important;
+def _remember_recent_search(product_name):
+    name = (product_name or "").strip()
+    if not name:
+        return
+    recent = [x for x in st.session_state.get("mobile_recent_searches", []) if x != name]
+    st.session_state["mobile_recent_searches"] = [name] + recent[: RECENT_SEARCH_LIMIT - 1]
+
+
+def _select_product(product_name):
+    name = (product_name or "").strip()
+    if not name:
+        return
+    st.session_state["mobile_selected_product"] = name
+    st.session_state["mobile_product_term"] = name
+    _remember_recent_search(name)
+
+
+def _expiry_inventory(days_limit=365):
+    df = q(
+        """
+        SELECT product_name, company, location, lot, exp_date, qty
+        FROM inventory
+        WHERE qty > 0 AND COALESCE(product_name, '') <> ''
+        ORDER BY exp_date, product_name, location, lot
+        """
+    )
+    if df.empty:
+        return df
+    today = pd.Timestamp.today().normalize()
+    df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+    df = df[df["_expiry"].notna()].copy()
+    df["남은일수"] = (df["_expiry"] - today).dt.days
+    return df[df["남은일수"] <= days_limit].copy()
+
+
+def _mobile_css():
+    st.markdown(
+        """
+        <style>
+        @media (max-width: 768px) {
+            header[data-testid="stHeader"] { height: 0 !important; }
+            div[data-testid="stAppViewContainer"] .main .block-container {
+                padding: .55rem .75rem 2rem !important;
+                max-width: 760px !important;
+            }
+            h1 { font-size: 1.15rem !important; margin: .15rem 0 .7rem !important; }
+            h2, h3 { margin-top: .5rem !important; }
+            p, label, div[data-testid="stMarkdownContainer"] { font-size: 13px; }
+            div[data-testid="stTextInput"] input { font-size: 14px !important; height: 44px; }
+            div[data-testid="stSelectbox"] { margin-top: -.72rem; }
+            div[data-testid="stSelectbox"] > div > div { font-size: 13px !important; }
+            div[data-testid="stButton"] button {
+                min-height: 40px;
+                font-size: 13px !important;
+                border-radius: 10px;
+            }
+            div[data-testid="stExpander"] details {
+                border-left: 0 !important;
+                border-right: 0 !important;
+                border-radius: 0 !important;
+            }
+            div[data-testid="stExpander"] summary p { font-size: 13px !important; }
+            [data-testid="stDataFrame"] { font-size: 12px !important; }
+            .mobile-summary {
+                padding: 10px 12px;
+                background: #f5f8ff;
+                border-radius: 10px;
+                margin: 6px 0 10px;
+                font-size: 12px;
+                line-height: 1.6;
+            }
+            .mobile-stock-title { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+            .mobile-muted { color: #6b7280; font-size: 12px; }
         }
-        header[data-testid="stHeader"] {
-            height: 0 !important;
-        }
-    }
-    </style>
-    """, unsafe_allow_html=True)
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    st.title("재고 찾기")
-    st.caption("모바일 조회 전용 화면입니다. 표준제품명, ERP명, 비자료명, 별칭으로 제품을 찾아 현재 재고 위치를 확인합니다.")
 
-    username = "기본"
-    st.session_state["mobile_stock_user"] = username
+def _render_mobile_search(username):
+    st.title("재고 검색")
+    term = st.text_input(
+        "제품 검색",
+        placeholder="제품명 또는 별칭 검색",
+        key="mobile_product_term",
+        label_visibility="collapsed",
+    )
 
-    fav_df = mobile_favorites_for_user(username)
-    with st.expander("즐겨찾기", expanded=not fav_df.empty):
-        if fav_df.empty:
-            st.caption("아직 즐겨찾기가 없습니다. 제품 검색 후 즐겨찾기에 추가하세요.")
-        else:
-            for i, r in enumerate(fav_df.itertuples(index=False)):
-                fav_name = str(getattr(r, "product_name") or "")
-                c1, c2, c3, c4 = st.columns([5, 1, 1, 1])
-                with c1:
-                    if st.button(fav_name, key=f"mobile_fav_pick_{username}_{fav_name}", use_container_width=True):
-                        st.session_state["mobile_selected_product"] = fav_name
-                        st.session_state["mobile_product_term"] = fav_name
-                        st.rerun()
-                with c2:
-                    if st.button("▲", key=f"mobile_fav_up_{username}_{fav_name}", disabled=(i == 0), use_container_width=True):
-                        mobile_move_favorite(username, fav_name, "up")
-                        st.rerun()
-                with c3:
-                    if st.button("▼", key=f"mobile_fav_down_{username}_{fav_name}", disabled=(i == len(fav_df)-1), use_container_width=True):
-                        mobile_move_favorite(username, fav_name, "down")
-                        st.rerun()
-                with c4:
-                    if st.button("삭제", key=f"mobile_fav_del_{username}_{fav_name}", use_container_width=True):
-                        mobile_remove_favorite(username, fav_name)
-                        st.rerun()
-
-    term = st.text_input("제품 검색", placeholder="표준제품명 또는 ERP명 입력", key="mobile_product_term")
-    filter_c1, filter_c2 = st.columns(2)
-    with filter_c1:
-        company_filter = st.selectbox("사업장", ["전체"] + COMPANIES, key="mobile_company_filter")
-    with filter_c2:
-        expiry_filter = st.selectbox("유통기한", ["전체", "정상", "임박(1년)", "만료"], key="mobile_expiry_filter")
-
-    candidates = mobile_product_candidates(term, limit=30) if term.strip() else []
+    candidates = mobile_product_candidates(term, limit=20) if term.strip() else []
     selected_product = st.session_state.get("mobile_selected_product", "")
-    if candidates:
-        if selected_product not in candidates:
-            selected_product = candidates[0]
-        selected_product = st.selectbox(
-            "제품 선택",
-            candidates,
-            index=candidates.index(selected_product) if selected_product in candidates else 0,
-            key="mobile_product_select",
+
+    if term.strip() and candidates:
+        options = ["선택하세요"] + candidates
+        picked = st.selectbox(
+            "검색 추천",
+            options,
+            index=0,
+            key=f"mobile_autocomplete_{term}",
+            label_visibility="collapsed",
         )
-        st.session_state["mobile_selected_product"] = selected_product
+        if picked != "선택하세요":
+            _select_product(picked)
+            st.rerun()
     elif term.strip():
-        st.info("검색 결과가 없습니다. ERP명이나 표준제품명을 다시 확인해주세요.")
-        return
-    elif not selected_product:
-        st.info("제품명을 검색하거나 즐겨찾기를 선택하세요.")
+        st.caption("검색 결과가 없습니다.")
+
+    if not term.strip():
+        recent = st.session_state.get("mobile_recent_searches", [])
+        if recent:
+            st.markdown("**최근 검색어**")
+            for name in recent:
+                if st.button(f"◷  {name}", key=f"recent_{name}", use_container_width=True):
+                    _select_product(name)
+                    st.rerun()
         return
 
-    if not selected_product:
-        return
+    if candidates:
+        st.markdown("**검색 결과**")
+        for name in candidates:
+            rows = mobile_stock_rows(name)
+            total_qty = int(rows["qty"].sum()) if not rows.empty else 0
+            company_totals = rows.groupby("company")["qty"].sum() if not rows.empty else pd.Series(dtype=float)
+            summary = " · ".join(
+                f"{company} {int(qty):,}"
+                for company, qty in company_totals.items()
+                if int(qty or 0) > 0
+            )
+            button_text = f"{name}    총 {total_qty:,}개"
+            if st.button(button_text, key=f"mobile_result_{name}", use_container_width=True):
+                _select_product(name)
+                st.rerun()
+            if summary:
+                st.markdown(f"<div class='mobile-muted'>{summary}</div>", unsafe_allow_html=True)
 
-    rows = mobile_stock_rows(selected_product, company_filter=company_filter, expiry_filter=expiry_filter)
+    if selected_product and selected_product == term.strip():
+        _render_product_detail(username, selected_product)
+
+
+def _render_product_detail(username, selected_product):
+    rows = mobile_stock_rows(selected_product)
     total_qty = int(rows["qty"].sum()) if not rows.empty else 0
-
     st.markdown("---")
-    fav = mobile_is_favorite(username, selected_product)
     title_col, fav_col = st.columns([4, 2])
     with title_col:
-        st.subheader(selected_product)
-        st.markdown(f"### 총재고 {total_qty:,}EA")
+        st.markdown(f"<div class='mobile-stock-title'>{selected_product}</div>", unsafe_allow_html=True)
+        st.markdown(f"### 총 {total_qty:,}개")
     with fav_col:
+        fav = mobile_is_favorite(username, selected_product)
         if fav:
-            if st.button("★ 즐겨찾기 해제", use_container_width=True, key=f"mobile_unfav_{username}_{selected_product}"):
+            if st.button("★ 해제", key=f"mobile_unfav_{selected_product}", use_container_width=True):
                 mobile_remove_favorite(username, selected_product)
                 st.rerun()
-        else:
-            if st.button("☆ 즐겨찾기 추가", use_container_width=True, key=f"mobile_addfav_{username}_{selected_product}"):
-                mobile_add_favorite(username, selected_product)
-                st.rerun()
+        elif st.button("☆ 즐겨찾기", key=f"mobile_addfav_{selected_product}", use_container_width=True):
+            mobile_add_favorite(username, selected_product)
+            st.rerun()
 
     if rows.empty or total_qty <= 0:
-        st.warning("조건에 맞는 현재 재고가 없습니다.")
-        return
-
-    if expiry_filter == "임박(1년)":
-        near_df = rows.copy()
-        near_df["표준제품명"] = selected_product
-        near_df["유통기한"] = near_df["exp_date"].apply(display_date_only)
-        near_df = near_df.rename(columns={"location": "로케이션", "qty": "수량"})
-        st.dataframe(
-            near_df[["로케이션", "표준제품명", "유통기한", "수량"]],
-            use_container_width=True,
-            hide_index=True,
-        )
+        st.warning("현재 재고가 없습니다.")
         return
 
     company_totals = rows.groupby("company")["qty"].sum().sort_index()
-    summary = " · ".join([f"{company} {int(qty):,}EA" for company, qty in company_totals.items() if int(qty or 0) > 0])
-    if summary:
-        st.caption(summary)
+    summary = " · ".join(
+        f"{company} {int(qty):,}개" for company, qty in company_totals.items() if int(qty or 0) > 0
+    )
+    st.markdown(f"<div class='mobile-summary'>{summary}</div>", unsafe_allow_html=True)
 
-    for company, cdf in rows.groupby("company", sort=True):
-        ctotal = int(cdf["qty"].sum())
-        if ctotal <= 0:
-            continue
-        with st.expander(f"{company} ({ctotal:,}EA)", expanded=True):
-            cdf = cdf.copy()
-            cdf["_exp_sort"] = pd.to_datetime(cdf["exp_date"], errors="coerce")
-            cdf["_exp_sort"] = cdf["_exp_sort"].fillna(pd.Timestamp.max)
-            cdf = cdf.sort_values(["_exp_sort", "location", "qty"])
-            for r in cdf.itertuples(index=False):
-                loc = str(getattr(r, "location") or "-")
-                exp = display_date_only(getattr(r, "exp_date") or "-")
-                qty = int(getattr(r, "qty") or 0)
-                status = expiry_status(getattr(r, "exp_date") or "-")
-                badge = "🟢" if status == "정상" else ("🟡" if status.startswith("임박") else "🔴")
-                st.markdown(f"{badge} **{loc}** &nbsp;&nbsp; {exp} &nbsp;&nbsp; **{qty:,}EA**", unsafe_allow_html=True)
+    detail = rows.copy()
+    detail["유통기한"] = detail["exp_date"].apply(display_date_only)
+    detail = detail.rename(columns={"location": "로케이션", "qty": "수량", "lot": "LOT/제조번호"})
+    st.dataframe(
+        detail[["로케이션", "유통기한", "수량", "LOT/제조번호"]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def _render_expiry_inventory():
+    st.title("임박재고")
+    filter_label = st.radio(
+        "기간",
+        ["전체", "3개월 이내", "6개월 이내", "1년 이내", "만료"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="mobile_expiry_period",
+    )
+    limits = {"3개월 이내": 90, "6개월 이내": 180, "1년 이내": 365}
+    df = _expiry_inventory(days_limit=365)
+    if filter_label == "만료":
+        df = df[df["남은일수"] < 0]
+    elif filter_label in limits:
+        df = df[(df["남은일수"] >= 0) & (df["남은일수"] <= limits[filter_label])]
+
+    search_term = st.text_input(
+        "임박재고 검색",
+        placeholder="제품명 검색",
+        key="mobile_expiry_search",
+        label_visibility="collapsed",
+    ).strip().lower()
+    if search_term and not df.empty:
+        df = df[df["product_name"].astype(str).str.lower().str.contains(search_term, na=False)]
+
+    if df.empty:
+        st.info("조건에 맞는 임박재고가 없습니다.")
+        return
+
+    total_qty = int(df["qty"].sum())
+    nearest = df["_expiry"].min().strftime("%Y.%m.%d")
+    st.markdown(
+        f"<div class='mobile-summary'><b>임박재고 {len(df):,}건 · 총 {total_qty:,}개</b><br>"
+        f"가장 가까운 유통기한: {nearest}</div>",
+        unsafe_allow_html=True,
+    )
+
+    product_summary = (
+        df.groupby("product_name", as_index=False)
+        .agg(총수량=("qty", "sum"), 건수=("qty", "size"), 최근유통기한=("_expiry", "min"))
+        .sort_values(["최근유통기한", "product_name"])
+    )
+
+    for row in product_summary.itertuples(index=False):
+        name = str(row.product_name)
+        total = int(row.총수량)
+        count = int(row.건수)
+        nearest_date = row.최근유통기한.strftime("%Y.%m.%d")
+        with st.expander(f"{name}  ·  총 {total:,}개  ·  {count}건  ·  최근 {nearest_date}"):
+            detail = df[df["product_name"] == name].copy()
+            detail = detail.sort_values(["_expiry", "location", "lot"])
+            detail["유통기한"] = detail["_expiry"].dt.strftime("%Y.%m.%d")
+            detail["남은 일수"] = detail["남은일수"].apply(
+                lambda days: f"만료 {abs(int(days))}일" if days < 0 else f"{int(days)}일"
+            )
+            detail = detail.rename(columns={"location": "로케이션", "qty": "수량"})
+            st.dataframe(
+                detail[["로케이션", "유통기한", "수량", "남은 일수"]],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+
+def page_mobile_stock_finder():
+    _mobile_css()
+    username = "기본"
+    st.session_state["mobile_stock_user"] = username
+
+    mode = st.radio(
+        "모바일 메뉴",
+        ["재고 검색", "임박재고"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="mobile_stock_mode",
+    )
+    if mode == "임박재고":
+        _render_expiry_inventory()
+    else:
+        _render_mobile_search(username)
