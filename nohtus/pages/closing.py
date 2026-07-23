@@ -14,6 +14,19 @@ from nohtus.services.closing import (
 from nohtus.services.outbound import _find_korean_font
 
 
+def _safe_int(value, default=0):
+    """NaN, None, 빈 문자열, 비정상 숫자를 안전하게 정수로 변환한다."""
+    try:
+        if value is None or pd.isna(value):
+            return default
+        text = str(value).strip().replace(",", "")
+        if not text:
+            return default
+        return int(float(text))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
 def _today_outbound_final_stock_map(items):
     if items.empty:
         return {}
@@ -35,7 +48,7 @@ def _today_outbound_final_stock_map(items):
             """,
             (company, product, lot, exp),
         )
-        result[(company, product, lot, exp)] = int(df.iloc[0]["qty"] or 0) if not df.empty else 0
+        result[(company, product, lot, exp)] = _safe_int(df.iloc[0]["qty"]) if not df.empty else 0
     return result
 
 
@@ -45,7 +58,7 @@ def _today_outbound_display_df(items):
     rows = []
     for key, grp in items.groupby(group_cols, sort=False, dropna=False):
         company, location, product, lot, exp = key
-        total_qty = int(grp["출고수량"].sum())
+        total_qty = _safe_int(grp["출고수량"].sum())
         final_qty = final_map.get((company, product, lot, exp), 0)
         for i, rr in enumerate(grp.itertuples(index=False)):
             rows.append({
@@ -54,7 +67,7 @@ def _today_outbound_display_df(items):
                 "제품명": product if i == 0 else "",
                 "유통기한": exp if i == 0 else "",
                 "매출처": getattr(rr, "매출처", ""),
-                "수량": int(getattr(rr, "출고수량", 0) or 0),
+                "수량": _safe_int(getattr(rr, "출고수량", 0)),
                 "총 출고수량": total_qty if i == 0 else "",
                 "최종재고": final_qty if i == 0 else "",
             })
@@ -80,7 +93,7 @@ def _today_outbound_html(items, *, include_style=True):
     ])
     for key, grp in items.groupby(group_cols, sort=False, dropna=False):
         company, location, product, lot, exp = key
-        total_qty = int(grp["출고수량"].sum())
+        total_qty = _safe_int(grp["출고수량"].sum())
         final_qty = final_map.get((company, product, lot, exp), 0)
         rowspan = len(grp)
         for i, rr in enumerate(grp.itertuples(index=False)):
@@ -91,7 +104,7 @@ def _today_outbound_html(items, *, include_style=True):
                 html.append(f"<td rowspan='{rowspan}'>{escape(str(product))}</td>")
                 html.append(f"<td rowspan='{rowspan}'>{escape(str(exp))}</td>")
             html.append(f"<td>{escape(str(getattr(rr, '매출처', '') or '-'))}</td>")
-            html.append(f"<td class='num'>{int(getattr(rr, '출고수량', 0) or 0):,}</td>")
+            html.append(f"<td class='num'>{_safe_int(getattr(rr, '출고수량', 0)):,}</td>")
             if i == 0:
                 html.append(f"<td class='num' rowspan='{rowspan}'>{total_qty:,}</td>")
                 html.append(f"<td class='num' rowspan='{rowspan}'>{final_qty:,}</td>")
@@ -136,7 +149,7 @@ def _today_outbound_pdf_bytes(items, ds):
     row_idx = 1
     for key, grp in items.groupby(group_cols, sort=False, dropna=False):
         company, location, product, lot, exp = key
-        total_qty = int(grp["출고수량"].sum())
+        total_qty = _safe_int(grp["출고수량"].sum())
         final_qty = final_map.get((company, product, lot, exp), 0)
         start = row_idx
         for i, rr in enumerate(grp.itertuples(index=False)):
@@ -146,7 +159,7 @@ def _today_outbound_pdf_bytes(items, ds):
                 str(product) if i == 0 else "",
                 str(exp) if i == 0 else "",
                 str(getattr(rr, "매출처", "") or "-"),
-                f"{int(getattr(rr, '출고수량', 0) or 0):,}",
+                f"{_safe_int(getattr(rr, '출고수량', 0)):,}",
                 f"{total_qty:,}" if i == 0 else "",
                 f"{final_qty:,}" if i == 0 else "",
             ])
@@ -240,7 +253,7 @@ def _scheduled_outbound_business_log(ds, customers_df):
             "제품명": str(getattr(r, "product_name", "") or ""),
             "제조번호": str(getattr(r, "lot", "-") or "-"),
             "유통기한": display_date_only(getattr(r, "exp_date", "-") or "-"),
-            "수량": int(getattr(r, "qty", 0) or 0),
+            "수량": _safe_int(getattr(r, "qty", 0)),
             "메모": str(getattr(r, "order_memo", "") or ""),
         })
     return rows
@@ -291,7 +304,7 @@ def _confirmed_export_business_log(ds, customers_df):
             "제품명": str(getattr(r, "product_name", "") or ""),
             "제조번호": str(getattr(r, "lot", "-") or "-"),
             "유통기한": display_date_only(getattr(r, "exp_date", "-") or "-"),
-            "수량": int(getattr(r, "qty", 0) or 0),
+            "수량": _safe_int(getattr(r, "qty", 0)),
             "메모": " / ".join(memo_parts),
         })
     return rows
@@ -395,7 +408,7 @@ def page_closing():
             "제품명": str(getattr(r, "product_name", "") or ""),
             "제조번호": str(getattr(r, "lot", "-") or "-"),
             "유통기한": display_date_only(getattr(r, "exp_date", "-") or "-"),
-            "수량": int(getattr(r, "qty", 0) or 0),
+            "수량": _safe_int(getattr(r, "qty", 0)),
             "메모": memo,
         })
 
