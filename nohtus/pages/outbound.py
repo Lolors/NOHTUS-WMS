@@ -316,37 +316,35 @@ def _render_last_sale_importer():
                 if np_file is not None:
                     frames.append(_parse_sales_excel(np_file, company="노투스팜", header_row=0, date_col="매출일자", customer_col="거래처명"))
                 if nt_file is not None:
-                    frames.append(_parse_sales_excel(nt_file, company="노투스", header_row=6, date_col="거래일자", customer_col="거래처명"))
+                    frames.append(_parse_sales_excel(nt_file, company="노투스", header_row=6, date_col="매출일자", customer_col="거래처명"))
                 if not frames:
-                    st.warning("갱신할 매출 파일을 업로드하세요.")
-                else:
-                    merged = pd.concat(frames, ignore_index=True)
-                    count = _upsert_customer_last_sales(merged)
-                    st.success(f"최근거래일 갱신 완료: {count}개 거래처 반영")
-                    st.rerun()
-            except Exception as e:
-                st.error(str(e))
+                    st.warning("매출 파일을 하나 이상 선택하세요.")
+                    return
+                merged = pd.concat(frames, ignore_index=True)
+                count = _upsert_customer_last_sales(merged)
+                st.success(f"최근거래일 {count}건을 갱신했습니다.")
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
 
 
 def _inventory_query_for_outbound(selected_product, selected_company, ignore_company=False):
-    selected_product = str(selected_product or "").strip()
-    selected_company = str(selected_company or "").strip()
     if not selected_product:
         return pd.DataFrame()
     if ignore_company:
         return q(
             """
-            SELECT *
+            SELECT id, company, product_name, warehouse_name, lot, exp_date, location, qty
             FROM inventory
             WHERE product_name=? AND qty>0
             ORDER BY company, location, lot, exp_date
             """,
             (selected_product,),
         )
-    if selected_company and selected_company in COMPANIES:
+    if selected_company:
         return q(
             """
-            SELECT *
+            SELECT id, company, product_name, warehouse_name, lot, exp_date, location, qty
             FROM inventory
             WHERE product_name=? AND company=? AND qty>0
             ORDER BY location, lot, exp_date
@@ -400,7 +398,6 @@ def page_outbound():
 
     st.markdown("""
     <style>
-      /* 출고지시 상단 카드: 총재고 숫자와 출고 요청 수량 입력값의 시각 크기를 맞춤 */
       div[data-testid="stMetricValue"] {font-size: 2.35rem; text-align:center;}
       div[data-testid="stMetricLabel"] {text-align:center; width:100%; display:flex; justify-content:center;}
       div[data-testid="stMetric"] label, div[data-testid="stMetric"] [data-testid="stMetricLabel"] {width:100%; justify-content:center; text-align:center;}
@@ -617,23 +614,36 @@ def page_outbound():
         for c in ["로케이션", "사업장", "제품명", "LOT", "유통기한", "요청수량"]:
             if c not in cart_df.columns:
                 cart_df[c] = ""
-        display_cols = ["로케이션", "사업장", "제품명", "LOT", "유통기한", "요청수량"]
+        cart_df["__cart_row_id"] = list(range(len(cart_df)))
+        display_cols = ["로케이션", "사업장", "제품명", "LOT", "유통기한", "요청수량", "__cart_row_id"]
         edited_cart = st.data_editor(
             cart_df[display_cols],
             hide_index=True,
             use_container_width=True,
             num_rows="dynamic",
-            disabled=["로케이션", "사업장", "제품명", "LOT", "유통기한"],
-            column_config={"요청수량": st.column_config.NumberColumn("요청수량", min_value=0, step=1)},
+            disabled=["로케이션", "사업장", "제품명", "LOT", "유통기한", "__cart_row_id"],
+            column_config={
+                "요청수량": st.column_config.NumberColumn("요청수량", min_value=0, step=1),
+                "__cart_row_id": None,
+            },
             key=f"out_cart_editor_{st.session_state.get('out_cart_editor_token', 0)}",
         )
         new_cart = []
-        for i in range(min(len(cart), len(edited_cart))):
-            item = dict(cart[i])
-            item["요청수량"] = int(edited_cart.iloc[i]["요청수량"] or 0)
+        for _, edited_row in edited_cart.iterrows():
+            source_index = _safe_int(edited_row.get("__cart_row_id"), -1)
+            if source_index < 0 or source_index >= len(cart):
+                continue
+            item = dict(cart[source_index])
+            item["요청수량"] = int(edited_row.get("요청수량") or 0)
             if item["요청수량"] > 0:
                 new_cart.append(item)
-        if len(new_cart) != len(cart) or any(int(a.get("요청수량", 0)) != int(b.get("요청수량", 0)) for a, b in zip(new_cart, cart)):
+        cart_changed = len(new_cart) != len(cart)
+        if not cart_changed:
+            for idx, item in enumerate(new_cart):
+                if idx >= len(cart) or int(item.get("요청수량", 0)) != int(cart[idx].get("요청수량", 0)):
+                    cart_changed = True
+                    break
+        if cart_changed:
             st.session_state["outbound_cart"] = new_cart
             st.session_state["out_cart_editor_token"] = int(st.session_state.get("out_cart_editor_token", 0) or 0) + 1
             st.rerun()
