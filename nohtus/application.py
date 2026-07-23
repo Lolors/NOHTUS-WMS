@@ -132,7 +132,9 @@ def main():
     sync_mobile_flag()
     if not require_login():
         return
-    if is_mobile():
+
+    force_mobile = str(st.query_params.get("mobile", "")).strip().lower() in {"1", "true", "yes", "on"}
+    if is_mobile() or force_mobile:
         page_mobile_stock_finder()
         return
 
