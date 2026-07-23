@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date, datetime
+
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
@@ -86,8 +88,39 @@ def _normalize_date_text(value):
     return parsed.strftime("%Y-%m-%d")
 
 
+def _date_value(value):
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return date.today()
+    return parsed.date()
+
+
+def _ensure_order_date_column():
+    with connect() as con:
+        cur = con.cursor()
+        cols = {r[1] for r in cur.execute("PRAGMA table_info(export_waiting_orders)").fetchall()}
+        if "order_date" not in cols:
+            cur.execute("ALTER TABLE export_waiting_orders ADD COLUMN order_date TEXT")
+        cur.execute("UPDATE export_waiting_orders SET order_date=DATE(created_at) WHERE TRIM(COALESCE(order_date,''))='' ")
+        con.commit()
+
+
+def _update_export_order_date(order_id, new_date):
+    date_text = _normalize_date_text(new_date)
+    if not date_text:
+        raise ValueError("출고일자를 선택하세요.")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with connect() as con:
+        con.execute(
+            "UPDATE export_waiting_orders SET order_date=?,updated_at=? WHERE id=?",
+            (date_text, now, int(order_id)),
+        )
+        con.commit()
+
+
 def page_saved_export_waiting():
     ensure_export_waiting_tables()
+    _ensure_order_date_column()
     st.title("저장된 수출대기")
     st.caption("기간, 국가, 바이어, 제품명으로 검색할 수 있습니다. 취소 건은 기본적으로 숨겨집니다.")
     msg = st.session_state.pop("_export_waiting_message", None)
@@ -132,24 +165,24 @@ def page_saved_export_waiting():
         start_date = _normalize_date_text(period[0])
         end_date = _normalize_date_text(period[1])
         if start_date and end_date:
-            clauses.append("DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)")
+            clauses.append("DATE(COALESCE(o.order_date,o.created_at)) BETWEEN DATE(?) AND DATE(?)")
             params.extend([start_date, end_date])
     elif period:
         selected_date = _normalize_date_text(period[0] if isinstance(period, (list, tuple)) else period)
         if selected_date:
-            clauses.append("DATE(o.created_at)=DATE(?)")
+            clauses.append("DATE(COALESCE(o.order_date,o.created_at))=DATE(?)")
             params.append(selected_date)
 
     where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     orders = q(
         f"""SELECT o.id,o.export_no,o.country,o.buyer,o.transport_method,o.title,o.status,
-                    o.erp_company,o.erp_customer_name,o.created_at,o.updated_at,o.confirmed_at,o.cancelled_at,
+                    o.erp_company,o.erp_customer_name,o.order_date,o.created_at,o.updated_at,o.confirmed_at,o.cancelled_at,
                     COUNT(i.id) AS total_items,
                     SUM(CASE WHEN COALESCE(i.confirmed,0)=1 THEN 1 ELSE 0 END) AS confirmed_items
              FROM export_waiting_orders o
              LEFT JOIN export_waiting_items i ON i.order_id=o.id
              {where_sql}
-             GROUP BY o.id ORDER BY o.id DESC""",
+             GROUP BY o.id ORDER BY DATE(COALESCE(o.order_date,o.created_at)) DESC,o.id DESC""",
         tuple(params),
     )
     if orders.empty:
@@ -159,12 +192,14 @@ def page_saved_export_waiting():
 
     orders["total_items"] = pd.to_numeric(orders["total_items"], errors="coerce").fillna(0).astype(int)
     orders["confirmed_items"] = pd.to_numeric(orders["confirmed_items"], errors="coerce").fillna(0).astype(int)
+    orders["출고일자"] = orders.apply(
+        lambda r: _normalize_date_text(r.get("order_date") or r.get("created_at")), axis=1
+    )
     view = orders.copy()
     view["상태"] = view["status"].map(STATUS_LABELS).fillna(view["status"])
     view["진행상황"] = view.apply(lambda r: f"{int(r['confirmed_items'])} / {int(r['total_items'])} 품목 확정", axis=1)
     view = view.rename(
         columns={
-            "id": "번호",
             "country": "국가",
             "buyer": "바이어",
             "transport_method": "운송방식",
@@ -178,7 +213,7 @@ def page_saved_export_waiting():
     view["바이어"] = view["바이어"].fillna("").astype(str).replace("", "미지정")
     view["운송방식"] = view["운송방식"].fillna("").astype(str).replace("", "미지정")
     view["__status"] = orders["status"].astype(str).values
-    table_columns = ["번호", "상태", "진행상황", "국가", "바이어", "운송방식", "수출번호", "제목", "최근 ERP사업장", "최근 ERP매출처", "등록일", "__status"]
+    table_columns = ["출고일자", "상태", "진행상황", "국가", "바이어", "운송방식", "수출번호", "제목", "최근 ERP사업장", "최근 ERP매출처", "등록일", "__status"]
     table = view[table_columns].reset_index(drop=True)
     styled = table.style.apply(_order_row_style, axis=1)
     event = st.dataframe(
@@ -215,6 +250,24 @@ def page_saved_export_waiting():
     c5.metric("운송방식", str(selected["transport_method"] or "미지정"))
     c6.metric("수출번호", str(selected["export_no"] or "-"))
     _fit_summary_metric_values()
+
+    date_col, save_date_col = st.columns([3, 1])
+    with date_col:
+        shipment_date = st.date_input(
+            "출고일자",
+            value=_date_value(selected.get("order_date") or selected.get("created_at")),
+            key=f"saved_export_waiting_order_date_{order_id}",
+        )
+    with save_date_col:
+        st.markdown("<div style='height:1.78rem'></div>", unsafe_allow_html=True)
+        if st.button("출고일자 저장", use_container_width=True, key=f"save_export_order_date_{order_id}"):
+            try:
+                _update_export_order_date(order_id, shipment_date)
+                st.session_state["_export_waiting_message"] = f"{selected['title']}의 출고일자를 {_normalize_date_text(shipment_date)}로 변경했습니다."
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+
     if total_count:
         st.progress(confirmed_count / total_count, text=f"{confirmed_count} / {total_count} 품목 확정")
 
@@ -230,7 +283,7 @@ def page_saved_export_waiting():
         st.error("취소된 건입니다. 확정되지 않았던 품목은 등록 당시 원래 로케이션으로 복구되었습니다.")
         return
     if status == "confirmed":
-        st.success("모든 품목의 수출확정이 완료되었습니다.")
+        st.success("모든 품목의 수출확정이 완료되었습니다. 출고일자는 위에서 수정할 수 있습니다.")
         return
 
     edit_col, cancel_col = st.columns(2)
