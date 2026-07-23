@@ -46,7 +46,6 @@ def product_master_excel_bytes(highlight_missing=False):
             for cell in row:
                 cell.border = border
                 cell.alignment = Alignment(vertical="center", wrap_text=True)
-                # ERP 제품코드는 계산값이 아니라 텍스트다. 003 같은 앞자리 0을 보존한다.
                 if cell.column_letter in ["C", "E"]:
                     cell.number_format = "@"
                     if cell.value is not None:
@@ -132,9 +131,6 @@ def import_product_master_excel(uploaded_file):
         rows_to_insert.append((code, name, name, aliases, erp_np, erp_nt, erp_noh, erp_noh_code, bidata_name))
     with connect() as con:
         cur = con.cursor()
-
-        # 기존 products 행을 교체하기 전에 표준제품명별 사진 경로를 따로 보존한다.
-        # 동일 표준제품명에 여러 매칭 행이 있어도 등록된 사진 경로 하나를 재사용한다.
         cur.execute("SELECT standard_name, image_path FROM products WHERE COALESCE(image_path, '') <> ''")
         image_paths = {}
         for standard_name, image_path in cur.fetchall():
@@ -142,7 +138,6 @@ def import_product_master_excel(uploaded_file):
             path = _clean_text(image_path)
             if name and path and name not in image_paths:
                 image_paths[name] = path
-
         cur.execute("DELETE FROM products")
         for row in rows_to_insert:
             image_path = image_paths.get(row[1], "")
@@ -168,14 +163,4 @@ def product_options(term=""):
         search_cols = ["standard_name", "warehouse_name", "aliases", "erp_nohtuspharm_name", "erp_nohtus_name", "erp_noh_name", "bidata_name"]
         mask = df.apply(lambda r: any(term in str(r.get(c, "")).lower() for c in search_cols), axis=1)
         df = df[mask]
-    if df.empty:
-        return []
-    return (
-        df["standard_name"]
-        .fillna("")
-        .astype(str)
-        .str.strip()
-        .loc[lambda s: s != ""]
-        .drop_duplicates()
-        .tolist()
-    )
+    return df
