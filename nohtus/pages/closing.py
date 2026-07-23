@@ -178,6 +178,28 @@ def _today_outbound_pdf_bytes(items, ds):
     return bio.getvalue()
 
 
+def _business_log_company_and_partner(row, memo, customers_df):
+    tx_type = str(getattr(row, "tx_type", "") or "")
+    from_company = str(getattr(row, "from_company", "") or "").strip()
+    to_company = str(getattr(row, "to_company", "") or "").strip()
+
+    if tx_type in {"출고지시", "출고지시수정", "출고지시 재차감", "출고"}:
+        partner = ""
+        title_marker = "출고지시서 제목:"
+        if title_marker in memo:
+            title = memo.split(title_marker, 1)[1].split(" / ", 1)[0].strip()
+            partner = _infer_customer_from_title(title, customers_df)[0]
+        return from_company or to_company, partner
+
+    inbound_partner = _extract_inbound_source_from_memo(memo)
+    if inbound_partner:
+        return to_company or from_company, inbound_partner
+
+    if from_company and to_company and from_company != to_company:
+        return from_company, to_company
+    return from_company or to_company, ""
+
+
 def page_closing():
     st.title("마감")
     st.caption("출고의 마지막 단계입니다. 오늘 출고 체크와 업무일지 작성 기능을 한 화면에서 전환합니다.")
@@ -249,20 +271,25 @@ def page_closing():
         st.info("해당 날짜의 재고 이력이 없습니다.")
         return
 
+    try:
+        customers_for_log = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
+    except Exception:
+        customers_for_log = pd.DataFrame(columns=["customer_name", "manager"])
+
     rows = []
     for r in history.itertuples(index=False):
-        tx_type = str(getattr(r, "tx_type", "") or "")
         memo = str(getattr(r, "memo", "") or "")
+        company, partner = _business_log_company_and_partner(r, memo, customers_for_log)
         rows.append({
-            "시간": str(getattr(r, "created_at", "") or "")[11:16],
-            "업무구분": tx_type,
+            "사업장": company,
+            "거래처(매출처/입고처)": partner,
             "제품명": str(getattr(r, "product_name", "") or ""),
             "제조번호": str(getattr(r, "lot", "-") or "-"),
-            "유통기한": display_date_only(getattr(r, "exp_date", "-") or "-"),
-            "출발": " / ".join(v for v in [str(getattr(r, "from_company", "") or ""), str(getattr(r, "from_location", "") or "")] if v),
-            "도착": " / ".join(v for v in [str(getattr(r, "to_company", "") or ""), str(getattr(r, "to_location", "") or "")] if v),
             "수량": int(getattr(r, "qty", 0) or 0),
-            "입고처": _extract_inbound_source_from_memo(memo),
             "메모": memo,
         })
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.dataframe(
+        pd.DataFrame(rows, columns=["사업장", "거래처(매출처/입고처)", "제품명", "제조번호", "수량", "메모"]),
+        hide_index=True,
+        use_container_width=True,
+    )
