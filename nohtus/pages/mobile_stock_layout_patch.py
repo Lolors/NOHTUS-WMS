@@ -18,12 +18,52 @@ def _inject_mobile_search_css():
         """
         <style>
         @media (max-width: 768px) {
+            div[data-testid="stAppViewContainer"] .main .block-container {
+                padding-top: 0 !important;
+                margin-top: 0 !important;
+            }
+            header[data-testid="stHeader"] {
+                height: 0 !important;
+                min-height: 0 !important;
+            }
+            .mobile-tab-row {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 0;
+                margin: 0 0 12px;
+                border-bottom: 1px solid #e5e7eb;
+            }
+            .mobile-tab-row div[data-testid="stButton"] {
+                margin: 0 !important;
+            }
+            .mobile-tab-row div[data-testid="stButton"] button {
+                width: 100% !important;
+                min-height: 42px !important;
+                border: 0 !important;
+                border-radius: 0 !important;
+                background: transparent !important;
+                box-shadow: none !important;
+                color: #64748b !important;
+                font-size: 14px !important;
+                font-weight: 600 !important;
+                border-bottom: 2px solid transparent !important;
+            }
+            .mobile-tab-row .active div[data-testid="stButton"] button {
+                color: #111827 !important;
+                font-weight: 800 !important;
+                border-bottom-color: #ff4b4b !important;
+            }
             .mobile-result-row {
                 min-height: 74px !important;
-                padding-right: 150px !important;
+                padding: 10px 132px 9px 70px !important;
+            }
+            .mobile-result-thumb {
+                background: #f8fafc !important;
             }
             .mobile-result-total {
-                right: 72px !important;
+                right: 70px !important;
+                top: 50% !important;
+                transform: translateY(-50%) !important;
                 font-size: 17px !important;
                 font-weight: 800 !important;
                 color: #1f2937 !important;
@@ -32,31 +72,27 @@ def _inject_mobile_search_css():
 
             div[class*="st-key-mobile_stock_result_"] div[data-testid="stButton"],
             div[class*="st-key-mobile_expiry_result_"] div[data-testid="stButton"] {
-                width: 54px !important;
+                width: 52px !important;
                 margin-left: auto !important;
             }
             div[class*="st-key-mobile_stock_result_"] div[data-testid="stButton"] button,
             div[class*="st-key-mobile_expiry_result_"] div[data-testid="stButton"] button {
-                width: 54px !important;
-                height: 34px !important;
-                min-height: 34px !important;
-                padding: 0 10px !important;
-                border: 1px solid #d8dde6 !important;
-                border-radius: 9px !important;
-                background: #ffffff !important;
-                color: #334155 !important;
+                width: 52px !important;
+                height: 32px !important;
+                min-height: 32px !important;
+                padding: 0 !important;
+                border: 0 !important;
+                border-radius: 0 !important;
+                background: transparent !important;
+                color: #2563eb !important;
                 box-shadow: none !important;
-                font-size: 12px !important;
+                font-size: 13px !important;
                 font-weight: 700 !important;
             }
             .mobile-result-click div[data-testid="stButton"] {
                 margin-top: -54px !important;
                 margin-bottom: 20px !important;
-                padding-right: 8px !important;
-            }
-            .mobile-result-click div[data-testid="stButton"] button {
-                color: #334155 !important;
-                background: #ffffff !important;
+                padding-right: 4px !important;
             }
 
             div[class*="st-key-recent_stock_"] div[data-testid="stButton"],
@@ -102,7 +138,7 @@ def _render_result_list(candidates, meta_getter, state_key, key_prefix):
         last_class = " last-row" if index == len(candidates) - 1 else ""
         thumbnail_uri = base._product_thumbnail_uri(name)
         thumbnail_html = (
-            f'<img src="{thumbnail_uri}" alt="{html.escape(str(name))}">' if thumbnail_uri else "📷"
+            f'<img src="{thumbnail_uri}" alt="{html.escape(str(name))}">' if thumbnail_uri else ""
         )
         st.markdown(
             f"""
@@ -199,19 +235,71 @@ def _render_expiry_inventory():
     )
 
 
+def _render_tabs():
+    current = st.session_state.get("mobile_stock_mode", "재고 검색")
+    left, right = st.columns(2, gap="small")
+    with left:
+        st.markdown(f'<div class="mobile-tab-row"><div class="{"active" if current == "재고 검색" else ""}">', unsafe_allow_html=True)
+        stock_clicked = st.button("재고 검색", key="mobile_tab_stock", use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    with right:
+        st.markdown(f'<div class="mobile-tab-row"><div class="{"active" if current == "임박재고" else ""}">', unsafe_allow_html=True)
+        expiry_clicked = st.button("임박재고", key="mobile_tab_expiry", use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    if stock_clicked and current != "재고 검색":
+        st.session_state["mobile_stock_mode"] = "재고 검색"
+        st.rerun()
+    if expiry_clicked and current != "임박재고":
+        st.session_state["mobile_stock_mode"] = "임박재고"
+        st.rerun()
+    return st.session_state.get("mobile_stock_mode", "재고 검색")
+
+
+def _render_stock_without_title(username):
+    detail_product = str(st.session_state.get(base.DETAIL_STATE_KEY, "") or "").strip()
+    if detail_product:
+        base._render_detail_view(username, detail_product)
+        return
+
+    term = base._live_input("mobile_product_term_live", "mobile_product_term", "제품명 또는 별칭 검색")
+    if not term.strip():
+        recent = st.session_state.get("mobile_recent_searches", [])
+        if recent:
+            _render_recent_links(recent, base.DETAIL_STATE_KEY, "recent_stock")
+        return
+
+    candidates = mobile_stock.mobile_product_candidates(term, limit=20)
+    if not candidates:
+        st.caption("검색 결과가 없습니다.")
+        return
+    st.markdown(
+        f'<div class="mobile-search-section">검색 결과 {len(candidates)}건</div>',
+        unsafe_allow_html=True,
+    )
+    _render_result_list(candidates, base._stock_meta, base.DETAIL_STATE_KEY, "mobile_stock_result")
+
+
 def page_mobile_stock_finder():
     original_inject = base._inject_mobile_search_css
     original_result = base._render_result_list
     original_recent = base._render_recent_links
     original_expiry = base._render_expiry_inventory
+    original_search = base._render_mobile_search
     base._inject_mobile_search_css = _inject_mobile_search_css
     base._render_result_list = _render_result_list
     base._render_recent_links = _render_recent_links
     base._render_expiry_inventory = _render_expiry_inventory
+    base._render_mobile_search = _render_stock_without_title
     try:
-        return base.page_mobile_stock_finder()
+        _inject_mobile_search_css()
+        mode = _render_tabs()
+        if mode == "임박재고":
+            _render_expiry_inventory()
+        else:
+            _render_stock_without_title("기본")
     finally:
         base._inject_mobile_search_css = original_inject
         base._render_result_list = original_result
         base._render_recent_links = original_recent
         base._render_expiry_inventory = original_expiry
+        base._render_mobile_search = original_search
