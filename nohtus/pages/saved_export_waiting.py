@@ -182,7 +182,8 @@ def page_saved_export_waiting():
         f"""SELECT o.id,o.export_no,o.country,o.buyer,o.transport_method,o.title,o.status,
                     o.erp_company,o.erp_customer_name,o.order_date,o.created_at,o.updated_at,o.confirmed_at,o.cancelled_at,
                     COUNT(i.id) AS total_items,
-                    SUM(CASE WHEN COALESCE(i.confirmed,0)=1 THEN 1 ELSE 0 END) AS confirmed_items
+                    SUM(CASE WHEN COALESCE(i.confirmed,0)=1 THEN 1 ELSE 0 END) AS confirmed_items,
+                    GROUP_CONCAT(DISTINCT NULLIF(TRIM(i.product_name),'')) AS product_names
              FROM export_waiting_orders o
              LEFT JOIN export_waiting_items i ON i.order_id=o.id
              {where_sql}
@@ -203,16 +204,26 @@ def page_saved_export_waiting():
         lambda r: _normalize_date_text(r.get("order_date")) if str(r.get("status")) == "confirmed" else "",
         axis=1,
     )
+
+    def summarize_products(value):
+        names = [x.strip() for x in str(value or "").split(",") if x.strip()]
+        if not names:
+            return "-"
+        if len(names) == 1:
+            return names[0]
+        if len(names) == 2:
+            return f"{names[0]}, {names[1]}"
+        return f"{names[0]}, {names[1]} 외 {len(names) - 2}종"
+
     view = orders.copy()
     view["상태"] = view["status"].map(STATUS_LABELS).fillna(view["status"])
-    view["진행상황"] = view.apply(lambda r: f"{int(r['confirmed_items'])} / {int(r['total_items'])} 품목 확정", axis=1)
+    view["포함된 품목"] = view["product_names"].apply(summarize_products)
     view = view.rename(
         columns={
             "country": "국가",
             "buyer": "바이어",
             "transport_method": "운송방식",
             "export_no": "수출번호",
-            "title": "제목",
             "erp_company": "사업장",
             "erp_customer_name": "ERP 매출처명",
             "created_at": "등록일",
@@ -221,7 +232,7 @@ def page_saved_export_waiting():
     view["바이어"] = view["바이어"].fillna("").astype(str).replace("", "미지정")
     view["운송방식"] = view["운송방식"].fillna("").astype(str).replace("", "미지정")
     view["__status"] = orders["status"].astype(str).values
-    table_columns = ["출고일자", "상태", "진행상황", "국가", "바이어", "운송방식", "수출번호", "제목", "사업장", "ERP 매출처명", "등록일", "__status"]
+    table_columns = ["출고일자", "국가", "바이어", "운송방식", "수출번호", "상태", "포함된 품목", "사업장", "ERP 매출처명", "등록일", "__status"]
     table = view[table_columns].reset_index(drop=True)
     styled = table.style.apply(_order_row_style, axis=1)
     event = st.dataframe(
@@ -264,7 +275,7 @@ def page_saved_export_waiting():
         with date_col:
             shipment_date = st.date_input(
                 "출고일자",
-                value=_date_value(selected.get("order_date") or selected.get("confirmed_at")),
+                value=_date_value(selected.get("order_date")),
                 key=f"saved_export_waiting_order_date_{order_id}",
             )
         with save_date_col:
