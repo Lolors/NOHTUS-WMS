@@ -1,11 +1,108 @@
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
 
-from nohtus.db import q
-from nohtus.pages.outbound import _parse_sales_excel, _upsert_customer_last_sales
+from nohtus.db import connect, q
 from nohtus.services.master import customer_export_excel_bytes, import_customer_master_excel
+
+
+def _normalize_customer_name(value):
+    return str(value or "").strip()
+
+
+def _ensure_customer_last_sales_table():
+    with connect() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS customer_last_sales(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_name TEXT NOT NULL,
+                company TEXT NOT NULL DEFAULT '',
+                last_sale_date TEXT NOT NULL,
+                source_company TEXT,
+                updated_at TEXT,
+                UNIQUE(customer_name, company)
+            )
+            """
+        )
+        con.commit()
+
+
+def _parse_sales_excel(uploaded_file, *, company, header_row, date_col, customer_col):
+    """매출 엑셀에서 거래처별 최근 거래일을 추출한다."""
+    if uploaded_file is None:
+        return pd.DataFrame(columns=["customer_name", "company", "last_sale_date"])
+
+    df = pd.read_excel(uploaded_file, header=header_row, dtype=object)
+    df.columns = [str(c).strip() for c in df.columns]
+    if date_col not in df.columns or customer_col not in df.columns:
+        raise ValueError(
+            f"{company} 매출 파일에서 '{date_col}', '{customer_col}' 컬럼을 찾을 수 없습니다. "
+            f"현재 컬럼: {', '.join(df.columns)}"
+        )
+
+    work = df[[date_col, customer_col]].copy()
+    work[customer_col] = work[customer_col].apply(_normalize_customer_name)
+    work = work[work[customer_col] != ""]
+    work[date_col] = pd.to_datetime(work[date_col], errors="coerce")
+    work = work.dropna(subset=[date_col])
+    if work.empty:
+        return pd.DataFrame(columns=["customer_name", "company", "last_sale_date"])
+
+    result = (
+        work.groupby(customer_col, as_index=False)[date_col]
+        .max()
+        .rename(columns={customer_col: "customer_name", date_col: "last_sale_date"})
+    )
+    result["company"] = company
+    result["last_sale_date"] = result["last_sale_date"].dt.strftime("%Y-%m-%d")
+    return result[["customer_name", "company", "last_sale_date"]]
+
+
+def _upsert_customer_last_sales(rows_df):
+    _ensure_customer_last_sales_table()
+    if rows_df is None or rows_df.empty:
+        return 0
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    count = 0
+    with connect() as con:
+        cur = con.cursor()
+        for row in rows_df.itertuples(index=False):
+            customer_name = _normalize_customer_name(getattr(row, "customer_name", ""))
+            company = str(getattr(row, "company", "") or "").strip()
+            last_sale_date = str(getattr(row, "last_sale_date", "") or "").strip()
+            if not customer_name or not last_sale_date:
+                continue
+
+            old = cur.execute(
+                "SELECT id, last_sale_date FROM customer_last_sales WHERE customer_name=? AND company=?",
+                (customer_name, company),
+            ).fetchone()
+            if old:
+                old_date = str(old[1] or "")
+                final_date = max(old_date, last_sale_date) if old_date else last_sale_date
+                cur.execute(
+                    """
+                    UPDATE customer_last_sales
+                    SET last_sale_date=?, source_company=?, updated_at=?
+                    WHERE id=?
+                    """,
+                    (final_date, company, now, int(old[0])),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO customer_last_sales(
+                        customer_name, company, last_sale_date, source_company, updated_at
+                    ) VALUES(?,?,?,?,?)
+                    """,
+                    (customer_name, company, last_sale_date, company, now),
+                )
+            count += 1
+        con.commit()
+    return count
 
 
 def _render_three_company_last_sale_importer():
