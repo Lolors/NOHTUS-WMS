@@ -17,7 +17,7 @@ def _inject_mobile_search_css():
         """
         <style>
         @media (max-width: 768px) {
-            /* 카드 구조를 사진 / 정보 / 총수량 / 열기 4열로 되돌린다. */
+            /* 카드 외곽과 실제 내용 사이 여백을 모든 방향에서 동일하게 맞춘다. */
             div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlockBorderWrapper"] {
                 margin-bottom: 4px !important;
                 padding: 0 !important;
@@ -27,25 +27,28 @@ def _inject_mobile_search_css():
             div[class*="st-key-mobile_result_row_"] > div,
             div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlock"],
             div[class*="st-key-mobile_result_row_"] div[data-testid="stElementContainer"] {
-                margin-top: 0 !important;
-                margin-bottom: 0 !important;
+                margin: 0 !important;
+                padding-top: 0 !important;
+                padding-bottom: 0 !important;
             }
+
+            /* 최상위 결과 행: 사진 / 제품정보 / 총수량+열기 3영역 */
             div[class*="st-key-mobile_result_row_"] > div div[data-testid="stHorizontalBlock"]:first-of-type {
                 display: grid !important;
-                grid-template-columns: 96px minmax(0, 1fr) 76px 56px !important;
+                grid-template-columns: 96px minmax(0, 1fr) 150px !important;
                 column-gap: 8px !important;
                 align-items: center !important;
-                min-height: 96px !important;
-                padding: 12px 14px !important;
+                min-height: 112px !important;
+                padding: 8px !important;
                 box-sizing: border-box !important;
             }
             div[class*="st-key-mobile_result_row_"] div[data-testid="column"] {
                 min-width: 0 !important;
-                padding: 0 !important;
                 margin: 0 !important;
+                padding: 0 !important;
             }
 
-            /* 사진은 둥근 정사각형 프레임 안에서 1:1로 crop한다. */
+            /* 사진은 96x96 프레임 안에서 1:1 crop한다. */
             .mobile-thumb-frame {
                 width: 96px !important;
                 height: 96px !important;
@@ -70,6 +73,14 @@ def _inject_mobile_search_css():
                 padding: 0 !important;
             }
 
+            .mobile-result-info {
+                min-height: 48px !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: center !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
             .mobile-result-name {
                 font-size: 14px !important;
                 line-height: 1.3 !important;
@@ -81,57 +92,63 @@ def _inject_mobile_search_css():
                 margin: 0 !important;
             }
 
-            /* 총수량은 정보 영역 중심에 두고 오른쪽에 약간 여백을 둔다. */
-            div[class*="st-key-mobile_result_row_"] div[data-testid="column"]:nth-child(3) {
+            /* 오른쪽 동작 영역을 하나의 행으로 묶는다. */
+            div[class*="st-key-mobile_result_action_"] {
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 0 8px 0 0 !important;
+                align-self: center !important;
+            }
+            div[class*="st-key-mobile_result_action_"] div[data-testid="stHorizontalBlock"] {
+                display: grid !important;
+                grid-template-columns: minmax(72px, 1fr) 58px !important;
+                gap: 6px !important;
+                align-items: center !important;
+                width: 100% !important;
+                min-height: 36px !important;
+                height: 36px !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            div[class*="st-key-mobile_result_action_"] div[data-testid="column"],
+            div[class*="st-key-mobile_result_action_"] div[data-testid="stElementContainer"],
+            div[class*="st-key-mobile_result_action_"] div[data-testid="stButton"] {
+                height: 36px !important;
+                min-height: 36px !important;
+                margin: 0 !important;
+                padding: 0 !important;
                 display: flex !important;
                 align-items: center !important;
                 justify-content: center !important;
-                padding-right: 6px !important;
+                transform: none !important;
             }
-            .mobile-result-qty {
+            div[class*="st-key-mobile_result_action_"] .mobile-result-qty {
                 width: 100% !important;
-                height: 34px !important;
-                min-height: 34px !important;
+                height: 36px !important;
+                min-height: 36px !important;
                 margin: 0 !important;
-                padding: 0 !important;
+                padding: 0 4px 0 0 !important;
                 display: flex !important;
                 align-items: center !important;
                 justify-content: center !important;
                 line-height: 1 !important;
                 white-space: nowrap !important;
             }
-
-            /* Streamlit 버튼의 내부 래퍼가 위로 붙는 현상을 직접 보정한다. */
-            div[class*="st-key-mobile_result_row_"] div[data-testid="column"]:nth-child(4) {
-                display: flex !important;
-                align-items: center !important;
-                justify-content: center !important;
-            }
-            div[class*="st-key-mobile_result_row_"] div[data-testid="column"]:nth-child(4) div[data-testid="stButton"] {
-                width: 56px !important;
-                height: 34px !important;
-                min-height: 34px !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                display: flex !important;
-                align-items: center !important;
-                justify-content: center !important;
-                transform: translateY(9px) !important;
-            }
-            div[class*="st-key-mobile_result_row_"] div[data-testid="column"]:nth-child(4) button {
-                width: 56px !important;
-                height: 34px !important;
-                min-height: 34px !important;
+            div[class*="st-key-mobile_result_action_"] button {
+                width: 58px !important;
+                height: 36px !important;
+                min-height: 36px !important;
                 margin: 0 !important;
                 padding: 0 6px !important;
                 display: flex !important;
                 align-items: center !important;
                 justify-content: center !important;
+                transform: none !important;
                 white-space: nowrap !important;
                 writing-mode: horizontal-tb !important;
                 line-height: 1 !important;
             }
-            div[class*="st-key-mobile_result_row_"] div[data-testid="column"]:nth-child(4) button p {
+            div[class*="st-key-mobile_result_action_"] button p {
                 margin: 0 !important;
                 line-height: 1 !important;
                 white-space: nowrap !important;
@@ -209,8 +226,8 @@ def _render_result_list(candidates, meta_getter, state_key, key_prefix):
         rows, total_qty, summary = meta_getter(name)
         row_key = f"mobile_result_row_{key_prefix}_{index}_{base.base._safe_key(name)}"
         with st.container(border=True, key=row_key):
-            photo_col, info_col, qty_col, open_col = st.columns(
-                [1.2, 3.25, 1.0, 0.74],
+            photo_col, info_col, action_col = st.columns(
+                [1.2, 3.25, 1.8],
                 gap="small",
                 vertical_alignment="center",
             )
@@ -219,22 +236,27 @@ def _render_result_list(candidates, meta_getter, state_key, key_prefix):
             with info_col:
                 expiry_html = _expiry_badge(rows) if key_prefix.startswith("mobile_expiry") else ""
                 st.markdown(
+                    '<div class="mobile-result-info">'
                     f'<div class="mobile-result-name">{html.escape(str(name))}</div>'
                     f'<div class="mobile-result-company">{summary or "재고 없음"}</div>'
-                    f'{expiry_html}',
+                    f'{expiry_html}'
+                    '</div>',
                     unsafe_allow_html=True,
                 )
-            with qty_col:
-                st.markdown(
-                    f'<div class="mobile-result-qty">{total_qty:,}개</div>',
-                    unsafe_allow_html=True,
-                )
-            with open_col:
-                if st.button("열기", key=f"{key_prefix}_{index}_{name}", use_container_width=True):
-                    _remember_result_state(key_prefix)
-                    st.session_state[state_key] = name
-                    mobile_stock._remember_recent_search(name)
-                    st.rerun()
+            with action_col:
+                with st.container(key=f"mobile_result_action_{key_prefix}_{index}"):
+                    qty_col, open_col = st.columns([1.25, 0.9], gap="small", vertical_alignment="center")
+                    with qty_col:
+                        st.markdown(
+                            f'<div class="mobile-result-qty">{total_qty:,}개</div>',
+                            unsafe_allow_html=True,
+                        )
+                    with open_col:
+                        if st.button("열기", key=f"{key_prefix}_{index}_{name}", use_container_width=True):
+                            _remember_result_state(key_prefix)
+                            st.session_state[state_key] = name
+                            mobile_stock._remember_recent_search(name)
+                            st.rerun()
 
 
 def _render_expiry_tab():
