@@ -53,8 +53,27 @@ def compare_stock_files(nohtuspharm_file=None, noh_file=None, nohtus_file=None, 
     }
 
 
+def _read_excel_first_sheet(uploaded_file, **kwargs):
+    """구형 xls의 깨진 워크시트 이름을 우회해 첫 번째 시트만 안전하게 읽는다."""
+    try:
+        return pd.read_excel(uploaded_file, sheet_name=0, **kwargs)
+    except ValueError as exc:
+        message = str(exc)
+        if "cannot be used in worksheets" not in message:
+            raise
+        uploaded_file.seek(0)
+        try:
+            import xlrd
+        except ImportError as import_exc:
+            raise ValueError("구형 .xls 파일을 읽으려면 xlrd가 필요합니다. 파일을 .xlsx로 저장한 뒤 다시 업로드해 주세요.") from import_exc
+        book = xlrd.open_workbook(file_contents=uploaded_file.read(), ignore_workbook_corruption=True)
+        sheet = book.sheet_by_index(0)
+        rows = [sheet.row_values(i) for i in range(sheet.nrows)]
+        return pd.DataFrame(rows)
+
+
 def _read_standard_erp(uploaded_file):
-    df = pd.read_excel(uploaded_file, dtype=object)
+    df = _read_excel_first_sheet(uploaded_file, dtype=object)
     df.columns = [_clean_header(c) for c in df.columns]
     _require_columns(df, ["제품명", "현재고수량"])
     out = df[["제품명", "현재고수량"]].copy()
@@ -63,7 +82,7 @@ def _read_standard_erp(uploaded_file):
 
 
 def _read_nohtus_erp(uploaded_file):
-    df = pd.read_excel(uploaded_file, header=7, dtype=object)
+    df = _read_excel_first_sheet(uploaded_file, header=7, dtype=object)
     df.columns = [_clean_header(c) for c in df.columns]
     _require_columns(df, ["품목명/규격", "현재재고"])
     out = df[["품목명/규격", "현재재고"]].copy()
@@ -72,7 +91,7 @@ def _read_nohtus_erp(uploaded_file):
 
 
 def _read_gmmedic(uploaded_file):
-    preview = pd.read_excel(uploaded_file, header=None, dtype=object, nrows=20)
+    preview = _read_excel_first_sheet(uploaded_file, header=None, dtype=object, nrows=20)
     header_row = None
     for idx, row in preview.iterrows():
         values = {_clean_header(v) for v in row.tolist() if str(v).strip() and str(v).lower() != "nan"}
@@ -82,7 +101,8 @@ def _read_gmmedic(uploaded_file):
     if header_row is None:
         raise ValueError("지엠메딕 파일에서 '제품명 / 유효기한 / 재고' 헤더를 찾지 못했습니다.")
 
-    df = pd.read_excel(uploaded_file, header=header_row, dtype=object)
+    uploaded_file.seek(0)
+    df = _read_excel_first_sheet(uploaded_file, header=header_row, dtype=object)
     df.columns = [_clean_header(c) for c in df.columns]
     _require_columns(df, ["제품명", "유효기한", "재고"])
     df["제품명"] = df["제품명"].ffill()
