@@ -43,7 +43,6 @@ def _load_editing_order():
 
 
 def _find_unmatched_p_item(order_id):
-    """제품명 변경 등으로 기존 수출대기 품목과 P 재고가 더 이상 일치하지 않는 첫 행을 찾는다."""
     if not order_id:
         return None
     df = q(
@@ -203,6 +202,7 @@ def page_export_waiting():
     original_save = outbound_page.save_outbound_order
     original_update = outbound_page.update_outbound_order
     original_q = outbound_page.q
+    original_renderer = outbound_page._render_last_sale_importer
     original_title, original_caption, original_markdown = st.title, st.caption, st.markdown
     original_button, original_success, original_rerun = st.button, st.success, st.rerun
     original_text_input, original_checkbox, original_info = st.text_input, st.checkbox, st.info
@@ -333,6 +333,7 @@ def page_export_waiting():
     outbound_page.save_outbound_order = patched_save
     outbound_page.update_outbound_order = lambda order_id, title, cart: patched_save(cart, title)
     outbound_page.q = patched_q
+    outbound_page._render_last_sale_importer = lambda: None
     st.title, st.caption, st.markdown = patched_title, patched_caption, patched_markdown
     st.text_input, st.checkbox, st.info = patched_text_input, patched_checkbox, patched_info
     st.button, st.success, st.rerun = patched_button, lambda body, *a, **k: original_success(str(body).replace("출고지시", "수출대기"), *a, **k), patched_rerun
@@ -342,6 +343,7 @@ def page_export_waiting():
         return result
     finally:
         outbound_page.save_outbound_order, outbound_page.update_outbound_order, outbound_page.q = original_save, original_update, original_q
+        outbound_page._render_last_sale_importer = original_renderer
         st.title, st.caption, st.markdown = original_title, original_caption, original_markdown
         st.text_input, st.checkbox, st.info = original_text_input, original_checkbox, original_info
         st.button, st.success, st.rerun = original_button, original_success, original_rerun
