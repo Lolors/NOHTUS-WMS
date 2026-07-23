@@ -9,6 +9,13 @@ import nohtus.pages.purchase_history as purchase_page
 import nohtus.pages.purchase_history_all_products as all_products
 
 
+NOTUS_COLUMN_ALIASES = {
+    "거래일자": "매입일자",
+    "품목명/규격": "제품명",
+    "단가": "실단가",
+}
+
+
 def _render_search_matches(options):
     """선택박스 없이 검색어와 일치하는 모든 제품을 한 번에 조회한다."""
     keyword = st.text_input(
@@ -31,7 +38,7 @@ def _render_search_matches(options):
 
 
 def _read_purchase_excel_for_company(payload, company):
-    """노투스 파일은 7행을 헤더로, 그 외 사업장은 1행을 헤더로 읽는다."""
+    """노투스 파일은 7행을 헤더로 읽고 전용 컬럼명을 공통 매입 컬럼명으로 변환한다."""
     header_row = 6 if company == "노투스" else 0
     sheets = pd.read_excel(BytesIO(payload), sheet_name=None, header=header_row)
     frames = []
@@ -40,8 +47,13 @@ def _read_purchase_excel_for_company(payload, company):
     for sheet_name, frame in sheets.items():
         if frame is None or frame.empty:
             continue
+
         frame = frame.copy()
         frame.columns = [purchase_page._normalize_header(c) for c in frame.columns]
+
+        if company == "노투스":
+            frame = frame.rename(columns=NOTUS_COLUMN_ALIASES)
+
         frame["업로드시트"] = sheet_name
         frame["업로드행번호"] = range(first_data_row, first_data_row + len(frame))
         frames.append(frame)
