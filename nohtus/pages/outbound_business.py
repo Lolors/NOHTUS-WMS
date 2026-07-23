@@ -11,6 +11,14 @@ _ALL_COMPANY_MANUAL_PICK_KEY = "out_all_company_manual_pick"
 _SHIPPABLE_COL = "is_shippable"
 _DIRECT_CUSTOMER_INLINE_KEY = "out_customer_direct_inline"
 
+# Streamlit 함수가 이전 rerun 과정에서 이미 monkey patch된 상태여도
+# 실제 원본 위젯 함수를 직접 사용할 수 있도록 모듈 로드시 보관한다.
+_BASE_TEXT_INPUT = st.text_input
+_BASE_CHECKBOX = st.checkbox
+_BASE_DATA_EDITOR = st.data_editor
+_BASE_MARKDOWN = st.markdown
+_BASE_CAPTION = st.caption
+
 
 def _hide_last_sale_importer():
     return None
@@ -108,14 +116,21 @@ def page_outbound():
     original_renderer = outbound_page._render_last_sale_importer
     original_save_with_customer = outbound_page._save_outbound_cart_with_customer
     original_inventory_query = outbound_page._inventory_query_for_outbound
-    original_text_input = st.text_input
-    original_checkbox = st.checkbox
-    original_data_editor = st.data_editor
-    original_markdown = st.markdown
-    original_caption = st.caption
+
+    # 복원할 때는 호출 당시 함수를 되돌리되, 내부 렌더링에는 반드시 진짜 원본을 쓴다.
+    previous_text_input = st.text_input
+    previous_checkbox = st.checkbox
+    previous_data_editor = st.data_editor
+    previous_markdown = st.markdown
+    previous_caption = st.caption
+    original_text_input = _BASE_TEXT_INPUT
+    original_checkbox = _BASE_CHECKBOX
+    original_data_editor = _BASE_DATA_EDITOR
+    original_markdown = _BASE_MARKDOWN
+    original_caption = _BASE_CAPTION
     original_manual_pick_rows = outbound_page._manual_pick_rows
 
-    st.markdown(
+    original_markdown(
         """
         <style>
         div[data-testid="stCheckbox"] label, div[data-testid="stCheckbox"] p {
@@ -242,7 +257,7 @@ def page_outbound():
             with search_col:
                 value = original_text_input(label, *args, **kwargs)
             with direct_col:
-                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                original_markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
                 if not direct_customer_inline_rendered:
                     direct_customer_inline_rendered = True
                     direct_value = original_checkbox(
@@ -318,8 +333,8 @@ def page_outbound():
         outbound_page._save_outbound_cart_with_customer = original_save_with_customer
         outbound_page._inventory_query_for_outbound = original_inventory_query
         outbound_page._manual_pick_rows = original_manual_pick_rows
-        st.markdown = original_markdown
-        st.caption = original_caption
-        st.text_input = original_text_input
-        st.checkbox = original_checkbox
-        st.data_editor = original_data_editor
+        st.markdown = previous_markdown
+        st.caption = previous_caption
+        st.text_input = previous_text_input
+        st.checkbox = previous_checkbox
+        st.data_editor = previous_data_editor
