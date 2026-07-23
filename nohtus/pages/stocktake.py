@@ -7,7 +7,6 @@ contains page rendering code.
 from __future__ import annotations
 
 import sqlite3
-
 from datetime import date
 import streamlit as st
 
@@ -20,11 +19,140 @@ from nohtus.services.inventory import adjust_inventory
 # The migration script injects runtime imports inside page_stocktake as needed.
 
 
+def _render_stock_comparison():
+    from nohtus.services.stock_compare import compare_stock_files
+
+    st.subheader("WMS · ERP · 실사재고 비교")
+    st.caption(
+        "ERP는 사업장·제품별 총수량으로 비교하고, 지엠메딕 실사재고는 "
+        "노투스팜의 지엠메딕 로케이션 재고를 제품·유통기한별로 비교합니다."
+    )
+
+    erp_left, erp_mid, erp_right = st.columns(3, gap="large")
+    with erp_left:
+        nohtuspharm_file = st.file_uploader(
+            "노투스팜 ERP 재고", type=["xlsx", "xls"], key="stock_compare_nohtuspharm"
+        )
+    with erp_mid:
+        noh_file = st.file_uploader(
+            "NOH ERP 재고", type=["xlsx", "xls"], key="stock_compare_noh"
+        )
+    with erp_right:
+        nohtus_file = st.file_uploader(
+            "노투스 ERP 재고", type=["xlsx", "xls"], key="stock_compare_nohtus"
+        )
+
+    gm_left, gm_blank = st.columns([1, 2], gap="large")
+    with gm_left:
+        gmmedic_file = st.file_uploader(
+            "지엠메딕 실사재고", type=["xlsx", "xls"], key="stock_compare_gmmedic"
+        )
+
+    uploaded = [nohtuspharm_file, noh_file, nohtus_file, gmmedic_file]
+    if st.button(
+        "재고 비교하기",
+        type="primary",
+        use_container_width=True,
+        disabled=not any(uploaded),
+        key="stock_compare_run",
+    ):
+        try:
+            for file in uploaded:
+                if file is not None:
+                    file.seek(0)
+            st.session_state["stock_compare_result"] = compare_stock_files(
+                nohtuspharm_file=nohtuspharm_file,
+                noh_file=noh_file,
+                nohtus_file=nohtus_file,
+                gmmedic_file=gmmedic_file,
+            )
+        except Exception as exc:
+            st.session_state.pop("stock_compare_result", None)
+            st.error(f"비교 실패: {exc}")
+
+    result = st.session_state.get("stock_compare_result")
+    if not result:
+        return
+
+    problems = result["problems"]
+    erp_result = result["erp"]
+    gm_result = result["gmmedic"]
+
+    total_erp = len(erp_result)
+    erp_errors = int((erp_result["상태"] == "불일치").sum()) if total_erp else 0
+    total_gm = len(gm_result)
+    gm_errors = int((gm_result["상태"] == "불일치").sum()) if total_gm else 0
+
+    metric1, metric2, metric3, metric4 = st.columns(4)
+    metric1.metric("ERP 비교 품목", f"{total_erp:,}건")
+    metric2.metric("ERP 불일치", f"{erp_errors:,}건")
+    metric3.metric("지엠메딕 비교 항목", f"{total_gm:,}건")
+    metric4.metric("전체 문제", f"{len(problems):,}건")
+
+    st.markdown("#### 문제목록")
+    if problems.empty:
+        st.success("업로드한 파일 기준으로 발견된 문제가 없습니다.")
+    else:
+        st.error(f"확인이 필요한 문제가 {len(problems):,}건 있습니다.")
+        st.dataframe(
+            problems,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "WMS수량": st.column_config.NumberColumn(format="%d"),
+                "비교수량": st.column_config.NumberColumn(format="%d"),
+                "차이": st.column_config.NumberColumn(format="%+d"),
+            },
+        )
+
+    tab_erp, tab_gm = st.tabs(["ERP 비교결과", "지엠메딕 실사 비교결과"])
+    with tab_erp:
+        if erp_result.empty:
+            st.info("ERP 파일을 업로드하지 않았습니다.")
+        else:
+            st.dataframe(
+                erp_result,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "WMS수량": st.column_config.NumberColumn(format="%d"),
+                    "ERP수량": st.column_config.NumberColumn(format="%d"),
+                    "차이": st.column_config.NumberColumn(format="%+d"),
+                },
+            )
+    with tab_gm:
+        if gm_result.empty:
+            st.info("지엠메딕 실사재고 파일을 업로드하지 않았습니다.")
+        else:
+            st.dataframe(
+                gm_result,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "WMS수량": st.column_config.NumberColumn(format="%d"),
+                    "실사수량": st.column_config.NumberColumn(format="%d"),
+                    "차이": st.column_config.NumberColumn(format="%+d"),
+                },
+            )
+
+    st.download_button(
+        "비교결과 엑셀 다운로드",
+        data=result["excel"],
+        file_name=f"NOHTUS_재고비교결과_{date.today().strftime('%Y%m%d')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        key="stock_compare_download",
+    )
+
+
 def page_stocktake():
     from nohtus.services.stocktake import current_baseline_stock_excel_bytes, full_inventory_excel_bytes, import_stock_survey_excel
     st.title("재고 실사")
-    st.caption("제품명/LOT/유통기한/로케이션 단위로 필요한 재고를 먼저 조정하고, 실사용 엑셀과 기준재고 양식을 내려받거나 업로드합니다.")
+    st.caption("WMS 재고를 ERP 및 외부창고 실사재고와 비교하고, 필요한 재고를 직접 조정하거나 실사용 엑셀을 관리합니다.")
 
+    _render_stock_comparison()
+
+    st.markdown("---")
     st.subheader("재고조정")
     adj_df = q("""
         SELECT id, location, company, product_name, warehouse_name, lot, exp_date, qty
