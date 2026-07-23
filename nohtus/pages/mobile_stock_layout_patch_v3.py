@@ -175,15 +175,50 @@ def _inject_mobile_search_css():
     )
 
 
-def _remember_result_state(key_prefix):
+def _remember_result_state(key_prefix, name):
     if key_prefix.startswith("mobile_expiry"):
         term = str(st.session_state.get("mobile_expiry_search_live", "") or "")
         st.session_state["mobile_expiry_search_value"] = term
         st.session_state["mobile_expiry_return_term"] = term
+        st.session_state["mobile_expiry_return_product"] = str(name)
     else:
         term = str(st.session_state.get("mobile_product_term_live", "") or "")
         st.session_state["mobile_product_term"] = term
         st.session_state["mobile_stock_return_term"] = term
+        st.session_state["mobile_stock_return_product"] = str(name)
+
+
+def _restore_result_position(state_key, key_prefix, candidates):
+    product_name = str(st.session_state.pop(state_key, "") or "").strip()
+    if not product_name:
+        return
+    try:
+        target_index = [str(value) for value in candidates].index(product_name)
+    except ValueError:
+        return
+
+    safe_prefix = html.escape(str(key_prefix), quote=True)
+    st.components.v1.html(
+        f"""
+        <script>
+        (() => {{
+            const selector = 'div[class*="st-key-mobile_result_row_{safe_prefix}_"]';
+            const targetIndex = {target_index};
+            const restore = () => {{
+                const doc = window.parent && window.parent.document ? window.parent.document : document;
+                const cards = Array.from(doc.querySelectorAll(selector));
+                const target = cards[targetIndex];
+                if (!target) return false;
+                target.scrollIntoView({{block: "center", behavior: "auto"}});
+                return true;
+            }};
+            [0, 100, 250, 500, 900].forEach(delay => setTimeout(restore, delay));
+        }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
 
 
 def _expiry_badge(rows):
@@ -253,10 +288,34 @@ def _render_result_list(candidates, meta_getter, state_key, key_prefix):
                         )
                     with open_col:
                         if st.button("열기", key=f"{key_prefix}_{index}_{name}", use_container_width=True):
-                            _remember_result_state(key_prefix)
+                            _remember_result_state(key_prefix, name)
                             st.session_state[state_key] = name
                             mobile_stock._remember_recent_search(name)
                             st.rerun()
+
+
+def _render_stock_detail_view(product_name):
+    st.markdown('<div class="mobile-back-button">', unsafe_allow_html=True)
+    go_back = st.button("‹ 검색 결과", key="mobile_search_back")
+    st.markdown("</div>", unsafe_allow_html=True)
+    if go_back:
+        st.session_state.pop(base.base.base.DETAIL_STATE_KEY, None)
+        saved_term = str(st.session_state.get("mobile_stock_return_term", "") or "")
+        st.session_state["mobile_product_term"] = saved_term
+        st.rerun()
+    base.base._render_stock_detail(product_name)
+
+
+def _render_expiry_detail(product_name, source_df):
+    st.markdown('<div class="mobile-back-button">', unsafe_allow_html=True)
+    go_back = st.button("‹ 검색 결과", key="mobile_expiry_back")
+    st.markdown("</div>", unsafe_allow_html=True)
+    if go_back:
+        st.session_state.pop(base.base.base.EXPIRY_DETAIL_STATE_KEY, None)
+        saved_term = str(st.session_state.get("mobile_expiry_return_term", "") or "")
+        st.session_state["mobile_expiry_search_value"] = saved_term
+        st.rerun()
+    base.base._render_expiry_detail(product_name, source_df)
 
 
 def _render_expiry_tab():
@@ -266,7 +325,7 @@ def _render_expiry_tab():
         period = st.session_state.get("mobile_expiry_period", "1년 이내")
         exclude_bidata = bool(st.session_state.get("mobile_expiry_exclude_bidata", True))
         df = base.base.base._filtered_expiry_df(period, exclude_bidata)
-        base._render_expiry_detail(detail_product, df)
+        _render_expiry_detail(detail_product, df)
         return
 
     term = base.base.base._live_input(
@@ -327,18 +386,30 @@ def _render_expiry_tab():
         base.base.base.EXPIRY_DETAIL_STATE_KEY,
         "mobile_expiry_result",
     )
+    _restore_result_position("mobile_expiry_return_product", "mobile_expiry_result", candidates)
 
 
 def page_mobile_stock_finder():
     original_inject = base._inject_mobile_search_css
     original_result = base._render_result_list
+    original_stock_detail = base._render_stock_detail_view
+    original_expiry_detail = base._render_expiry_detail
     original_expiry = base._render_expiry_tab
     base._inject_mobile_search_css = _inject_mobile_search_css
     base._render_result_list = _render_result_list
+    base._render_stock_detail_view = _render_stock_detail_view
+    base._render_expiry_detail = _render_expiry_detail
     base._render_expiry_tab = _render_expiry_tab
     try:
-        return base.page_mobile_stock_finder()
+        result = base.page_mobile_stock_finder()
+        term = str(st.session_state.get("mobile_product_term", "") or "").strip()
+        if term:
+            candidates = mobile_stock.mobile_product_candidates(term, limit=20)
+            _restore_result_position("mobile_stock_return_product", "mobile_stock_result", candidates)
+        return result
     finally:
         base._inject_mobile_search_css = original_inject
         base._render_result_list = original_result
+        base._render_stock_detail_view = original_stock_detail
+        base._render_expiry_detail = original_expiry_detail
         base._render_expiry_tab = original_expiry
