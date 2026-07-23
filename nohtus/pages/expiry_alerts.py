@@ -67,8 +67,8 @@ def _expiry_badge(exp_date_text: str) -> tuple[str, str]:
     if days <= 90:
         return "3개월 이내", "red"
     if days <= 180:
-        return "4개월~6개월 이내", "yellow"
-    return "7개월~1년 이내", "blue"
+        return "6개월 이내", "yellow"
+    return "1년 이내", "blue"
 
 
 def _render_html_table(rows: pd.DataFrame):
