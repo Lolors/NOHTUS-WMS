@@ -246,6 +246,57 @@ def _scheduled_outbound_business_log(ds, customers_df):
     return rows
 
 
+def _confirmed_export_business_log(ds, customers_df):
+    exported = q(
+        """
+        SELECT COALESCE(i.confirmed_at, o.confirmed_at, '') AS confirmed_at,
+               COALESCE(i.confirmed_company, o.erp_company, i.company, '') AS company,
+               COALESCE(i.confirmed_customer_name, o.erp_customer_name, o.buyer, '') AS customer_name,
+               COALESCE(o.title, '') AS title,
+               COALESCE(o.export_no, '') AS export_no,
+               i.product_name AS product_name,
+               COALESCE(i.lot, '-') AS lot,
+               COALESCE(i.exp_date, '-') AS exp_date,
+               i.qty AS qty
+        FROM export_waiting_orders o
+        JOIN export_waiting_items i ON o.id=i.order_id
+        WHERE COALESCE(i.confirmed, 0)=1
+          AND substr(COALESCE(i.confirmed_at, o.confirmed_at, ''), 1, 10)=?
+        ORDER BY COALESCE(i.confirmed_at, o.confirmed_at, ''), o.id, i.id
+        """,
+        (ds,),
+    )
+    rows = []
+    for r in exported.itertuples(index=False):
+        partner = str(getattr(r, "customer_name", "") or "").strip()
+        manager = ""
+        if customers_df is not None and not customers_df.empty and partner:
+            matched = customers_df[customers_df["customer_name"].astype(str).str.strip() == partner]
+            if not matched.empty:
+                manager = str(matched.iloc[0].get("manager") or "")
+        confirmed_at = str(getattr(r, "confirmed_at", "") or "")
+        title = str(getattr(r, "title", "") or "")
+        export_no = str(getattr(r, "export_no", "") or "")
+        memo_parts = ["수출확정"]
+        if export_no:
+            memo_parts.append(f"수출번호: {export_no}")
+        if title:
+            memo_parts.append(title)
+        rows.append({
+            "시간": confirmed_at[11:16] if len(confirmed_at) >= 16 else "",
+            "유형": "출고지시",
+            "사업장": str(getattr(r, "company", "") or ""),
+            "거래처(매출처/입고처)": partner,
+            "담당자": manager,
+            "제품명": str(getattr(r, "product_name", "") or ""),
+            "제조번호": str(getattr(r, "lot", "-") or "-"),
+            "유통기한": display_date_only(getattr(r, "exp_date", "-") or "-"),
+            "수량": int(getattr(r, "qty", 0) or 0),
+            "메모": " / ".join(memo_parts),
+        })
+    return rows
+
+
 def page_closing():
     st.title("마감")
     st.caption("출고의 마지막 단계입니다. 오늘 출고 체크와 업무일지 작성 기능을 한 화면에서 전환합니다.")
@@ -312,7 +363,10 @@ def page_closing():
                from_company, from_location, to_company, to_location, qty, memo
         FROM transactions
         WHERE substr(created_at, 1, 10)=?
-          AND tx_type NOT IN ('출고지시', '출고지시수정', '출고지시 재차감', '출고')
+          AND tx_type NOT IN (
+              '출고지시', '출고지시수정', '출고지시 재차감', '출고',
+              '위치이동', '사업장이동', '사업장+위치이동', '사업장 이동', '이동'
+          )
         ORDER BY created_at, id
         """,
         (ds,),
@@ -324,6 +378,7 @@ def page_closing():
         customers_for_log = pd.DataFrame(columns=["customer_name", "manager"])
 
     rows = _scheduled_outbound_business_log(ds, customers_for_log)
+    rows.extend(_confirmed_export_business_log(ds, customers_for_log))
     for r in history.itertuples(index=False):
         memo = str(getattr(r, "memo", "") or "")
         company, partner, manager = _business_log_company_and_partner(r, memo, customers_for_log)
