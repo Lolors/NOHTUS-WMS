@@ -17,7 +17,6 @@ def _inject_mobile_search_css():
         """
         <style>
         @media (max-width: 768px) {
-            /* 카드 외곽과 실제 내용 사이 여백을 모든 방향에서 동일하게 맞춘다. */
             div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlockBorderWrapper"] {
                 margin-bottom: 4px !important;
                 padding: 0 !important;
@@ -31,15 +30,13 @@ def _inject_mobile_search_css():
                 padding-top: 0 !important;
                 padding-bottom: 0 !important;
             }
-
-            /* 최상위 결과 행: 사진 / 제품정보 / 총수량+열기 3영역 */
             div[class*="st-key-mobile_result_row_"] > div div[data-testid="stHorizontalBlock"]:first-of-type {
                 display: grid !important;
                 grid-template-columns: 96px minmax(0, 1fr) 150px !important;
                 column-gap: 8px !important;
                 align-items: center !important;
-                min-height: 112px !important;
-                padding: 8px !important;
+                min-height: 104px !important;
+                padding: 4px !important;
                 box-sizing: border-box !important;
             }
             div[class*="st-key-mobile_result_row_"] div[data-testid="column"] {
@@ -47,8 +44,6 @@ def _inject_mobile_search_css():
                 margin: 0 !important;
                 padding: 0 !important;
             }
-
-            /* 사진은 96x96 프레임 안에서 1:1 crop한다. */
             .mobile-thumb-frame {
                 width: 96px !important;
                 height: 96px !important;
@@ -57,12 +52,8 @@ def _inject_mobile_search_css():
                 overflow: hidden !important;
                 background: #fafbfc !important;
             }
-            .mobile-thumb-frame.has-image {
-                border: 1px solid #e1e6ee !important;
-            }
-            .mobile-thumb-frame.empty {
-                border: 1.5px dashed #b8c0cc !important;
-            }
+            .mobile-thumb-frame.has-image { border: 1px solid #e1e6ee !important; }
+            .mobile-thumb-frame.empty { border: 1.5px dashed #b8c0cc !important; }
             .mobile-thumb-frame img {
                 display: block !important;
                 width: 100% !important;
@@ -72,7 +63,6 @@ def _inject_mobile_search_css():
                 margin: 0 !important;
                 padding: 0 !important;
             }
-
             .mobile-result-info {
                 min-height: 48px !important;
                 display: flex !important;
@@ -91,12 +81,10 @@ def _inject_mobile_search_css():
                 line-height: 1.35 !important;
                 margin: 0 !important;
             }
-
-            /* 오른쪽 동작 영역을 하나의 행으로 묶는다. */
             div[class*="st-key-mobile_result_action_"] {
                 width: 100% !important;
                 margin: 0 !important;
-                padding: 0 8px 0 0 !important;
+                padding: 0 4px 0 0 !important;
                 align-self: center !important;
             }
             div[class*="st-key-mobile_result_action_"] div[data-testid="stHorizontalBlock"] {
@@ -120,14 +108,13 @@ def _inject_mobile_search_css():
                 display: flex !important;
                 align-items: center !important;
                 justify-content: center !important;
-                transform: none !important;
             }
             div[class*="st-key-mobile_result_action_"] .mobile-result-qty {
                 width: 100% !important;
                 height: 36px !important;
                 min-height: 36px !important;
                 margin: 0 !important;
-                padding: 0 4px 0 0 !important;
+                padding: 0 !important;
                 display: flex !important;
                 align-items: center !important;
                 justify-content: center !important;
@@ -143,7 +130,6 @@ def _inject_mobile_search_css():
                 display: flex !important;
                 align-items: center !important;
                 justify-content: center !important;
-                transform: none !important;
                 white-space: nowrap !important;
                 writing-mode: horizontal-tb !important;
                 line-height: 1 !important;
@@ -154,20 +140,14 @@ def _inject_mobile_search_css():
                 white-space: nowrap !important;
                 writing-mode: horizontal-tb !important;
             }
-
             .mobile-detail-photo:empty {
                 box-sizing: border-box !important;
                 border: 1.5px dashed #b8c0cc !important;
                 border-radius: 12px !important;
                 background: #fafbfc !important;
             }
-            .mobile-detail-photo img {
-                object-fit: cover !important;
-            }
-
-            .mobile-expiry-date-row {
-                margin-top: 4px !important;
-            }
+            .mobile-detail-photo img { object-fit: cover !important; }
+            .mobile-expiry-date-row { margin-top: 4px !important; }
         }
         </style>
         """,
@@ -175,26 +155,28 @@ def _inject_mobile_search_css():
     )
 
 
-def _remember_result_state(key_prefix, name):
+def _remember_result_state(key_prefix, name, index):
     if key_prefix.startswith("mobile_expiry"):
         term = str(st.session_state.get("mobile_expiry_search_live", "") or "")
         st.session_state["mobile_expiry_search_value"] = term
         st.session_state["mobile_expiry_return_term"] = term
         st.session_state["mobile_expiry_return_product"] = str(name)
+        st.session_state["mobile_expiry_return_index"] = int(index)
     else:
         term = str(st.session_state.get("mobile_product_term_live", "") or "")
         st.session_state["mobile_product_term"] = term
         st.session_state["mobile_stock_return_term"] = term
         st.session_state["mobile_stock_return_product"] = str(name)
+        st.session_state["mobile_stock_return_index"] = int(index)
 
 
-def _restore_result_position(state_key, key_prefix, candidates):
-    product_name = str(st.session_state.pop(state_key, "") or "").strip()
-    if not product_name:
+def _restore_result_position(state_key, key_prefix):
+    index = st.session_state.pop(state_key, None)
+    if index is None:
         return
     try:
-        target_index = [str(value) for value in candidates].index(product_name)
-    except ValueError:
+        index = int(index)
+    except (TypeError, ValueError):
         return
 
     safe_prefix = html.escape(str(key_prefix), quote=True)
@@ -203,7 +185,7 @@ def _restore_result_position(state_key, key_prefix, candidates):
         <script>
         (() => {{
             const selector = 'div[class*="st-key-mobile_result_row_{safe_prefix}_"]';
-            const targetIndex = {target_index};
+            const targetIndex = {index};
             const restore = () => {{
                 const doc = window.parent && window.parent.document ? window.parent.document : document;
                 const cards = Array.from(doc.querySelectorAll(selector));
@@ -273,7 +255,7 @@ def _render_result_list(candidates, meta_getter, state_key, key_prefix):
                 st.markdown(
                     '<div class="mobile-result-info">'
                     f'<div class="mobile-result-name">{html.escape(str(name))}</div>'
-                    f'<div class="mobile-result-company">{summary or "재고 없음"}</div>'
+                    f'<div class="mobile-result-company">{html.escape(str(summary or "재고 없음"))}</div>'
                     f'{expiry_html}'
                     '</div>',
                     unsafe_allow_html=True,
@@ -288,7 +270,7 @@ def _render_result_list(candidates, meta_getter, state_key, key_prefix):
                         )
                     with open_col:
                         if st.button("열기", key=f"{key_prefix}_{index}_{name}", use_container_width=True):
-                            _remember_result_state(key_prefix, name)
+                            _remember_result_state(key_prefix, name, index)
                             st.session_state[state_key] = name
                             mobile_stock._remember_recent_search(name)
                             st.rerun()
@@ -296,7 +278,7 @@ def _render_result_list(candidates, meta_getter, state_key, key_prefix):
 
 def _render_stock_detail_view(product_name):
     st.markdown('<div class="mobile-back-button">', unsafe_allow_html=True)
-    go_back = st.button("‹ 검색 결과", key="mobile_search_back")
+    go_back = st.button("‹ 검색 결과", key="mobile_search_back_v3")
     st.markdown("</div>", unsafe_allow_html=True)
     if go_back:
         st.session_state.pop(base.base.base.DETAIL_STATE_KEY, None)
@@ -308,14 +290,30 @@ def _render_stock_detail_view(product_name):
 
 def _render_expiry_detail(product_name, source_df):
     st.markdown('<div class="mobile-back-button">', unsafe_allow_html=True)
-    go_back = st.button("‹ 검색 결과", key="mobile_expiry_back")
+    go_back = st.button("‹ 검색 결과", key="mobile_expiry_back_v3")
     st.markdown("</div>", unsafe_allow_html=True)
     if go_back:
         st.session_state.pop(base.base.base.EXPIRY_DETAIL_STATE_KEY, None)
         saved_term = str(st.session_state.get("mobile_expiry_return_term", "") or "")
         st.session_state["mobile_expiry_search_value"] = saved_term
         st.rerun()
-    base.base._render_expiry_detail(product_name, source_df)
+
+    rows = source_df[source_df["product_name"].astype(str) == str(product_name)].copy()
+    base.base._detail_header(product_name, rows)
+    if rows.empty:
+        st.info("조건에 맞는 임박재고가 없습니다.")
+        return
+    rows = rows.sort_values(["_expiry", "company", "location", "lot"])
+    rows["유통기한"] = rows["_expiry"].dt.strftime("%Y.%m.%d")
+    rows = rows.rename(
+        columns={"company": "사업장", "location": "로케이션", "lot": "제조번호", "qty": "수량"}
+    )
+    st.markdown('<div class="mobile-detail-table-gap"></div>', unsafe_allow_html=True)
+    st.dataframe(
+        rows[["사업장", "로케이션", "제조번호", "유통기한", "수량"]],
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 def _render_expiry_tab():
@@ -386,7 +384,7 @@ def _render_expiry_tab():
         base.base.base.EXPIRY_DETAIL_STATE_KEY,
         "mobile_expiry_result",
     )
-    _restore_result_position("mobile_expiry_return_product", "mobile_expiry_result", candidates)
+    _restore_result_position("mobile_expiry_return_index", "mobile_expiry_result")
 
 
 def page_mobile_stock_finder():
@@ -402,10 +400,7 @@ def page_mobile_stock_finder():
     base._render_expiry_tab = _render_expiry_tab
     try:
         result = base.page_mobile_stock_finder()
-        term = str(st.session_state.get("mobile_product_term", "") or "").strip()
-        if term:
-            candidates = mobile_stock.mobile_product_candidates(term, limit=20)
-            _restore_result_position("mobile_stock_return_product", "mobile_stock_result", candidates)
+        _restore_result_position("mobile_stock_return_index", "mobile_stock_result")
         return result
     finally:
         base._inject_mobile_search_css = original_inject
