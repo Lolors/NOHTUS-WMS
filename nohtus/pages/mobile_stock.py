@@ -3,6 +3,11 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+try:
+    from st_keyup import st_keyup
+except ImportError:
+    st_keyup = None
+
 from nohtus.config_runtime import COMPANIES
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only, expiry_status
@@ -258,14 +263,28 @@ def _mobile_css():
     )
 
 
-def _render_mobile_search(username):
-    st.title("재고 검색")
-    term = st.text_input(
+def _live_search_input():
+    if st_keyup is not None:
+        return st_keyup(
+            "제품 검색",
+            value=st.session_state.get("mobile_product_term", ""),
+            key="mobile_product_term_live",
+            placeholder="제품명 또는 별칭 검색",
+            debounce=120,
+            label_visibility="collapsed",
+        ) or ""
+    return st.text_input(
         "제품 검색",
         placeholder="제품명 또는 별칭 검색",
         key="mobile_product_term",
         label_visibility="collapsed",
     )
+
+
+def _render_mobile_search(username):
+    st.title("재고 검색")
+    term = _live_search_input()
+    st.session_state["mobile_product_term"] = term
 
     candidates = mobile_product_candidates(term, limit=20) if term.strip() else []
     selected_product = st.session_state.get("mobile_selected_product", "")
