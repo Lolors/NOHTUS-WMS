@@ -21,65 +21,32 @@ def _inject_mobile_search_css():
                 margin: 0 0 6px 0 !important;
                 padding: 0 !important;
             }
-            div[class*="st-key-mobile_result_row_"] > div,
-            div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlockBorderWrapper"],
-            div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlock"] {
-                margin: 0 !important;
-            }
             div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlockBorderWrapper"] {
-                padding: 0 !important;
+                padding: 8px !important;
                 border-radius: 12px !important;
                 overflow: hidden !important;
-            }
-
-            /* 카드의 첫 번째 가로행만 사진 / 정보 / 액션 3열로 사용한다. */
-            div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlockBorderWrapper"]
-            > div[data-testid="stVerticalBlock"]
-            > div[data-testid="stElementContainer"]:first-child
-            > div[data-testid="stHorizontalBlock"] {
-                display: grid !important;
-                grid-template-columns: 96px minmax(0, 1fr) 150px !important;
-                column-gap: 8px !important;
-                align-items: center !important;
-                min-height: 112px !important;
-                margin: 0 !important;
-                padding: 8px !important;
                 box-sizing: border-box !important;
             }
             div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlockBorderWrapper"]
-            > div[data-testid="stVerticalBlock"]
-            > div[data-testid="stElementContainer"]:first-child
-            > div[data-testid="stHorizontalBlock"]
-            > div[data-testid="column"] {
-                min-width: 0 !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                align-self: center !important;
-            }
-            div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlockBorderWrapper"]
-            > div[data-testid="stVerticalBlock"]
-            > div[data-testid="stElementContainer"]:first-child
-            > div[data-testid="stHorizontalBlock"]
-            > div[data-testid="column"]
             > div[data-testid="stVerticalBlock"] {
-                width: 100% !important;
+                gap: 0 !important;
                 margin: 0 !important;
                 padding: 0 !important;
             }
+            div[class*="st-key-mobile_result_row_"] div[data-testid="stHorizontalBlock"] {
+                align-items: center !important;
+                min-height: 96px !important;
+                gap: 8px !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            div[class*="st-key-mobile_result_row_"] div[data-testid="column"],
             div[class*="st-key-mobile_result_row_"] div[data-testid="stElementContainer"] {
                 min-width: 0 !important;
                 margin: 0 !important;
                 padding: 0 !important;
             }
 
-            .mobile-result-marker {
-                display: block !important;
-                width: 0 !important;
-                height: 0 !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                overflow: hidden !important;
-            }
             .mobile-thumb-frame {
                 width: 96px !important;
                 height: 96px !important;
@@ -106,7 +73,6 @@ def _inject_mobile_search_css():
             }
 
             .mobile-result-info {
-                min-height: 48px !important;
                 display: flex !important;
                 flex-direction: column !important;
                 justify-content: center !important;
@@ -129,24 +95,13 @@ def _inject_mobile_search_css():
                 margin: 0 !important;
                 padding: 0 !important;
             }
-            div[class*="st-key-mobile_result_action_"] > div,
-            div[class*="st-key-mobile_result_action_"] div[data-testid="stVerticalBlock"] {
-                width: 100% !important;
-                margin: 0 !important;
-                padding: 0 !important;
-            }
             div[class*="st-key-mobile_result_action_"] div[data-testid="stHorizontalBlock"] {
                 display: grid !important;
                 grid-template-columns: minmax(72px, 1fr) 58px !important;
                 gap: 6px !important;
                 align-items: center !important;
+                min-height: 0 !important;
                 width: 100% !important;
-                margin: 0 !important;
-                padding: 0 !important;
-            }
-            div[class*="st-key-mobile_result_action_"] div[data-testid="column"],
-            div[class*="st-key-mobile_result_action_"] div[data-testid="stElementContainer"],
-            div[class*="st-key-mobile_result_action_"] div[data-testid="stButton"] {
                 margin: 0 !important;
                 padding: 0 !important;
             }
@@ -193,44 +148,46 @@ def _inject_mobile_search_css():
     )
 
 
-def _remember_result_state(key_prefix, marker_id):
+def _remember_result_state(key_prefix, index):
     if key_prefix.startswith("mobile_expiry"):
         term = str(st.session_state.get("mobile_expiry_search_live", "") or "")
         st.session_state["mobile_expiry_search_value"] = term
         st.session_state["mobile_expiry_return_term"] = term
-        st.session_state["mobile_expiry_return_marker"] = marker_id
+        st.session_state["mobile_expiry_return_index"] = int(index)
     else:
         term = str(st.session_state.get("mobile_product_term_live", "") or "")
         st.session_state["mobile_product_term"] = term
         st.session_state["mobile_stock_return_term"] = term
-        st.session_state["mobile_stock_return_marker"] = marker_id
+        st.session_state["mobile_stock_return_index"] = int(index)
 
 
-def _restore_result_position(state_key):
-    marker_id = str(st.session_state.pop(state_key, "") or "").strip()
-    if not marker_id:
+def _restore_result_position(state_key, key_prefix):
+    index = st.session_state.pop(state_key, None)
+    if index is None:
         return
-    safe_marker_id = html.escape(marker_id, quote=True)
+    try:
+        index = int(index)
+    except (TypeError, ValueError):
+        return
+
+    safe_prefix = html.escape(str(key_prefix), quote=True)
     st.components.v1.html(
         f"""
         <script>
         (() => {{
-            const markerId = "{safe_marker_id}";
+            const selector = 'div[class*="st-key-mobile_result_row_{safe_prefix}_"]';
+            const targetIndex = {index};
             const findAndScroll = () => {{
                 const doc = window.parent && window.parent.document
                     ? window.parent.document
                     : document;
-                const marker = doc.getElementById(markerId);
-                if (!marker) return false;
-                const markerContainer = marker.closest('[data-testid="stElementContainer"]');
-                const card = markerContainer
-                    ? markerContainer.nextElementSibling
-                    : marker.nextElementSibling;
-                const target = card || marker;
+                const cards = Array.from(doc.querySelectorAll(selector));
+                const target = cards[targetIndex];
+                if (!target) return false;
                 target.scrollIntoView({{block: "center", behavior: "auto"}});
                 return true;
             }};
-            [0, 80, 180, 350, 650, 1000].forEach(delay => setTimeout(findAndScroll, delay));
+            [0, 100, 250, 500, 900, 1400].forEach(delay => setTimeout(findAndScroll, delay));
         }})();
         </script>
         """,
@@ -278,12 +235,7 @@ def _render_result_list(candidates, meta_getter, state_key, key_prefix):
     for index, name in enumerate(candidates):
         rows, total_qty, summary = meta_getter(name)
         safe_key = base.base._safe_key(name)
-        marker_id = f"result-marker-{key_prefix}-{index}-{safe_key}"
         row_key = f"mobile_result_row_{key_prefix}_{index}_{safe_key}"
-        st.markdown(
-            f'<span id="{html.escape(marker_id, quote=True)}" class="mobile-result-marker"></span>',
-            unsafe_allow_html=True,
-        )
         with st.container(border=True, key=row_key):
             photo_col, info_col, action_col = st.columns(
                 [1.2, 3.25, 1.8],
@@ -312,7 +264,7 @@ def _render_result_list(candidates, meta_getter, state_key, key_prefix):
                         )
                     with open_col:
                         if st.button("열기", key=f"{key_prefix}_{index}_{name}", use_container_width=True):
-                            _remember_result_state(key_prefix, marker_id)
+                            _remember_result_state(key_prefix, index)
                             st.session_state[state_key] = name
                             mobile_stock._remember_recent_search(name)
                             st.rerun()
@@ -410,7 +362,7 @@ def _render_expiry_tab():
         base.base.base.EXPIRY_DETAIL_STATE_KEY,
         "mobile_expiry_result",
     )
-    _restore_result_position("mobile_expiry_return_marker")
+    _restore_result_position("mobile_expiry_return_index", "mobile_expiry_result")
 
 
 def page_mobile_stock_finder():
@@ -426,7 +378,7 @@ def page_mobile_stock_finder():
     base._render_expiry_tab = _render_expiry_tab
     try:
         result = base.page_mobile_stock_finder()
-        _restore_result_position("mobile_stock_return_marker")
+        _restore_result_position("mobile_stock_return_index", "mobile_stock_result")
         return result
     finally:
         base._inject_mobile_search_css = original_inject
