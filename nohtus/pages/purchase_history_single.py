@@ -27,10 +27,26 @@ def _render_search_matches(options):
     return [(idx + 1, product_name) for idx, product_name in enumerate(matched)]
 
 
+def _file_uploader_with_legacy_excel(label, *args, **kwargs):
+    """매입내역 업로더에서 구형 .xls와 신형 .xlsx를 모두 허용한다."""
+    if kwargs.get("key") == "purchase_history_upload":
+        kwargs["type"] = ["xls", "xlsx"]
+    return st.file_uploader(label, *args, **kwargs)
+
+
 def page_purchase_history():
     original_render_query_items = purchase_page._render_query_items
+    original_file_uploader = st.file_uploader
+
+    def patched_file_uploader(label, *args, **kwargs):
+        if kwargs.get("key") == "purchase_history_upload":
+            kwargs["type"] = ["xls", "xlsx"]
+        return original_file_uploader(label, *args, **kwargs)
+
     purchase_page._render_query_items = _render_search_matches
+    st.file_uploader = patched_file_uploader
     try:
         return all_products.page_purchase_history()
     finally:
         purchase_page._render_query_items = original_render_query_items
+        st.file_uploader = original_file_uploader
