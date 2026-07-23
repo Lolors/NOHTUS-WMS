@@ -43,10 +43,11 @@ def _last_sale_text(customer_name, company, exact_map, name_map):
 
 
 def page_outbound():
-    """신규 출고지시 저장일과 누락된 최근거래 표시 헬퍼를 보정한다."""
+    """출고일자와 과거/현재 출고 화면 간 헬퍼 시그니처 차이를 보정한다."""
     original_save = outbound_page.save_outbound_order
     original_last_sale_text = getattr(outbound_page, "_last_sale_text", None)
     original_days_ago_label = getattr(outbound_page, "_days_ago_label", None)
+    original_customer_payload = getattr(outbound_page, "_current_customer_payload", None)
 
     def patched_save(cart, title="", memo=""):
         order_id = original_save(cart, title, memo)
@@ -58,13 +59,27 @@ def page_outbound():
             con.commit()
         return order_id
 
+    def patched_customer_payload(selected_customer=None):
+        if original_customer_payload is None:
+            saved = st.session_state.get("out_selected_customer") or {}
+            return {
+                "customer_name": str(saved.get("customer_name") or "").strip(),
+                "company": str(saved.get("company") or "").strip(),
+            }
+        try:
+            return original_customer_payload(selected_customer)
+        except TypeError:
+            return original_customer_payload()
+
     outbound_page.save_outbound_order = patched_save
     outbound_page._last_sale_text = _last_sale_text
     outbound_page._days_ago_label = _days_ago_label
+    outbound_page._current_customer_payload = patched_customer_payload
     try:
         return _page_outbound()
     finally:
         outbound_page.save_outbound_order = original_save
+
         if original_last_sale_text is None:
             try:
                 delattr(outbound_page, "_last_sale_text")
@@ -80,3 +95,11 @@ def page_outbound():
                 pass
         else:
             outbound_page._days_ago_label = original_days_ago_label
+
+        if original_customer_payload is None:
+            try:
+                delattr(outbound_page, "_current_customer_payload")
+            except AttributeError:
+                pass
+        else:
+            outbound_page._current_customer_payload = original_customer_payload
