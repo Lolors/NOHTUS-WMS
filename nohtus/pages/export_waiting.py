@@ -33,7 +33,7 @@ def _load_editing_order():
                    product_name AS 제품명,lot AS LOT,exp_date AS 유통기한,qty AS 요청수량
             FROM export_waiting_items WHERE order_id=? ORDER BY id""", (int(order_id),))
     st.session_state["export_waiting_country"] = str(order.iloc[0]["country"] or "")
-    st.session_state["export_waiting_buyer"] = str(order.iloc[0].get("buyer") or "")
+    st.session_state["export_waiting_buyer"] = str(order.iloc[0].get("buyer") or "") or "미지정"
     method = str(order.iloc[0].get("transport_method") or "").strip()
     st.session_state["export_waiting_transport_method"] = method if method in TRANSPORT_METHODS else "미지정"
     st.session_state["export_waiting_number"] = str(order.iloc[0]["export_no"] or "")
@@ -214,25 +214,34 @@ def page_export_waiting():
     fields_rendered = {"done": False}
 
     def patched_save(cart, title="", memo=""):
+        country = str(st.session_state.get("export_waiting_country") or "").strip()
+        export_no = str(st.session_state.get("export_waiting_number") or "").strip()
+        buyer = str(st.session_state.get("export_waiting_buyer") or "").strip() or "미지정"
+        transport_method = str(st.session_state.get("export_waiting_transport_method") or "").strip() or "미지정"
+        if not country:
+            raise ValueError("국가는 필수 입력값입니다.")
+        if not export_no:
+            raise ValueError("수출번호는 필수 입력값입니다.")
+
         editing_order_id = st.session_state.get("export_editing_order_id")
         unmatched = _find_unmatched_p_item(editing_order_id)
         if unmatched:
             st.session_state[_P_MATCH_REQUEST_KEY] = unmatched
             st.session_state[_P_MATCH_SAVE_KEY] = {
                 "cart": [dict(x) for x in (cart or [])],
-                "country": st.session_state.get("export_waiting_country"),
-                "buyer": st.session_state.get("export_waiting_buyer"),
-                "transport_method": st.session_state.get("export_waiting_transport_method") or "미지정",
-                "export_no": st.session_state.get("export_waiting_number"),
+                "country": country,
+                "buyer": buyer,
+                "transport_method": transport_method,
+                "export_no": export_no,
                 "editing_order_id": editing_order_id,
             }
             raise ValueError("제품명이 변경된 P 재고를 직접 연결해 주세요. 아래 검색창이 열렸습니다.")
         result = save_export_waiting_order(
             cart,
-            country=st.session_state.get("export_waiting_country"),
-            buyer=st.session_state.get("export_waiting_buyer"),
-            transport_method=st.session_state.get("export_waiting_transport_method") or "미지정",
-            export_no=st.session_state.get("export_waiting_number"),
+            country=country,
+            buyer=buyer,
+            transport_method=transport_method,
+            export_no=export_no,
             editing_order_id=editing_order_id,
         )
         completed["done"] = True
@@ -253,25 +262,29 @@ def page_export_waiting():
     def patched_caption(body, *args, **kwargs):
         if isinstance(body, str):
             if "출고지시 저장 시" in body:
-                body = "등록 완료 시 선택 재고는 같은 사업장의 P로 이동합니다. 바이어와 운송방식은 선택사항입니다."
+                body = "등록 완료 시 선택 재고는 같은 사업장의 P로 이동합니다. 국가는 필수이고 바이어와 운송방식은 미지정으로 둘 수 있습니다."
             else:
                 body = body.replace("출고지시", "수출대기")
         return original_caption(body, *args, **kwargs)
 
     def patched_markdown(body, *args, **kwargs):
         if isinstance(body, str) and body.strip() == "### 매출처":
-            result = original_markdown("### 수출 정보", *args, **kwargs)
+            result = original_markdown("### 주문 정보", *args, **kwargs)
             if not fields_rendered["done"]:
                 fields_rendered["done"] = True
+                if "export_waiting_buyer" not in st.session_state:
+                    st.session_state["export_waiting_buyer"] = "미지정"
+                if "export_waiting_transport_method" not in st.session_state:
+                    st.session_state["export_waiting_transport_method"] = "미지정"
                 c1, c2, c3, c4 = st.columns(4, gap="medium")
                 with c1:
-                    original_text_input("국가", placeholder="국가를 입력하세요", key="export_waiting_country")
+                    original_text_input("국가 *", placeholder="필수 입력", key="export_waiting_country")
                 with c2:
-                    original_text_input("바이어 (선택)", placeholder="미입력 가능", key="export_waiting_buyer")
+                    original_text_input("바이어", placeholder="미지정", key="export_waiting_buyer")
                 with c3:
-                    st.selectbox("운송방식 (선택)", TRANSPORT_METHODS, key="export_waiting_transport_method")
+                    st.selectbox("운송방식", TRANSPORT_METHODS, key="export_waiting_transport_method")
                 with c4:
-                    original_text_input("수출번호", placeholder="수출번호를 입력하세요", key="export_waiting_number")
+                    original_text_input("수출번호 *", placeholder="필수 입력", key="export_waiting_number")
             return result
         if isinstance(body, str):
             body = body.replace("### 출고지시 장바구니", "### 수출대기 장바구니")
@@ -303,8 +316,10 @@ def page_export_waiting():
         return original_info(body, *args, **kwargs)
 
     def patched_button(label, *args, **kwargs):
-        label = {"지시완료 저장": "수출대기 수정 완료" if st.session_state.get("export_editing_order_id") else "수출대기 등록 완료",
-                 "선택 재고 장바구니에 담기": "선택 재고 수출대기 장바구니에 담기"}.get(label, label)
+        label = {
+            "지시완료 저장": "수출대기 수정 완료" if st.session_state.get("export_editing_order_id") else "수출대기 등록 완료",
+            "선택 재고 장바구니에 담기": "선택 재고 수출대기 장바구니에 담기",
+        }.get(label, label)
         return original_button(label, *args, **kwargs)
 
     def patched_rerun(*args, **kwargs):
