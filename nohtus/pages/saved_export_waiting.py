@@ -101,7 +101,8 @@ def _ensure_order_date_column():
         cols = {r[1] for r in cur.execute("PRAGMA table_info(export_waiting_orders)").fetchall()}
         if "order_date" not in cols:
             cur.execute("ALTER TABLE export_waiting_orders ADD COLUMN order_date TEXT")
-        cur.execute("UPDATE export_waiting_orders SET order_date=DATE(created_at) WHERE TRIM(COALESCE(order_date,''))='' ")
+        cur.execute("UPDATE export_waiting_orders SET order_date=NULL WHERE status<>'confirmed'")
+        cur.execute("UPDATE export_waiting_orders SET order_date=DATE(confirmed_at) WHERE status='confirmed' AND TRIM(COALESCE(order_date,''))='' AND TRIM(COALESCE(confirmed_at,''))<>''")
         con.commit()
 
 
@@ -111,6 +112,9 @@ def _update_export_order_date(order_id, new_date):
         raise ValueError("출고일자를 선택하세요.")
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with connect() as con:
+        row = con.execute("SELECT status FROM export_waiting_orders WHERE id=?", (int(order_id),)).fetchone()
+        if not row or str(row[0]) != "confirmed":
+            raise ValueError("수출확정된 건만 출고일자를 수정할 수 있습니다.")
         con.execute(
             "UPDATE export_waiting_orders SET order_date=?,updated_at=? WHERE id=?",
             (date_text, now, int(order_id)),
@@ -165,12 +169,12 @@ def page_saved_export_waiting():
         start_date = _normalize_date_text(period[0])
         end_date = _normalize_date_text(period[1])
         if start_date and end_date:
-            clauses.append("DATE(COALESCE(o.order_date,o.created_at)) BETWEEN DATE(?) AND DATE(?)")
+            clauses.append("DATE(o.order_date) BETWEEN DATE(?) AND DATE(?)")
             params.extend([start_date, end_date])
     elif period:
         selected_date = _normalize_date_text(period[0] if isinstance(period, (list, tuple)) else period)
         if selected_date:
-            clauses.append("DATE(COALESCE(o.order_date,o.created_at))=DATE(?)")
+            clauses.append("DATE(o.order_date)=DATE(?)")
             params.append(selected_date)
 
     where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
@@ -182,7 +186,7 @@ def page_saved_export_waiting():
              FROM export_waiting_orders o
              LEFT JOIN export_waiting_items i ON i.order_id=o.id
              {where_sql}
-             GROUP BY o.id ORDER BY DATE(COALESCE(o.order_date,o.created_at)) DESC,o.id DESC""",
+             GROUP BY o.id ORDER BY CASE WHEN o.order_date IS NULL OR TRIM(o.order_date)='' THEN 1 ELSE 0 END, DATE(o.order_date) DESC,o.id DESC""",
         tuple(params),
     )
     if orders.empty:
@@ -193,7 +197,8 @@ def page_saved_export_waiting():
     orders["total_items"] = pd.to_numeric(orders["total_items"], errors="coerce").fillna(0).astype(int)
     orders["confirmed_items"] = pd.to_numeric(orders["confirmed_items"], errors="coerce").fillna(0).astype(int)
     orders["출고일자"] = orders.apply(
-        lambda r: _normalize_date_text(r.get("order_date") or r.get("created_at")), axis=1
+        lambda r: _normalize_date_text(r.get("order_date")) if str(r.get("status")) == "confirmed" else "",
+        axis=1,
     )
     view = orders.copy()
     view["상태"] = view["status"].map(STATUS_LABELS).fillna(view["status"])
@@ -251,22 +256,23 @@ def page_saved_export_waiting():
     c6.metric("수출번호", str(selected["export_no"] or "-"))
     _fit_summary_metric_values()
 
-    date_col, save_date_col = st.columns([3, 1])
-    with date_col:
-        shipment_date = st.date_input(
-            "출고일자",
-            value=_date_value(selected.get("order_date") or selected.get("created_at")),
-            key=f"saved_export_waiting_order_date_{order_id}",
-        )
-    with save_date_col:
-        st.markdown("<div style='height:1.78rem'></div>", unsafe_allow_html=True)
-        if st.button("출고일자 저장", use_container_width=True, key=f"save_export_order_date_{order_id}"):
-            try:
-                _update_export_order_date(order_id, shipment_date)
-                st.session_state["_export_waiting_message"] = f"{selected['title']}의 출고일자를 {_normalize_date_text(shipment_date)}로 변경했습니다."
-                st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
+    if status == "confirmed":
+        date_col, save_date_col = st.columns([3, 1])
+        with date_col:
+            shipment_date = st.date_input(
+                "출고일자",
+                value=_date_value(selected.get("order_date") or selected.get("confirmed_at")),
+                key=f"saved_export_waiting_order_date_{order_id}",
+            )
+        with save_date_col:
+            st.markdown("<div style='height:1.78rem'></div>", unsafe_allow_html=True)
+            if st.button("출고일자 저장", use_container_width=True, key=f"save_export_order_date_{order_id}"):
+                try:
+                    _update_export_order_date(order_id, shipment_date)
+                    st.session_state["_export_waiting_message"] = f"{selected['title']}의 출고일자를 {_normalize_date_text(shipment_date)}로 변경했습니다."
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
 
     if total_count:
         st.progress(confirmed_count / total_count, text=f"{confirmed_count} / {total_count} 품목 확정")
