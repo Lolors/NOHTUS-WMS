@@ -202,6 +202,7 @@ def page_export_waiting():
     original_save = outbound_page.save_outbound_order
     original_update = outbound_page.update_outbound_order
     original_q = outbound_page.q
+    original_inventory_query = outbound_page._inventory_query_for_outbound
     original_renderer = outbound_page._render_last_sale_importer
     original_title, original_caption, original_markdown = st.title, st.caption, st.markdown
     original_button, original_success, original_rerun = st.button, st.success, st.rerun
@@ -212,6 +213,19 @@ def page_export_waiting():
     st.session_state["_outbound_screen_mode"] = "export_waiting"
     completed = {"done": False, "message": ""}
     fields_rendered = {"done": False}
+
+    def patched_inventory_query(selected_product, selected_company, ignore_company=False):
+        if not selected_product:
+            return pd.DataFrame()
+        return original_q(
+            """
+            SELECT id, company, product_name, warehouse_name, lot, exp_date, location, qty
+            FROM inventory
+            WHERE product_name=? AND COALESCE(qty,0)>0
+            ORDER BY company, location, lot, exp_date
+            """,
+            (selected_product,),
+        )
 
     def patched_save(cart, title="", memo=""):
         country = str(st.session_state.get("export_waiting_country") or "").strip()
@@ -333,6 +347,7 @@ def page_export_waiting():
     outbound_page.save_outbound_order = patched_save
     outbound_page.update_outbound_order = lambda order_id, title, cart: patched_save(cart, title)
     outbound_page.q = patched_q
+    outbound_page._inventory_query_for_outbound = patched_inventory_query
     outbound_page._render_last_sale_importer = lambda: None
     st.title, st.caption, st.markdown = patched_title, patched_caption, patched_markdown
     st.text_input, st.checkbox, st.info = patched_text_input, patched_checkbox, patched_info
@@ -343,6 +358,7 @@ def page_export_waiting():
         return result
     finally:
         outbound_page.save_outbound_order, outbound_page.update_outbound_order, outbound_page.q = original_save, original_update, original_q
+        outbound_page._inventory_query_for_outbound = original_inventory_query
         outbound_page._render_last_sale_importer = original_renderer
         st.title, st.caption, st.markdown = original_title, original_caption, original_markdown
         st.text_input, st.checkbox, st.info = original_text_input, original_checkbox, original_info
