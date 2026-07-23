@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from html import escape
 
 import pandas as pd
@@ -47,20 +47,51 @@ def _expiry_alert_rows(companies: list[str]) -> pd.DataFrame:
     return df[["사업장", "로케이션", "표준제품명", "유통기한", "수량"]]
 
 
+def _expiry_badge(exp_date_text: str) -> tuple[str, str]:
+    text = str(exp_date_text or "").strip()
+    if not text:
+        return "", ""
+
+    parsed = None
+    for fmt in ("%Y.%m.%d", "%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            parsed = datetime.strptime(text, fmt).date()
+            break
+        except ValueError:
+            continue
+
+    if parsed is None:
+        return "", ""
+
+    days = (parsed - date.today()).days
+    if days <= 90:
+        return "3개월 이내", "red"
+    if days <= 180:
+        return "4개월~6개월 이내", "yellow"
+    return "7개월~1년 이내", "blue"
+
+
 def _render_html_table(rows: pd.DataFrame):
     body = []
     for r in rows.itertuples(index=False):
         company = escape(str(getattr(r, "사업장") or ""))
         location = escape(str(getattr(r, "로케이션") or ""))
         product_name = escape(str(getattr(r, "표준제품명") or ""))
-        exp_date = escape(str(getattr(r, "유통기한") or ""))
+        exp_date_raw = str(getattr(r, "유통기한") or "")
+        exp_date = escape(exp_date_raw)
+        badge_text, badge_class = _expiry_badge(exp_date_raw)
+        badge_html = (
+            f"<span class='expiry-badge {badge_class}'>{escape(badge_text)}</span>"
+            if badge_text
+            else ""
+        )
         qty = int(getattr(r, "수량") or 0)
         body.append(
             "<tr>"
             f"<td>{company}</td>"
             f"<td>{location}</td>"
             f"<td>{product_name}</td>"
-            f"<td>{exp_date}</td>"
+            f"<td><div class='expiry-date-cell'><span>{exp_date}</span>{badge_html}</div></td>"
             f"<td class='qty'>{qty:,}</td>"
             "</tr>"
         )
@@ -96,7 +127,7 @@ def _render_html_table(rows: pd.DataFrame):
             border-bottom:1px solid #edf2f7;
             color:#111827;
             padding:9px 12px;
-            vertical-align:top;
+            vertical-align:middle;
         }
         .expiry-alert-table td:nth-child(1),
         .expiry-alert-table td:nth-child(2),
@@ -109,6 +140,26 @@ def _render_html_table(rows: pd.DataFrame):
             color:#4f6fff;
             font-weight:700;
         }
+        .expiry-date-cell{
+            display:flex;
+            align-items:center;
+            gap:7px;
+            white-space:nowrap;
+        }
+        .expiry-badge{
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            padding:3px 7px;
+            border-radius:999px;
+            font-size:11px;
+            font-weight:750;
+            line-height:1.2;
+            white-space:nowrap;
+        }
+        .expiry-badge.red{background:#fee2e2;color:#b91c1c;}
+        .expiry-badge.yellow{background:#fef3c7;color:#a16207;}
+        .expiry-badge.blue{background:#dbeafe;color:#1d4ed8;}
         @media (max-width: 768px){
             .expiry-alert-table-wrap{width:100%;}
         }
