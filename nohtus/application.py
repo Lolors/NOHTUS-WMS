@@ -28,21 +28,49 @@ from nohtus.pages.stocktake_business import page_stocktake
 
 
 def page_export_waiting():
-    """수출대기 화면에서 구형/신형 출고 고객정보 함수 시그니처를 호환한다."""
+    """수출대기 화면에서 혼재된 출고 헬퍼 함수 시그니처를 호환한다."""
     import nohtus.pages.outbound as outbound_page
 
-    original = getattr(outbound_page, "_current_customer_payload", None)
-    if original is None:
-        return _page_export_waiting()
+    original_customer_payload = getattr(outbound_page, "_current_customer_payload", None)
+    original_manual_pick_rows = getattr(outbound_page, "_manual_pick_rows", None)
 
-    def compatible_current_customer_payload(selected_customer=None):
-        return original(selected_customer)
+    if original_customer_payload is not None:
+        def compatible_current_customer_payload(selected_customer=None):
+            return original_customer_payload(selected_customer)
 
-    outbound_page._current_customer_payload = compatible_current_customer_payload
+        outbound_page._current_customer_payload = compatible_current_customer_payload
+
+    if original_manual_pick_rows is not None:
+        def compatible_manual_pick_rows(pick_df, editor_df=None):
+            if editor_df is None:
+                if pick_df is None or pick_df.empty:
+                    return pick_df
+                rows = pick_df.copy()
+                rows = rows.rename(columns={
+                    "company": "사업장",
+                    "product_name": "제품명",
+                    "lot": "LOT",
+                    "exp_date": "유통기한",
+                    "location": "로케이션",
+                    "qty": "현재수량",
+                })
+                if "유통기한" in rows.columns:
+                    rows["유통기한"] = rows["유통기한"].apply(outbound_page.display_date_only)
+                rows.insert(0, "선택", False)
+                rows["요청수량"] = 0
+                columns = ["선택", "id", "사업장", "제품명", "LOT", "유통기한", "로케이션", "현재수량", "요청수량"]
+                return rows[[c for c in columns if c in rows.columns]]
+            return original_manual_pick_rows(pick_df, editor_df)
+
+        outbound_page._manual_pick_rows = compatible_manual_pick_rows
+
     try:
         return _page_export_waiting()
     finally:
-        outbound_page._current_customer_payload = original
+        if original_customer_payload is not None:
+            outbound_page._current_customer_payload = original_customer_payload
+        if original_manual_pick_rows is not None:
+            outbound_page._manual_pick_rows = original_manual_pick_rows
 
 
 def main():
