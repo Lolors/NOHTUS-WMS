@@ -7,7 +7,6 @@ from io import BytesIO
 import pandas as pd
 
 import nohtus.pages.closing as closing_page
-from nohtus.pages.erp_stock_compare_inventory import page_erp_stock_compare as page_erp_stock_compare_live
 from nohtus.services.export_waiting import ensure_export_waiting_tables
 
 
@@ -241,9 +240,8 @@ def _location_aware_pdf(items, ds):
 
 
 def page_closing():
-    """출고일자 보정, 수출대기 원위치 체크, inventory 기준 ERP/WMS 비교를 적용한다."""
+    """출고일자 보정과 수출대기 원위치 체크를 적용한다."""
     original_q = closing_page.q
-    original_erp_compare = closing_page.page_erp_stock_compare
     original_html = closing_page._today_outbound_html
     original_pdf = closing_page._today_outbound_pdf_bytes
 
@@ -261,13 +259,11 @@ def page_closing():
         return _sort_checklist_items(result)
 
     closing_page.q = patched_q
-    closing_page.page_erp_stock_compare = page_erp_stock_compare_live
     closing_page._today_outbound_html = _location_aware_html
     closing_page._today_outbound_pdf_bytes = _location_aware_pdf
     try:
         return closing_page.page_closing()
     finally:
         closing_page.q = original_q
-        closing_page.page_erp_stock_compare = original_erp_compare
         closing_page._today_outbound_html = original_html
         closing_page._today_outbound_pdf_bytes = original_pdf
