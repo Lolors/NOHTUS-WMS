@@ -16,7 +16,7 @@ from nohtus.pages.history_business import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.location_map_business import page_map
 from nohtus.pages.customer_master_business import page_customer_master
-from nohtus.pages.mobile_stock_layout_patch import page_mobile_stock_finder
+from nohtus.pages.mobile_stock_layout_patch_v2 import page_mobile_stock_finder
 from nohtus.pages.move import page_move
 from nohtus.pages.outbound_date_fix import page_outbound
 from nohtus.pages.own_product_status import page_own_product_status
