@@ -18,7 +18,7 @@ NOTUS_COLUMN_ALIASES = {
 
 
 def _render_search_matches(options):
-    """선택박스 없이 검색어와 일치하는 모든 제품을 한 번에 조회한다."""
+    """검색어와 일부 일치하는 제품을 즉시 목록으로 보여주고 모두 조회 대상으로 사용한다."""
     keyword = st.text_input(
         "제품 검색",
         key="purchase_single_search",
@@ -26,15 +26,20 @@ def _render_search_matches(options):
     )
 
     if not str(keyword or "").strip():
-        st.caption("제품명을 입력하면 일치하는 모든 과거 매입내역을 조회합니다.")
         return []
 
     matched = purchase_page._filter_product_options(options, keyword)
     if not matched:
-        st.caption("검색어와 일치하는 제품명이 없습니다.")
+        st.info("검색어와 일치하는 제품명이 없습니다.")
         return []
 
-    st.caption(f"검색된 제품 {len(matched)}개 · 조회 시 관련 매입내역을 모두 표시합니다.")
+    result_df = pd.DataFrame({"검색결과": matched})
+    st.dataframe(
+        result_df,
+        use_container_width=True,
+        hide_index=True,
+        height=min(420, 38 + len(result_df) * 35),
+    )
     return [(idx + 1, product_name) for idx, product_name in enumerate(matched)]
 
 
