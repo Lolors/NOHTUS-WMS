@@ -296,7 +296,7 @@ def _render_stock_detail_view(product_name):
         saved_term = str(st.session_state.get("mobile_stock_return_term", "") or "")
         st.session_state["mobile_product_term"] = saved_term
         st.rerun()
-    base._render_stock_detail(product_name)
+    base.base._render_stock_detail(product_name)
 
 
 def _render_expiry_detail(product_name, source_df):
@@ -308,7 +308,7 @@ def _render_expiry_detail(product_name, source_df):
         saved_term = str(st.session_state.get("mobile_expiry_return_term", "") or "")
         st.session_state["mobile_expiry_search_value"] = saved_term
         st.rerun()
-    base._render_expiry_detail(product_name, source_df)
+    base.base._render_expiry_detail(product_name, source_df)
 
 
 def _render_expiry_tab():
