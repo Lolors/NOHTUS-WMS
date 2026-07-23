@@ -62,7 +62,6 @@ def _today_outbound_display_df(items):
 
 
 def _today_outbound_html(items, *, include_style=True):
-    # 제조번호는 화면에 표시하지 않지만, LOT이 다른 재고가 섞이지 않도록 내부 그룹 기준에는 유지한다.
     group_cols = ["사업장", "로케이션", "표준제품명", "제조번호", "유통기한"]
     final_map = _today_outbound_final_stock_map(items)
     html = []
@@ -209,6 +208,7 @@ def _scheduled_outbound_business_log(ds, customers_df):
                i.company AS company,
                i.product_name AS product_name,
                COALESCE(i.lot, '-') AS lot,
+               COALESCE(i.exp_date, '-') AS exp_date,
                i.qty AS qty,
                COALESCE(o.memo, '') AS order_memo
         FROM outbound_orders o
@@ -224,15 +224,15 @@ def _scheduled_outbound_business_log(ds, customers_df):
         title = str(getattr(r, "title", "") or "")
         partner = _infer_customer_from_title(title, customers_df)[0]
         created_at = str(getattr(r, "created_at", "") or "")
-        time_text = created_at[11:19] if len(created_at) >= 19 else ""
-        log_datetime = f"{ds} {time_text}".strip()
+        time_text = created_at[11:16] if len(created_at) >= 16 else ""
         rows.append({
-            "일시": log_datetime,
+            "일시": time_text,
             "유형": "출고지시",
             "사업장": str(getattr(r, "company", "") or ""),
             "거래처(매출처/입고처)": partner,
             "제품명": str(getattr(r, "product_name", "") or ""),
             "제조번호": str(getattr(r, "lot", "-") or "-"),
+            "유통기한": display_date_only(getattr(r, "exp_date", "-") or "-"),
             "수량": int(getattr(r, "qty", 0) or 0),
             "메모": str(getattr(r, "order_memo", "") or ""),
         })
@@ -320,13 +320,15 @@ def page_closing():
     for r in history.itertuples(index=False):
         memo = str(getattr(r, "memo", "") or "")
         company, partner = _business_log_company_and_partner(r, memo, customers_for_log)
+        created_at = str(getattr(r, "created_at", "") or "")
         rows.append({
-            "일시": str(getattr(r, "created_at", "") or ""),
+            "일시": created_at[11:16] if len(created_at) >= 16 else "",
             "유형": str(getattr(r, "tx_type", "") or ""),
             "사업장": company,
             "거래처(매출처/입고처)": partner,
             "제품명": str(getattr(r, "product_name", "") or ""),
             "제조번호": str(getattr(r, "lot", "-") or "-"),
+            "유통기한": display_date_only(getattr(r, "exp_date", "-") or "-"),
             "수량": int(getattr(r, "qty", 0) or 0),
             "메모": memo,
         })
@@ -337,7 +339,7 @@ def page_closing():
 
     log_df = pd.DataFrame(
         rows,
-        columns=["일시", "유형", "사업장", "거래처(매출처/입고처)", "제품명", "제조번호", "수량", "메모"],
+        columns=["일시", "유형", "사업장", "거래처(매출처/입고처)", "제품명", "제조번호", "유통기한", "수량", "메모"],
     )
     log_df = log_df.sort_values(["일시", "유형", "사업장", "제품명"], kind="stable").reset_index(drop=True)
     st.dataframe(log_df, hide_index=True, use_container_width=True)
