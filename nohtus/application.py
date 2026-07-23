@@ -28,11 +28,15 @@ from nohtus.pages.stocktake_business import page_stocktake
 
 
 def page_export_waiting():
-    """수출대기 화면에서 혼재된 출고 헬퍼 함수 시그니처를 호환한다."""
+    """수출대기 화면에서 혼재된 출고 헬퍼 함수 시그니처와 누락 함수를 호환한다."""
+    from datetime import date, datetime
+
     import nohtus.pages.outbound as outbound_page
 
     original_customer_payload = getattr(outbound_page, "_current_customer_payload", None)
     original_manual_pick_rows = getattr(outbound_page, "_manual_pick_rows", None)
+    original_last_sale_text = getattr(outbound_page, "_last_sale_text", None)
+    original_days_ago_label = getattr(outbound_page, "_days_ago_label", None)
 
     if original_customer_payload is not None:
         def compatible_current_customer_payload(selected_customer=None):
@@ -64,6 +68,30 @@ def page_export_waiting():
 
         outbound_page._manual_pick_rows = compatible_manual_pick_rows
 
+    def compatible_days_ago_label(date_text):
+        try:
+            target_date = datetime.strptime(str(date_text), "%Y-%m-%d").date()
+        except Exception:
+            return ""
+        days = (date.today() - target_date).days
+        if days < 0:
+            return "예정"
+        if days == 0:
+            return "오늘"
+        return f"{days}일 전"
+
+    def compatible_last_sale_text(customer_name, company, exact_map, name_map):
+        customer = str(customer_name or "").strip()
+        company = str(company or "").strip()
+        last_date = exact_map.get((customer, company)) or name_map.get(customer) or ""
+        if not last_date:
+            return "최근거래 없음"
+        ago = compatible_days_ago_label(last_date)
+        return f"최근거래 {last_date} ({ago})" if ago else f"최근거래 {last_date}"
+
+    outbound_page._days_ago_label = compatible_days_ago_label
+    outbound_page._last_sale_text = compatible_last_sale_text
+
     try:
         return _page_export_waiting()
     finally:
@@ -71,6 +99,22 @@ def page_export_waiting():
             outbound_page._current_customer_payload = original_customer_payload
         if original_manual_pick_rows is not None:
             outbound_page._manual_pick_rows = original_manual_pick_rows
+
+        if original_last_sale_text is None:
+            try:
+                delattr(outbound_page, "_last_sale_text")
+            except AttributeError:
+                pass
+        else:
+            outbound_page._last_sale_text = original_last_sale_text
+
+        if original_days_ago_label is None:
+            try:
+                delattr(outbound_page, "_days_ago_label")
+            except AttributeError:
+                pass
+        else:
+            outbound_page._days_ago_label = original_days_ago_label
 
 
 def main():
