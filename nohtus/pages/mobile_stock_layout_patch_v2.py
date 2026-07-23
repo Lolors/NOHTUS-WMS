@@ -14,32 +14,34 @@ def _inject_mobile_search_css():
         """
         <style>
         @media (max-width: 768px) {
-            /* 검색 결과 카드의 외부·내부 여백을 더 줄인다. */
+            /* 검색 결과 카드의 내부 여백을 기존보다 절반 수준으로 줄인다. */
             div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlockBorderWrapper"] {
-                margin-bottom: 4px !important;
-                border-radius: 10px !important;
+                margin-bottom: 2px !important;
+                border-radius: 9px !important;
             }
             div[class*="st-key-mobile_result_row_"] div[data-testid="stHorizontalBlock"] {
                 min-height: 98px !important;
-                padding: 1px 4px !important;
-                column-gap: 4px !important;
-                grid-template-columns: 98px minmax(0, 1fr) 82px 48px !important;
+                padding: 0 2px !important;
+                column-gap: 3px !important;
+                grid-template-columns: 98px minmax(0, 1fr) 86px 58px !important;
             }
             div[class*="st-key-mobile_result_row_"] div[data-testid="column"],
             div[class*="st-key-mobile_result_row_"] div[data-testid="stElementContainer"] {
                 margin-top: 0 !important;
                 margin-bottom: 0 !important;
+                padding-top: 0 !important;
+                padding-bottom: 0 !important;
             }
 
-            /* 제품명과 사업장별 재고를 약 3pt 키운다. */
+            /* 제품명과 사업장별 재고 폰트를 원래 크기로 복원한다. */
             .mobile-result-name {
-                font-size: 18px !important;
-                line-height: 1.25 !important;
-                margin-bottom: 5px !important;
+                font-size: 14px !important;
+                line-height: 1.3 !important;
+                margin-bottom: 4px !important;
             }
             .mobile-result-company {
-                font-size: 15.5px !important;
-                line-height: 1.25 !important;
+                font-size: 11.5px !important;
+                line-height: 1.35 !important;
             }
 
             /* 총수량과 열기 버튼을 같은 높이·같은 중심선에 둔다. */
@@ -52,16 +54,10 @@ def _inject_mobile_search_css():
                 line-height: 1 !important;
                 margin: 0 !important;
                 padding: 0 !important;
+                white-space: nowrap !important;
             }
             div[class*="st-key-mobile_result_row_"] div[data-testid="stButton"] {
-                height: 34px !important;
-                min-height: 34px !important;
-                margin: 0 !important;
-                display: flex !important;
-                align-items: center !important;
-                justify-content: center !important;
-            }
-            div[class*="st-key-mobile_result_row_"] div[data-testid="stButton"] button {
+                width: 58px !important;
                 height: 34px !important;
                 min-height: 34px !important;
                 margin: 0 !important;
@@ -69,16 +65,30 @@ def _inject_mobile_search_css():
                 display: flex !important;
                 align-items: center !important;
                 justify-content: center !important;
+            }
+            div[class*="st-key-mobile_result_row_"] div[data-testid="stButton"] button {
+                width: 58px !important;
+                height: 34px !important;
+                min-height: 34px !important;
+                margin: 0 !important;
+                padding: 0 6px !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
                 line-height: 1 !important;
+                white-space: nowrap !important;
+                writing-mode: horizontal-tb !important;
             }
             div[class*="st-key-mobile_result_row_"] div[data-testid="stButton"] button p {
                 margin: 0 !important;
                 line-height: 1 !important;
+                white-space: nowrap !important;
+                writing-mode: horizontal-tb !important;
             }
 
-            /* 기간 라디오와 비자료 제외를 같은 행에 배치한다. */
+            /* 임박재고 검색창 아래에 기간 필터와 비자료 제외를 한 행으로 둔다. */
             div[class*="st-key-mobile_expiry_filter_row"] {
-                margin-top: 8px !important;
+                margin-top: 4px !important;
                 margin-bottom: 4px !important;
             }
             div[class*="st-key-mobile_expiry_filter_row"] div[data-testid="stHorizontalBlock"] {
@@ -118,6 +128,13 @@ def _inject_mobile_search_css():
 def _render_expiry_tab():
     detail_product = str(st.session_state.get(base.base.EXPIRY_DETAIL_STATE_KEY, "") or "").strip()
 
+    # 재고 검색 화면과 동일하게 검색창을 가장 위에 둔다.
+    term = base.base._live_input(
+        "mobile_expiry_search_live",
+        "mobile_expiry_search_value",
+        "제품명 또는 별칭 검색",
+    )
+
     with st.container(key="mobile_expiry_filter_row"):
         period_col, exclude_col = st.columns([4.2, 1.3], gap="small", vertical_alignment="center")
         with period_col:
@@ -135,12 +152,6 @@ def _render_expiry_tab():
                 value=True,
                 key="mobile_expiry_exclude_bidata",
             )
-
-    term = base.base._live_input(
-        "mobile_expiry_search_live",
-        "mobile_expiry_search_value",
-        "제품명 또는 별칭 검색",
-    )
 
     df = base.base._filtered_expiry_df(period, exclude_bidata)
     if detail_product:
