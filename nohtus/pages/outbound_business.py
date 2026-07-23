@@ -9,6 +9,7 @@ from nohtus.db import connect
 
 _ALL_COMPANY_MANUAL_PICK_KEY = "out_all_company_manual_pick"
 _SHIPPABLE_COL = "is_shippable"
+_DIRECT_CUSTOMER_INLINE_KEY = "out_customer_direct_inline"
 
 
 def _hide_last_sale_importer():
@@ -183,6 +184,7 @@ def page_outbound():
             "_out_customer_label",
             "out_selected_customer",
             "out_customer_direct",
+            _DIRECT_CUSTOMER_INLINE_KEY,
             "out_customer_manual_name",
             "out_product_term",
             "out_req_qty",
@@ -239,13 +241,28 @@ def page_outbound():
                 value = original_text_input(label, *args, **kwargs)
             with direct_col:
                 st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-                direct_value = original_checkbox("직접입력", value=False, key="out_customer_direct")
+                direct_value = original_checkbox(
+                    "직접입력",
+                    value=bool(st.session_state.get("out_customer_direct", False)),
+                    key=_DIRECT_CUSTOMER_INLINE_KEY,
+                )
+            st.session_state["out_customer_direct"] = bool(direct_value)
             checkbox_skip_values["out_customer_direct"] = bool(direct_value)
             return value
         return original_text_input(label, *args, **kwargs)
 
     def patched_checkbox(label, *args, **kwargs):
         key = kwargs.get("key")
+        if key == "out_customer_direct":
+            value = bool(
+                st.session_state.get(
+                    _DIRECT_CUSTOMER_INLINE_KEY,
+                    st.session_state.get("out_customer_direct", kwargs.get("value", False)),
+                )
+            )
+            st.session_state["out_customer_direct"] = value
+            checkbox_skip_values["out_customer_direct"] = value
+            return value
         if key in checkbox_skip_values:
             return checkbox_skip_values[key]
         if key in ["out_ignore_company", "out_manual_pick"]:
