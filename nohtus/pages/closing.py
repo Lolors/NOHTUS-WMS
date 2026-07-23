@@ -27,16 +27,27 @@ def _safe_int(value, default=0):
         return default
 
 
+def _safe_text(value, default=""):
+    """NaN, None, 빈 문자열을 화면에 nan으로 노출하지 않도록 정리한다."""
+    try:
+        if value is None or pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    return text if text and text.lower() != "nan" else default
+
+
 def _today_outbound_final_stock_map(items):
     if items.empty:
         return {}
     keys = items[["사업장", "표준제품명", "제조번호", "유통기한"]].drop_duplicates()
     result = {}
     for r in keys.itertuples(index=False):
-        company = str(getattr(r, "사업장") or "")
-        product = str(getattr(r, "표준제품명") or "")
-        lot = str(getattr(r, "제조번호") or "-")
-        exp = str(getattr(r, "유통기한") or "-")
+        company = _safe_text(getattr(r, "사업장", ""))
+        product = _safe_text(getattr(r, "표준제품명", ""))
+        lot = _safe_text(getattr(r, "제조번호", "-"), "-")
+        exp = _safe_text(getattr(r, "유통기한", "-"), "-")
         df = q(
             """
             SELECT COALESCE(SUM(qty), 0) AS qty
@@ -58,6 +69,11 @@ def _today_outbound_display_df(items):
     rows = []
     for key, grp in items.groupby(group_cols, sort=False, dropna=False):
         company, location, product, lot, exp = key
+        company = _safe_text(company)
+        location = _safe_text(location, "-")
+        product = _safe_text(product)
+        lot = _safe_text(lot, "-")
+        exp = _safe_text(exp, "-")
         total_qty = _safe_int(grp["출고수량"].sum())
         final_qty = final_map.get((company, product, lot, exp), 0)
         for i, rr in enumerate(grp.itertuples(index=False)):
@@ -66,7 +82,7 @@ def _today_outbound_display_df(items):
                 "로케이션": location if i == 0 else "",
                 "제품명": product if i == 0 else "",
                 "유통기한": exp if i == 0 else "",
-                "매출처": getattr(rr, "매출처", ""),
+                "매출처": _safe_text(getattr(rr, "매출처", "")),
                 "수량": _safe_int(getattr(rr, "출고수량", 0)),
                 "총 출고수량": total_qty if i == 0 else "",
                 "최종재고": final_qty if i == 0 else "",
@@ -93,17 +109,22 @@ def _today_outbound_html(items, *, include_style=True):
     ])
     for key, grp in items.groupby(group_cols, sort=False, dropna=False):
         company, location, product, lot, exp = key
+        company = _safe_text(company)
+        location = _safe_text(location, "-")
+        product = _safe_text(product)
+        lot = _safe_text(lot, "-")
+        exp = _safe_text(exp, "-")
         total_qty = _safe_int(grp["출고수량"].sum())
         final_qty = final_map.get((company, product, lot, exp), 0)
         rowspan = len(grp)
         for i, rr in enumerate(grp.itertuples(index=False)):
             html.append("<tr>")
             if i == 0:
-                html.append(f"<td rowspan='{rowspan}'>{escape(str(company))}</td>")
-                html.append(f"<td rowspan='{rowspan}'>{escape(str(location))}</td>")
-                html.append(f"<td rowspan='{rowspan}'>{escape(str(product))}</td>")
-                html.append(f"<td rowspan='{rowspan}'>{escape(str(exp))}</td>")
-            html.append(f"<td>{escape(str(getattr(rr, '매출처', '') or '-'))}</td>")
+                html.append(f"<td rowspan='{rowspan}'>{escape(company)}</td>")
+                html.append(f"<td rowspan='{rowspan}'>{escape(location)}</td>")
+                html.append(f"<td rowspan='{rowspan}'>{escape(product)}</td>")
+                html.append(f"<td rowspan='{rowspan}'>{escape(exp)}</td>")
+            html.append(f"<td>{escape(_safe_text(getattr(rr, '매출처', ''), '-'))}</td>")
             html.append(f"<td class='num'>{_safe_int(getattr(rr, '출고수량', 0)):,}</td>")
             if i == 0:
                 html.append(f"<td class='num' rowspan='{rowspan}'>{total_qty:,}</td>")
@@ -149,16 +170,21 @@ def _today_outbound_pdf_bytes(items, ds):
     row_idx = 1
     for key, grp in items.groupby(group_cols, sort=False, dropna=False):
         company, location, product, lot, exp = key
+        company = _safe_text(company)
+        location = _safe_text(location, "-")
+        product = _safe_text(product)
+        lot = _safe_text(lot, "-")
+        exp = _safe_text(exp, "-")
         total_qty = _safe_int(grp["출고수량"].sum())
         final_qty = final_map.get((company, product, lot, exp), 0)
         start = row_idx
         for i, rr in enumerate(grp.itertuples(index=False)):
             data.append([
-                str(company) if i == 0 else "",
-                str(location) if i == 0 else "",
-                str(product) if i == 0 else "",
-                str(exp) if i == 0 else "",
-                str(getattr(rr, "매출처", "") or "-"),
+                company if i == 0 else "",
+                location if i == 0 else "",
+                product if i == 0 else "",
+                exp if i == 0 else "",
+                _safe_text(getattr(rr, "매출처", ""), "-"),
                 f"{_safe_int(getattr(rr, '출고수량', 0)):,}",
                 f"{total_qty:,}" if i == 0 else "",
                 f"{final_qty:,}" if i == 0 else "",
@@ -191,9 +217,9 @@ def _today_outbound_pdf_bytes(items, ds):
 
 
 def _business_log_company_and_partner(row, memo, customers_df):
-    tx_type = str(getattr(row, "tx_type", "") or "")
-    from_company = str(getattr(row, "from_company", "") or "").strip()
-    to_company = str(getattr(row, "to_company", "") or "").strip()
+    tx_type = _safe_text(getattr(row, "tx_type", ""))
+    from_company = _safe_text(getattr(row, "from_company", ""))
+    to_company = _safe_text(getattr(row, "to_company", ""))
 
     if tx_type in {"출고지시", "출고지시수정", "출고지시 재차감", "출고"}:
         partner = ""
@@ -210,7 +236,7 @@ def _business_log_company_and_partner(row, memo, customers_df):
         if customers_df is not None and not customers_df.empty:
             matched = customers_df[customers_df["customer_name"].astype(str).str.strip() == inbound_partner]
             if not matched.empty:
-                manager = str(matched.iloc[0].get("manager") or "")
+                manager = _safe_text(matched.iloc[0].get("manager"))
         return to_company or from_company, inbound_partner, manager
 
     if from_company and to_company and from_company != to_company:
@@ -240,21 +266,29 @@ def _scheduled_outbound_business_log(ds, customers_df):
     )
     rows = []
     for r in outbound.itertuples(index=False):
-        title = str(getattr(r, "title", "") or "")
+        company = _safe_text(getattr(r, "company", ""))
+        product_name = _safe_text(getattr(r, "product_name", ""))
+        qty = _safe_int(getattr(r, "qty", 0))
+
+        # 저장 중 생긴 완전히 빈 출고지시 품목 행은 업무일지에 노출하지 않는다.
+        if not company and not product_name and qty == 0:
+            continue
+
+        title = _safe_text(getattr(r, "title", ""))
         partner, manager = _infer_customer_from_title(title, customers_df)
-        created_at = str(getattr(r, "created_at", "") or "")
+        created_at = _safe_text(getattr(r, "created_at", ""))
         time_text = created_at[11:16] if len(created_at) >= 16 else ""
         rows.append({
             "시간": time_text,
             "유형": "출고지시",
-            "사업장": str(getattr(r, "company", "") or ""),
-            "거래처(매출처/입고처)": partner,
-            "담당자": manager,
-            "제품명": str(getattr(r, "product_name", "") or ""),
-            "제조번호": str(getattr(r, "lot", "-") or "-"),
-            "유통기한": display_date_only(getattr(r, "exp_date", "-") or "-"),
-            "수량": _safe_int(getattr(r, "qty", 0)),
-            "메모": str(getattr(r, "order_memo", "") or ""),
+            "사업장": company,
+            "거래처(매출처/입고처)": _safe_text(partner),
+            "담당자": _safe_text(manager),
+            "제품명": product_name,
+            "제조번호": _safe_text(getattr(r, "lot", "-"), "-"),
+            "유통기한": display_date_only(_safe_text(getattr(r, "exp_date", "-"), "-")),
+            "수량": qty,
+            "메모": _safe_text(getattr(r, "order_memo", "")),
         })
     return rows
 
@@ -281,16 +315,16 @@ def _confirmed_export_business_log(ds, customers_df):
     )
     rows = []
     for r in exported.itertuples(index=False):
-        confirmed_at = str(getattr(r, "confirmed_at", "") or "")
-        customer_name = str(getattr(r, "customer_name", "") or "").strip()
+        confirmed_at = _safe_text(getattr(r, "confirmed_at", ""))
+        customer_name = _safe_text(getattr(r, "customer_name", ""))
         manager = ""
         if customer_name and customers_df is not None and not customers_df.empty:
             matched = customers_df[customers_df["customer_name"].astype(str).str.strip() == customer_name]
             if not matched.empty:
-                manager = str(matched.iloc[0].get("manager") or "")
+                manager = _safe_text(matched.iloc[0].get("manager"))
         memo_parts = ["수출확정"]
-        export_no = str(getattr(r, "export_no", "") or "").strip()
-        title = str(getattr(r, "title", "") or "").strip()
+        export_no = _safe_text(getattr(r, "export_no", ""))
+        title = _safe_text(getattr(r, "title", ""))
         if export_no:
             memo_parts.append(f"수출번호: {export_no}")
         if title:
@@ -298,12 +332,12 @@ def _confirmed_export_business_log(ds, customers_df):
         rows.append({
             "시간": confirmed_at[11:16] if len(confirmed_at) >= 16 else "",
             "유형": "출고지시",
-            "사업장": str(getattr(r, "company", "") or ""),
+            "사업장": _safe_text(getattr(r, "company", "")),
             "거래처(매출처/입고처)": customer_name,
             "담당자": manager,
-            "제품명": str(getattr(r, "product_name", "") or ""),
-            "제조번호": str(getattr(r, "lot", "-") or "-"),
-            "유통기한": display_date_only(getattr(r, "exp_date", "-") or "-"),
+            "제품명": _safe_text(getattr(r, "product_name", "")),
+            "제조번호": _safe_text(getattr(r, "lot", "-"), "-"),
+            "유통기한": display_date_only(_safe_text(getattr(r, "exp_date", "-"), "-")),
             "수량": _safe_int(getattr(r, "qty", 0)),
             "메모": " / ".join(memo_parts),
         })
@@ -349,8 +383,8 @@ def page_closing():
         if items.empty:
             st.info("해당 날짜의 출고지시가 없습니다.")
         else:
-            items["로케이션"] = items["로케이션"].astype(str).replace("", "-")
-            items["유통기한"] = items["유통기한"].apply(display_date_only)
+            items["로케이션"] = items["로케이션"].apply(lambda v: _safe_text(v, "-"))
+            items["유통기한"] = items["유통기한"].apply(lambda v: display_date_only(_safe_text(v, "-")))
             items["출고수량"] = pd.to_numeric(items["출고수량"], errors="coerce").fillna(0).astype(int)
             try:
                 customers_for_close = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
@@ -396,18 +430,18 @@ def page_closing():
         pass
 
     for r in history.itertuples(index=False):
-        memo = str(getattr(r, "memo", "") or "")
+        memo = _safe_text(getattr(r, "memo", ""))
         company, partner, manager = _business_log_company_and_partner(r, memo, customers_for_log)
-        created_at = str(getattr(r, "created_at", "") or "")
+        created_at = _safe_text(getattr(r, "created_at", ""))
         rows.append({
             "시간": created_at[11:16] if len(created_at) >= 16 else "",
-            "유형": str(getattr(r, "tx_type", "") or ""),
-            "사업장": company,
-            "거래처(매출처/입고처)": partner,
-            "담당자": manager,
-            "제품명": str(getattr(r, "product_name", "") or ""),
-            "제조번호": str(getattr(r, "lot", "-") or "-"),
-            "유통기한": display_date_only(getattr(r, "exp_date", "-") or "-"),
+            "유형": _safe_text(getattr(r, "tx_type", "")),
+            "사업장": _safe_text(company),
+            "거래처(매출처/입고처)": _safe_text(partner),
+            "담당자": _safe_text(manager),
+            "제품명": _safe_text(getattr(r, "product_name", "")),
+            "제조번호": _safe_text(getattr(r, "lot", "-"), "-"),
+            "유통기한": display_date_only(_safe_text(getattr(r, "exp_date", "-"), "-")),
             "수량": _safe_int(getattr(r, "qty", 0)),
             "메모": memo,
         })
