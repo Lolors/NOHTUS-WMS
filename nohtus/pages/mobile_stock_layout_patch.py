@@ -1,4 +1,5 @@
 import html
+import re
 
 import streamlit as st
 
@@ -10,6 +11,10 @@ _ORIGINAL_INJECT_CSS = base._inject_mobile_search_css
 _ORIGINAL_RENDER_RECENT_LINKS = base._render_recent_links
 
 
+def _safe_key(value):
+    return re.sub(r"[^0-9A-Za-z가-힣_-]+", "_", str(value or ""))[:60]
+
+
 def _inject_mobile_search_css():
     _ORIGINAL_INJECT_CSS()
     st.markdown(
@@ -18,20 +23,29 @@ def _inject_mobile_search_css():
         header[data-testid="stHeader"] {
             height: 0 !important;
             min-height: 0 !important;
+            display: none !important;
         }
-        div[data-testid="stAppViewContainer"] .main .block-container {
-            padding-top: 0 !important;
-            margin-top: 0 !important;
-        }
+
         @media (max-width: 768px) {
+            html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+                margin-top: 0 !important;
+                padding-top: 0 !important;
+            }
+
+            /* 전역 스타일이 다시 만든 상단 공백까지 강제로 제거한다. */
+            [data-testid="stMainBlockContainer"],
+            section.main > div.block-container,
             div[data-testid="stAppViewContainer"] .main .block-container {
                 padding: 0 .65rem 1.5rem !important;
+                margin-top: 0 !important;
+                transform: translateY(-140px) !important;
+                margin-bottom: -140px !important;
             }
 
             div[data-testid="stTabs"] [data-baseweb="tab-list"] {
                 gap: 0 !important;
                 border-bottom: 1px solid #e5e7eb !important;
-                margin-bottom: 10px !important;
+                margin: 0 0 10px !important;
             }
             div[data-testid="stTabs"] button[data-baseweb="tab"] {
                 flex: 1 1 0 !important;
@@ -44,30 +58,41 @@ def _inject_mobile_search_css():
             div[data-testid="stTabs"] button[aria-selected="true"] {
                 font-weight: 800 !important;
             }
+            div[data-testid="stTabs"] [data-baseweb="tab-panel"] {
+                padding-top: 0 !important;
+            }
 
-            .mobile-result-grid div[data-testid="stVerticalBlockBorderWrapper"] {
-                border: 0 !important;
-                border-bottom: 1px solid #edf0f4 !important;
-                border-radius: 0 !important;
+            /* 모바일에서도 결과 한 행을 사진 / 정보 / 수량 / 열기로 고정한다. */
+            div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlockBorderWrapper"] {
+                border: 1px solid #e2e6ed !important;
+                border-radius: 12px !important;
+                background: #ffffff !important;
                 box-shadow: none !important;
-                background: #fff !important;
+                padding: 0 !important;
+                margin-bottom: 8px !important;
+                overflow: hidden !important;
+            }
+            div[class*="st-key-mobile_result_row_"] div[data-testid="stHorizontalBlock"] {
+                display: grid !important;
+                grid-template-columns: 52px minmax(0, 1fr) 84px 48px !important;
+                align-items: center !important;
+                column-gap: 7px !important;
+                min-height: 76px !important;
+                padding: 8px 10px !important;
+            }
+            div[class*="st-key-mobile_result_row_"] div[data-testid="column"] {
+                width: auto !important;
+                min-width: 0 !important;
+                max-width: none !important;
+                flex: none !important;
                 padding: 0 !important;
             }
-            .mobile-result-grid div[data-testid="stVerticalBlockBorderWrapper"]:last-child {
-                border-bottom: 0 !important;
-            }
-            .mobile-result-grid div[data-testid="stHorizontalBlock"] {
-                align-items: center !important;
-                gap: .45rem !important;
-                min-height: 72px !important;
-                padding: 7px 4px !important;
-            }
-            .mobile-result-grid div[data-testid="stImage"] {
+            div[class*="st-key-mobile_result_row_"] div[data-testid="stImage"] {
                 width: 48px !important;
                 height: 48px !important;
                 margin: 0 !important;
             }
-            .mobile-result-grid div[data-testid="stImage"] img {
+            div[class*="st-key-mobile_result_row_"] div[data-testid="stImage"] img {
                 width: 48px !important;
                 height: 48px !important;
                 object-fit: contain !important;
@@ -81,20 +106,22 @@ def _inject_mobile_search_css():
                 background: #f8fafc;
             }
             .mobile-result-name {
+                margin: 0 0 4px;
+                overflow: hidden;
                 font-size: 14px;
-                line-height: 1.32;
                 font-weight: 750;
+                line-height: 1.3;
                 color: #182033;
-                margin-bottom: 4px;
-                word-break: keep-all;
+                text-overflow: ellipsis;
+                white-space: nowrap;
             }
             .mobile-result-company {
+                overflow: hidden;
                 font-size: 11.5px;
                 line-height: 1.35;
                 color: #727b8d;
-                overflow: hidden;
-                white-space: nowrap;
                 text-overflow: ellipsis;
+                white-space: nowrap;
             }
             .mobile-result-qty {
                 width: 100%;
@@ -105,11 +132,14 @@ def _inject_mobile_search_css():
                 color: #1f2937;
                 white-space: nowrap;
             }
-            .mobile-result-grid div[data-testid="stButton"] button {
-                width: 100% !important;
+            div[class*="st-key-mobile_result_row_"] div[data-testid="stButton"] {
+                margin: 0 !important;
+            }
+            div[class*="st-key-mobile_result_row_"] div[data-testid="stButton"] button {
+                width: 48px !important;
                 min-height: 32px !important;
                 height: 32px !important;
-                padding: 0 4px !important;
+                padding: 0 !important;
                 border: 0 !important;
                 border-radius: 0 !important;
                 background: transparent !important;
@@ -131,13 +161,22 @@ def _inject_mobile_search_css():
                 line-height: 1 !important;
             }
 
-            .mobile-expiry-check-row {
-                margin-top: -8px;
-                margin-bottom: 2px;
+            /* 임박재고 검색창 바로 아래에 체크박스를 붙인다. */
+            div[class*="st-key-mobile_expiry_search_live"] {
+                margin-bottom: -16px !important;
+            }
+            div[class*="st-key-mobile_expiry_check_row"] {
+                margin-top: -12px !important;
+                margin-bottom: -2px !important;
+            }
+            div[class*="st-key-mobile_expiry_check_row"] div[data-testid="stHorizontalBlock"] {
+                align-items: center !important;
+                gap: 0 !important;
             }
             div[class*="st-key-mobile_expiry_exclude_bidata"] {
                 display: flex !important;
                 justify-content: flex-end !important;
+                margin: 0 !important;
             }
             div[class*="st-key-mobile_expiry_exclude_bidata"] label {
                 white-space: nowrap !important;
@@ -151,10 +190,10 @@ def _inject_mobile_search_css():
 
 
 def _render_result_list(candidates, meta_getter, state_key, key_prefix):
-    st.markdown('<div class="mobile-result-grid">', unsafe_allow_html=True)
     for index, name in enumerate(candidates):
         _, total_qty, summary = meta_getter(name)
-        with st.container(border=True):
+        row_key = f"mobile_result_row_{key_prefix}_{index}_{_safe_key(name)}"
+        with st.container(border=True, key=row_key):
             photo_col, info_col, qty_col, open_col = st.columns(
                 [0.72, 3.25, 1.15, 0.78],
                 gap="small",
@@ -182,7 +221,6 @@ def _render_result_list(candidates, meta_getter, state_key, key_prefix):
                     st.session_state[state_key] = name
                     mobile_stock._remember_recent_search(name)
                     st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def _render_recent_links(names, state_key, key_prefix):
@@ -238,15 +276,14 @@ def _render_expiry_tab():
         "제품명 또는 별칭 검색",
     )
 
-    st.markdown('<div class="mobile-expiry-check-row">', unsafe_allow_html=True)
-    _, check_col = st.columns([3.4, 1.6], gap="small")
-    with check_col:
-        exclude_bidata = st.checkbox(
-            "비자료 제외",
-            value=True,
-            key="mobile_expiry_exclude_bidata",
-        )
-    st.markdown("</div>", unsafe_allow_html=True)
+    with st.container(key="mobile_expiry_check_row"):
+        _, check_col = st.columns([3.7, 1.3], gap="small")
+        with check_col:
+            exclude_bidata = st.checkbox(
+                "비자료 제외",
+                value=True,
+                key="mobile_expiry_exclude_bidata",
+            )
 
     df = base._filtered_expiry_df(period, exclude_bidata)
     detail_product = str(st.session_state.get(base.EXPIRY_DETAIL_STATE_KEY, "") or "").strip()
