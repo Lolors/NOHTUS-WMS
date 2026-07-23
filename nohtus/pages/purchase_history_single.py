@@ -7,7 +7,7 @@ import streamlit as st
 
 import nohtus.pages.purchase_history as purchase_page
 import nohtus.pages.purchase_history_all_products as all_products
-from nohtus.db import connect
+from nohtus.db import connect, q
 
 
 NOTUS_COLUMN_ALIASES = {
@@ -77,6 +77,40 @@ def _replace_company_purchase_data(company):
         con.commit()
 
 
+def _render_latest_upload_info():
+    """사업장별로 현재 조회 데이터의 마지막 파일 업데이트 시각을 표시한다."""
+    purchase_page._ensure_purchase_storage()
+    uploads = q(
+        """
+        SELECT business_name, file_name, imported_at, row_count
+        FROM purchase_uploads
+        WHERE id IN (
+            SELECT MAX(id)
+            FROM purchase_uploads
+            GROUP BY business_name
+        )
+        ORDER BY CASE business_name
+            WHEN '노투스팜' THEN 1
+            WHEN '노투스' THEN 2
+            WHEN 'NOH' THEN 3
+            ELSE 4
+        END
+        """
+    )
+
+    st.markdown("#### 파일 업데이트 현황")
+    if uploads.empty:
+        st.caption("아직 업로드된 매입가 파일이 없습니다.")
+        return
+
+    for row in uploads.itertuples(index=False):
+        company = str(getattr(row, "business_name", "") or "-")
+        file_name = str(getattr(row, "file_name", "") or "파일명 없음")
+        imported_at = str(getattr(row, "imported_at", "") or "시간 확인 불가")
+        row_count = int(getattr(row, "row_count", 0) or 0)
+        st.caption(f"{company} · 마지막 업데이트 {imported_at} · {file_name} · {row_count:,}건")
+
+
 def page_purchase_history():
     original_render_query_items = purchase_page._render_query_items
     original_file_uploader = st.file_uploader
@@ -104,6 +138,7 @@ def page_purchase_history():
     purchase_page._import_purchase_history = patched_import_purchase_history
     st.file_uploader = patched_file_uploader
     try:
+        _render_latest_upload_info()
         return all_products.page_purchase_history()
     finally:
         purchase_page._render_query_items = original_render_query_items
