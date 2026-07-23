@@ -10,7 +10,6 @@ from nohtus.dates import display_date_only
 from nohtus.services.closing import (
     _infer_customer_from_title,
     _extract_inbound_source_from_memo,
-    page_erp_stock_compare,
 )
 from nohtus.services.outbound import _find_korean_font
 
@@ -181,12 +180,8 @@ def _today_outbound_pdf_bytes(items, ds):
 
 def page_closing():
     st.title("마감")
-    st.caption("출고의 마지막 단계입니다. 오늘 출고 체크, ERP 재고 비교, 업무일지 작성 기능을 한 화면에서 전환합니다.")
-    tab = st.radio("마감", ["오늘 출고 체크", "ERP 재고 비교", "업무일지 작성"], horizontal=True, key="closing_sub")
-
-    if tab == "ERP 재고 비교":
-        page_erp_stock_compare()
-        return
+    st.caption("출고의 마지막 단계입니다. 오늘 출고 체크와 업무일지 작성 기능을 한 화면에서 전환합니다.")
+    tab = st.radio("마감", ["오늘 출고 체크", "업무일지 작성"], horizontal=True, key="closing_sub")
 
     target_date = st.date_input("기준일", value=date.today(), key="closing_date")
     ds = str(target_date)
@@ -238,57 +233,36 @@ def page_closing():
                     data=_today_outbound_pdf_bytes(items, ds),
                     file_name=f"NOHTUS_마감체크_{ds}.pdf",
                     mime="application/pdf",
-                    use_container_width=False,
+                    use_container_width=True,
                 )
-    else:
-        st.markdown("### 출고")
-        out_raw = q("""SELECT o.id AS 지시서번호, COALESCE(o.title, '') AS 출고지시서제목,
-                              i.product_name AS 표준제품명, i.qty AS 수량
-                       FROM outbound_orders o
-                       JOIN outbound_order_items i ON o.id=i.order_id
-                       WHERE o.order_date=? AND IFNULL(o.status,'')<>'취소됨'
-                       ORDER BY o.id, i.id""", (ds,))
-        if out_raw.empty:
-            st.info("출고 업무일지 데이터가 없습니다.")
-        else:
-            customers_for_worklog = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
-            out_raw[["출고처", "담당자"]] = out_raw["출고지시서제목"].apply(
-                lambda x: pd.Series(_infer_customer_from_title(x, customers_for_worklog))
-            )
-            out_raw["수량"] = pd.to_numeric(out_raw["수량"], errors="coerce").fillna(0).astype(int)
-            out = (out_raw.assign(내역=out_raw["표준제품명"].fillna("").astype(str) + " * " + out_raw["수량"].astype(str))
-                         .groupby(["출고처", "담당자"], as_index=False, dropna=False)["내역"]
-                         .agg(lambda x: ", ".join(x)))
-            tsv = out.to_csv(sep='\t', index=False, header=False)
-            st.text_area("드래그해서 복사", value=tsv, height=140, key="worklog_out_tsv")
+        return
 
-        st.markdown("### 입고")
-        inbound_raw = q("""SELECT COALESCE(t.memo,'') AS 메모,
-                                 COALESCE(t.to_location, '') AS 적치위치,
-                                 t.product_name AS 표준제품명,
-                                 COALESCE(t.lot, '-') AS 제조번호,
-                                 COALESCE(t.exp_date, '-') AS 유통기한,
-                                 t.qty AS 수량
-                          FROM transactions t
-                          WHERE t.tx_type='입고' AND substr(t.created_at,1,10)=? ORDER BY t.id""", (ds,))
-        if inbound_raw.empty:
-            st.info("입고 업무일지 데이터가 없습니다.")
-        else:
-            inbound_raw["매입처"] = inbound_raw["메모"].apply(_extract_inbound_source_from_memo)
-            inbound_raw["적치위치"] = inbound_raw["적치위치"].astype(str).replace("", "-")
-            inbound_raw["제조번호"] = inbound_raw["제조번호"].astype(str).replace("", "-")
-            inbound_raw["유통기한"] = inbound_raw["유통기한"].apply(display_date_only)
-            inbound_raw["수량"] = pd.to_numeric(inbound_raw["수량"], errors="coerce").fillna(0).astype(int)
-            inbound_raw["내역"] = inbound_raw["표준제품명"].astype(str) + " * " + inbound_raw["수량"].astype(str)
-            inbound = inbound_raw[["매입처", "적치위치", "내역", "제조번호", "유통기한"]]
-            tsv = inbound.to_csv(sep='\t', index=False, header=False)
-            st.text_area("드래그해서 복사", value=tsv, height=140, key="worklog_in_tsv")
+    st.subheader("업무일지 작성")
+    history = q("""
+        SELECT created_at, tx_type, product_name, lot, exp_date,
+               from_company, from_location, to_company, to_location, qty, memo
+        FROM transactions
+        WHERE substr(created_at, 1, 10)=?
+        ORDER BY created_at, id
+    """, (ds,))
+    if history.empty:
+        st.info("해당 날짜의 재고 이력이 없습니다.")
+        return
 
-        st.markdown("### 이동")
-        moves = q("""SELECT product_name || '*' || qty AS 이동내역, COALESCE(from_location,'') || ' → ' || COALESCE(to_location,'') AS 이동위치
-                     FROM transactions WHERE tx_type IN ('이동','위치이동','사업장이동','사업장+위치이동','비자료전환') AND substr(created_at,1,10)=? ORDER BY id""", (ds,))
-        if moves.empty:
-            st.info("이동 업무일지 데이터가 없습니다.")
-        else:
-            tsv = moves.to_csv(sep='\t', index=False, header=False)
-            st.text_area("드래그해서 복사", value=tsv, height=140, key="worklog_move_tsv")
+    rows = []
+    for r in history.itertuples(index=False):
+        tx_type = str(getattr(r, "tx_type", "") or "")
+        memo = str(getattr(r, "memo", "") or "")
+        rows.append({
+            "시간": str(getattr(r, "created_at", "") or "")[11:16],
+            "업무구분": tx_type,
+            "제품명": str(getattr(r, "product_name", "") or ""),
+            "제조번호": str(getattr(r, "lot", "-") or "-"),
+            "유통기한": display_date_only(getattr(r, "exp_date", "-") or "-"),
+            "출발": " / ".join(v for v in [str(getattr(r, "from_company", "") or ""), str(getattr(r, "from_location", "") or "")] if v),
+            "도착": " / ".join(v for v in [str(getattr(r, "to_company", "") or ""), str(getattr(r, "to_location", "") or "")] if v),
+            "수량": int(getattr(r, "qty", 0) or 0),
+            "입고처": _extract_inbound_source_from_memo(memo),
+            "메모": memo,
+        })
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
