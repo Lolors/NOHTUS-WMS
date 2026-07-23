@@ -4,11 +4,13 @@ import pandas as pd
 import streamlit as st
 
 import nohtus.pages.outbound as outbound_page
-from nohtus.db import q
+from nohtus.db import connect, q
 from nohtus.pages.outbound_business import page_outbound as _page_outbound
 from nohtus.services.export_waiting import TRANSPORT_METHODS, ensure_export_waiting_tables, save_export_waiting_order
 
 _ALL_COMPANY_SELECTION_KEYS = ("out_all_company_manual_pick", "out_ignore_company", "out_manual_pick")
+_P_MATCH_REQUEST_KEY = "_export_p_match_request"
+_P_MATCH_SAVE_KEY = "_export_p_match_pending_save"
 
 
 def _export_title():
@@ -40,6 +42,158 @@ def _load_editing_order():
     st.session_state["_export_edit_loaded"] = int(order_id)
 
 
+def _find_unmatched_p_item(order_id):
+    """제품명 변경 등으로 기존 수출대기 품목과 P 재고가 더 이상 일치하지 않는 첫 행을 찾는다."""
+    if not order_id:
+        return None
+    df = q(
+        """SELECT i.id,i.company,i.product_name,i.warehouse_name,i.lot,i.exp_date,i.qty,i.source_location,
+                  COALESCE(SUM(inv.qty),0) AS p_qty
+           FROM export_waiting_items i
+           LEFT JOIN inventory inv
+             ON inv.company=i.company
+            AND inv.product_name=i.product_name
+            AND IFNULL(inv.warehouse_name,'')=IFNULL(i.warehouse_name,'')
+            AND IFNULL(inv.lot,'-')=IFNULL(i.lot,'-')
+            AND IFNULL(inv.exp_date,'-')=IFNULL(i.exp_date,'-')
+            AND inv.location='P'
+           WHERE i.order_id=? AND COALESCE(i.confirmed,0)=0
+           GROUP BY i.id
+           HAVING COALESCE(SUM(inv.qty),0) < i.qty
+           ORDER BY i.id
+           LIMIT 1""",
+        (int(order_id),),
+    )
+    return None if df.empty else df.iloc[0].to_dict()
+
+
+def _p_inventory_candidates(term=""):
+    term = str(term or "").strip()
+    params = []
+    where = ["location='P'", "COALESCE(qty,0)>0"]
+    if term:
+        where.append("product_name LIKE ?")
+        params.append(f"%{term}%")
+    return q(
+        f"""SELECT id,company AS 사업장,product_name AS 제품명,
+                   IFNULL(warehouse_name,'') AS 창고명,IFNULL(lot,'-') AS LOT,
+                   IFNULL(exp_date,'-') AS 유통기한,qty AS P재고
+            FROM inventory
+            WHERE {' AND '.join(where)}
+            ORDER BY product_name,company,lot,exp_date
+            LIMIT 200""",
+        tuple(params),
+    )
+
+
+def _apply_p_inventory_match(waiting_item_id, inventory_id):
+    with connect() as con:
+        con.row_factory = None
+        row = con.execute(
+            """SELECT company,product_name,IFNULL(warehouse_name,''),IFNULL(lot,'-'),
+                      IFNULL(exp_date,'-'),qty
+               FROM inventory WHERE id=? AND location='P'""",
+            (int(inventory_id),),
+        ).fetchone()
+        if not row:
+            raise ValueError("선택한 P 재고를 찾을 수 없습니다.")
+        company, product_name, warehouse_name, lot, exp_date, qty = row
+        waiting = con.execute("SELECT qty FROM export_waiting_items WHERE id=?", (int(waiting_item_id),)).fetchone()
+        if not waiting:
+            raise ValueError("연결할 수출대기 품목을 찾을 수 없습니다.")
+        if int(qty or 0) < int(waiting[0] or 0):
+            raise ValueError(f"선택한 P 재고가 부족합니다. 필요 {int(waiting[0] or 0)}EA / 현재 {int(qty or 0)}EA")
+        con.execute(
+            """UPDATE export_waiting_items
+               SET company=?,product_name=?,warehouse_name=?,lot=?,exp_date=?
+               WHERE id=?""",
+            (company, product_name, warehouse_name, lot, exp_date, int(waiting_item_id)),
+        )
+        con.commit()
+
+
+def _finish_export_save(result):
+    st.session_state["_outbound_last_success"] = (
+        f"수출대기 등록 완료: {result['title']} / 총 {result['total_qty']}EA → 로케이션 P"
+    )
+    for key in [
+        "export_waiting_number", "export_waiting_country", "export_waiting_buyer",
+        "export_waiting_transport_method", "export_waiting_auto_title",
+        "export_editing_order_id", "_export_edit_loaded", _P_MATCH_REQUEST_KEY, _P_MATCH_SAVE_KEY,
+    ]:
+        st.session_state.pop(key, None)
+
+
+def _render_p_match_dialog():
+    request = st.session_state.get(_P_MATCH_REQUEST_KEY)
+    pending = st.session_state.get(_P_MATCH_SAVE_KEY)
+    if not request or not pending:
+        return
+
+    dialog_api = getattr(st, "dialog", None) or getattr(st, "experimental_dialog", None)
+
+    def body():
+        old_name = str(request.get("product_name") or "")
+        st.warning(
+            f"P 로케이션에서 기존 제품명 ‘{old_name}’과 정확히 일치하는 재고를 찾지 못했습니다. "
+            "제품 이름이 변경된 경우 아래에서 현재 제품명을 검색해 연결하세요."
+        )
+        st.caption(
+            f"기존 정보: {request.get('company','-')} / LOT {request.get('lot','-')} / "
+            f"유통기한 {request.get('exp_date','-')} / 필요 {int(request.get('qty') or 0)}EA"
+        )
+        term = st.text_input(
+            "P 로케이션 제품 검색",
+            value=old_name,
+            placeholder="현재 제품명 일부를 입력하세요",
+            key=f"export_p_match_term_{request.get('id')}",
+        )
+        candidates = _p_inventory_candidates(term)
+        if candidates.empty:
+            st.info("검색 결과가 없습니다. 제품명의 다른 일부를 입력해 보세요.")
+            return
+        labels = [
+            f"{r['제품명']} | {r['사업장']} | LOT {r['LOT']} | {r['유통기한']} | P재고 {int(r['P재고'] or 0)}EA"
+            for _, r in candidates.iterrows()
+        ]
+        selected_label = st.selectbox("연결할 P 재고", labels, key=f"export_p_match_select_{request.get('id')}")
+        selected_index = labels.index(selected_label)
+        selected = candidates.iloc[selected_index]
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("닫기", use_container_width=True, key=f"export_p_match_close_{request.get('id')}"):
+                st.session_state.pop(_P_MATCH_REQUEST_KEY, None)
+                st.session_state.pop(_P_MATCH_SAVE_KEY, None)
+                st.rerun()
+        with c2:
+            if st.button("이 재고로 연결하고 저장", type="primary", use_container_width=True, key=f"export_p_match_apply_{request.get('id')}"):
+                try:
+                    _apply_p_inventory_match(int(request["id"]), int(selected["id"]))
+                    st.session_state.pop(_P_MATCH_REQUEST_KEY, None)
+                    result = save_export_waiting_order(
+                        pending["cart"],
+                        country=pending["country"],
+                        buyer=pending["buyer"],
+                        transport_method=pending["transport_method"],
+                        export_no=pending["export_no"],
+                        editing_order_id=pending["editing_order_id"],
+                    )
+                    _finish_export_save(result)
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
+    if dialog_api:
+        @dialog_api("P 로케이션 제품 연결")
+        def _dialog():
+            body()
+        _dialog()
+    else:
+        st.markdown("### P 로케이션 제품 연결")
+        body()
+
+
 def page_export_waiting():
     ensure_export_waiting_tables()
     _load_editing_order()
@@ -60,13 +214,26 @@ def page_export_waiting():
     fields_rendered = {"done": False}
 
     def patched_save(cart, title="", memo=""):
+        editing_order_id = st.session_state.get("export_editing_order_id")
+        unmatched = _find_unmatched_p_item(editing_order_id)
+        if unmatched:
+            st.session_state[_P_MATCH_REQUEST_KEY] = unmatched
+            st.session_state[_P_MATCH_SAVE_KEY] = {
+                "cart": [dict(x) for x in (cart or [])],
+                "country": st.session_state.get("export_waiting_country"),
+                "buyer": st.session_state.get("export_waiting_buyer"),
+                "transport_method": st.session_state.get("export_waiting_transport_method") or "미지정",
+                "export_no": st.session_state.get("export_waiting_number"),
+                "editing_order_id": editing_order_id,
+            }
+            raise ValueError("제품명이 변경된 P 재고를 직접 연결해 주세요. 아래 검색창이 열렸습니다.")
         result = save_export_waiting_order(
             cart,
             country=st.session_state.get("export_waiting_country"),
             buyer=st.session_state.get("export_waiting_buyer"),
             transport_method=st.session_state.get("export_waiting_transport_method") or "미지정",
             export_no=st.session_state.get("export_waiting_number"),
-            editing_order_id=st.session_state.get("export_editing_order_id"),
+            editing_order_id=editing_order_id,
         )
         completed["done"] = True
         completed["message"] = f"수출대기 등록 완료: {result['title']} / 총 {result['total_qty']}EA → 로케이션 P"
@@ -155,7 +322,9 @@ def page_export_waiting():
     st.text_input, st.checkbox, st.info = patched_text_input, patched_checkbox, patched_info
     st.button, st.success, st.rerun = patched_button, lambda body, *a, **k: original_success(str(body).replace("출고지시", "수출대기"), *a, **k), patched_rerun
     try:
-        return _page_outbound()
+        result = _page_outbound()
+        _render_p_match_dialog()
+        return result
     finally:
         outbound_page.save_outbound_order, outbound_page.update_outbound_order, outbound_page.q = original_save, original_update, original_q
         st.title, st.caption, st.markdown = original_title, original_caption, original_markdown
