@@ -9,7 +9,7 @@ from nohtus.navigation import render_sidebar
 from nohtus.pages.all_inventory import page_all_inventory
 from nohtus.pages.closing_print import page_closing
 from nohtus.pages.expiry_alerts import page_expiry_alerts
-from nohtus.pages.export_waiting import page_export_waiting
+from nohtus.pages.export_waiting import page_export_waiting as _page_export_waiting
 from nohtus.pages.saved_export_waiting import page_saved_export_waiting
 from nohtus.pages.history_business import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
@@ -25,6 +25,24 @@ from nohtus.pages.purchase_history_single import page_purchase_history
 from nohtus.pages.saved_outbound_date_fix import page_saved_outbound as page_saved_outbound_refactored
 from nohtus.pages.shippable_inventory import page_shippable_inventory
 from nohtus.pages.stocktake_business import page_stocktake
+
+
+def page_export_waiting():
+    """수출대기 화면에서 구형/신형 출고 고객정보 함수 시그니처를 호환한다."""
+    import nohtus.pages.outbound as outbound_page
+
+    original = getattr(outbound_page, "_current_customer_payload", None)
+    if original is None:
+        return _page_export_waiting()
+
+    def compatible_current_customer_payload(selected_customer=None):
+        return original(selected_customer)
+
+    outbound_page._current_customer_payload = compatible_current_customer_payload
+    try:
+        return _page_export_waiting()
+    finally:
+        outbound_page._current_customer_payload = original
 
 
 def main():
