@@ -200,6 +200,45 @@ def _business_log_company_and_partner(row, memo, customers_df):
     return from_company or to_company, ""
 
 
+def _scheduled_outbound_business_log(ds, customers_df):
+    outbound = q(
+        """
+        SELECT o.order_date AS log_date,
+               COALESCE(o.created_at, '') AS created_at,
+               COALESCE(o.title, '') AS title,
+               i.company AS company,
+               i.product_name AS product_name,
+               COALESCE(i.lot, '-') AS lot,
+               i.qty AS qty,
+               COALESCE(o.memo, '') AS order_memo
+        FROM outbound_orders o
+        JOIN outbound_order_items i ON o.id=i.order_id
+        WHERE o.order_date=?
+          AND IFNULL(o.status,'')<>'취소됨'
+        ORDER BY COALESCE(o.created_at, ''), o.id, i.id
+        """,
+        (ds,),
+    )
+    rows = []
+    for r in outbound.itertuples(index=False):
+        title = str(getattr(r, "title", "") or "")
+        partner = _infer_customer_from_title(title, customers_df)[0]
+        created_at = str(getattr(r, "created_at", "") or "")
+        time_text = created_at[11:19] if len(created_at) >= 19 else ""
+        log_datetime = f"{ds} {time_text}".strip()
+        rows.append({
+            "일시": log_datetime,
+            "유형": "출고지시",
+            "사업장": str(getattr(r, "company", "") or ""),
+            "거래처(매출처/입고처)": partner,
+            "제품명": str(getattr(r, "product_name", "") or ""),
+            "제조번호": str(getattr(r, "lot", "-") or "-"),
+            "수량": int(getattr(r, "qty", 0) or 0),
+            "메모": str(getattr(r, "order_memo", "") or ""),
+        })
+    return rows
+
+
 def page_closing():
     st.title("마감")
     st.caption("출고의 마지막 단계입니다. 오늘 출고 체크와 업무일지 작성 기능을 한 화면에서 전환합니다.")
@@ -260,23 +299,24 @@ def page_closing():
         return
 
     st.subheader("업무일지 작성")
-    history = q("""
+    history = q(
+        """
         SELECT created_at, tx_type, product_name, lot, exp_date,
                from_company, from_location, to_company, to_location, qty, memo
         FROM transactions
         WHERE substr(created_at, 1, 10)=?
+          AND tx_type NOT IN ('출고지시', '출고지시수정', '출고지시 재차감', '출고')
         ORDER BY created_at, id
-    """, (ds,))
-    if history.empty:
-        st.info("해당 날짜의 재고 이력이 없습니다.")
-        return
+        """,
+        (ds,),
+    )
 
     try:
         customers_for_log = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
     except Exception:
         customers_for_log = pd.DataFrame(columns=["customer_name", "manager"])
 
-    rows = []
+    rows = _scheduled_outbound_business_log(ds, customers_for_log)
     for r in history.itertuples(index=False):
         memo = str(getattr(r, "memo", "") or "")
         company, partner = _business_log_company_and_partner(r, memo, customers_for_log)
@@ -290,11 +330,14 @@ def page_closing():
             "수량": int(getattr(r, "qty", 0) or 0),
             "메모": memo,
         })
-    st.dataframe(
-        pd.DataFrame(
-            rows,
-            columns=["일시", "유형", "사업장", "거래처(매출처/입고처)", "제품명", "제조번호", "수량", "메모"],
-        ),
-        hide_index=True,
-        use_container_width=True,
+
+    if not rows:
+        st.info("해당 날짜의 업무 이력이 없습니다.")
+        return
+
+    log_df = pd.DataFrame(
+        rows,
+        columns=["일시", "유형", "사업장", "거래처(매출처/입고처)", "제품명", "제조번호", "수량", "메모"],
     )
+    log_df = log_df.sort_values(["일시", "유형", "사업장", "제품명"], kind="stable").reset_index(drop=True)
+    st.dataframe(log_df, hide_index=True, use_container_width=True)
