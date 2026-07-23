@@ -160,12 +160,25 @@ def import_product_master_excel(uploaded_file):
 
 
 def product_options(term=""):
+    """검색 조건에 맞는 표준제품명을 중복 없이 문자열 목록으로 반환한다."""
     term = (term or "").strip().lower()
     df = q("""SELECT standard_name, warehouse_name, aliases,
                     erp_nohtuspharm_name, erp_nohtus_name, erp_noh_name, bidata_name
              FROM products ORDER BY standard_name, id""")
+    if df.empty:
+        return []
     if term:
         search_cols = ["standard_name", "warehouse_name", "aliases", "erp_nohtuspharm_name", "erp_nohtus_name", "erp_noh_name", "bidata_name"]
         mask = df.apply(lambda r: any(term in str(r.get(c, "")).lower() for c in search_cols), axis=1)
         df = df[mask]
-    return df
+    if df.empty:
+        return []
+    return (
+        df["standard_name"]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .loc[lambda values: values.ne("")]
+        .drop_duplicates()
+        .tolist()
+    )
