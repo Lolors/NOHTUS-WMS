@@ -141,6 +141,7 @@ def page_outbound():
     checkbox_skip_values = {}
     manual_pick_option_rendered = False
     outbound_date_rendered = False
+    direct_customer_inline_rendered = False
 
     def all_company_manual_pick_value():
         return bool(st.session_state.get(_ALL_COMPANY_MANUAL_PICK_KEY, False))
@@ -235,17 +236,27 @@ def page_outbound():
         return original_caption(body, *args, **kwargs)
 
     def patched_text_input(label, *args, **kwargs):
+        nonlocal direct_customer_inline_rendered
         if kwargs.get("key") == "out_customer_term":
             search_col, direct_col = st.columns([8, 2], gap="small")
             with search_col:
                 value = original_text_input(label, *args, **kwargs)
             with direct_col:
                 st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-                direct_value = original_checkbox(
-                    "직접입력",
-                    value=bool(st.session_state.get("out_customer_direct", False)),
-                    key=_DIRECT_CUSTOMER_INLINE_KEY,
-                )
+                if not direct_customer_inline_rendered:
+                    direct_customer_inline_rendered = True
+                    direct_value = original_checkbox(
+                        "직접입력",
+                        value=bool(st.session_state.get("out_customer_direct", False)),
+                        key=_DIRECT_CUSTOMER_INLINE_KEY,
+                    )
+                else:
+                    direct_value = bool(
+                        st.session_state.get(
+                            _DIRECT_CUSTOMER_INLINE_KEY,
+                            st.session_state.get("out_customer_direct", False),
+                        )
+                    )
             st.session_state["out_customer_direct"] = bool(direct_value)
             checkbox_skip_values["out_customer_direct"] = bool(direct_value)
             return value
