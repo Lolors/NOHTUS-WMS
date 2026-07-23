@@ -17,38 +17,44 @@ def _inject_mobile_search_css():
         """
         <style>
         @media (max-width: 768px) {
-            /* 카드 외곽과 실제 내용 사이 여백을 모든 방향에서 동일하게 맞춘다. */
+            /*
+            Streamlit 카드의 실제 테두리는 BorderWrapper가 담당한다.
+            바깥 key wrapper와 내부 vertical block의 기본 여백을 각각 제거해야
+            카드 네 방향의 체감 여백이 동일해진다.
+            */
+            div[class*="st-key-mobile_result_row_"] {
+                margin: 0 0 6px 0 !important;
+                padding: 0 !important;
+            }
+            div[class*="st-key-mobile_result_row_"] > div,
+            div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlockBorderWrapper"],
+            div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlock"] {
+                margin: 0 !important;
+            }
             div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlockBorderWrapper"] {
-                margin-bottom: 4px !important;
                 padding: 0 !important;
                 border-radius: 12px !important;
                 overflow: hidden !important;
             }
-            div[class*="st-key-mobile_result_row_"] > div,
-            div[class*="st-key-mobile_result_row_"] div[data-testid="stVerticalBlock"],
-            div[class*="st-key-mobile_result_row_"] div[data-testid="stElementContainer"] {
-                margin: 0 !important;
-                padding-top: 0 !important;
-                padding-bottom: 0 !important;
-            }
 
-            /* 최상위 결과 행: 사진 / 제품정보 / 총수량+열기 3영역 */
+            /* 카드의 유일한 실질 padding은 최상위 결과 행의 8px이다. */
             div[class*="st-key-mobile_result_row_"] > div div[data-testid="stHorizontalBlock"]:first-of-type {
                 display: grid !important;
                 grid-template-columns: 96px minmax(0, 1fr) 150px !important;
                 column-gap: 8px !important;
                 align-items: center !important;
                 min-height: 112px !important;
+                margin: 0 !important;
                 padding: 8px !important;
                 box-sizing: border-box !important;
             }
-            div[class*="st-key-mobile_result_row_"] div[data-testid="column"] {
+            div[class*="st-key-mobile_result_row_"] div[data-testid="column"],
+            div[class*="st-key-mobile_result_row_"] div[data-testid="stElementContainer"] {
                 min-width: 0 !important;
                 margin: 0 !important;
                 padding: 0 !important;
             }
 
-            /* 사진은 96x96 프레임 안에서 1:1 crop한다. */
             .mobile-thumb-frame {
                 width: 96px !important;
                 height: 96px !important;
@@ -92,11 +98,14 @@ def _inject_mobile_search_css():
                 margin: 0 !important;
             }
 
-            /* 오른쪽 동작 영역을 하나의 행으로 묶는다. */
+            /*
+            버튼 높이는 강제하지 않는다. Streamlit 기본 버튼 높이를 그대로 두고
+            오른쪽 액션 행만 중앙 정렬하여 버전별 DOM 차이에 덜 민감하게 한다.
+            */
             div[class*="st-key-mobile_result_action_"] {
                 width: 100% !important;
                 margin: 0 !important;
-                padding: 0 8px 0 0 !important;
+                padding: 0 !important;
                 align-self: center !important;
             }
             div[class*="st-key-mobile_result_action_"] div[data-testid="stHorizontalBlock"] {
@@ -105,27 +114,17 @@ def _inject_mobile_search_css():
                 gap: 6px !important;
                 align-items: center !important;
                 width: 100% !important;
-                min-height: 36px !important;
-                height: 36px !important;
                 margin: 0 !important;
                 padding: 0 !important;
             }
             div[class*="st-key-mobile_result_action_"] div[data-testid="column"],
             div[class*="st-key-mobile_result_action_"] div[data-testid="stElementContainer"],
             div[class*="st-key-mobile_result_action_"] div[data-testid="stButton"] {
-                height: 36px !important;
-                min-height: 36px !important;
                 margin: 0 !important;
                 padding: 0 !important;
-                display: flex !important;
-                align-items: center !important;
-                justify-content: center !important;
-                transform: none !important;
             }
             div[class*="st-key-mobile_result_action_"] .mobile-result-qty {
                 width: 100% !important;
-                height: 36px !important;
-                min-height: 36px !important;
                 margin: 0 !important;
                 padding: 0 4px 0 0 !important;
                 display: flex !important;
@@ -136,14 +135,9 @@ def _inject_mobile_search_css():
             }
             div[class*="st-key-mobile_result_action_"] button {
                 width: 58px !important;
-                height: 36px !important;
-                min-height: 36px !important;
                 margin: 0 !important;
-                padding: 0 6px !important;
-                display: flex !important;
-                align-items: center !important;
-                justify-content: center !important;
-                transform: none !important;
+                padding-left: 6px !important;
+                padding-right: 6px !important;
                 white-space: nowrap !important;
                 writing-mode: horizontal-tb !important;
                 line-height: 1 !important;
@@ -164,7 +158,6 @@ def _inject_mobile_search_css():
             .mobile-detail-photo img {
                 object-fit: cover !important;
             }
-
             .mobile-expiry-date-row {
                 margin-top: 4px !important;
             }
@@ -175,15 +168,47 @@ def _inject_mobile_search_css():
     )
 
 
-def _remember_result_state(key_prefix):
+def _remember_result_state(key_prefix, anchor_id):
     if key_prefix.startswith("mobile_expiry"):
         term = str(st.session_state.get("mobile_expiry_search_live", "") or "")
         st.session_state["mobile_expiry_search_value"] = term
         st.session_state["mobile_expiry_return_term"] = term
+        st.session_state["mobile_expiry_return_anchor"] = anchor_id
     else:
         term = str(st.session_state.get("mobile_product_term_live", "") or "")
         st.session_state["mobile_product_term"] = term
         st.session_state["mobile_stock_return_term"] = term
+        st.session_state["mobile_stock_return_anchor"] = anchor_id
+
+
+def _restore_anchor(state_key):
+    anchor_id = str(st.session_state.pop(state_key, "") or "").strip()
+    if not anchor_id:
+        return
+    safe_anchor = html.escape(anchor_id, quote=True)
+    st.markdown(
+        f"""
+        <script>
+        (() => {{
+            const anchorId = "{safe_anchor}";
+            const findAndScroll = () => {{
+                const doc = window.parent && window.parent.document
+                    ? window.parent.document
+                    : document;
+                const target = doc.getElementById(anchorId);
+                if (!target) return false;
+                target.scrollIntoView({{block: "center", behavior: "auto"}});
+                return true;
+            }};
+            if (!findAndScroll()) {{
+                setTimeout(findAndScroll, 120);
+                setTimeout(findAndScroll, 320);
+            }}
+        }})();
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _expiry_badge(rows):
@@ -224,7 +249,10 @@ def _thumbnail_html(name):
 def _render_result_list(candidates, meta_getter, state_key, key_prefix):
     for index, name in enumerate(candidates):
         rows, total_qty, summary = meta_getter(name)
-        row_key = f"mobile_result_row_{key_prefix}_{index}_{base.base._safe_key(name)}"
+        safe_key = base.base._safe_key(name)
+        anchor_id = f"result-anchor-{key_prefix}-{index}-{safe_key}"
+        row_key = f"mobile_result_row_{key_prefix}_{index}_{safe_key}"
+        st.markdown(f'<div id="{html.escape(anchor_id, quote=True)}"></div>', unsafe_allow_html=True)
         with st.container(border=True, key=row_key):
             photo_col, info_col, action_col = st.columns(
                 [1.2, 3.25, 1.8],
@@ -238,7 +266,7 @@ def _render_result_list(candidates, meta_getter, state_key, key_prefix):
                 st.markdown(
                     '<div class="mobile-result-info">'
                     f'<div class="mobile-result-name">{html.escape(str(name))}</div>'
-                    f'<div class="mobile-result-company">{summary or "재고 없음"}</div>'
+                    f'<div class="mobile-result-company">{html.escape(str(summary or "재고 없음"))}</div>'
                     f'{expiry_html}'
                     '</div>',
                     unsafe_allow_html=True,
@@ -253,10 +281,34 @@ def _render_result_list(candidates, meta_getter, state_key, key_prefix):
                         )
                     with open_col:
                         if st.button("열기", key=f"{key_prefix}_{index}_{name}", use_container_width=True):
-                            _remember_result_state(key_prefix)
+                            _remember_result_state(key_prefix, anchor_id)
                             st.session_state[state_key] = name
                             mobile_stock._remember_recent_search(name)
                             st.rerun()
+
+
+def _render_stock_detail_view(product_name):
+    st.markdown('<div class="mobile-back-button">', unsafe_allow_html=True)
+    go_back = st.button("‹ 검색 결과", key="mobile_search_back")
+    st.markdown("</div>", unsafe_allow_html=True)
+    if go_back:
+        st.session_state.pop(base.base.base.DETAIL_STATE_KEY, None)
+        saved_term = str(st.session_state.get("mobile_stock_return_term", "") or "")
+        st.session_state["mobile_product_term"] = saved_term
+        st.rerun()
+    base._render_stock_detail(product_name)
+
+
+def _render_expiry_detail(product_name, source_df):
+    st.markdown('<div class="mobile-back-button">', unsafe_allow_html=True)
+    go_back = st.button("‹ 검색 결과", key="mobile_expiry_back")
+    st.markdown("</div>", unsafe_allow_html=True)
+    if go_back:
+        st.session_state.pop(base.base.base.EXPIRY_DETAIL_STATE_KEY, None)
+        saved_term = str(st.session_state.get("mobile_expiry_return_term", "") or "")
+        st.session_state["mobile_expiry_search_value"] = saved_term
+        st.rerun()
+    base._render_expiry_detail(product_name, source_df)
 
 
 def _render_expiry_tab():
@@ -266,7 +318,7 @@ def _render_expiry_tab():
         period = st.session_state.get("mobile_expiry_period", "1년 이내")
         exclude_bidata = bool(st.session_state.get("mobile_expiry_exclude_bidata", True))
         df = base.base.base._filtered_expiry_df(period, exclude_bidata)
-        base._render_expiry_detail(detail_product, df)
+        _render_expiry_detail(detail_product, df)
         return
 
     term = base.base.base._live_input(
@@ -327,18 +379,27 @@ def _render_expiry_tab():
         base.base.base.EXPIRY_DETAIL_STATE_KEY,
         "mobile_expiry_result",
     )
+    _restore_anchor("mobile_expiry_return_anchor")
 
 
 def page_mobile_stock_finder():
     original_inject = base._inject_mobile_search_css
     original_result = base._render_result_list
+    original_stock_detail = base._render_stock_detail_view
+    original_expiry_detail = base._render_expiry_detail
     original_expiry = base._render_expiry_tab
     base._inject_mobile_search_css = _inject_mobile_search_css
     base._render_result_list = _render_result_list
+    base._render_stock_detail_view = _render_stock_detail_view
+    base._render_expiry_detail = _render_expiry_detail
     base._render_expiry_tab = _render_expiry_tab
     try:
-        return base.page_mobile_stock_finder()
+        result = base.page_mobile_stock_finder()
+        _restore_anchor("mobile_stock_return_anchor")
+        return result
     finally:
         base._inject_mobile_search_css = original_inject
         base._render_result_list = original_result
+        base._render_stock_detail_view = original_stock_detail
+        base._render_expiry_detail = original_expiry_detail
         base._render_expiry_tab = original_expiry
