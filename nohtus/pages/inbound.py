@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
+
 import streamlit as st
 
 from nohtus.dates import normalize_exp_date
@@ -20,6 +22,7 @@ from nohtus.services.inbound import (
     strip_company_stock_label,
 )
 from nohtus.services.inbound_bridge_runtime import _apply_inbound_location_pending, _inbound_js_loc_changed
+from nohtus.db import connect
 
 
 FIRST_PRODUCT_DRAFT_KEYS = [
@@ -44,6 +47,46 @@ def _erp_choice_label(value):
     return str(value or "")
 
 
+def _apply_selected_inbound_date(*, company, product, warehouse, lot, exp, location, qty, memo, inbound_date):
+    """방금 저장한 입고 이력의 날짜를 사용자가 지정한 입고일자로 바꾼다.
+
+    재고의 실제 수정 시각은 유지하고, 이력조회에 표시되는 transactions.created_at만
+    선택한 입고일자와 현재 시각 조합으로 기록한다.
+    """
+    selected_at = datetime.combine(inbound_date, datetime.now().time()).strftime("%Y-%m-%d %H:%M:%S")
+    with connect() as con:
+        row = con.execute(
+            """
+            SELECT id
+            FROM transactions
+            WHERE tx_type='입고'
+              AND product_name=?
+              AND IFNULL(warehouse_name,'')=?
+              AND IFNULL(lot,'-')=?
+              AND IFNULL(exp_date,'-')=?
+              AND IFNULL(to_company,'')=?
+              AND IFNULL(to_location,'')=?
+              AND qty=?
+              AND IFNULL(memo,'')=?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                product,
+                warehouse or "",
+                lot,
+                exp,
+                company,
+                location,
+                int(qty),
+                memo,
+            ),
+        ).fetchone()
+        if row:
+            con.execute("UPDATE transactions SET created_at=? WHERE id=?", (selected_at, int(row[0])))
+            con.commit()
+
+
 def page_inbound():
     from styles import apply_inbound_bridge_style
     from nohtus.ui.location_picker import inbound_location_picker
@@ -52,6 +95,13 @@ def page_inbound():
     _apply_inbound_location_pending()
     _keep_first_product_section_open_if_needed()
     st.title("입고 등록")
+
+    inbound_date = st.date_input(
+        "입고일자",
+        value=date.today(),
+        key="inbound_date",
+        help="선택한 날짜가 이력조회 입고 기록일로 저장됩니다.",
+    )
 
     apply_inbound_bridge_style()
     st.text_input(
@@ -91,8 +141,6 @@ def page_inbound():
             st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
             first_product = st.checkbox("최초 등록", key="inbound_first_product")
 
-        # 체크박스가 도면 클릭 rerun 중 잠깐 false로 평가되어도,
-        # 이미 입력된 최초 등록 값이 있으면 바로 다시 열린 상태로 유지한다.
         if not first_product and _has_first_product_draft():
             st.session_state["inbound_first_product"] = True
             first_product = True
@@ -172,7 +220,20 @@ def page_inbound():
                     if memo:
                         memo_parts.append(memo)
                     inbound_memo = " / ".join(memo_parts) if memo_parts else "입고 등록"
-                    add_inventory(company, product, wh, normalize_blank(lot), normalize_exp_date(exp), loc, int(qty), inbound_memo)
-                    save_msg.success(f"입고 저장 완료: {company} / {product} / {wh} / {loc} / {qty}EA")
+                    normalized_lot = normalize_blank(lot)
+                    normalized_exp = normalize_exp_date(exp)
+                    add_inventory(company, product, wh, normalized_lot, normalized_exp, loc, int(qty), inbound_memo)
+                    _apply_selected_inbound_date(
+                        company=company,
+                        product=product,
+                        warehouse=wh,
+                        lot=normalized_lot,
+                        exp=normalized_exp,
+                        location=loc,
+                        qty=int(qty),
+                        memo=inbound_memo,
+                        inbound_date=inbound_date,
+                    )
+                    save_msg.success(f"입고 저장 완료: {inbound_date.strftime('%Y-%m-%d')} / {company} / {product} / {wh} / {loc} / {qty}EA")
                 except Exception as e:
                     save_msg.error(str(e))
