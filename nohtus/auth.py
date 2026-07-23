@@ -18,10 +18,19 @@ DEFAULT_USERS = {
 ADMIN_USERNAMES = {"hn", "admin"}
 LEGACY_USERNAMES = ["khn", "kjw", "shj", "ngw", "njg"]
 
+# viewer는 재고 조회 전용 권한이다.
+# 사이드바 노출과 직접 페이지 접근 검사 모두 이 목록을 기준으로 한다.
+VIEWER_PAGES = {
+    "로케이션 맵",
+    "유통기한 임박",
+    "자사제품 조회",
+    "전체 조회",
+}
+
 ROLE_PAGES = {
     "admin": None,
     "user": None,
-    "viewer": {"로케이션 맵", "유통기한 임박", "자사제품 조회", "전체 조회"},
+    "viewer": VIEWER_PAGES,
 }
 
 
