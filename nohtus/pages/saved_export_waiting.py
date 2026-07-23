@@ -186,7 +186,10 @@ def page_saved_export_waiting():
              FROM export_waiting_orders o
              LEFT JOIN export_waiting_items i ON i.order_id=o.id
              {where_sql}
-             GROUP BY o.id ORDER BY CASE WHEN o.order_date IS NULL OR TRIM(o.order_date)='' THEN 1 ELSE 0 END, DATE(o.order_date) DESC,o.id DESC""",
+             GROUP BY o.id
+             ORDER BY CASE WHEN o.order_date IS NULL OR TRIM(o.order_date)='' THEN 0 ELSE 1 END,
+                      o.id DESC,
+                      DATE(o.order_date) DESC""",
         tuple(params),
     )
     if orders.empty:
@@ -210,15 +213,15 @@ def page_saved_export_waiting():
             "transport_method": "운송방식",
             "export_no": "수출번호",
             "title": "제목",
-            "erp_company": "최근 ERP사업장",
-            "erp_customer_name": "최근 ERP매출처",
+            "erp_company": "사업장",
+            "erp_customer_name": "ERP 매출처명",
             "created_at": "등록일",
         }
     )
     view["바이어"] = view["바이어"].fillna("").astype(str).replace("", "미지정")
     view["운송방식"] = view["운송방식"].fillna("").astype(str).replace("", "미지정")
     view["__status"] = orders["status"].astype(str).values
-    table_columns = ["출고일자", "상태", "진행상황", "국가", "바이어", "운송방식", "수출번호", "제목", "최근 ERP사업장", "최근 ERP매출처", "등록일", "__status"]
+    table_columns = ["출고일자", "상태", "진행상황", "국가", "바이어", "운송방식", "수출번호", "제목", "사업장", "ERP 매출처명", "등록일", "__status"]
     table = view[table_columns].reset_index(drop=True)
     styled = table.style.apply(_order_row_style, axis=1)
     event = st.dataframe(
