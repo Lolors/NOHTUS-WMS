@@ -1,11 +1,17 @@
+import base64
 import html
+import mimetypes
+from pathlib import Path
 
 import streamlit as st
 
 import nohtus.pages.mobile_stock as mobile_stock
+from nohtus.services.location_map import get_product_image_path
 
 
 DETAIL_STATE_KEY = "mobile_search_detail_product"
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_THUMB_DIR = _PROJECT_ROOT / "data" / "product_images" / "thumbs"
 
 
 def _inject_mobile_search_css():
@@ -40,13 +46,38 @@ def _inject_mobile_search_css():
             }
             .mobile-result-row {
                 position: relative;
-                min-height: 66px;
-                padding: 12px 90px 11px 15px;
+                min-height: 72px;
+                padding: 10px 90px 9px 72px;
                 border-bottom: 1px solid #edf0f4;
                 background: #ffffff;
             }
             .mobile-result-row.last-row {
                 border-bottom: 0;
+            }
+            .mobile-result-thumb {
+                position: absolute;
+                left: 12px;
+                top: 50%;
+                width: 48px;
+                height: 48px;
+                transform: translateY(-50%);
+                overflow: hidden;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border: 1px solid #edf0f4;
+                border-radius: 10px;
+                background: #f8fafc;
+                color: #a7afbd;
+                font-size: 20px;
+            }
+            .mobile-result-thumb img {
+                width: 100%;
+                height: 100%;
+                display: block;
+                object-fit: contain;
+                object-position: center;
+                background: #ffffff;
             }
             .mobile-result-name {
                 margin-bottom: 4px;
@@ -85,12 +116,12 @@ def _inject_mobile_search_css():
             .mobile-result-click div[data-testid="stButton"] {
                 position: relative;
                 z-index: 2;
-                margin-top: -66px !important;
+                margin-top: -72px !important;
                 margin-bottom: 0 !important;
             }
             .mobile-result-click div[data-testid="stButton"] button {
-                height: 66px !important;
-                min-height: 66px !important;
+                height: 72px !important;
+                min-height: 72px !important;
                 padding: 0 !important;
                 border: 0 !important;
                 border-radius: 0 !important;
@@ -134,6 +165,28 @@ def _inject_mobile_search_css():
     )
 
 
+def _image_data_uri(path_value):
+    path = Path(str(path_value or ""))
+    if not path.is_file():
+        return ""
+    try:
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    except OSError:
+        return ""
+    mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+    return f"data:{mime};base64,{encoded}"
+
+
+def _product_thumbnail_uri(product_name):
+    original_path = get_product_image_path(product_name)
+    if not original_path:
+        return ""
+    original = Path(original_path)
+    thumb = _THUMB_DIR / f"{original.stem}.jpg"
+    selected = thumb if thumb.is_file() else original
+    return _image_data_uri(selected)
+
+
 def _result_meta(name):
     rows = mobile_stock.mobile_stock_rows(name)
     total_qty = int(rows["qty"].sum()) if not rows.empty else 0
@@ -155,9 +208,16 @@ def _render_result_list(candidates):
     for index, name in enumerate(candidates):
         _, total_qty, summary = _result_meta(name)
         last_class = " last-row" if index == len(candidates) - 1 else ""
+        thumbnail_uri = _product_thumbnail_uri(name)
+        thumbnail_html = (
+            f'<img src="{thumbnail_uri}" alt="{html.escape(str(name))}">'
+            if thumbnail_uri
+            else "📷"
+        )
         st.markdown(
             f"""
             <div class="mobile-result-row{last_class}">
+                <div class="mobile-result-thumb">{thumbnail_html}</div>
                 <div class="mobile-result-name">{html.escape(str(name))}</div>
                 <div class="mobile-result-company">{summary or '재고 없음'}</div>
                 <div class="mobile-result-total">{total_qty:,}개</div>
