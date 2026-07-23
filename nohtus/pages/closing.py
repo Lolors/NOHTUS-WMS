@@ -184,19 +184,25 @@ def _business_log_company_and_partner(row, memo, customers_df):
 
     if tx_type in {"출고지시", "출고지시수정", "출고지시 재차감", "출고"}:
         partner = ""
+        manager = ""
         title_marker = "출고지시서 제목:"
         if title_marker in memo:
             title = memo.split(title_marker, 1)[1].split(" / ", 1)[0].strip()
-            partner = _infer_customer_from_title(title, customers_df)[0]
-        return from_company or to_company, partner
+            partner, manager = _infer_customer_from_title(title, customers_df)
+        return from_company or to_company, partner, manager
 
     inbound_partner = _extract_inbound_source_from_memo(memo)
     if inbound_partner:
-        return to_company or from_company, inbound_partner
+        manager = ""
+        if customers_df is not None and not customers_df.empty:
+            matched = customers_df[customers_df["customer_name"].astype(str).str.strip() == inbound_partner]
+            if not matched.empty:
+                manager = str(matched.iloc[0].get("manager") or "")
+        return to_company or from_company, inbound_partner, manager
 
     if from_company and to_company and from_company != to_company:
-        return from_company, to_company
-    return from_company or to_company, ""
+        return from_company, to_company, ""
+    return from_company or to_company, "", ""
 
 
 def _scheduled_outbound_business_log(ds, customers_df):
@@ -222,14 +228,15 @@ def _scheduled_outbound_business_log(ds, customers_df):
     rows = []
     for r in outbound.itertuples(index=False):
         title = str(getattr(r, "title", "") or "")
-        partner = _infer_customer_from_title(title, customers_df)[0]
+        partner, manager = _infer_customer_from_title(title, customers_df)
         created_at = str(getattr(r, "created_at", "") or "")
         time_text = created_at[11:16] if len(created_at) >= 16 else ""
         rows.append({
-            "일시": time_text,
+            "시간": time_text,
             "유형": "출고지시",
             "사업장": str(getattr(r, "company", "") or ""),
             "거래처(매출처/입고처)": partner,
+            "담당자": manager,
             "제품명": str(getattr(r, "product_name", "") or ""),
             "제조번호": str(getattr(r, "lot", "-") or "-"),
             "유통기한": display_date_only(getattr(r, "exp_date", "-") or "-"),
@@ -319,13 +326,14 @@ def page_closing():
     rows = _scheduled_outbound_business_log(ds, customers_for_log)
     for r in history.itertuples(index=False):
         memo = str(getattr(r, "memo", "") or "")
-        company, partner = _business_log_company_and_partner(r, memo, customers_for_log)
+        company, partner, manager = _business_log_company_and_partner(r, memo, customers_for_log)
         created_at = str(getattr(r, "created_at", "") or "")
         rows.append({
-            "일시": created_at[11:16] if len(created_at) >= 16 else "",
+            "시간": created_at[11:16] if len(created_at) >= 16 else "",
             "유형": str(getattr(r, "tx_type", "") or ""),
             "사업장": company,
             "거래처(매출처/입고처)": partner,
+            "담당자": manager,
             "제품명": str(getattr(r, "product_name", "") or ""),
             "제조번호": str(getattr(r, "lot", "-") or "-"),
             "유통기한": display_date_only(getattr(r, "exp_date", "-") or "-"),
@@ -339,7 +347,7 @@ def page_closing():
 
     log_df = pd.DataFrame(
         rows,
-        columns=["일시", "유형", "사업장", "거래처(매출처/입고처)", "제품명", "제조번호", "유통기한", "수량", "메모"],
+        columns=["시간", "유형", "사업장", "거래처(매출처/입고처)", "담당자", "제품명", "제조번호", "유통기한", "수량", "메모"],
     )
-    log_df = log_df.sort_values(["일시", "유형", "사업장", "제품명"], kind="stable").reset_index(drop=True)
+    log_df = log_df.sort_values(["시간", "유형", "사업장", "제품명"], kind="stable").reset_index(drop=True)
     st.dataframe(log_df, hide_index=True, use_container_width=True)
