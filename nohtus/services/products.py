@@ -168,4 +168,14 @@ def product_options(term=""):
         search_cols = ["standard_name", "warehouse_name", "aliases", "erp_nohtuspharm_name", "erp_nohtus_name", "erp_noh_name", "bidata_name"]
         mask = df.apply(lambda r: any(term in str(r.get(c, "")).lower() for c in search_cols), axis=1)
         df = df[mask]
-    return df
+    if df.empty:
+        return []
+    return (
+        df["standard_name"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .loc[lambda s: s != ""]
+        .drop_duplicates()
+        .tolist()
+    )
