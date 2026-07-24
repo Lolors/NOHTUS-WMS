@@ -136,11 +136,11 @@ def page_purchase_history():
             purchase_page._read_purchase_excel = original_reader
 
     def patched_render_import_box():
-        upload_col, status_col = st.columns(2, gap="large")
-        with upload_col:
-            original_render_import_box()
+        status_col, upload_col = st.columns([7, 3], gap="large")
         with status_col:
             _render_latest_upload_info()
+        with upload_col:
+            original_render_import_box()
 
     purchase_page._render_query_items = _render_search_matches
     purchase_page._render_import_box = patched_render_import_box
