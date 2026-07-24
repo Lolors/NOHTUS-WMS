@@ -32,11 +32,11 @@ def _inject_mobile_search_css():
             }
             div[class*="st-key-mobile_result_row_"] > div div[data-testid="stHorizontalBlock"]:first-of-type {
                 display: grid !important;
-                grid-template-columns: 96px minmax(0, 1fr) 150px !important;
+                grid-template-columns: minmax(0, 1fr) 150px !important;
                 column-gap: 8px !important;
                 align-items: center !important;
-                min-height: 104px !important;
-                padding: 4px !important;
+                min-height: 68px !important;
+                padding: 6px 8px !important;
                 box-sizing: border-box !important;
             }
             div[class*="st-key-mobile_result_row_"] div[data-testid="column"] {
@@ -44,27 +44,7 @@ def _inject_mobile_search_css():
                 margin: 0 !important;
                 padding: 0 !important;
             }
-            .mobile-thumb-frame {
-                width: 96px !important;
-                height: 96px !important;
-                box-sizing: border-box !important;
-                border-radius: 10px !important;
-                overflow: hidden !important;
-                background: #fafbfc !important;
-            }
-            .mobile-thumb-frame.has-image { border: 1px solid #e1e6ee !important; }
-            .mobile-thumb-frame.empty { border: 1.5px dashed #b8c0cc !important; }
-            .mobile-thumb-frame img {
-                display: block !important;
-                width: 100% !important;
-                height: 100% !important;
-                object-fit: cover !important;
-                object-position: center !important;
-                margin: 0 !important;
-                padding: 0 !important;
-            }
             .mobile-result-info {
-                min-height: 48px !important;
                 display: flex !important;
                 flex-direction: column !important;
                 justify-content: center !important;
@@ -75,16 +55,23 @@ def _inject_mobile_search_css():
                 font-size: 14px !important;
                 line-height: 1.3 !important;
                 margin: 0 0 4px !important;
+                white-space: normal !important;
+                overflow: visible !important;
+                text-overflow: clip !important;
+                word-break: keep-all !important;
             }
             .mobile-result-company {
                 font-size: 11.5px !important;
                 line-height: 1.35 !important;
                 margin: 0 !important;
+                white-space: normal !important;
+                overflow: visible !important;
+                text-overflow: clip !important;
             }
             div[class*="st-key-mobile_result_action_"] {
                 width: 100% !important;
                 margin: 0 !important;
-                padding: 0 4px 0 0 !important;
+                padding: 0 !important;
                 align-self: center !important;
             }
             div[class*="st-key-mobile_result_action_"] div[data-testid="stHorizontalBlock"] {
@@ -153,6 +140,26 @@ def _inject_mobile_search_css():
         """,
         unsafe_allow_html=True,
     )
+
+
+def _live_input(key, value_key, placeholder):
+    """iOS 한글 조합 입력이 끝날 시간을 확보한 실시간 검색 입력."""
+    if mobile_stock.st_keyup is not None:
+        return mobile_stock.st_keyup(
+            "검색",
+            value=st.session_state.get(value_key, ""),
+            key=key,
+            placeholder=placeholder,
+            debounce=350,
+            label_visibility="collapsed",
+        ) or ""
+    return st.text_input(
+        "검색",
+        value=st.session_state.get(value_key, ""),
+        key=key,
+        placeholder=placeholder,
+        label_visibility="collapsed",
+    ) or ""
 
 
 def _remember_result_state(key_prefix, name, index):
@@ -225,31 +232,16 @@ def _expiry_badge(rows):
     )
 
 
-def _thumbnail_html(name):
-    thumbnail_uri = base.base.base._product_thumbnail_uri(name)
-    if not thumbnail_uri:
-        return '<div class="mobile-thumb-frame empty"></div>'
-    safe_uri = html.escape(str(thumbnail_uri), quote=True)
-    safe_name = html.escape(str(name), quote=True)
-    return (
-        '<div class="mobile-thumb-frame has-image">'
-        f'<img src="{safe_uri}" alt="{safe_name}">'
-        '</div>'
-    )
-
-
 def _render_result_list(candidates, meta_getter, state_key, key_prefix):
     for index, name in enumerate(candidates):
         rows, total_qty, summary = meta_getter(name)
         row_key = f"mobile_result_row_{key_prefix}_{index}_{base.base._safe_key(name)}"
         with st.container(border=True, key=row_key):
-            photo_col, info_col, action_col = st.columns(
-                [1.2, 3.25, 1.8],
+            info_col, action_col = st.columns(
+                [4.2, 1.8],
                 gap="small",
                 vertical_alignment="center",
             )
-            with photo_col:
-                st.markdown(_thumbnail_html(name), unsafe_allow_html=True)
             with info_col:
                 expiry_html = _expiry_badge(rows) if key_prefix.startswith("mobile_expiry") else ""
                 st.markdown(
@@ -326,7 +318,7 @@ def _render_expiry_tab():
         _render_expiry_detail(detail_product, df)
         return
 
-    term = base.base.base._live_input(
+    term = _live_input(
         "mobile_expiry_search_live",
         "mobile_expiry_search_value",
         "제품명 또는 별칭 검색",
@@ -393,11 +385,13 @@ def page_mobile_stock_finder():
     original_stock_detail = base._render_stock_detail_view
     original_expiry_detail = base._render_expiry_detail
     original_expiry = base._render_expiry_tab
+    original_live_input = base.base.base._live_input
     base._inject_mobile_search_css = _inject_mobile_search_css
     base._render_result_list = _render_result_list
     base._render_stock_detail_view = _render_stock_detail_view
     base._render_expiry_detail = _render_expiry_detail
     base._render_expiry_tab = _render_expiry_tab
+    base.base.base._live_input = _live_input
     try:
         result = base.page_mobile_stock_finder()
         _restore_result_position("mobile_stock_return_index", "mobile_stock_result")
@@ -408,3 +402,4 @@ def page_mobile_stock_finder():
         base._render_stock_detail_view = original_stock_detail
         base._render_expiry_detail = original_expiry_detail
         base._render_expiry_tab = original_expiry
+        base.base.base._live_input = original_live_input
