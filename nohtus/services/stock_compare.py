@@ -53,23 +53,73 @@ def compare_stock_files(nohtuspharm_file=None, noh_file=None, nohtus_file=None, 
     }
 
 
-def _read_excel_first_sheet(uploaded_file, **kwargs):
-    """구형 xls의 깨진 워크시트 이름을 우회해 첫 번째 시트만 안전하게 읽는다."""
+def _dataframe_from_rows(rows, **kwargs):
+    """행 배열에 read_excel의 header/nrows 동작을 적용한다."""
+    frame = pd.DataFrame(rows)
+    nrows = kwargs.get("nrows")
+    if nrows is not None:
+        frame = frame.iloc[: int(nrows)].copy()
+
+    header = kwargs.get("header", 0)
+    if header is None:
+        return frame.reset_index(drop=True)
+
+    header_row = int(header)
+    if header_row < 0 or header_row >= len(frame):
+        return pd.DataFrame()
+    columns = frame.iloc[header_row].tolist()
+    frame = frame.iloc[header_row + 1 :].copy()
+    frame.columns = columns
+    return frame.reset_index(drop=True)
+
+
+def _read_with_calamine(file_bytes, **kwargs):
+    """xlrd가 깨진 워크시트 이름에서 실패할 때 calamine으로 첫 시트를 읽는다."""
     try:
-        return pd.read_excel(uploaded_file, sheet_name=0, **kwargs)
-    except ValueError as exc:
-        message = str(exc)
-        if "cannot be used in worksheets" not in message:
+        from python_calamine import CalamineWorkbook
+    except ImportError:
+        return None
+
+    workbook = CalamineWorkbook.from_filelike(BytesIO(file_bytes))
+    sheet = workbook.get_sheet_by_index(0)
+    rows = sheet.to_python()
+    return _dataframe_from_rows(rows, **kwargs)
+
+
+def _read_excel_first_sheet(uploaded_file, **kwargs):
+    """ERP 파일의 깨진 워크시트 이름을 무시하고 첫 번째 시트만 읽는다."""
+    uploaded_file.seek(0)
+    file_bytes = uploaded_file.read()
+    uploaded_file.seek(0)
+
+    try:
+        return pd.read_excel(BytesIO(file_bytes), sheet_name=0, **kwargs)
+    except Exception as first_exc:
+        message = str(first_exc)
+        worksheet_name_error = (
+            "cannot be used in worksheets" in message
+            or "Invalid character" in message
+            or "sheet title" in message.lower()
+        )
+        if not worksheet_name_error:
             raise
-        uploaded_file.seek(0)
-        try:
-            import xlrd
-        except ImportError as import_exc:
-            raise ValueError("구형 .xls 파일을 읽으려면 xlrd가 필요합니다. 파일을 .xlsx로 저장한 뒤 다시 업로드해 주세요.") from import_exc
-        book = xlrd.open_workbook(file_contents=uploaded_file.read(), ignore_workbook_corruption=True)
+
+    calamine_df = _read_with_calamine(file_bytes, **kwargs)
+    if calamine_df is not None:
+        return calamine_df
+
+    try:
+        import xlrd
+
+        book = xlrd.open_workbook(file_contents=file_bytes, ignore_workbook_corruption=True)
         sheet = book.sheet_by_index(0)
         rows = [sheet.row_values(i) for i in range(sheet.nrows)]
-        return pd.DataFrame(rows)
+        return _dataframe_from_rows(rows, **kwargs)
+    except Exception as fallback_exc:
+        raise ValueError(
+            "ERP 엑셀의 워크시트 이름이 손상되어 기본 방식으로 읽을 수 없습니다. "
+            "python-calamine 패키지를 설치하거나, 해당 파일을 Excel에서 .xlsx로 다시 저장한 뒤 업로드해 주세요."
+        ) from fallback_exc
 
 
 def _read_standard_erp(uploaded_file):
