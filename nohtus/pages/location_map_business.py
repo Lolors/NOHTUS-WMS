@@ -133,6 +133,10 @@ def page_map():
         <style>
         .total-card-small { margin-bottom: 12px !important; }
         div[class*="st-key-map_fav_"] { display:none !important; }
+        div[data-testid="stTextInput"]:has(input[aria-label="제품명 검색"]) {
+            width: calc(100% + 10px) !important;
+            max-width: calc(100% + 10px) !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
