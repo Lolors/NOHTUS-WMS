@@ -123,7 +123,7 @@ def _render_purchase_page(original_render_import_box):
         st.info("제품 매칭표에 등록된 제품이 없습니다. 먼저 제품 매칭표를 업로드해 주세요.")
         return
 
-    query_col, side_col = st.columns([7, 3], gap="large")
+    query_col, side_col = st.columns([4, 6], gap="large")
 
     with query_col:
         st.markdown("### 조회 품목")
