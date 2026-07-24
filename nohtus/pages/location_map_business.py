@@ -153,6 +153,13 @@ def page_map():
                 ].copy()
 
         groups = original_product_groups(product_name, filtered_inv)
+        if bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)):
+            groups = [
+                group
+                for group in groups
+                if group.get("rows") is not None and not group.get("rows").empty
+            ]
+
         for group in groups:
             rows = group.get("rows")
             if rows is None or rows.empty or "location" not in rows.columns:
