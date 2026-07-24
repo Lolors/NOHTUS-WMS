@@ -116,7 +116,7 @@ def _save_product_image(product_name: str, uploaded_file) -> str:
     if not data:
         raise ValueError("빈 파일은 업로드할 수 없습니다.")
     if len(data) > _MAX_IMAGE_BYTES:
-        raise ValueError("사진은 8MB 이하만 업로드할 수 있습니다.")
+        raise ValueError("사진은 8MB 이하만 등록할 수 있습니다.")
 
     _IMAGE_DIR.mkdir(parents=True, exist_ok=True)
     old = q("SELECT image_path FROM products WHERE standard_name=?", (product_name,))
@@ -249,6 +249,15 @@ def _map_search_product_groups(product_name, inv_df):
     }]
 
 
+def _normalized_map_location(value):
+    return re.sub(r"[\s\-_]+", "", str(value or "").strip().upper())
+
+
+def _is_material_or_promo_location(value):
+    normalized = _normalized_map_location(value)
+    return normalized.startswith("G1") or normalized.startswith("G2") or "홍보물랙" in normalized
+
+
 def page_map_search_results(term, compact: bool = False):
     """로케이션맵 > 제품명 검색 결과."""
     try:
@@ -264,10 +273,21 @@ def page_map_search_results(term, compact: bool = False):
         st.info("검색 결과가 없습니다.")
         return
 
-    inv = q("""
+    exclude_p = bool(st.session_state.get("map_search_available_only", False))
+    exclude_materials = bool(st.session_state.get("map_search_exclude_materials", True))
+    where = ["qty>0"]
+    if exclude_p:
+        where.append("REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', ''), '-', ''), '_', '') NOT LIKE 'P%'")
+    if exclude_materials:
+        normalized_sql = "REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', ''), '-', ''), '_', '')"
+        where.append(f"{normalized_sql} NOT LIKE 'G1%'")
+        where.append(f"{normalized_sql} NOT LIKE 'G2%'")
+        where.append(f"{normalized_sql} NOT LIKE '%홍보물랙%'")
+
+    inv = q(f"""
         SELECT id, company, product_name, warehouse_name, lot, exp_date, location, qty
         FROM inventory
-        WHERE qty>0
+        WHERE {' AND '.join(where)}
     """)
     if not inv.empty:
         inv["exp_date"] = inv["exp_date"].apply(display_date_only)
@@ -275,6 +295,10 @@ def page_map_search_results(term, compact: bool = False):
             inv[col] = inv[col].fillna("-").astype(str)
         inv["warehouse_name"] = inv["warehouse_name"].apply(_map_search_warehouse_name)
         inv["qty"] = pd.to_numeric(inv["qty"], errors="coerce").fillna(0).astype(int)
+        if exclude_p:
+            inv = inv.loc[~inv["location"].apply(lambda v: _normalized_map_location(v).startswith("P"))].copy()
+        if exclude_materials:
+            inv = inv.loc[~inv["location"].apply(_is_material_or_promo_location)].copy()
 
     result_groups = []
     for product_name in opts["standard_name"].dropna().astype(str).drop_duplicates().tolist():
