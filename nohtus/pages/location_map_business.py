@@ -13,6 +13,20 @@ _AVAILABLE_ONLY_KEY = "map_search_available_only"
 _EXCLUDE_MATERIALS_KEY = "map_search_exclude_materials"
 _SPECIAL_SORT_PREFIX = "\uffff"
 _NON_COUNTED_LOCATION = "N-홍보물랙"
+_EXCLUDED_MATERIAL_PROMO_LOCATIONS = {
+    "G1-01-01",
+    "G1-01-02",
+    "G1-01-03",
+    "G1-02-01",
+    "G1-02-02",
+    "G1-02-03",
+    "G1-03-01",
+    "G1-03-02",
+    "G1-03-03",
+    "G2",
+    "홍보물랙",
+    "N-홍보물랙",
+}
 
 
 def _normalized_location(value):
@@ -25,12 +39,7 @@ def _is_non_counted_location(value):
 
 def _is_material_or_promo_location(value):
     location = _normalized_location(value)
-    return (
-        location == _NON_COUNTED_LOCATION
-        or location in {"G1", "G2"}
-        or location.startswith("G1-")
-        or location.startswith("G2-")
-    )
+    return location in _EXCLUDED_MATERIAL_PROMO_LOCATIONS
 
 
 def _page_map_search_results_with_available_filter(term, compact: bool = False):
@@ -182,7 +191,7 @@ def page_map():
                     "부자재 및 홍보물 제외",
                     value=bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)),
                     key=_EXCLUDE_MATERIALS_KEY,
-                    help="G1, G2 및 그 하위 로케이션과 N - 홍보물랙 재고를 총재고와 재고 분포에서 제외합니다.",
+                    help="지정된 G1 부자재 로케이션, G2, 홍보물랙 재고를 총재고와 재고 분포에서 제외합니다.",
                 )
             return value
         return original_text_input(label, *args, **kwargs)
