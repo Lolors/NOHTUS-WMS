@@ -2,11 +2,26 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+import pandas as pd
 import streamlit as st
 
 import nohtus.pages.outbound as outbound_page
 from nohtus.db import connect
 from nohtus.pages.outbound_business import page_outbound as _page_outbound
+
+
+_BLOCKED_OUTBOUND_LOCATIONS = {"N-홍보물랙", "G1", "G2"}
+
+
+def _normalized_location(value):
+    return str(value or "").strip().upper().replace(" ", "")
+
+
+def _is_blocked_outbound_location(value):
+    location = _normalized_location(value)
+    if location in _BLOCKED_OUTBOUND_LOCATIONS:
+        return True
+    return location.startswith("G1-") or location.startswith("G2-")
 
 
 def _selected_date_text():
@@ -48,6 +63,8 @@ def page_outbound():
     original_last_sale_text = getattr(outbound_page, "_last_sale_text", None)
     original_days_ago_label = getattr(outbound_page, "_days_ago_label", None)
     original_customer_payload = getattr(outbound_page, "_current_customer_payload", None)
+    original_inventory_query = outbound_page._inventory_query_for_outbound
+    original_q = outbound_page.q
 
     def patched_save(cart, title="", memo=""):
         order_id = original_save(cart, title, memo)
@@ -71,14 +88,49 @@ def page_outbound():
         except TypeError:
             return original_customer_payload()
 
+    def patched_inventory_query(selected_product, selected_company, ignore_company=False):
+        rows = original_inventory_query(selected_product, selected_company, ignore_company=ignore_company)
+        if rows is None or rows.empty or "location" not in rows.columns:
+            return rows
+        blocked = rows["location"].apply(_is_blocked_outbound_location)
+        return rows.loc[~blocked].copy()
+
+    def patched_q(sql, params=()):
+        normalized = " ".join(str(sql or "").lower().split())
+        if (
+            "select coalesce(sum(qty),0) as qty from inventory" in normalized
+            and "where product_name=? and qty>0" in normalized
+        ):
+            return original_q(
+                """
+                SELECT COALESCE(SUM(qty),0) AS qty
+                FROM inventory
+                WHERE product_name=? AND qty>0
+                  AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') <> 'N-홍보물랙'
+                  AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT IN ('G1','G2')
+                  AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT LIKE 'G1-%'
+                  AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT LIKE 'G2-%'
+                """,
+                params,
+            )
+        result = original_q(sql, params)
+        if isinstance(result, pd.DataFrame) and "location" in result.columns:
+            blocked = result["location"].apply(_is_blocked_outbound_location)
+            return result.loc[~blocked].copy()
+        return result
+
     outbound_page.save_outbound_order = patched_save
     outbound_page._last_sale_text = _last_sale_text
     outbound_page._days_ago_label = _days_ago_label
     outbound_page._current_customer_payload = patched_customer_payload
+    outbound_page._inventory_query_for_outbound = patched_inventory_query
+    outbound_page.q = patched_q
     try:
         return _page_outbound()
     finally:
         outbound_page.save_outbound_order = original_save
+        outbound_page._inventory_query_for_outbound = original_inventory_query
+        outbound_page.q = original_q
 
         if original_last_sale_text is None:
             try:
