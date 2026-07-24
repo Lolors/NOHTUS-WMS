@@ -134,8 +134,8 @@ def page_map():
         .total-card-small { margin-bottom: 12px !important; }
         div[class*="st-key-map_fav_"] { display:none !important; }
         div[data-testid="stTextInput"]:has(input[aria-label="제품명 검색"]) {
-            width: calc(100% + 10px) !important;
-            max-width: calc(100% + 10px) !important;
+            width: calc(100% + 2px) !important;
+            max-width: calc(100% + 2px) !important;
         }
         </style>
         """,
@@ -165,7 +165,7 @@ def page_map():
 
     def patched_text_input(label, *args, **kwargs):
         if isinstance(label, str) and label == "제품명 검색":
-            search_col, p_col, materials_col = st.columns([5.5, 2, 2.5], gap="small")
+            search_col, p_col, materials_col = st.columns([5.1, 2.15, 2.75], gap="small")
             with search_col:
                 value = original_text_input(label, *args, **kwargs)
             with p_col:
