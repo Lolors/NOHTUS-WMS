@@ -113,6 +113,7 @@ def _render_latest_upload_info():
 
 def page_purchase_history():
     original_render_query_items = purchase_page._render_query_items
+    original_render_import_box = purchase_page._render_import_box
     original_file_uploader = st.file_uploader
     original_import_purchase_history = purchase_page._import_purchase_history
 
@@ -134,13 +135,21 @@ def page_purchase_history():
         finally:
             purchase_page._read_purchase_excel = original_reader
 
+    def patched_render_import_box():
+        upload_col, status_col = st.columns(2, gap="large")
+        with upload_col:
+            original_render_import_box()
+        with status_col:
+            _render_latest_upload_info()
+
     purchase_page._render_query_items = _render_search_matches
+    purchase_page._render_import_box = patched_render_import_box
     purchase_page._import_purchase_history = patched_import_purchase_history
     st.file_uploader = patched_file_uploader
     try:
-        _render_latest_upload_info()
         return all_products.page_purchase_history()
     finally:
         purchase_page._render_query_items = original_render_query_items
+        purchase_page._render_import_box = original_render_import_box
         purchase_page._import_purchase_history = original_import_purchase_history
         st.file_uploader = original_file_uploader
