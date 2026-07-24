@@ -10,7 +10,7 @@ from nohtus.pages.location_map import page_map as _page_map
 
 _ORIGINAL_MAP_SEARCH_RESULTS = location_map_page.page_map_search_results
 _AVAILABLE_ONLY_KEY = "map_search_available_only"
-_EXCLUDE_G_KEY = "map_search_exclude_g_locations"
+_EXCLUDE_MATERIALS_KEY = "map_search_exclude_materials"
 _SPECIAL_SORT_PREFIX = "\uffff"
 _NON_COUNTED_LOCATION = "N-홍보물랙"
 
@@ -23,14 +23,19 @@ def _is_non_counted_location(value):
     return _normalized_location(value) == _NON_COUNTED_LOCATION
 
 
-def _is_g_location(value):
+def _is_material_or_promo_location(value):
     location = _normalized_location(value)
-    return location in {"G1", "G2"} or location.startswith("G1-") or location.startswith("G2-")
+    return (
+        location == _NON_COUNTED_LOCATION
+        or location in {"G1", "G2"}
+        or location.startswith("G1-")
+        or location.startswith("G2-")
+    )
 
 
 def _page_map_search_results_with_available_filter(term, compact: bool = False):
     available_only = bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False))
-    exclude_g = bool(st.session_state.get(_EXCLUDE_G_KEY, True))
+    exclude_materials = bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True))
     original_q = location_map_page.q
 
     def filtered_q(sql, params=()):
@@ -45,8 +50,8 @@ def _page_map_search_results_with_available_filter(term, compact: bool = False):
             locations = result["location"].fillna("").astype(str)
             if available_only:
                 keep &= locations.str.strip().str.upper() != "P"
-            if exclude_g:
-                keep &= ~locations.apply(_is_g_location)
+            if exclude_materials:
+                keep &= ~locations.apply(_is_material_or_promo_location)
             result = result.loc[keep].copy()
         return result
 
@@ -156,7 +161,7 @@ def page_map():
 
     def patched_text_input(label, *args, **kwargs):
         if isinstance(label, str) and label == "제품명 검색":
-            search_col, p_col, g_col = st.columns([6, 2, 2], gap="small")
+            search_col, p_col, materials_col = st.columns([5.5, 2, 2.5], gap="small")
             with search_col:
                 value = original_text_input(label, *args, **kwargs)
             with p_col:
@@ -167,13 +172,13 @@ def page_map():
                     key=_AVAILABLE_ONLY_KEY,
                     help="수출대기(P) 재고를 총재고와 재고 분포에서 제외합니다.",
                 )
-            with g_col:
+            with materials_col:
                 st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
                 st.checkbox(
-                    "G1/G2 제외",
-                    value=bool(st.session_state.get(_EXCLUDE_G_KEY, True)),
-                    key=_EXCLUDE_G_KEY,
-                    help="G1, G2 및 그 하위 로케이션 재고를 총재고와 재고 분포에서 제외합니다.",
+                    "부자재 및 홍보물 제외",
+                    value=bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)),
+                    key=_EXCLUDE_MATERIALS_KEY,
+                    help="G1, G2 및 그 하위 로케이션과 N - 홍보물랙 재고를 총재고와 재고 분포에서 제외합니다.",
                 )
             return value
         return original_text_input(label, *args, **kwargs)
