@@ -10,22 +10,44 @@ from nohtus.pages.location_map import page_map as _page_map
 
 _ORIGINAL_MAP_SEARCH_RESULTS = location_map_page.page_map_search_results
 _AVAILABLE_ONLY_KEY = "map_search_available_only"
+_EXCLUDE_G_KEY = "map_search_exclude_g_locations"
+_SPECIAL_SORT_PREFIX = "\uffff"
+_NON_COUNTED_LOCATION = "N-홍보물랙"
+
+
+def _normalized_location(value):
+    return str(value or "").strip().upper().replace(" ", "").lstrip(_SPECIAL_SORT_PREFIX)
+
+
+def _is_non_counted_location(value):
+    return _normalized_location(value) == _NON_COUNTED_LOCATION
+
+
+def _is_g_location(value):
+    location = _normalized_location(value)
+    return location in {"G1", "G2"} or location.startswith("G1-") or location.startswith("G2-")
 
 
 def _page_map_search_results_with_available_filter(term, compact: bool = False):
     available_only = bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False))
+    exclude_g = bool(st.session_state.get(_EXCLUDE_G_KEY, True))
     original_q = location_map_page.q
 
     def filtered_q(sql, params=()):
         result = original_q(sql, params)
         normalized = " ".join(str(sql or "").lower().split())
         if (
-            available_only
-            and isinstance(result, pd.DataFrame)
+            isinstance(result, pd.DataFrame)
             and " from inventory " in f" {normalized} "
             and "location" in result.columns
         ):
-            return result[result["location"].fillna("").astype(str).str.strip() != "P"].copy()
+            keep = pd.Series(True, index=result.index)
+            locations = result["location"].fillna("").astype(str)
+            if available_only:
+                keep &= locations.str.strip().str.upper() != "P"
+            if exclude_g:
+                keep &= ~locations.apply(_is_g_location)
+            result = result.loc[keep].copy()
         return result
 
     location_map_page.q = filtered_q
@@ -96,8 +118,10 @@ def _inject_gm_medic_special_location():
 
 def page_map():
     original_search_results = location_map_page.page_map_search_results
+    original_product_groups = location_map_page._map_search_product_groups
     original_text_input = st.text_input
     original_button = st.button
+    original_markdown = st.markdown
 
     st.markdown(
         """
@@ -109,18 +133,47 @@ def page_map():
         unsafe_allow_html=True,
     )
 
+    def patched_product_groups(product_name, inv_df):
+        groups = original_product_groups(product_name, inv_df)
+        for group in groups:
+            rows = group.get("rows")
+            if rows is None or rows.empty or "location" not in rows.columns:
+                continue
+            rows = rows.copy()
+            non_counted = rows["location"].apply(_is_non_counted_location)
+            if non_counted.any():
+                counted_qty = pd.to_numeric(rows.loc[~non_counted, "qty"], errors="coerce").fillna(0).sum()
+                group["total_qty"] = int(counted_qty)
+                rows.loc[non_counted, "qty"] = 0
+                rows.loc[non_counted, "location"] = (
+                    _SPECIAL_SORT_PREFIX + rows.loc[non_counted, "location"].astype(str)
+                )
+                rows.loc[non_counted, "company"] = (
+                    _SPECIAL_SORT_PREFIX + rows.loc[non_counted, "company"].astype(str)
+                )
+                group["rows"] = rows
+        return groups
+
     def patched_text_input(label, *args, **kwargs):
         if isinstance(label, str) and label == "제품명 검색":
-            search_col, filter_col = st.columns([7, 3], gap="small")
+            search_col, p_col, g_col = st.columns([6, 2, 2], gap="small")
             with search_col:
                 value = original_text_input(label, *args, **kwargs)
-            with filter_col:
+            with p_col:
                 st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
                 st.checkbox(
                     "수출대기(P) 제외",
                     value=bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False)),
                     key=_AVAILABLE_ONLY_KEY,
                     help="수출대기(P) 재고를 총재고와 재고 분포에서 제외합니다.",
+                )
+            with g_col:
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                st.checkbox(
+                    "G1/G2 제외",
+                    value=bool(st.session_state.get(_EXCLUDE_G_KEY, True)),
+                    key=_EXCLUDE_G_KEY,
+                    help="G1, G2 및 그 하위 로케이션 재고를 총재고와 재고 분포에서 제외합니다.",
                 )
             return value
         return original_text_input(label, *args, **kwargs)
@@ -130,15 +183,38 @@ def page_map():
             return False
         if isinstance(label, str) and label == "제품 사진\n(아래에서 업로드)":
             label = "클릭해서 업로드"
+        if isinstance(label, str) and label.startswith(_SPECIAL_SORT_PREFIX):
+            clean_label = label.lstrip(_SPECIAL_SORT_PREFIX)
+            clicked = original_button(clean_label, *args, **kwargs)
+            if clicked and clean_label == "N - 홍보물랙":
+                st.session_state["selected_location"] = clean_label
+            return clicked
         return original_button(label, *args, **kwargs)
 
+    def patched_markdown(body, *args, **kwargs):
+        if isinstance(body, str):
+            body = body.replace(_SPECIAL_SORT_PREFIX, "")
+            body = body.replace(
+                "<div class='dist-cell-qty'>0 EA</div>",
+                "<div class='dist-cell-qty'>측정 대상 아님</div>",
+            )
+            body = body.replace(
+                "<span class='company-total-blue'>0 EA</span>",
+                "<span class='company-total-blue'>측정 대상 아님</span>",
+            )
+        return original_markdown(body, *args, **kwargs)
+
     location_map_page.page_map_search_results = _page_map_search_results_with_available_filter
+    location_map_page._map_search_product_groups = patched_product_groups
     st.text_input = patched_text_input
     st.button = patched_button
+    st.markdown = patched_markdown
     try:
         _page_map()
     finally:
         location_map_page.page_map_search_results = original_search_results
+        location_map_page._map_search_product_groups = original_product_groups
         st.text_input = original_text_input
         st.button = original_button
+        st.markdown = original_markdown
     _inject_gm_medic_special_location()
