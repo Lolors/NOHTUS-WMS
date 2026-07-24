@@ -12,13 +12,12 @@ DEFAULT_USERS = {
     "jw": {"display_name": "김정욱", "role": "user"},
     "hj": {"display_name": "신호재", "role": "user"},
     "gw": {"display_name": "노건우", "role": "user"},
-    "jg": {"display_name": "노진국", "role": "viewer"},
     "noh": {"display_name": "노진국 대표", "role": "viewer"},
     "test0803": {"display_name": "test0803", "role": "viewer"},
 }
 
 ADMIN_USERNAMES = {"hn", "admin"}
-LEGACY_USERNAMES = ["khn", "kjw", "shj", "ngw", "njg"]
+LEGACY_USERNAMES = ["khn", "kjw", "shj", "ngw", "njg", "jg"]
 
 # viewer는 조회 전용 권한이다.
 # 사이드바 노출과 직접 페이지 접근 검사 모두 이 목록을 기준으로 한다.
