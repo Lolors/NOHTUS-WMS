@@ -13,6 +13,7 @@ DEFAULT_USERS = {
     "hj": {"display_name": "신호재", "role": "user"},
     "gw": {"display_name": "노건우", "role": "user"},
     "jg": {"display_name": "노진국", "role": "viewer"},
+    "noh": {"display_name": "노진국 대표", "role": "viewer"},
     "test0803": {"display_name": "test0803", "role": "viewer"},
 }
 
