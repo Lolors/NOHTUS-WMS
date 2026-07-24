@@ -36,13 +36,14 @@ def _build_where(companies, product_term, erp_term, exclude_p=False, exclude_mat
     if erp_term:
         where.append("COALESCE(warehouse_name,'') LIKE ?")
         params.append(f"%{erp_term}%")
+
+    normalized = "REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '')"
     if exclude_p:
-        where.append("REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT LIKE 'P%'")
+        where.append(f"{normalized} NOT LIKE 'P%'")
     if exclude_materials:
-        normalized = "REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '')"
-        where.append(f"{normalized} NOT IN ('G1','G2','N-홍보물랙')")
-        where.append(f"{normalized} NOT LIKE 'G1-%'")
-        where.append(f"{normalized} NOT LIKE 'G2-%'")
+        where.append(f"{normalized} NOT LIKE 'G1%'")
+        where.append(f"{normalized} NOT LIKE 'G2%'")
+        where.append(f"{normalized} NOT LIKE '%홍보물랙%'")
     return " AND ".join(where), params
 
 
@@ -169,7 +170,7 @@ def page_all_inventory():
                 "부자재 및 홍보물 제외",
                 value=True,
                 key="all_inv_exclude_materials",
-                help="G1, G2 및 그 하위 로케이션과 N - 홍보물랙 재고를 조회 결과와 합계에서 제외합니다.",
+                help="G1 계열, G2 계열 및 홍보물랙 재고를 조회 결과와 합계에서 제외합니다.",
             )
 
     row_count, total_qty, by_company = _summary_query(
