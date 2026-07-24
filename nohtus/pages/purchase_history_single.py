@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from io import BytesIO
 
 import pandas as pd
@@ -111,11 +112,72 @@ def _render_latest_upload_info():
         st.caption(f"{company} · 마지막 업데이트 {imported_at} · {file_name} · {row_count:,}건")
 
 
+def _render_purchase_page(original_render_import_box):
+    purchase_page._ensure_purchase_storage()
+
+    st.title("매입가 조회")
+    st.caption("표준제품명을 선택하면 노투스팜·노투스·NOH ERP명까지 함께 찾아 과거 매입가를 조회합니다.")
+
+    options = all_products._all_purchase_product_options()
+    if not options:
+        st.info("제품 매칭표에 등록된 제품이 없습니다. 먼저 제품 매칭표를 업로드해 주세요.")
+        return
+
+    query_col, side_col = st.columns([7, 3], gap="large")
+
+    with query_col:
+        st.markdown("### 조회 품목")
+        d1, d2 = st.columns(2)
+        with d1:
+            start = st.date_input("시작일", value=date(2020, 1, 1), key="purchase_start_date")
+        with d2:
+            end = st.date_input("종료일", value=date.today(), key="purchase_end_date")
+
+        selected = _render_search_matches(options)
+        run_query = st.button("매입가 조회", type="primary", use_container_width=True)
+
+    with side_col:
+        original_render_import_box()
+        _render_latest_upload_info()
+
+    if not run_query:
+        return
+    if not selected:
+        st.warning("조회할 품목을 1개 이상 선택해 주세요.")
+        return
+
+    frames = []
+    for item_no, product_name in selected:
+        rows = all_products._query_all_purchase_rows(item_no, product_name, str(start), str(end))
+        if not rows.empty:
+            frames.append(rows)
+
+    if not frames:
+        st.info("조회 결과가 없습니다.")
+        return
+
+    result = pd.concat(frames, ignore_index=True)
+    result = result.rename(columns={
+        "business_name": "사업장",
+        "purchase_date": "매입일자",
+        "supplier_name": "거래처명",
+        "specification": "규격",
+        "quantity": "수량",
+        "unit_price": "실단가",
+        "note": "비고",
+    })
+    display_cols = ["품목", "표준제품명", "사업장", "매입일자", "거래처명", "규격", "수량", "실단가", "비고"]
+    result = result[[col for col in display_cols if col in result.columns]]
+
+    st.markdown("### 조회 결과")
+    st.caption("결과표에는 ERP 제품명을 표시하지 않고 표준제품명만 표시합니다.")
+    st.dataframe(result, use_container_width=True)
+
+
 def page_purchase_history():
-    original_render_query_items = purchase_page._render_query_items
-    original_render_import_box = purchase_page._render_import_box
     original_file_uploader = st.file_uploader
     original_import_purchase_history = purchase_page._import_purchase_history
+    original_render_import_box = purchase_page._render_import_box
 
     def patched_file_uploader(label, *args, **kwargs):
         if kwargs.get("key") == "purchase_history_upload":
@@ -135,21 +197,10 @@ def page_purchase_history():
         finally:
             purchase_page._read_purchase_excel = original_reader
 
-    def patched_render_import_box():
-        status_col, upload_col = st.columns([7, 3], gap="large")
-        with status_col:
-            _render_latest_upload_info()
-        with upload_col:
-            original_render_import_box()
-
-    purchase_page._render_query_items = _render_search_matches
-    purchase_page._render_import_box = patched_render_import_box
     purchase_page._import_purchase_history = patched_import_purchase_history
     st.file_uploader = patched_file_uploader
     try:
-        return all_products.page_purchase_history()
+        _render_purchase_page(original_render_import_box)
     finally:
-        purchase_page._render_query_items = original_render_query_items
-        purchase_page._render_import_box = original_render_import_box
         purchase_page._import_purchase_history = original_import_purchase_history
         st.file_uploader = original_file_uploader
