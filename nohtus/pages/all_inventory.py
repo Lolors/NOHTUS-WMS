@@ -147,29 +147,30 @@ def page_all_inventory():
     st.title("전체 조회")
     st.caption("전체 재고를 사업장, 표준제품명, ERP명 기준으로 조회합니다. N - 홍보물랙은 수량 합계에서 제외됩니다.")
 
-    f1, f2, f3 = st.columns([4, 3, 3], gap="small")
+    f1, f2, f3, f4 = st.columns([3, 2, 2, 3], gap="small")
     with f1:
         companies = st.multiselect("사업장", COMPANIES, default=COMPANIES, key="all_inv_companies")
     with f2:
         product_term = st.text_input("표준제품명 검색", placeholder="표준제품명 일부 입력", key="all_inv_product_term")
     with f3:
         erp_term = st.text_input("ERP명 검색", placeholder="ERP명 일부 입력", key="all_inv_erp_term")
-
-    c1, c2, _ = st.columns([2, 3, 5], gap="small")
-    with c1:
-        exclude_p = st.checkbox(
-            "수출대기(P) 제외",
-            value=False,
-            key="all_inv_exclude_p",
-            help="P 로케이션 재고를 조회 결과와 합계에서 제외합니다.",
-        )
-    with c2:
-        exclude_materials = st.checkbox(
-            "부자재 및 홍보물 제외",
-            value=True,
-            key="all_inv_exclude_materials",
-            help="G1, G2 및 그 하위 로케이션과 N - 홍보물랙 재고를 조회 결과와 합계에서 제외합니다.",
-        )
+    with f4:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        c1, c2 = st.columns([1, 1], gap="small")
+        with c1:
+            exclude_p = st.checkbox(
+                "수출대기(P) 제외",
+                value=False,
+                key="all_inv_exclude_p",
+                help="P 로케이션 재고를 조회 결과와 합계에서 제외합니다.",
+            )
+        with c2:
+            exclude_materials = st.checkbox(
+                "부자재 및 홍보물 제외",
+                value=True,
+                key="all_inv_exclude_materials",
+                help="G1, G2 및 그 하위 로케이션과 N - 홍보물랙 재고를 조회 결과와 합계에서 제외합니다.",
+            )
 
     row_count, total_qty, by_company = _summary_query(
         companies, product_term, erp_term, exclude_p, exclude_materials
