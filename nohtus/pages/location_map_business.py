@@ -13,20 +13,6 @@ _AVAILABLE_ONLY_KEY = "map_search_available_only"
 _EXCLUDE_MATERIALS_KEY = "map_search_exclude_materials"
 _SPECIAL_SORT_PREFIX = "\uffff"
 _NON_COUNTED_LOCATION = "N-홍보물랙"
-_EXCLUDED_MATERIAL_PROMO_LOCATIONS = {
-    "G1-01-01",
-    "G1-01-02",
-    "G1-01-03",
-    "G1-02-01",
-    "G1-02-02",
-    "G1-02-03",
-    "G1-03-01",
-    "G1-03-02",
-    "G1-03-03",
-    "G2",
-    "홍보물랙",
-    "N-홍보물랙",
-}
 
 
 def _normalized_location(value):
@@ -39,7 +25,7 @@ def _is_non_counted_location(value):
 
 def _is_material_or_promo_location(value):
     location = _normalized_location(value)
-    return location in _EXCLUDED_MATERIAL_PROMO_LOCATIONS
+    return location.startswith("G1") or location.startswith("G2") or "홍보물랙" in location
 
 
 def _page_map_search_results_with_available_filter(term, compact: bool = False):
@@ -58,7 +44,7 @@ def _page_map_search_results_with_available_filter(term, compact: bool = False):
             keep = pd.Series(True, index=result.index)
             locations = result["location"].fillna("").astype(str)
             if available_only:
-                keep &= locations.str.strip().str.upper() != "P"
+                keep &= ~locations.apply(lambda value: _normalized_location(value).startswith("P"))
             if exclude_materials:
                 keep &= ~locations.apply(_is_material_or_promo_location)
             result = result.loc[keep].copy()
@@ -152,7 +138,21 @@ def page_map():
     )
 
     def patched_product_groups(product_name, inv_df):
-        groups = original_product_groups(product_name, inv_df)
+        filtered_inv = inv_df
+        if isinstance(inv_df, pd.DataFrame) and not inv_df.empty and "location" in inv_df.columns:
+            filtered_inv = inv_df.copy()
+            locations = filtered_inv["location"].fillna("").astype(str)
+            if bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False)):
+                filtered_inv = filtered_inv.loc[
+                    ~locations.apply(lambda value: _normalized_location(value).startswith("P"))
+                ].copy()
+                locations = filtered_inv["location"].fillna("").astype(str)
+            if bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)):
+                filtered_inv = filtered_inv.loc[
+                    ~locations.apply(_is_material_or_promo_location)
+                ].copy()
+
+        groups = original_product_groups(product_name, filtered_inv)
         for group in groups:
             rows = group.get("rows")
             if rows is None or rows.empty or "location" not in rows.columns:
@@ -191,7 +191,7 @@ def page_map():
                     "부자재 및 홍보물 제외",
                     value=bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)),
                     key=_EXCLUDE_MATERIALS_KEY,
-                    help="지정된 G1 부자재 로케이션, G2, 홍보물랙 재고를 총재고와 재고 분포에서 제외합니다.",
+                    help="G1 계열, G2 계열 및 홍보물랙 재고를 총재고와 재고 분포에서 제외합니다.",
                 )
             return value
         return original_text_input(label, *args, **kwargs)
