@@ -137,24 +137,6 @@ def page_map():
         unsafe_allow_html=True,
     )
 
-    # 검색 폼 내부 체크박스는 검색 버튼을 누르기 전까지 값이 반영되지 않는다.
-    # 필터를 폼 밖에서 렌더링해 체크 즉시 rerun되고 검색 결과 집계에도 바로 적용되게 한다.
-    filter_spacer, p_col, materials_col = st.columns([5.1, 2.15, 2.75], gap="small")
-    with p_col:
-        st.checkbox(
-            "수출대기(P) 제외",
-            value=bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False)),
-            key=_AVAILABLE_ONLY_KEY,
-            help="수출대기(P) 재고를 총재고와 재고 분포에서 제외합니다.",
-        )
-    with materials_col:
-        st.checkbox(
-            "부자재 및 홍보물 제외",
-            value=bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)),
-            key=_EXCLUDE_MATERIALS_KEY,
-            help="G1 계열, G2 계열 및 홍보물랙 재고를 총재고와 재고 분포에서 제외합니다.",
-        )
-
     def patched_product_groups(product_name, inv_df):
         filtered_inv = inv_df
         if isinstance(inv_df, pd.DataFrame) and not inv_df.empty and "location" in inv_df.columns:
@@ -191,6 +173,27 @@ def page_map():
         return groups
 
     def patched_text_input(label, *args, **kwargs):
+        if isinstance(label, str) and label == "제품명 검색":
+            search_col, p_col, materials_col = st.columns([5.1, 2.15, 2.75], gap="small")
+            with search_col:
+                value = original_text_input(label, *args, **kwargs)
+            with p_col:
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                st.checkbox(
+                    "수출대기(P) 제외",
+                    value=bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False)),
+                    key=_AVAILABLE_ONLY_KEY,
+                    help="수출대기(P) 재고를 총재고와 재고 분포에서 제외합니다.",
+                )
+            with materials_col:
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                st.checkbox(
+                    "부자재 및 홍보물 제외",
+                    value=bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)),
+                    key=_EXCLUDE_MATERIALS_KEY,
+                    help="G1 계열, G2 계열 및 홍보물랙 재고를 총재고와 재고 분포에서 제외합니다.",
+                )
+            return value
         return original_text_input(label, *args, **kwargs)
 
     def patched_button(label, *args, **kwargs):
