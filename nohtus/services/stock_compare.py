@@ -122,8 +122,19 @@ def _read_excel_first_sheet(uploaded_file, **kwargs):
         ) from fallback_exc
 
 
+def _drop_last_data_row(df):
+    """ERP 시트의 마지막 데이터 행은 합계행이므로 비교 대상에서 제외한다."""
+    if df is None or df.empty:
+        return df
+    work = df.dropna(how="all").copy()
+    if work.empty:
+        return work
+    return work.iloc[:-1].copy()
+
+
 def _read_standard_erp(uploaded_file):
     df = _read_excel_first_sheet(uploaded_file, dtype=object)
+    df = _drop_last_data_row(df)
     df.columns = [_clean_header(c) for c in df.columns]
     _require_columns(df, ["제품명", "현재고수량"])
     out = df[["제품명", "현재고수량"]].copy()
@@ -133,6 +144,7 @@ def _read_standard_erp(uploaded_file):
 
 def _read_nohtus_erp(uploaded_file):
     df = _read_excel_first_sheet(uploaded_file, header=7, dtype=object)
+    df = _drop_last_data_row(df)
     df.columns = [_clean_header(c) for c in df.columns]
     _require_columns(df, ["품목명/규격", "현재재고"])
     out = df[["품목명/규격", "현재재고"]].copy()
