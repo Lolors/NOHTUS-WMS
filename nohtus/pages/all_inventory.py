@@ -21,7 +21,7 @@ def _is_non_counted_location(value):
     return _normalized_location(value) == _NON_COUNTED_LOCATION
 
 
-def _build_where(companies, product_term, erp_term, exclude_p=False, exclude_g=True):
+def _build_where(companies, product_term, erp_term, exclude_p=False, exclude_materials=True):
     where = ["qty>0"]
     params = []
     if companies:
@@ -38,16 +38,16 @@ def _build_where(companies, product_term, erp_term, exclude_p=False, exclude_g=T
         params.append(f"%{erp_term}%")
     if exclude_p:
         where.append("REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT LIKE 'P%'")
-    if exclude_g:
+    if exclude_materials:
         normalized = "REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '')"
-        where.append(f"{normalized} NOT IN ('G1','G2')")
+        where.append(f"{normalized} NOT IN ('G1','G2','N-홍보물랙')")
         where.append(f"{normalized} NOT LIKE 'G1-%'")
         where.append(f"{normalized} NOT LIKE 'G2-%'")
     return " AND ".join(where), params
 
 
-def _build_query(companies, product_term, erp_term, exclude_p=False, exclude_g=True):
-    where_sql, params = _build_where(companies, product_term, erp_term, exclude_p, exclude_g)
+def _build_query(companies, product_term, erp_term, exclude_p=False, exclude_materials=True):
+    where_sql, params = _build_where(companies, product_term, erp_term, exclude_p, exclude_materials)
     sql = f"""
         SELECT company AS 사업장,
                location AS 로케이션,
@@ -65,8 +65,8 @@ def _build_query(companies, product_term, erp_term, exclude_p=False, exclude_g=T
     return q(sql, tuple(params))
 
 
-def _summary_query(companies, product_term, erp_term, exclude_p=False, exclude_g=True):
-    where_sql, params = _build_where(companies, product_term, erp_term, exclude_p, exclude_g)
+def _summary_query(companies, product_term, erp_term, exclude_p=False, exclude_materials=True):
+    where_sql, params = _build_where(companies, product_term, erp_term, exclude_p, exclude_materials)
     counted_condition = "REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '')<>'N-홍보물랙'"
     total_df = q(
         f"""
@@ -155,7 +155,7 @@ def page_all_inventory():
     with f3:
         erp_term = st.text_input("ERP명 검색", placeholder="ERP명 일부 입력", key="all_inv_erp_term")
 
-    c1, c2, _ = st.columns([2, 2, 6], gap="small")
+    c1, c2, _ = st.columns([2, 3, 5], gap="small")
     with c1:
         exclude_p = st.checkbox(
             "수출대기(P) 제외",
@@ -164,19 +164,19 @@ def page_all_inventory():
             help="P 로케이션 재고를 조회 결과와 합계에서 제외합니다.",
         )
     with c2:
-        exclude_g = st.checkbox(
-            "G1/G2 제외",
+        exclude_materials = st.checkbox(
+            "부자재 및 홍보물 제외",
             value=True,
-            key="all_inv_exclude_g",
-            help="G1, G2 및 그 하위 로케이션 재고를 조회 결과와 합계에서 제외합니다.",
+            key="all_inv_exclude_materials",
+            help="G1, G2 및 그 하위 로케이션과 N - 홍보물랙 재고를 조회 결과와 합계에서 제외합니다.",
         )
 
     row_count, total_qty, by_company = _summary_query(
-        companies, product_term, erp_term, exclude_p, exclude_g
+        companies, product_term, erp_term, exclude_p, exclude_materials
     )
     _render_summary(row_count, total_qty, by_company)
 
-    df = _build_query(companies, product_term, erp_term, exclude_p, exclude_g)
+    df = _build_query(companies, product_term, erp_term, exclude_p, exclude_materials)
     display_df = _prepare_display_df(df)
 
     st.caption(f"표시 중: {len(display_df):,} / {row_count:,}건")
