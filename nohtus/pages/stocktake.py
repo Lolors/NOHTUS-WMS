@@ -11,13 +11,92 @@ from datetime import date
 import streamlit as st
 
 
-from nohtus.db import q
-from nohtus.dates import display_date_only
+from nohtus.db import connect, q
+from nohtus.dates import display_date_only, normalize_exp_date
 from nohtus.services.inventory import adjust_inventory
 
 
 # Several Excel/import helper functions still live in app.py until later steps.
 # The migration script injects runtime imports inside page_stocktake as needed.
+
+
+def _normalize_master_text(value):
+    text = str(value or "").strip()
+    return text if text else "-"
+
+
+def _update_inventory_master(inv_id, product_name, lot, exp_date):
+    """선택한 재고 행의 표준제품명, 제조번호, 유통기한을 직접 수정한다."""
+    product_name = str(product_name or "").strip()
+    if not product_name:
+        raise ValueError("제품명을 입력하세요.")
+
+    lot = _normalize_master_text(lot)
+    exp_date = normalize_exp_date(exp_date)
+
+    with connect() as con:
+        row = con.execute(
+            "SELECT id FROM inventory WHERE id=?",
+            (int(inv_id),),
+        ).fetchone()
+        if not row:
+            raise ValueError("수정할 재고를 찾을 수 없습니다.")
+
+        try:
+            con.execute(
+                """
+                UPDATE inventory
+                SET product_name=?, lot=?, exp_date=?
+                WHERE id=?
+                """,
+                (product_name, lot, exp_date, int(inv_id)),
+            )
+            con.commit()
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(
+                "같은 사업장·로케이션에 동일한 제품명/제조번호/유통기한 재고가 이미 존재합니다."
+            ) from exc
+
+    return product_name, lot, exp_date
+
+
+@st.dialog("제품마스터 수정")
+def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
+    st.caption("현재 선택한 재고 1건의 제품명, 제조번호, 유통기한을 DB에서 수정합니다.")
+    with st.form(f"stock_master_edit_form_{inv_id}"):
+        new_product_name = st.text_input(
+            "제품명",
+            value=str(product_name or ""),
+            key=f"stock_master_product_{inv_id}",
+        )
+        new_lot = st.text_input(
+            "LOT/제조번호",
+            value=str(lot or "-"),
+            key=f"stock_master_lot_{inv_id}",
+        )
+        new_exp = st.text_input(
+            "유통기한",
+            value=str(exp_date or "-"),
+            placeholder="예) 2028-03-30 / 미입력 시 '-'",
+            key=f"stock_master_exp_{inv_id}",
+        )
+        submitted = st.form_submit_button("제품마스터 수정 저장", type="primary", use_container_width=True)
+
+    if submitted:
+        try:
+            saved_product, saved_lot, saved_exp = _update_inventory_master(
+                int(inv_id),
+                new_product_name,
+                new_lot,
+                new_exp,
+            )
+            st.session_state["_stock_master_success_msg"] = (
+                f"제품마스터 수정 완료: {saved_product} / {saved_lot} / {display_date_only(saved_exp)}"
+            )
+            st.session_state["_stock_master_focus_product"] = saved_product
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
 
 
 def _render_stock_comparison():
@@ -148,6 +227,16 @@ def _render_stock_comparison():
 
 def _render_stock_adjustment():
     st.subheader("재고조정")
+
+    focus_product = st.session_state.pop("_stock_master_focus_product", None)
+    if focus_product:
+        st.session_state["stock_adjust_search"] = focus_product
+        st.session_state["stock_adjust_product"] = focus_product
+
+    master_msg = st.session_state.pop("_stock_master_success_msg", None)
+    if master_msg:
+        st.success(master_msg)
+
     adj_df = q("""
         SELECT id, location, company, product_name, warehouse_name, lot, exp_date, qty
         FROM inventory
@@ -209,13 +298,21 @@ def _render_stock_adjustment():
         st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
         btn_left, btn_mid, btn_right = st.columns([1, 1, 1])
         with btn_mid:
-            if st.button("재고조정 저장", type="primary", use_container_width=False, key=f"stock_adjust_submit_{inv_id}"):
+            if st.button("재고조정 저장", type="primary", use_container_width=True, key=f"stock_adjust_submit_{inv_id}"):
                 try:
                     before, after, diff = adjust_inventory(int(inv_id), int(actual), reason, memo)
                     st.session_state["_stock_adjust_success_msg"] = f"재고조정 완료: {before}EA → {after}EA ({diff:+d}EA)"
                     st.rerun()
                 except Exception as e:
                     st.error(str(e))
+        with btn_right:
+            if st.button("제품마스터 수정", use_container_width=True, key=f"stock_master_open_{inv_id}"):
+                _render_inventory_master_dialog(
+                    int(inv_id),
+                    row["product_name"],
+                    row["lot"],
+                    row["exp_date"],
+                )
 
         st.markdown("#### 선택 재고")
         show = target_df[["id", "location", "company", "product_name", "warehouse_name", "lot", "exp_date", "qty"]].copy()
