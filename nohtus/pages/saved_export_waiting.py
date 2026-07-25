@@ -9,7 +9,12 @@ import streamlit.components.v1 as components
 from nohtus.config import COMPANIES
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only
-from nohtus.services.export_waiting import cancel_export_waiting_order, confirm_export_waiting_items, ensure_export_waiting_tables
+from nohtus.services.export_waiting import (
+    cancel_export_waiting_order,
+    confirm_export_waiting_items,
+    ensure_export_waiting_tables,
+    merge_export_waiting_orders,
+)
 
 STATUS_LABELS = {"waiting": "수출대기", "partial": "일부 확정", "confirmed": "수출확정", "cancelled": "취소됨"}
 _SELECTED_ORDER_KEY = "saved_export_waiting_selected_order_id"
@@ -306,7 +311,7 @@ def page_saved_export_waiting():
         st.success("모든 품목의 수출확정이 완료되었습니다. 출고일자는 위에서 수정할 수 있습니다.")
         return
 
-    edit_col, cancel_col = st.columns(2)
+    edit_col, merge_col, cancel_col = st.columns(3)
     with edit_col:
         if status == "waiting":
             if st.button("수출대기 수정", type="primary", use_container_width=True):
@@ -316,9 +321,72 @@ def page_saved_export_waiting():
                 st.rerun()
         else:
             st.button("일부 확정 후에는 수정할 수 없음", disabled=True, use_container_width=True)
+    with merge_col:
+        if status == "waiting":
+            if st.button("수출대기 병합", use_container_width=True):
+                st.session_state["confirm_export_merge_source_id"] = order_id
+        else:
+            st.button("일부 확정 후에는 병합할 수 없음", disabled=True, use_container_width=True)
     with cancel_col:
         if st.button("남은 수출대기 취소", use_container_width=True):
             st.session_state["confirm_export_cancel_id"] = order_id
+
+    if st.session_state.get("confirm_export_merge_source_id") == order_id:
+        merge_targets = q(
+            """SELECT id,export_no,country,buyer,transport_method,title
+               FROM export_waiting_orders
+               WHERE id<>? AND status='waiting'
+               ORDER BY id DESC""",
+            (order_id,),
+        )
+        if merge_targets.empty:
+            st.warning("병합할 수 있는 다른 수출대기 건이 없습니다.")
+            if st.button("병합 닫기", use_container_width=True):
+                st.session_state.pop("confirm_export_merge_source_id", None)
+                st.rerun()
+        else:
+            target_labels = [
+                f"{str(row.export_no or '-')} · {str(row.title or '-')}"
+                for row in merge_targets.itertuples()
+            ]
+            selected_target_label = st.selectbox(
+                "합쳐질 대상 수출대기 건",
+                target_labels,
+                key=f"export_merge_target_{order_id}",
+                help="선택한 현재 건의 모든 품목이 이 수출번호로 합쳐집니다.",
+            )
+            target_index = target_labels.index(selected_target_label)
+            target_order = merge_targets.iloc[target_index]
+            target_order_id = int(target_order["id"])
+            source_export_no = str(selected["export_no"] or "-")
+            target_export_no = str(target_order["export_no"] or "-")
+            st.warning(
+                f"수출번호 {source_export_no}의 모든 품목을 {target_export_no}에 합칩니다. "
+                f"병합 후 {source_export_no} 건은 목록에서 삭제되며 되돌릴 수 없습니다."
+            )
+            no_merge_col, yes_merge_col = st.columns(2)
+            with no_merge_col:
+                if st.button("병합하지 않기", use_container_width=True):
+                    st.session_state.pop("confirm_export_merge_source_id", None)
+                    st.rerun()
+            with yes_merge_col:
+                if st.button(
+                    f"{source_export_no} → {target_export_no} 병합",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    try:
+                        result = merge_export_waiting_orders(order_id, target_order_id)
+                        st.session_state.pop("confirm_export_merge_source_id", None)
+                        st.session_state[_SELECTED_ORDER_KEY] = target_order_id
+                        st.session_state["_export_waiting_message"] = (
+                            f"수출번호 {result['source_export_no']}의 "
+                            f"{result['merged_row_count']}개 재고행 / {result['merged_qty']}EA를 "
+                            f"{result['target_export_no']}에 합쳤습니다."
+                        )
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
 
     if st.session_state.get("confirm_export_cancel_id") == order_id:
         st.warning("이미 확정된 품목은 유지되고, 아직 확정되지 않은 품목만 원래 로케이션으로 돌아갑니다.")

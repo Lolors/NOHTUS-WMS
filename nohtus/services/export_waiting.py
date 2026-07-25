@@ -347,6 +347,95 @@ def save_export_waiting_order(cart, *, country, buyer="", transport_method="미�
     return {"order_id":order_id,"row_count":len(grouped),"total_qty":total,"title":title}
 
 
+def merge_export_waiting_orders(source_order_id, target_order_id):
+    """Merge one waiting export order into another without moving inventory again."""
+    source_order_id = int(source_order_id or 0)
+    target_order_id = int(target_order_id or 0)
+    if not source_order_id or not target_order_id:
+        raise ValueError("합칠 수출대기 건과 대상 수출대기 건을 선택하세요.")
+    if source_order_id == target_order_id:
+        raise ValueError("같은 수출대기 건끼리는 합칠 수 없습니다.")
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with connect() as con:
+        cur = con.cursor()
+        ensure_export_waiting_tables(cur)
+        source = _dict_row(
+            cur,
+            "SELECT id,export_no,title,status FROM export_waiting_orders WHERE id=?",
+            (source_order_id,),
+        )
+        target = _dict_row(
+            cur,
+            "SELECT id,export_no,title,status FROM export_waiting_orders WHERE id=?",
+            (target_order_id,),
+        )
+        if not source:
+            raise ValueError("합칠 원본 수출대기 건을 찾을 수 없습니다.")
+        if not target:
+            raise ValueError("병합 대상 수출대기 건을 찾을 수 없습니다.")
+        if source["status"] != "waiting" or target["status"] != "waiting":
+            raise ValueError("아직 품목이 확정되지 않은 수출대기 건끼리만 합칠 수 있습니다.")
+
+        confirmed_count = cur.execute(
+            """SELECT COUNT(*) FROM export_waiting_items
+               WHERE order_id IN (?,?) AND COALESCE(confirmed,0)<>0""",
+            (source_order_id, target_order_id),
+        ).fetchone()[0]
+        if int(confirmed_count or 0):
+            raise ValueError("수출확정된 품목이 있는 수출대기 건은 합칠 수 없습니다.")
+
+        source_summary = cur.execute(
+            "SELECT COUNT(*),COALESCE(SUM(qty),0) FROM export_waiting_items WHERE order_id=?",
+            (source_order_id,),
+        ).fetchone()
+        if not int(source_summary[0] or 0):
+            raise ValueError("원본 수출대기 건에 합칠 품목이 없습니다.")
+
+        grouped_items = cur.execute(
+            """SELECT source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
+                      source_location,waiting_location,SUM(qty) AS qty,MIN(moved_at) AS moved_at
+               FROM export_waiting_items
+               WHERE order_id IN (?,?)
+               GROUP BY source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
+                        source_location,waiting_location
+               ORDER BY MIN(id)""",
+            (target_order_id, source_order_id),
+        ).fetchall()
+
+        cur.execute(
+            "DELETE FROM export_waiting_items WHERE order_id IN (?,?)",
+            (target_order_id, source_order_id),
+        )
+        for item in grouped_items:
+            cur.execute(
+                """INSERT INTO export_waiting_items(
+                       order_id,source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
+                       source_location,waiting_location,qty,moved_at,confirmed
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,0)""",
+                (target_order_id, *item),
+            )
+
+        cur.execute("DELETE FROM export_waiting_orders WHERE id=?", (source_order_id,))
+        cur.execute(
+            "UPDATE export_waiting_orders SET updated_at=? WHERE id=?",
+            (now, target_order_id),
+        )
+        con.commit()
+
+    return {
+        "source_order_id": source_order_id,
+        "source_export_no": str(source["export_no"] or ""),
+        "target_order_id": target_order_id,
+        "target_export_no": str(target["export_no"] or ""),
+        "target_title": str(target["title"] or ""),
+        "merged_row_count": int(source_summary[0] or 0),
+        "merged_qty": int(source_summary[1] or 0),
+        "result_row_count": len(grouped_items),
+        "result_qty": sum(int(item[8] or 0) for item in grouped_items),
+    }
+
+
 def cancel_export_waiting_order(order_id):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with connect() as con:
