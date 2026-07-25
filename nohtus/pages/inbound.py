@@ -47,6 +47,20 @@ def _erp_choice_label(value):
     return str(value or "")
 
 
+def _sync_inbound_company_option(options):
+    """제품 변경으로 재고수량 라벨이 바뀌어도 기존 사업장 선택을 유지한다."""
+    if not options:
+        return
+    current_label = st.session_state.get("inbound_company", "")
+    current_company = strip_company_stock_label(current_label)
+    matching_label = next(
+        (option for option in options if strip_company_stock_label(option) == current_company),
+        None,
+    )
+    if matching_label:
+        st.session_state["inbound_company"] = matching_label
+
+
 def _apply_selected_inbound_date(*, company, product, warehouse, lot, exp, location, qty, memo, inbound_date):
     """방금 저장한 입고 이력의 날짜를 사용자가 지정한 입고일자로 바꾼다.
 
@@ -131,7 +145,9 @@ def page_inbound():
             inbound_source = st.text_input("매입처", value="", placeholder="예: 거래처명/수입처", key="inbound_source")
         with in_company_col:
             _inbound_selected_product_for_stock = st.session_state.get("inbound_product", "")
-            company_label = st.selectbox("사업장", inbound_company_options_for(_inbound_selected_product_for_stock), key="inbound_company")
+            company_options = inbound_company_options_for(_inbound_selected_product_for_stock)
+            _sync_inbound_company_option(company_options)
+            company_label = st.selectbox("사업장", company_options, key="inbound_company")
             company = strip_company_stock_label(company_label)
 
         search_col, first_col = st.columns([8, 2], gap="small")
