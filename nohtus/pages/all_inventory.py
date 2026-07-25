@@ -99,11 +99,13 @@ def _prepare_display_df(df):
         return df
     work = df.copy()
     work["유통기한"] = work["유통기한"].apply(display_date_only)
-    numeric_qty = pd.to_numeric(work["수량"], errors="coerce").fillna(0).astype(int)
-    work["수량"] = [
-        "측정 대상 아님" if _is_non_counted_location(location) else f"{qty:,}"
-        for location, qty in zip(work["로케이션"], numeric_qty)
-    ]
+
+    # 표시 전에 쉼표가 포함된 문자열로 바꾸면 Streamlit이 문자 순서로 정렬한다.
+    # 숫자형을 유지하고, 합계 대상이 아닌 홍보물랙만 빈 값으로 표시한다.
+    work["수량"] = pd.to_numeric(work["수량"], errors="coerce").round().astype("Int64")
+    non_counted_mask = work["로케이션"].apply(_is_non_counted_location)
+    work.loc[non_counted_mask, "수량"] = pd.NA
+
     return work[["사업장", "로케이션", "표준제품명", "ERP명", "제조번호", "유통기한", "수량"]]
 
 
@@ -190,4 +192,7 @@ def page_all_inventory():
             hide_index=True,
             use_container_width=True,
             height=min(720, 38 + max(1, len(display_df)) * 35),
+            column_config={
+                "수량": st.column_config.NumberColumn("수량", format=",%d"),
+            },
         )
