@@ -97,14 +97,17 @@ def _summary_query(companies, product_term, erp_term, exclude_p=False, exclude_m
 def _prepare_display_df(df):
     if df.empty:
         return df
+
     work = df.copy()
     work["유통기한"] = work["유통기한"].apply(display_date_only)
 
-    # 표시 전에 쉼표가 포함된 문자열로 바꾸면 Streamlit이 문자 순서로 정렬한다.
-    # 숫자형을 유지하고, 합계 대상이 아닌 홍보물랙만 빈 값으로 표시한다.
-    work["수량"] = pd.to_numeric(work["수량"], errors="coerce").round().astype("Int64")
-    non_counted_mask = work["로케이션"].apply(_is_non_counted_location)
-    work.loc[non_counted_mask, "수량"] = pd.NA
+    # Streamlit 정렬이 문자열/nullable 정수로 해석되지 않도록 순수 int64로 고정한다.
+    work["수량"] = (
+        pd.to_numeric(work["수량"], errors="coerce")
+        .fillna(0)
+        .round()
+        .astype("int64")
+    )
 
     return work[["사업장", "로케이션", "표준제품명", "ERP명", "제조번호", "유통기한", "수량"]]
 
