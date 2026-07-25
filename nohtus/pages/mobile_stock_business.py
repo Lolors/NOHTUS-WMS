@@ -11,6 +11,7 @@ from nohtus.pages.mobile_stock_layout_patch_v3 import page_mobile_stock_finder a
 
 
 _MATERIAL_OR_PROMO_PREFIXES = ("G1", "G2")
+_MATERIAL_OR_PROMO_KEYWORDS = ("부자재", "홍보물")
 
 
 def _normalized_location(value):
@@ -19,7 +20,10 @@ def _normalized_location(value):
 
 def _is_material_or_promo_location(value):
     location = _normalized_location(value)
-    return location.startswith(_MATERIAL_OR_PROMO_PREFIXES) or "홍보물랙" in location
+    return (
+        location.startswith(_MATERIAL_OR_PROMO_PREFIXES)
+        or any(keyword in location for keyword in _MATERIAL_OR_PROMO_KEYWORDS)
+    )
 
 
 def _is_export_waiting_location(value):
@@ -116,7 +120,7 @@ def _render_result_list_with_export_badge(candidates, meta_getter, state_key, ke
 
 
 def page_mobile_stock_finder():
-    """모바일 재고 화면에서는 G1/G2 및 홍보물랙 재고를 항상 제외한다."""
+    """모바일 재고 화면에서는 부자재 및 홍보물 재고를 항상 제외한다."""
     original_stock_rows = mobile_stock.mobile_stock_rows
     original_candidates = mobile_stock.mobile_product_candidates
     original_expiry_inventory = mobile_stock._expiry_inventory
