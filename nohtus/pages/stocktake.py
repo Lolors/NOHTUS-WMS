@@ -8,16 +8,33 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date
-import streamlit as st
 
+import pandas as pd
+import streamlit as st
 
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only, normalize_exp_date
 from nohtus.services.inventory import adjust_inventory
 
+PRODUCT_MAPPING_COLUMNS = [
+    "노투스팜 ERP명",
+    "노투스팜 ERP 제품코드",
+    "NOH ERP명",
+    "NOH ERP 제품코드",
+    "노투스 ERP명",
+    "비자료명",
+    "별칭",
+]
 
-# Several Excel/import helper functions still live in app.py until later steps.
-# The migration script injects runtime imports inside page_stocktake as needed.
+PRODUCT_MAPPING_DB_COLUMNS = {
+    "노투스팜 ERP명": "erp_nohtuspharm_name",
+    "노투스팜 ERP 제품코드": "product_code",
+    "NOH ERP명": "erp_noh_name",
+    "NOH ERP 제품코드": "erp_noh_code",
+    "노투스 ERP명": "erp_nohtus_name",
+    "비자료명": "bidata_name",
+    "별칭": "aliases",
+}
 
 
 def _normalize_master_text(value):
@@ -25,22 +42,76 @@ def _normalize_master_text(value):
     return text if text else "-"
 
 
-def _update_inventory_master(inv_id, product_name, lot, exp_date):
-    """선택한 재고 행의 표준제품명, 제조번호, 유통기한을 직접 수정한다."""
+def _clean_mapping_text(value):
+    if pd.isna(value):
+        return ""
+    text = str(value or "").strip()
+    return "" if text.lower() == "nan" else text
+
+
+def _load_product_mapping_rows(product_name):
+    mapping_df = q(
+        """
+        SELECT id, erp_nohtuspharm_name, product_code, erp_noh_name,
+               erp_noh_code, erp_nohtus_name, bidata_name, aliases
+        FROM products
+        WHERE TRIM(standard_name)=?
+        ORDER BY id
+        """,
+        (str(product_name or "").strip(),),
+    )
+    if mapping_df.empty:
+        return pd.DataFrame([{column: "" for column in PRODUCT_MAPPING_COLUMNS}])
+
+    return mapping_df.rename(
+        columns={
+            "erp_nohtuspharm_name": "노투스팜 ERP명",
+            "product_code": "노투스팜 ERP 제품코드",
+            "erp_noh_name": "NOH ERP명",
+            "erp_noh_code": "NOH ERP 제품코드",
+            "erp_nohtus_name": "노투스 ERP명",
+            "bidata_name": "비자료명",
+            "aliases": "별칭",
+        }
+    )[["id", *PRODUCT_MAPPING_COLUMNS]]
+
+
+def _update_inventory_and_product_mappings(inv_id, product_name, lot, exp_date, edited_mappings):
     product_name = str(product_name or "").strip()
     if not product_name:
         raise ValueError("제품명을 입력하세요.")
 
     lot = _normalize_master_text(lot)
     exp_date = normalize_exp_date(exp_date)
+    mapping_rows = edited_mappings.copy()
+    if "id" not in mapping_rows.columns:
+        mapping_rows.insert(0, "id", None)
 
     with connect() as con:
-        row = con.execute(
-            "SELECT id FROM inventory WHERE id=?",
+        current = con.execute(
+            "SELECT product_name FROM inventory WHERE id=?",
             (int(inv_id),),
         ).fetchone()
-        if not row:
+        if not current:
             raise ValueError("수정할 재고를 찾을 수 없습니다.")
+        old_product_name = str(current[0] or "").strip()
+
+        existing_rows = con.execute(
+            """
+            SELECT id, warehouse_name, image_path
+            FROM products
+            WHERE TRIM(standard_name)=?
+            ORDER BY id
+            """,
+            (old_product_name,),
+        ).fetchall()
+        existing_by_id = {
+            int(row[0]): {
+                "warehouse_name": str(row[1] or ""),
+                "image_path": str(row[2] or ""),
+            }
+            for row in existing_rows
+        }
 
         try:
             con.execute(
@@ -51,47 +122,133 @@ def _update_inventory_master(inv_id, product_name, lot, exp_date):
                 """,
                 (product_name, lot, exp_date, int(inv_id)),
             )
+
+            kept_ids = set()
+            for _, mapping in mapping_rows.iterrows():
+                values = {
+                    db_column: _clean_mapping_text(mapping.get(label))
+                    for label, db_column in PRODUCT_MAPPING_DB_COLUMNS.items()
+                }
+                raw_id = mapping.get("id")
+                mapping_id = None
+                if not pd.isna(raw_id) and str(raw_id).strip():
+                    try:
+                        mapping_id = int(raw_id)
+                    except (TypeError, ValueError):
+                        mapping_id = None
+
+                if mapping_id in existing_by_id:
+                    kept_ids.add(mapping_id)
+                    preserved = existing_by_id[mapping_id]
+                    con.execute(
+                        """
+                        UPDATE products
+                        SET standard_name=?, warehouse_name=?, aliases=?,
+                            erp_nohtuspharm_name=?, product_code=?,
+                            erp_noh_name=?, erp_noh_code=?,
+                            erp_nohtus_name=?, bidata_name=?
+                        WHERE id=?
+                        """,
+                        (
+                            product_name,
+                            preserved["warehouse_name"] or product_name,
+                            values["aliases"],
+                            values["erp_nohtuspharm_name"],
+                            values["product_code"],
+                            values["erp_noh_name"],
+                            values["erp_noh_code"],
+                            values["erp_nohtus_name"],
+                            values["bidata_name"],
+                            mapping_id,
+                        ),
+                    )
+                else:
+                    con.execute(
+                        """
+                        INSERT INTO products(
+                            product_code, standard_name, warehouse_name, aliases,
+                            erp_nohtuspharm_name, erp_nohtus_name, erp_noh_name,
+                            erp_noh_code, bidata_name, image_path
+                        ) VALUES(?,?,?,?,?,?,?,?,?,?)
+                        """,
+                        (
+                            values["product_code"],
+                            product_name,
+                            product_name,
+                            values["aliases"],
+                            values["erp_nohtuspharm_name"],
+                            values["erp_nohtus_name"],
+                            values["erp_noh_name"],
+                            values["erp_noh_code"],
+                            values["bidata_name"],
+                            "",
+                        ),
+                    )
+
+            delete_ids = [mapping_id for mapping_id in existing_by_id if mapping_id not in kept_ids]
+            if delete_ids:
+                placeholders = ",".join("?" for _ in delete_ids)
+                con.execute(f"DELETE FROM products WHERE id IN ({placeholders})", delete_ids)
+
             con.commit()
         except sqlite3.IntegrityError as exc:
-            raise ValueError(
-                "같은 사업장·로케이션에 동일한 제품명/제조번호/유통기한 재고가 이미 존재합니다."
-            ) from exc
+            con.rollback()
+            raise ValueError("수정 결과와 동일한 재고 또는 제품매칭 정보가 이미 존재합니다.") from exc
+        except Exception:
+            con.rollback()
+            raise
 
-    return product_name, lot, exp_date
+    return product_name, lot, exp_date, len(mapping_rows)
 
 
-@st.dialog("제품마스터 수정")
+@st.dialog("제품마스터 수정", width="large")
 def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
-    st.caption("현재 선택한 재고 1건의 제품명, 제조번호, 유통기한을 DB에서 수정합니다.")
-    with st.form(f"stock_master_edit_form_{inv_id}"):
-        new_product_name = st.text_input(
-            "제품명",
-            value=str(product_name or ""),
-            key=f"stock_master_product_{inv_id}",
-        )
-        new_lot = st.text_input(
-            "LOT/제조번호",
-            value=str(lot or "-"),
-            key=f"stock_master_lot_{inv_id}",
-        )
+    st.caption("선택한 재고 기본정보와 해당 표준제품명의 제품매칭표를 한 번에 수정합니다.")
+
+    st.markdown("#### 제품 기본정보")
+    basic_left, basic_mid, basic_right = st.columns(3)
+    with basic_left:
+        new_product_name = st.text_input("제품명", value=str(product_name or ""), key=f"stock_master_product_{inv_id}")
+    with basic_mid:
+        new_lot = st.text_input("LOT/제조번호", value=str(lot or "-"), key=f"stock_master_lot_{inv_id}")
+    with basic_right:
         new_exp = st.text_input(
             "유통기한",
             value=str(exp_date or "-"),
             placeholder="예) 2028-03-30 / 미입력 시 '-'",
             key=f"stock_master_exp_{inv_id}",
         )
-        submitted = st.form_submit_button("제품마스터 수정 저장", type="primary", use_container_width=True)
 
-    if submitted:
+    st.markdown("#### 제품매칭표")
+    st.caption("행을 추가하거나 삭제할 수 있습니다. 같은 표준제품명에 연결된 매칭 행 전체가 저장됩니다.")
+    mapping_df = _load_product_mapping_rows(product_name)
+    edited_mappings = st.data_editor(
+        mapping_df,
+        hide_index=True,
+        use_container_width=True,
+        num_rows="dynamic",
+        key=f"stock_master_mapping_editor_{inv_id}",
+        column_config={
+            "id": st.column_config.NumberColumn("ID", disabled=True),
+            "노투스팜 ERP 제품코드": st.column_config.TextColumn("노투스팜 ERP 제품코드"),
+            "NOH ERP 제품코드": st.column_config.TextColumn("NOH ERP 제품코드"),
+        },
+        disabled=["id"],
+    )
+
+    if st.button(
+        "제품 기본정보 + 제품매칭표 저장",
+        type="primary",
+        use_container_width=True,
+        key=f"stock_master_save_{inv_id}",
+    ):
         try:
-            saved_product, saved_lot, saved_exp = _update_inventory_master(
-                int(inv_id),
-                new_product_name,
-                new_lot,
-                new_exp,
+            saved_product, saved_lot, saved_exp, mapping_count = _update_inventory_and_product_mappings(
+                int(inv_id), new_product_name, new_lot, new_exp, edited_mappings
             )
             st.session_state["_stock_master_success_msg"] = (
-                f"제품마스터 수정 완료: {saved_product} / {saved_lot} / {display_date_only(saved_exp)}"
+                f"제품마스터 수정 완료: {saved_product} / {saved_lot} / "
+                f"{display_date_only(saved_exp)} / 매칭 {mapping_count}행"
             )
             st.session_state["_stock_master_focus_product"] = saved_product
             st.rerun()
