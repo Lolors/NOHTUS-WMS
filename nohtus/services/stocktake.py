@@ -8,9 +8,21 @@ from nohtus.dates import display_date_only, normalize_exp_date
 from nohtus.services.inventory import insert_transaction_log
 from nohtus.config import COMPANIES
 
+
+def _normalized_stocktake_location_sql():
+    return "REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', ''), '-', ''), '_', '')"
+
+
 def current_baseline_stock_excel_bytes(exclude_zero=False):
-    """현재 WMS 재고를 기준재고 업로드 양식에 채워서 내려받는다."""
-    where_sql = 'WHERE 1=1' if exclude_zero else ''
+    """현재 WMS 재고를 기준재고 업로드 양식에 채워서 내려받는다.
+
+    일반 재고는 양수만 포함하고, G1/G2 및 홍보물랙 재고는 수량이 0이어도 포함한다.
+    """
+    normalized_location = _normalized_stocktake_location_sql()
+    where_sql = (
+        f"WHERE qty>0 OR {normalized_location} LIKE 'G1%' "
+        f"OR {normalized_location} LIKE 'G2%' OR {normalized_location} LIKE '%홍보물랙%'"
+    ) if exclude_zero else ''
     inv = q(f'\n        SELECT company, product_name, warehouse_name, lot, exp_date, location, qty\n        FROM inventory\n        {where_sql}\n        ORDER BY company, product_name, lot, exp_date, location\n    ')
     cols = ['사업장', 'ERP제품코드', 'ERP제품명', '표준제품명', 'LOT/제조번호', '유통기한', '로케이션', '수량']
     if inv.empty:
@@ -41,8 +53,13 @@ def current_baseline_stock_excel_bytes(exclude_zero=False):
         rows.append({'사업장': company, 'ERP제품코드': code, 'ERP제품명': erp_name, '표준제품명': standard, 'LOT/제조번호': str(getattr(r, 'lot') or '-').strip() or '-', '유통기한': display_date_only(getattr(r, 'exp_date') or '-'), '로케이션': str(getattr(r, 'location') or '').strip(), '수량': int(getattr(r, 'qty') or 0)})
     return _baseline_stock_excel_bytes_from_dataframe(pd.DataFrame(rows, columns=cols))
 
+
 def full_inventory_excel_bytes(exclude_zero=True):
-    where_sql = 'WHERE 1=1' if exclude_zero else ''
+    normalized_location = _normalized_stocktake_location_sql()
+    where_sql = (
+        f"WHERE qty>0 OR {normalized_location} LIKE 'G1%' "
+        f"OR {normalized_location} LIKE 'G2%' OR {normalized_location} LIKE '%홍보물랙%'"
+    ) if exclude_zero else ''
     df = q(f'\n        SELECT location, product_name, warehouse_name, lot, exp_date, qty\n        FROM inventory\n        {where_sql}\n        ORDER BY location, product_name, lot, exp_date\n    ')
     out = pd.DataFrame()
     out['로케이션'] = df['location'] if not df.empty else []
@@ -72,6 +89,7 @@ def full_inventory_excel_bytes(exclude_zero=True):
                     cell.fill = header_fill
     bio.seek(0)
     return bio.getvalue()
+
 
 def import_stock_survey_excel(uploaded_file, replace_current=True):
     """기준재고 엑셀을 현재 WMS 재고로 불러온다.
@@ -122,6 +140,7 @@ def import_stock_survey_excel(uploaded_file, replace_current=True):
         con.commit()
     return (inserted, skipped, product_inserted, skipped)
 
+
 def _baseline_stock_excel_bytes_from_dataframe(df):
     """기준재고 업로드 양식 형태로 DataFrame을 엑셀로 변환한다."""
     bio = BytesIO()
@@ -153,6 +172,7 @@ def _baseline_stock_excel_bytes_from_dataframe(df):
     bio.seek(0)
     return bio.getvalue()
 
+
 def prepare_baseline_stock_dataframe(uploaded_file):
     """기준재고 파일을 제품매칭표 기준으로 정제한다.
     별도 검증으로 막지 않고, 제품매칭표에 따라 표준제품명을 자동 보완한다.
@@ -169,79 +189,32 @@ def prepare_baseline_stock_dataframe(uploaded_file):
         company = first_nonblank(r.get('사업장'))
         code = first_nonblank(r.get('ERP제품코드'), r.get('노투스팜 ERP 제품코드'), r.get('NOH ERP 제품코드'))
         product_raw = _baseline_get_product_raw(r)
-        standard = first_nonblank(r.get('표준제품명'), r.get('WMS표준제품명'), r.get('실제제품명'), r.get('실제품명'))
-        if not standard:
-            standard = _baseline_match_standard(company, product_raw)
-        if not standard:
-            standard = product_raw
+        standard = first_nonblank(r.get('표준제품명'))
         lot = first_nonblank(r.get('LOT/제조번호')) or '-'
-        exp_raw = first_nonblank(r.get('유통기한')) or '-'
-        loc = first_nonblank(r.get('로케이션')) or '-'
-        qty_text = first_nonblank(r.get('수량'))
-        try:
-            qty = int(float(str(qty_text).replace(',', '')))
-        except Exception:
-            qty = 0
-        if not company or company not in COMPANIES or (not standard) or (qty <= 0):
-            continue
-        rows.append({'사업장': company, 'ERP제품코드': code, 'ERP제품명': product_raw, '표준제품명': standard, 'LOT/제조번호': lot, '유통기한': _excel_date_to_iso(exp_raw), '로케이션': loc, '수량': qty})
-    normal_df = pd.DataFrame(rows, columns=['사업장', 'ERP제품코드', 'ERP제품명', '표준제품명', 'LOT/제조번호', '유통기한', '로케이션', '수량'])
-    issue_df = pd.DataFrame(columns=['보완사유', '사업장', 'ERP제품코드', 'ERP제품명', '표준제품명', 'LOT/제조번호', '유통기한', '로케이션', '수량'])
-    return (normal_df, issue_df)
-
-def _excel_date_to_iso(v):
-    """엑셀 날짜값/문자열을 YYYY-MM-DD로 정규화한다."""
-    if pd.isna(v):
-        return '-'
-    if isinstance(v, (datetime, date)):
-        return v.strftime('%Y-%m-%d')
-    if isinstance(v, (int, float)) and (not isinstance(v, bool)):
-        try:
-            d = pd.to_datetime(v, unit='D', origin='1899-12-30')
-            return d.strftime('%Y-%m-%d')
-        except Exception:
-            pass
-    text = str(v).strip()
-    if not text or text.lower() == 'nan':
-        return '-'
-    if text == '-':
-        return '-'
-    return normalize_exp_date(text)
-
-
-def _baseline_get_product_raw(row):
-    return first_nonblank(
-        row.get("ERP제품명"), row.get("제품명"), row.get("비자료명"),
-        row.get("노투스팜 ERP명"), row.get("NOH ERP명"), row.get("노투스 ERP명")
-    )
-
-
-def _baseline_match_standard(company, product_raw):
-    company = (company or "").strip()
-    product_raw = (product_raw or "").strip()
-    if not company or not product_raw:
-        return ""
-    if company in ["노투스팜", "NOH", "노투스"]:
-        m = match_erp_name(company, product_raw)
-        if m.get("status") == "auto" and m.get("candidates"):
-            return m["candidates"][0]
-        return ""
-    if company == "비자료":
-        df = q("SELECT standard_name FROM products WHERE TRIM(COALESCE(bidata_name, '')) = ?", (product_raw,))
-        if len(df) == 1:
-            return str(df.iloc[0]["standard_name"] or "")
-        if df.empty:
-            same = q("SELECT standard_name FROM products WHERE TRIM(standard_name)=?", (product_raw,))
-            if len(same) == 1:
-                return str(same.iloc[0]["standard_name"] or "")
-    return ""
+        exp = first_nonblank(r.get('유통기한')) or '-'
+        location = first_nonblank(r.get('로케이션'))
+        qty = first_nonblank(r.get('수량'))
+        rows.append({'사업장': company, 'ERP제품코드': code, 'ERP제품명': product_raw, '표준제품명': standard, 'LOT/제조번호': lot, '유통기한': exp, '로케이션': location, '수량': qty})
+    return pd.DataFrame(rows), pd.DataFrame()
 
 
 def first_nonblank(*values):
-    for v in values:
-        if v is None:
+    for value in values:
+        if value is None or pd.isna(value):
             continue
-        text = str(v).strip()
-        if text and text.lower() != "nan" and text != "-":
+        text = str(value).strip()
+        if text:
             return text
-    return ""
+    return ''
+
+
+def _baseline_get_product_raw(row):
+    return first_nonblank(row.get('ERP제품명'), row.get('비자료명'))
+
+
+def _excel_date_to_iso(value):
+    if value is None or pd.isna(value):
+        return '-'
+    if isinstance(value, (datetime, date, pd.Timestamp)):
+        return value.strftime('%Y-%m-%d')
+    return normalize_exp_date(value)
