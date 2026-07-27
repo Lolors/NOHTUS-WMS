@@ -34,8 +34,20 @@ def _page_map_search_results_with_available_filter(term, compact: bool = False):
     original_q = location_map_page.q
 
     def filtered_q(sql, params=()):
-        result = original_q(sql, params)
-        normalized = " ".join(str(sql or "").lower().split())
+        sql_text = str(sql or "")
+        normalized_location_sql = (
+            "REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', ''), '-', ''), '_', '')"
+        )
+        if "qty>0" in sql_text and "FROM inventory" in sql_text:
+            sql_text = sql_text.replace(
+                "qty>0",
+                f"(qty>0 OR {normalized_location_sql} LIKE 'G1%' "
+                f"OR {normalized_location_sql} LIKE 'G2%' "
+                f"OR {normalized_location_sql} LIKE '%홍보물랙%')",
+            )
+
+        result = original_q(sql_text, params)
+        normalized = " ".join(sql_text.lower().split())
         if (
             isinstance(result, pd.DataFrame)
             and " from inventory " in f" {normalized} "
