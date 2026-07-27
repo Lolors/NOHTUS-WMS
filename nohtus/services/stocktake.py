@@ -12,25 +12,34 @@ from nohtus.dates import display_date_only, normalize_exp_date
 from nohtus.services.inventory import insert_transaction_log
 
 
+def _normalize_stocktake_location(value):
+    """로케이션 비교용 문자열을 정규화한다."""
+    return str(value or "").strip().upper().replace(" ", "").replace("-", "").replace("_", "")
+
+
 def _normalized_stocktake_location_sql():
     return "REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', ''), '-', ''), '_', '')"
 
 
+def _is_zero_qty_exception_location(location):
+    """G1, G2, 홍보물랙은 수량이 0이어도 재고 행을 유지한다."""
+    normalized = _normalize_stocktake_location(location)
+    return normalized.startswith("G1") or normalized.startswith("G2") or "홍보물랙" in normalized
+
+
 def _zero_qty_exception_sql():
-    """0이어도 실사/기준재고 양식에 남겨야 하는 부자재·패키지 조건."""
+    """0이어도 실사/기준재고 양식에 남겨야 하는 로케이션 조건."""
     location = _normalized_stocktake_location_sql()
     return (
         f"{location} LIKE 'G1%' OR {location} LIKE 'G2%' "
-        f"OR {location} LIKE '%홍보물랙%' OR {location} LIKE '%패키지%' "
-        "OR UPPER(TRIM(COALESCE(product_name,''))) LIKE '%패키지%' "
-        "OR UPPER(TRIM(COALESCE(warehouse_name,''))) LIKE '%패키지%'"
+        f"OR {location} LIKE '%홍보물랙%'"
     )
 
 
 def current_baseline_stock_excel_bytes(exclude_zero=False):
     """현재 WMS 재고를 기준재고 업로드 양식에 채워서 내려받는다.
 
-    일반 재고는 양수만 포함하고, G1/G2·홍보물랙·패키지는 수량이 0이어도 포함한다.
+    0 수량 제외 옵션을 사용해도 G1, G2, 홍보물랙 재고는 포함한다.
     """
     where_sql = f"WHERE qty>0 OR {_zero_qty_exception_sql()}" if exclude_zero else ""
     inv = q(
@@ -54,24 +63,25 @@ def current_baseline_stock_excel_bytes(exclude_zero=False):
     )
     product_map = {}
     if not product_df.empty:
-        for r in product_df.itertuples(index=False):
-            product_map[str(getattr(r, "standard_name") or "").strip()] = {
-                "product_code": str(getattr(r, "product_code") or "").strip(),
-                "erp_noh_code": str(getattr(r, "erp_noh_code") or "").strip(),
-                "erp_nohtuspharm_name": str(getattr(r, "erp_nohtuspharm_name") or "").strip(),
-                "erp_noh_name": str(getattr(r, "erp_noh_name") or "").strip(),
-                "erp_nohtus_name": str(getattr(r, "erp_nohtus_name") or "").strip(),
-                "bidata_name": str(getattr(r, "bidata_name") or "").strip(),
+        for row in product_df.itertuples(index=False):
+            product_map[str(getattr(row, "standard_name") or "").strip()] = {
+                "product_code": str(getattr(row, "product_code") or "").strip(),
+                "erp_noh_code": str(getattr(row, "erp_noh_code") or "").strip(),
+                "erp_nohtuspharm_name": str(getattr(row, "erp_nohtuspharm_name") or "").strip(),
+                "erp_noh_name": str(getattr(row, "erp_noh_name") or "").strip(),
+                "erp_nohtus_name": str(getattr(row, "erp_nohtus_name") or "").strip(),
+                "bidata_name": str(getattr(row, "bidata_name") or "").strip(),
             }
 
     rows = []
-    for r in inv.itertuples(index=False):
-        company = str(getattr(r, "company") or "").strip()
-        standard = str(getattr(r, "product_name") or "").strip()
-        warehouse = str(getattr(r, "warehouse_name") or "").strip()
+    for row in inv.itertuples(index=False):
+        company = str(getattr(row, "company") or "").strip()
+        standard = str(getattr(row, "product_name") or "").strip()
+        warehouse = str(getattr(row, "warehouse_name") or "").strip()
         info = product_map.get(standard, {})
         code = ""
         erp_name = warehouse or standard
+
         if company == "노투스팜":
             code = info.get("product_code", "")
             erp_name = info.get("erp_nohtuspharm_name", "") or warehouse or standard
@@ -89,12 +99,13 @@ def current_baseline_stock_excel_bytes(exclude_zero=False):
                 "ERP제품코드": code,
                 "ERP제품명": erp_name,
                 "표준제품명": standard,
-                "LOT/제조번호": str(getattr(r, "lot") or "-").strip() or "-",
-                "유통기한": display_date_only(getattr(r, "exp_date") or "-"),
-                "로케이션": str(getattr(r, "location") or "").strip(),
-                "수량": int(getattr(r, "qty") or 0),
+                "LOT/제조번호": str(getattr(row, "lot") or "-").strip() or "-",
+                "유통기한": display_date_only(getattr(row, "exp_date") or "-"),
+                "로케이션": str(getattr(row, "location") or "").strip(),
+                "수량": int(getattr(row, "qty") or 0),
             }
         )
+
     return _baseline_stock_excel_bytes_from_dataframe(pd.DataFrame(rows, columns=cols))
 
 
@@ -108,6 +119,7 @@ def full_inventory_excel_bytes(exclude_zero=True):
         ORDER BY location, product_name, lot, exp_date
         """
     )
+
     out = pd.DataFrame()
     out["로케이션"] = df["location"] if not df.empty else []
     out["제품명(표준제품명)"] = df["product_name"] if not df.empty else []
@@ -123,6 +135,7 @@ def full_inventory_excel_bytes(exclude_zero=True):
         widths = {"A": 16, "B": 30, "C": 18, "D": 16, "E": 12, "F": 12}
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
+
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
         thin = Side(style="thin", color="000000")
@@ -135,42 +148,57 @@ def full_inventory_excel_bytes(exclude_zero=True):
                 if cell.row == 1:
                     cell.font = Font(bold=True)
                     cell.fill = header_fill
+
     bio.seek(0)
     return bio.getvalue()
 
 
 def import_stock_survey_excel(uploaded_file, replace_current=True):
-    """기준재고 엑셀을 현재 WMS 재고로 불러온다."""
+    """기준재고 엑셀을 현재 WMS 재고로 불러온다.
+
+    일반 로케이션의 0 수량 행은 제외하지만 G1, G2, 홍보물랙의 0 수량 행은
+    DB에 저장하여 이후 실사 및 기준재고 양식에도 계속 나타나게 한다.
+    """
     normal_df, issue_df = prepare_baseline_stock_dataframe(uploaded_file)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     inserted = 0
     skipped = int(len(issue_df)) if issue_df is not None else 0
     product_inserted = 0
+
     with connect() as con:
         cur = con.cursor()
         if replace_current:
             cur.execute("DELETE FROM inventory")
             cur.execute("DELETE FROM transactions WHERE tx_type='재고조사불러오기'")
-        for _, r in normal_df.iterrows():
-            company = str(r.get("사업장") or "").strip()
-            code = str(r.get("ERP제품코드") or "").strip()
-            product_raw = str(r.get("ERP제품명") or "").strip()
-            product = str(r.get("표준제품명") or "").strip()
-            lot = str(r.get("LOT/제조번호") or "").strip() or "-"
-            exp = _excel_date_to_iso(r.get("유통기한"))
-            loc = str(r.get("로케이션") or "").strip()
-            qty = int(float(r.get("수량") or 0))
-            if not company or not product or not loc or qty <= 0:
+
+        for _, row in normal_df.iterrows():
+            company = str(row.get("사업장") or "").strip()
+            code = str(row.get("ERP제품코드") or "").strip()
+            product_raw = str(row.get("ERP제품명") or "").strip()
+            product = str(row.get("표준제품명") or "").strip()
+            lot = str(row.get("LOT/제조번호") or "").strip() or "-"
+            exp = _excel_date_to_iso(row.get("유통기한"))
+            location = str(row.get("로케이션") or "").strip()
+            qty = int(float(row.get("수량") or 0))
+
+            keep_zero = qty == 0 and _is_zero_qty_exception_location(location)
+            if not company or not product or not location or qty < 0 or (qty == 0 and not keep_zero):
                 skipped += 1
                 continue
+
             exists = cur.execute("SELECT id FROM products WHERE standard_name=?", (product,)).fetchone()
             if not exists:
                 cur.execute(
-                    """INSERT INTO products(product_code, standard_name, warehouse_name, aliases,
-                       erp_nohtuspharm_name, erp_noh_name, erp_noh_code, erp_nohtus_name, bidata_name)
-                       VALUES(?,?,?,?,?,?,?,?,?)""",
+                    """INSERT INTO products(
+                           product_code, standard_name, warehouse_name, aliases,
+                           erp_nohtuspharm_name, erp_noh_name, erp_noh_code,
+                           erp_nohtus_name, bidata_name
+                       ) VALUES(?,?,?,?,?,?,?,?,?)""",
                     (
-                        code if company == "노투스팜" else "", product, product_raw, "",
+                        code if company == "노투스팜" else "",
+                        product,
+                        product_raw,
+                        "",
                         product_raw if company == "노투스팜" else "",
                         product_raw if company == "NOH" else "",
                         code if company == "NOH" else "",
@@ -180,18 +208,31 @@ def import_stock_survey_excel(uploaded_file, replace_current=True):
                 )
                 product_inserted += 1
             else:
-                pid = int(exists[0])
+                product_id = int(exists[0])
                 if company == "노투스팜":
-                    cur.execute("UPDATE products SET erp_nohtuspharm_name=COALESCE(NULLIF(erp_nohtuspharm_name,''), ?), product_code=COALESCE(NULLIF(product_code,''), ?) WHERE id=?", (product_raw, code, pid))
+                    cur.execute(
+                        "UPDATE products SET erp_nohtuspharm_name=COALESCE(NULLIF(erp_nohtuspharm_name,''), ?), product_code=COALESCE(NULLIF(product_code,''), ?) WHERE id=?",
+                        (product_raw, code, product_id),
+                    )
                 elif company == "NOH":
-                    cur.execute("UPDATE products SET erp_noh_name=COALESCE(NULLIF(erp_noh_name,''), ?), erp_noh_code=COALESCE(NULLIF(erp_noh_code,''), ?) WHERE id=?", (product_raw, code, pid))
+                    cur.execute(
+                        "UPDATE products SET erp_noh_name=COALESCE(NULLIF(erp_noh_name,''), ?), erp_noh_code=COALESCE(NULLIF(erp_noh_code,''), ?) WHERE id=?",
+                        (product_raw, code, product_id),
+                    )
                 elif company == "노투스":
-                    cur.execute("UPDATE products SET erp_nohtus_name=COALESCE(NULLIF(erp_nohtus_name,''), ?) WHERE id=?", (product_raw, pid))
+                    cur.execute(
+                        "UPDATE products SET erp_nohtus_name=COALESCE(NULLIF(erp_nohtus_name,''), ?) WHERE id=?",
+                        (product_raw, product_id),
+                    )
                 elif company == "비자료":
-                    cur.execute("UPDATE products SET bidata_name=COALESCE(NULLIF(bidata_name,''), ?) WHERE id=?", (product_raw, pid))
+                    cur.execute(
+                        "UPDATE products SET bidata_name=COALESCE(NULLIF(bidata_name,''), ?) WHERE id=?",
+                        (product_raw, product_id),
+                    )
+
             cur.execute(
                 "INSERT INTO inventory(company, product_name, warehouse_name, lot, exp_date, location, qty, updated_at) VALUES(?,?,?,?,?,?,?,?)",
-                (company, product, product_raw, lot, exp, loc, qty, now),
+                (company, product, product_raw, lot, exp, location, qty, now),
             )
             insert_transaction_log(
                 cur,
@@ -204,12 +245,14 @@ def import_stock_survey_excel(uploaded_file, replace_current=True):
                 from_company=None,
                 from_location=None,
                 to_company=company,
-                to_location=loc,
+                to_location=location,
                 qty=qty,
                 memo=f"기준재고 엑셀 업로드 / 원본명: {product_raw}",
             )
             inserted += 1
+
         con.commit()
+
     return inserted, skipped, product_inserted, skipped
 
 
@@ -218,6 +261,7 @@ def _baseline_stock_excel_bytes_from_dataframe(df):
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="기준재고업로드")
         ws = writer.book["기준재고업로드"]
+
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
         thin = Side(style="thin", color="000000")
@@ -227,6 +271,7 @@ def _baseline_stock_excel_bytes_from_dataframe(df):
         widths = {"A": 14, "B": 18, "C": 34, "D": 30, "E": 18, "F": 16, "G": 18, "H": 10}
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
+
         ws.freeze_panes = "A2"
         max_row = max(1, len(df) + 1)
         ws.auto_filter.ref = f"A1:H{max_row}"
@@ -241,6 +286,7 @@ def _baseline_stock_excel_bytes_from_dataframe(df):
                 if cell.row == 1:
                     cell.font = Font(bold=True)
                     cell.fill = optional_fill if cell.value == "표준제품명" else header_fill
+
     bio.seek(0)
     return bio.getvalue()
 
@@ -248,32 +294,52 @@ def _baseline_stock_excel_bytes_from_dataframe(df):
 def prepare_baseline_stock_dataframe(uploaded_file):
     df = pd.read_excel(uploaded_file, dtype=str).fillna("")
     col_alias = {
-        "구분": "사업장", "ERP제품코드": "ERP제품코드", "ERP 제품코드": "ERP제품코드",
-        "전산제품코드": "ERP제품코드", "제품코드": "ERP제품코드",
-        "노투스팜 ERP 제품코드": "ERP제품코드", "NOH ERP 제품코드": "ERP제품코드",
-        "ERP상제품명": "ERP제품명", "ERP제품명": "ERP제품명", "제품명": "ERP제품명",
-        "전산상명칭": "ERP제품명", "전산상 명칭": "ERP제품명", "전산상제품명": "ERP제품명",
-        "비자료명": "비자료명", "LOT": "LOT/제조번호", "제조번호": "LOT/제조번호",
-        "수량": "수량", "기준수량": "수량", "현재재고": "수량", "실재고": "수량",
+        "구분": "사업장",
+        "ERP제품코드": "ERP제품코드",
+        "ERP 제품코드": "ERP제품코드",
+        "전산제품코드": "ERP제품코드",
+        "제품코드": "ERP제품코드",
+        "노투스팜 ERP 제품코드": "ERP제품코드",
+        "NOH ERP 제품코드": "ERP제품코드",
+        "ERP상제품명": "ERP제품명",
+        "ERP제품명": "ERP제품명",
+        "제품명": "ERP제품명",
+        "전산상명칭": "ERP제품명",
+        "전산상 명칭": "ERP제품명",
+        "전산상제품명": "ERP제품명",
+        "비자료명": "비자료명",
+        "LOT": "LOT/제조번호",
+        "제조번호": "LOT/제조번호",
+        "수량": "수량",
+        "기준수량": "수량",
+        "현재재고": "수량",
+        "실재고": "수량",
     }
-    df = df.rename(columns={c: col_alias.get(c, c) for c in df.columns})
-    for c in ["사업장", "ERP제품코드", "ERP제품명", "비자료명", "표준제품명", "LOT/제조번호", "유통기한", "로케이션", "수량"]:
-        if c not in df.columns:
-            df[c] = ""
+    df = df.rename(columns={column: col_alias.get(column, column) for column in df.columns})
+
+    required_columns = [
+        "사업장", "ERP제품코드", "ERP제품명", "비자료명", "표준제품명",
+        "LOT/제조번호", "유통기한", "로케이션", "수량",
+    ]
+    for column in required_columns:
+        if column not in df.columns:
+            df[column] = ""
+
     rows = []
-    for _, r in df.iterrows():
+    for _, row in df.iterrows():
         rows.append(
             {
-                "사업장": first_nonblank(r.get("사업장")),
-                "ERP제품코드": first_nonblank(r.get("ERP제품코드"), r.get("노투스팜 ERP 제품코드"), r.get("NOH ERP 제품코드")),
-                "ERP제품명": _baseline_get_product_raw(r),
-                "표준제품명": first_nonblank(r.get("표준제품명")),
-                "LOT/제조번호": first_nonblank(r.get("LOT/제조번호")) or "-",
-                "유통기한": first_nonblank(r.get("유통기한")) or "-",
-                "로케이션": first_nonblank(r.get("로케이션")),
-                "수량": first_nonblank(r.get("수량")),
+                "사업장": first_nonblank(row.get("사업장")),
+                "ERP제품코드": first_nonblank(row.get("ERP제품코드"), row.get("노투스팜 ERP 제품코드"), row.get("NOH ERP 제품코드")),
+                "ERP제품명": _baseline_get_product_raw(row),
+                "표준제품명": first_nonblank(row.get("표준제품명")),
+                "LOT/제조번호": first_nonblank(row.get("LOT/제조번호")) or "-",
+                "유통기한": first_nonblank(row.get("유통기한")) or "-",
+                "로케이션": first_nonblank(row.get("로케이션")),
+                "수량": first_nonblank(row.get("수량")),
             }
         )
+
     return pd.DataFrame(rows), pd.DataFrame()
 
 
