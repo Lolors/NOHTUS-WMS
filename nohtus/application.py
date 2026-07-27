@@ -4,6 +4,7 @@ from styles import apply_style
 from nohtus.auth import allowed_pages_for_current_user, can_access_page, is_admin, render_user_box, require_login
 from nohtus.config import APP_TITLE, VERSION
 from nohtus.db_init import init_db
+import nohtus.services.export_waiting_history_patch  # noqa: F401
 from nohtus.device import is_mobile, sync_mobile_flag
 from nohtus.navigation import render_sidebar
 from nohtus.pages.all_inventory import page_all_inventory
