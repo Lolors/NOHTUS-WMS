@@ -22,7 +22,10 @@ def _is_non_counted_location(value):
 
 
 def _build_where(companies, product_term, erp_term, exclude_p=False, exclude_materials=True):
-    where = ["qty>0"]
+    normalized = "REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '')"
+    where = [
+        f"(qty>0 OR {normalized} LIKE 'G1%' OR {normalized} LIKE 'G2%' OR {normalized} LIKE '%홍보물랙%')"
+    ]
     params = []
     if companies:
         placeholders = ",".join(["?"] * len(companies))
@@ -37,7 +40,6 @@ def _build_where(companies, product_term, erp_term, exclude_p=False, exclude_mat
         where.append("COALESCE(warehouse_name,'') LIKE ?")
         params.append(f"%{erp_term}%")
 
-    normalized = "REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '')"
     if exclude_p:
         where.append(f"{normalized} NOT LIKE 'P%'")
     if exclude_materials:
