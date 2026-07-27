@@ -181,7 +181,7 @@ def page_map():
 
     def patched_text_input(label, *args, **kwargs):
         if isinstance(label, str) and label == "제품명 검색":
-            search_col, p_col, materials_col = st.columns([4.9, 2.35, 2.75], gap="small")
+            search_col, p_col, materials_col = st.columns([5.2, 2.2, 2.6], gap="small")
             with search_col:
                 value = original_text_input(label, *args, **kwargs)
             with p_col:
