@@ -15,6 +15,11 @@ from nohtus.services.export_waiting import (
     ensure_export_waiting_tables,
     merge_export_waiting_orders,
 )
+from nohtus.services.export_waiting_excel import (
+    build_export_waiting_erp_sales_rows,
+    export_waiting_erp_sales_excel_bytes,
+    safe_export_no_for_filename,
+)
 
 STATUS_LABELS = {"waiting": "수출대기", "partial": "일부 확정", "confirmed": "수출확정", "cancelled": "취소됨"}
 _SELECTED_ORDER_KEY = "saved_export_waiting_selected_order_id"
@@ -303,6 +308,29 @@ def page_saved_export_waiting():
     display_cols = ["확정상태", "사업장", "제품명", "LOT", "유통기한", "수량", "원래로케이션", "현재로케이션", "확정사업장", "확정매출처", "확정일시"]
     st.dataframe(items[display_cols], hide_index=True, use_container_width=True)
     st.caption(f"전체 {len(items)}개 재고행 / {total_qty}EA · 남은 수출대기 {len(remaining_items)}개 / {remaining_qty}EA")
+
+    erp_sales_rows = build_export_waiting_erp_sales_rows(items)
+    if not erp_sales_rows.empty:
+        unmatched_count = int((erp_sales_rows["매칭상태"] == "확인필요").sum())
+        download_col, notice_col = st.columns([2, 3])
+        with download_col:
+            st.download_button(
+                "ERP 매출입력용 리스트 엑셀 다운로드",
+                data=export_waiting_erp_sales_excel_bytes(erp_sales_rows),
+                file_name=(
+                    f"NOHTUS_ERP_매출입력용_"
+                    f"{safe_export_no_for_filename(selected['export_no'])}_"
+                    f"{date.today().strftime('%Y%m%d')}.xlsx"
+                ),
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key=f"export_waiting_erp_sales_download_{order_id}",
+            )
+        with notice_col:
+            if unmatched_count:
+                st.warning(f"제품매칭표에 해당 사업장 ERP명이 없는 품목이 {unmatched_count}개 있습니다. 엑셀에서 `확인필요`로 표시됩니다.")
+            else:
+                st.success("모든 품목의 사업장별 ERP명이 매칭되었습니다.")
 
     if status == "cancelled":
         st.error("취소된 건입니다. 확정되지 않았던 품목은 등록 당시 원래 로케이션으로 복구되었습니다.")
