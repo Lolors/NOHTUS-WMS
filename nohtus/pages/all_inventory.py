@@ -101,7 +101,7 @@ def _prepare_display_df(df):
     work = df.copy()
     work["유통기한"] = work["유통기한"].apply(display_date_only)
 
-    # Streamlit 정렬이 문자열/nullable 정수로 해석되지 않도록 순수 int64로 고정한다.
+    # 문자열이 아니라 실제 숫자형으로 유지해 정렬과 필터가 숫자 기준으로 동작하게 한다.
     work["수량"] = (
         pd.to_numeric(work["수량"], errors="coerce")
         .fillna(0)
@@ -196,6 +196,6 @@ def page_all_inventory():
             use_container_width=True,
             height=min(720, 38 + max(1, len(display_df)) * 35),
             column_config={
-                "수량": st.column_config.NumberColumn("수량", format=",%d"),
+                "수량": st.column_config.NumberColumn("수량", format="%d"),
             },
         )
