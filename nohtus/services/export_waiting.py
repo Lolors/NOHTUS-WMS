@@ -199,80 +199,60 @@ def _current_item_signature(cur, order_id):
 
 def _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now, title, export_no):
     current_items = _items(cur, order_id, confirmed=False)
-    current_qty = defaultdict(int)
-    current_item_by_source = {}
+    target_qty = {int(k): int(v) for k, v in dict(grouped).items() if int(v) > 0}
+
+    restored_source_rows = {}
     for item in current_items:
         source_id = int(item.get("source_inventory_id") or 0)
-        current_qty[source_id] += int(item.get("qty") or 0)
-        current_item_by_source.setdefault(source_id, item)
-
-    target_qty = {int(k): int(v) for k, v in dict(grouped).items()}
-    all_source_ids = sorted(set(current_qty) | set(target_qty))
-
-    for source_id in all_source_ids:
-        before = int(current_qty.get(source_id, 0))
-        after = int(target_qty.get(source_id, 0))
-        diff = after - before
-        if diff == 0:
-            continue
-
-        if diff < 0:
-            item = current_item_by_source[source_id]
-            restore_qty = abs(diff)
-            _take_p(cur, item, now, restore_qty)
-            _add(cur, item, item["source_location"], restore_qty, now, 1)
-            insert_transaction_log(
-                cur,
-                created_at=now,
-                tx_type="위치이동",
-                product_name=item["product_name"],
-                warehouse_name=item.get("warehouse_name", ""),
-                lot=item.get("lot", "-"),
-                exp_date=item.get("exp_date", "-"),
-                from_company=item["company"],
-                from_location=P,
-                to_company=item["company"],
-                to_location=item["source_location"],
-                qty=restore_qty,
-                memo=f"수출대기 수정 / 수량감소 또는 품목삭제 / {title} / 수출번호: {export_no}",
-            )
-        else:
-            hint = source_hints.get(source_id)
-            s = _take_source(cur, source_id, diff, now, hint)
-            _add(cur, s, P, diff, now, 0)
-            source_hints[source_id] = s
-            insert_transaction_log(
-                cur,
-                created_at=now,
-                tx_type="위치이동",
-                product_name=s.get("product_name", ""),
-                warehouse_name=s.get("warehouse_name", "") or "",
-                lot=s.get("lot", "-"),
-                exp_date=s.get("exp_date", "-"),
-                from_company=s.get("company", ""),
-                from_location=s.get("location", ""),
-                to_company=s.get("company", ""),
-                to_location=P,
-                qty=diff,
-                memo=f"수출대기 수정 / 수량증가 또는 품목추가 / {title} / 수출번호: {export_no}",
-            )
+        _take_p(cur, item, now)
+        restored_id = _add(cur, item, item["source_location"], int(item["qty"]), now, 1)
+        restored = _dict_row(cur, "SELECT * FROM inventory WHERE id=?", (restored_id,))
+        if restored:
+            restored_source_rows[source_id] = restored
+            source_hints[source_id] = restored
+        insert_transaction_log(
+            cur,
+            created_at=now,
+            tx_type="위치이동",
+            product_name=item["product_name"],
+            warehouse_name=item.get("warehouse_name", ""),
+            lot=item.get("lot", "-"),
+            exp_date=item.get("exp_date", "-"),
+            from_company=item["company"],
+            from_location=P,
+            to_company=item["company"],
+            to_location=item["source_location"],
+            qty=item["qty"],
+            memo=f"수출대기 수정 / 기존 품목 전체 원복 / {title} / 수출번호: {export_no}",
+        )
 
     cur.execute("DELETE FROM export_waiting_items WHERE order_id=?", (int(order_id),))
+
     for source_id, qty in target_qty.items():
-        if qty <= 0:
-            continue
-        s = source_hints.get(source_id) or _resolve_source_row(cur, source_id, source_hints.get(source_id))
-        if not s:
-            s = current_item_by_source.get(source_id)
-        if not s:
-            raise ValueError(f"수출대기 품목 재구성 중 재고 #{source_id} 정보를 찾을 수 없습니다.")
-        resolved_inventory_id = int(s.get("_resolved_inventory_id") or s.get("id") or source_id)
-        source_location = str(s.get("location") or s.get("source_location") or "").strip()
+        hint = source_hints.get(source_id) or restored_source_rows.get(source_id)
+        source = _take_source(cur, source_id, qty, now, hint)
+        resolved_inventory_id = int(source.get("_resolved_inventory_id") or source.get("id") or source_id)
+        _add(cur, source, P, qty, now, 0)
         cur.execute("""INSERT INTO export_waiting_items(order_id,source_inventory_id,company,product_name,
             warehouse_name,lot,exp_date,source_location,waiting_location,qty,moved_at,confirmed)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,0)""",
-            (order_id,resolved_inventory_id,s.get("company", ""),s.get("product_name", ""),s.get("warehouse_name", "") or "",
-             s.get("lot", "-") or "-",s.get("exp_date", "-") or "-",source_location,P,qty,now))
+            (order_id,resolved_inventory_id,source.get("company", ""),source.get("product_name", ""),source.get("warehouse_name", "") or "",
+             source.get("lot", "-") or "-",source.get("exp_date", "-") or "-",source.get("location", ""),P,qty,now))
+        insert_transaction_log(
+            cur,
+            created_at=now,
+            tx_type="위치이동",
+            product_name=source.get("product_name", ""),
+            warehouse_name=source.get("warehouse_name", "") or "",
+            lot=source.get("lot", "-"),
+            exp_date=source.get("exp_date", "-"),
+            from_company=source.get("company", ""),
+            from_location=source.get("location", ""),
+            to_company=source.get("company", ""),
+            to_location=P,
+            qty=qty,
+            memo=f"수출대기 수정 / 새 목록 재적재 / {title} / 수출번호: {export_no}",
+        )
 
 
 def save_export_waiting_order(cart, *, country, buyer="", transport_method="미지정", export_no, editing_order_id=None):
@@ -348,7 +328,6 @@ def save_export_waiting_order(cart, *, country, buyer="", transport_method="미�
 
 
 def merge_export_waiting_orders(source_order_id, target_order_id):
-    """Merge one waiting export order into another without moving inventory again."""
     source_order_id = int(source_order_id or 0)
     target_order_id = int(target_order_id or 0)
     if not source_order_id or not target_order_id:
@@ -360,16 +339,8 @@ def merge_export_waiting_orders(source_order_id, target_order_id):
     with connect() as con:
         cur = con.cursor()
         ensure_export_waiting_tables(cur)
-        source = _dict_row(
-            cur,
-            "SELECT id,export_no,title,status FROM export_waiting_orders WHERE id=?",
-            (source_order_id,),
-        )
-        target = _dict_row(
-            cur,
-            "SELECT id,export_no,title,status FROM export_waiting_orders WHERE id=?",
-            (target_order_id,),
-        )
+        source = _dict_row(cur,"SELECT id,export_no,title,status FROM export_waiting_orders WHERE id=?",(source_order_id,))
+        target = _dict_row(cur,"SELECT id,export_no,title,status FROM export_waiting_orders WHERE id=?",(target_order_id,))
         if not source:
             raise ValueError("합칠 원본 수출대기 건을 찾을 수 없습니다.")
         if not target:
@@ -377,50 +348,32 @@ def merge_export_waiting_orders(source_order_id, target_order_id):
         if source["status"] != "waiting" or target["status"] != "waiting":
             raise ValueError("아직 품목이 확정되지 않은 수출대기 건끼리만 합칠 수 있습니다.")
 
-        confirmed_count = cur.execute(
-            """SELECT COUNT(*) FROM export_waiting_items
-               WHERE order_id IN (?,?) AND COALESCE(confirmed,0)<>0""",
-            (source_order_id, target_order_id),
-        ).fetchone()[0]
+        confirmed_count = cur.execute("""SELECT COUNT(*) FROM export_waiting_items
+               WHERE order_id IN (?,?) AND COALESCE(confirmed,0)<>0""",(source_order_id, target_order_id)).fetchone()[0]
         if int(confirmed_count or 0):
             raise ValueError("수출확정된 품목이 있는 수출대기 건은 합칠 수 없습니다.")
 
-        source_summary = cur.execute(
-            "SELECT COUNT(*),COALESCE(SUM(qty),0) FROM export_waiting_items WHERE order_id=?",
-            (source_order_id,),
-        ).fetchone()
+        source_summary = cur.execute("SELECT COUNT(*),COALESCE(SUM(qty),0) FROM export_waiting_items WHERE order_id=?",(source_order_id,)).fetchone()
         if not int(source_summary[0] or 0):
             raise ValueError("원본 수출대기 건에 합칠 품목이 없습니다.")
 
-        grouped_items = cur.execute(
-            """SELECT source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
+        grouped_items = cur.execute("""SELECT source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
                       source_location,waiting_location,SUM(qty) AS qty,MIN(moved_at) AS moved_at
                FROM export_waiting_items
                WHERE order_id IN (?,?)
                GROUP BY source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
                         source_location,waiting_location
-               ORDER BY MIN(id)""",
-            (target_order_id, source_order_id),
-        ).fetchall()
+               ORDER BY MIN(id)""",(target_order_id, source_order_id)).fetchall()
 
-        cur.execute(
-            "DELETE FROM export_waiting_items WHERE order_id IN (?,?)",
-            (target_order_id, source_order_id),
-        )
+        cur.execute("DELETE FROM export_waiting_items WHERE order_id IN (?,?)",(target_order_id, source_order_id))
         for item in grouped_items:
-            cur.execute(
-                """INSERT INTO export_waiting_items(
+            cur.execute("""INSERT INTO export_waiting_items(
                        order_id,source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
                        source_location,waiting_location,qty,moved_at,confirmed
-                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,0)""",
-                (target_order_id, *item),
-            )
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,0)""",(target_order_id, *item))
 
         cur.execute("DELETE FROM export_waiting_orders WHERE id=?", (source_order_id,))
-        cur.execute(
-            "UPDATE export_waiting_orders SET updated_at=? WHERE id=?",
-            (now, target_order_id),
-        )
+        cur.execute("UPDATE export_waiting_orders SET updated_at=? WHERE id=?",(now, target_order_id))
         con.commit()
 
     return {
