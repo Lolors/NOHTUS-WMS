@@ -136,9 +136,93 @@ def _render_three_company_last_sale_importer():
             st.error(str(e))
 
 
+def _render_direct_customer_registration():
+    st.markdown("### 거래처 바로 등록")
+    st.caption("필수 항목은 거래처명입니다. 동일한 거래처명과 사업장이 이미 등록되어 있으면 저장되지 않습니다.")
+
+    with st.form("direct_customer_registration_form", clear_on_submit=True):
+        r1c1, r1c2, r1c3, r1c4 = st.columns([2, 2, 2, 2], gap="small")
+        with r1c1:
+            customer_name = st.text_input("거래처명 *")
+        with r1c2:
+            customer_code = st.text_input("거래처코드")
+        with r1c3:
+            company = st.selectbox("사업장", ["", "노투스팜", "NOH", "노투스", "비자료"])
+        with r1c4:
+            customer_type = st.text_input("유형", placeholder="예: 병원, 도매상")
+
+        r2c1, r2c2 = st.columns(2, gap="small")
+        with r2c1:
+            manager = st.text_input("담당자")
+        with r2c2:
+            phone = st.text_input("연락처")
+
+        address = st.text_input("주소")
+        memo = st.text_area("메모", height=80)
+        submitted = st.form_submit_button("거래처 등록", type="primary", use_container_width=True)
+
+    if not submitted:
+        return
+
+    customer_name = _normalize_customer_name(customer_name)
+    customer_code = str(customer_code or "").strip()
+    company = str(company or "").strip()
+    customer_type = str(customer_type or "").strip()
+    manager = str(manager or "").strip()
+    phone = str(phone or "").strip()
+    address = str(address or "").strip()
+    memo = str(memo or "").strip()
+
+    if not customer_name:
+        st.error("거래처명을 입력하세요.")
+        return
+
+    with connect() as con:
+        duplicate = con.execute(
+            """
+            SELECT id
+            FROM customers
+            WHERE LOWER(TRIM(customer_name))=LOWER(TRIM(?))
+              AND LOWER(TRIM(COALESCE(company,'')))=LOWER(TRIM(?))
+            LIMIT 1
+            """,
+            (customer_name, company),
+        ).fetchone()
+        if duplicate:
+            st.warning("같은 거래처명과 사업장으로 등록된 거래처가 이미 있습니다.")
+            return
+
+        con.execute(
+            """
+            INSERT INTO customers(
+                customer_code, customer_name, company, customer_type,
+                manager, phone, address, memo, updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                customer_code,
+                customer_name,
+                company,
+                customer_type,
+                manager,
+                phone,
+                address,
+                memo,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
+        con.commit()
+
+    st.success(f"'{customer_name}' 거래처를 등록했습니다.")
+    st.rerun()
+
+
 def page_customer_master():
     st.title("거래처 관리")
-    st.caption("거래처 엑셀을 업로드하면 출고지시와 업무일지에서 매출처/담당자 정보를 재사용할 수 있습니다.")
+    st.caption("거래처를 화면에서 바로 등록하거나 엑셀로 일괄 관리할 수 있습니다.")
+
+    _render_direct_customer_registration()
+    st.divider()
 
     c1, c2, c3 = st.columns([1.5, 2, 6.5], gap="large")
     with c1:
@@ -161,16 +245,44 @@ def page_customer_master():
     with c3:
         _render_three_company_last_sale_importer()
 
-    df = q("SELECT customer_code AS 거래처코드, customer_name AS 거래처명, company AS 사업장, customer_type AS 유형, manager AS 담당자, phone AS 연락처, address AS 주소, memo AS 메모 FROM customers ORDER BY customer_name, company")
     st.markdown("### 등록된 거래처")
+    term = st.text_input(
+        "거래처 검색",
+        placeholder="거래처명, 코드, 사업장, 담당자, 연락처, 주소, 메모 일부 입력",
+        key="customer_master_search",
+    )
+
+    sql = """
+        SELECT customer_code AS 거래처코드,
+               customer_name AS 거래처명,
+               company AS 사업장,
+               customer_type AS 유형,
+               manager AS 담당자,
+               phone AS 연락처,
+               address AS 주소,
+               memo AS 메모
+        FROM customers
+    """
+    params = []
+    term = str(term or "").strip()
+    if term:
+        like = f"%{term}%"
+        sql += """
+            WHERE COALESCE(customer_code,'') LIKE ?
+               OR COALESCE(customer_name,'') LIKE ?
+               OR COALESCE(company,'') LIKE ?
+               OR COALESCE(customer_type,'') LIKE ?
+               OR COALESCE(manager,'') LIKE ?
+               OR COALESCE(phone,'') LIKE ?
+               OR COALESCE(address,'') LIKE ?
+               OR COALESCE(memo,'') LIKE ?
+        """
+        params = [like] * 8
+    sql += " ORDER BY customer_name, company"
+
+    df = q(sql, tuple(params))
     if df.empty:
-        st.info("등록된 거래처가 없습니다.")
+        st.info("검색 조건에 맞는 거래처가 없습니다." if term else "등록된 거래처가 없습니다.")
     else:
-        term = st.text_input("거래처 검색", placeholder="거래처명/담당자/주소 일부 입력")
-        if term.strip():
-            low = term.strip().lower()
-            mask = False
-            for col in df.columns:
-                mask = mask | df[col].fillna("").astype(str).str.lower().str.contains(low, regex=False)
-            df = df[mask]
+        st.caption(f"검색 결과 {len(df):,}건")
         st.dataframe(df, use_container_width=True, hide_index=True)
