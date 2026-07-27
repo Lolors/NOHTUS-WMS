@@ -65,6 +65,15 @@ def page_outbound():
     original_customer_payload = getattr(outbound_page, "_current_customer_payload", None)
     original_inventory_query = outbound_page._inventory_query_for_outbound
     original_q = outbound_page.q
+    original_title = st.title
+
+    # 수출대기 화면을 다녀온 뒤 남은 화면 모드가 일반 출고 제목을 바꾸지 않게 한다.
+    st.session_state.pop("_outbound_screen_mode", None)
+
+    def patched_title(body, *args, **kwargs):
+        if isinstance(body, str) and body.strip() in {"수출대기 등록", "수출대기 수정"}:
+            body = "출고지시"
+        return original_title(body, *args, **kwargs)
 
     def patched_save(cart, title="", memo=""):
         order_id = original_save(cart, title, memo)
@@ -126,12 +135,14 @@ def page_outbound():
     outbound_page._current_customer_payload = patched_customer_payload
     outbound_page._inventory_query_for_outbound = patched_inventory_query
     outbound_page.q = patched_q
+    st.title = patched_title
     try:
         return _page_outbound()
     finally:
         outbound_page.save_outbound_order = original_save
         outbound_page._inventory_query_for_outbound = original_inventory_query
         outbound_page.q = original_q
+        st.title = original_title
 
         if original_last_sale_text is None:
             try:
