@@ -63,12 +63,66 @@ def page_export_waiting():
     from datetime import date, datetime
 
     import nohtus.pages.outbound as outbound_page
+    import nohtus.services.export_waiting as export_waiting_service
 
     original_customer_payload = getattr(outbound_page, "_current_customer_payload", None)
     original_manual_pick_rows = getattr(outbound_page, "_manual_pick_rows", None)
     original_last_sale_text = getattr(outbound_page, "_last_sale_text", None)
     original_days_ago_label = getattr(outbound_page, "_days_ago_label", None)
     original_export_renderer = export_waiting_page._page_outbound
+    original_find_unmatched = export_waiting_page._find_unmatched_p_item
+    original_take_p = export_waiting_service._take_p
+
+    def tolerant_take_p(cur, item, now, qty=None):
+        """수정 원복 시 P 재고명이 바뀌거나 수량이 달라도 주문 기록을 기준으로 복구한다."""
+        needed = int(item.get("qty") or 0) if qty is None else int(qty or 0)
+        if needed <= 0:
+            return 0
+
+        exact = export_waiting_service._find(cur, item, export_waiting_service.P)
+        candidates = []
+        if exact:
+            candidates.append((int(exact[0]), int(exact[1] or 0)))
+
+        rows = cur.execute(
+            """
+            SELECT id, qty
+            FROM inventory
+            WHERE location='P'
+              AND company=?
+              AND IFNULL(lot,'-')=?
+              AND IFNULL(exp_date,'-')=?
+              AND COALESCE(qty,0)>0
+            ORDER BY CASE WHEN product_name=? THEN 0 ELSE 1 END, qty DESC, id
+            """,
+            (
+                str(item.get("company") or ""),
+                str(item.get("lot") or "-"),
+                str(item.get("exp_date") or "-"),
+                str(item.get("product_name") or ""),
+            ),
+        ).fetchall()
+        known_ids = {row_id for row_id, _ in candidates}
+        candidates.extend((int(row_id), int(stock or 0)) for row_id, stock in rows if int(row_id) not in known_ids)
+
+        remaining = needed
+        deducted = 0
+        for inventory_id, available in candidates:
+            if remaining <= 0:
+                break
+            take = min(max(available, 0), remaining)
+            if take <= 0:
+                continue
+            cur.execute(
+                "UPDATE inventory SET qty=?,updated_at=? WHERE id=?",
+                (available - take, now, inventory_id),
+            )
+            remaining -= take
+            deducted += take
+
+        # P 재고가 부족하거나 제품명이 바뀌어도 수출대기 원본 기록을 신뢰해
+        # 원래 제품명·LOT·유통기한·로케이션으로 전량 복구한다.
+        return deducted
 
     if original_customer_payload is not None:
         def compatible_current_customer_payload(selected_customer=None):
@@ -124,6 +178,10 @@ def page_export_waiting():
     outbound_page._days_ago_label = compatible_days_ago_label
     outbound_page._last_sale_text = compatible_last_sale_text
 
+    # 수정 시 제품명이 바뀌었거나 P 수량이 일치하지 않아도 수출대기 원본 기록으로 원복한다.
+    export_waiting_page._find_unmatched_p_item = lambda order_id: None
+    export_waiting_service._take_p = tolerant_take_p
+
     # 수출대기 전용 화면은 outbound_business의 UI 재패치를 거치면
     # 수출대기용 제목/주문정보 패치가 덮어써지므로 기본 출고 렌더러를 직접 사용한다.
     export_waiting_page._page_outbound = outbound_page.page_outbound
@@ -132,6 +190,8 @@ def page_export_waiting():
         return _page_export_waiting()
     finally:
         export_waiting_page._page_outbound = original_export_renderer
+        export_waiting_page._find_unmatched_p_item = original_find_unmatched
+        export_waiting_service._take_p = original_take_p
 
         if original_customer_payload is not None:
             outbound_page._current_customer_payload = original_customer_payload
