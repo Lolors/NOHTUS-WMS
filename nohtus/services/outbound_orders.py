@@ -6,7 +6,11 @@ implementation can be migrated here in smaller safe commits.
 """
 from __future__ import annotations
 import streamlit as st
-from nohtus.services.inventory import insert_transaction_log, stock_key_final_qty
+from nohtus.services.inventory import (
+    assert_stock_key_history_consistent,
+    insert_transaction_log,
+    stock_key_final_qty,
+)
 from nohtus.dates import display_date_only
 from nohtus.db import connect
 from datetime import datetime
@@ -317,6 +321,26 @@ def update_outbound_order(order_id, title_or_cart, maybe_cart=None):
             delta = new_qty - old_qty
             if delta:
                 changed_deltas[inv_key] = delta
+
+        checked_stock_keys = set()
+        for inv_key in changed_deltas:
+            src = inv_map[inv_key]
+            stock_key = _stock_key(
+                src.get('company', ''),
+                src.get('product_name', ''),
+                src.get('lot', '-'),
+                src.get('exp_date', '-'),
+            )
+            if stock_key in checked_stock_keys:
+                continue
+            assert_stock_key_history_consistent(
+                cur,
+                company=src.get('company', ''),
+                product_name=src.get('product_name', ''),
+                lot=src.get('lot', '-'),
+                exp_date=src.get('exp_date', '-'),
+            )
+            checked_stock_keys.add(stock_key)
 
         for inv_key, delta in changed_deltas.items():
             src = inv_map.get(inv_key)

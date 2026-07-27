@@ -90,6 +90,56 @@ def stock_key_final_qty(cur, *, company, product_name, lot, exp_date):
     return int((row[0] if row else 0) or 0)
 
 
+def latest_stock_key_history_final_qty(cur, *, company, product_name, lot, exp_date):
+    """같은 재고키에 기록된 가장 최근 이력의 최종재고를 반환한다."""
+    company, product, lot, exp_date = _stock_key(company, product_name, lot, exp_date)
+    if not company or not product:
+        return None
+    rows = cur.execute(
+        """
+        SELECT tx_type,from_company,to_company,final_stock
+        FROM transactions
+        WHERE product_name=?
+          AND IFNULL(lot, '-')=?
+          AND IFNULL(exp_date, '-')=?
+          AND final_stock IS NOT NULL
+        ORDER BY id DESC
+        """,
+        (product, lot, exp_date),
+    ).fetchall()
+    for tx_type, from_company, to_company, final_stock in rows:
+        history_company = _infer_transaction_stock_company(tx_type, from_company, to_company)
+        if str(history_company or "").strip() == company:
+            return int(final_stock)
+    return None
+
+
+def assert_stock_key_history_consistent(cur, *, company, product_name, lot, exp_date):
+    """현재고와 최신 이력 스냅샷이 다르면 재고 변경 전에 작업을 차단한다."""
+    current_qty = stock_key_final_qty(
+        cur,
+        company=company,
+        product_name=product_name,
+        lot=lot,
+        exp_date=exp_date,
+    )
+    history_qty = latest_stock_key_history_final_qty(
+        cur,
+        company=company,
+        product_name=product_name,
+        lot=lot,
+        exp_date=exp_date,
+    )
+    if history_qty is None or current_qty == history_qty:
+        return
+    raise ValueError(
+        "출고지시 수정을 중단했습니다. "
+        f"{company} / {product_name} / LOT {lot or '-'} / 유통기한 {exp_date or '-'}의 "
+        f"현재고({current_qty}EA)와 최근 이력 최종재고({history_qty}EA)가 일치하지 않습니다. "
+        "재고 이력 또는 재고실사를 확인한 후 다시 시도하세요. 재고는 변경되지 않았습니다."
+    )
+
+
 def current_product_lot_exp_stock(cur, product_name, lot, exp_date, company=None):
     """호환용 wrapper. company가 있으면 사업장 포함 기준으로 계산한다."""
     if company:
