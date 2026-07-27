@@ -55,6 +55,27 @@ def init_db():
     if "actor" not in tx_cols:
         cur.execute("ALTER TABLE transactions ADD COLUMN actor TEXT")
 
+    # 수출확정도 실제 매출 출고이므로 일반 출고지시 이력으로 통일한다.
+    # 과거에 '출고'로 저장된 수출확정 이력도 앱 시작 시 함께 보정한다.
+    cur.execute("""
+        UPDATE transactions
+        SET tx_type='출고지시'
+        WHERE tx_type='출고'
+          AND TRIM(COALESCE(memo,'')) LIKE '수출확정 /%'
+    """)
+    cur.execute("DROP TRIGGER IF EXISTS trg_export_confirm_as_outbound_history")
+    cur.execute("""
+        CREATE TRIGGER trg_export_confirm_as_outbound_history
+        AFTER INSERT ON transactions
+        WHEN NEW.tx_type='출고'
+         AND TRIM(COALESCE(NEW.memo,'')) LIKE '수출확정 /%'
+        BEGIN
+            UPDATE transactions
+            SET tx_type='출고지시'
+            WHERE id=NEW.id;
+        END
+    """)
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS erp_stock(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
