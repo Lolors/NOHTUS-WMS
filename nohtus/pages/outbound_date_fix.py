@@ -6,8 +6,8 @@ import pandas as pd
 import streamlit as st
 
 import nohtus.pages.outbound as outbound_page
+import nohtus.pages.outbound_business as outbound_business
 from nohtus.db import connect
-from nohtus.pages.outbound_business import page_outbound as _page_outbound
 
 
 _BLOCKED_OUTBOUND_LOCATIONS = {"N-홍보물랙", "G1", "G2"}
@@ -66,6 +66,19 @@ def page_outbound():
     original_inventory_query = outbound_page._inventory_query_for_outbound
     original_q = outbound_page.q
     original_title = st.title
+
+    # outbound_business가 과거 수출대기용 text_input 패치를 원본으로 잘못 보관했을 수 있다.
+    # 일반 출고 화면에서는 현재 Streamlit 원본 위젯을 사용해 매출처 검색창을 반드시 표시한다.
+    previous_base_text_input = outbound_business._BASE_TEXT_INPUT
+    previous_base_checkbox = outbound_business._BASE_CHECKBOX
+    previous_base_data_editor = outbound_business._BASE_DATA_EDITOR
+    previous_base_markdown = outbound_business._BASE_MARKDOWN
+    previous_base_caption = outbound_business._BASE_CAPTION
+    outbound_business._BASE_TEXT_INPUT = st.text_input
+    outbound_business._BASE_CHECKBOX = st.checkbox
+    outbound_business._BASE_DATA_EDITOR = st.data_editor
+    outbound_business._BASE_MARKDOWN = st.markdown
+    outbound_business._BASE_CAPTION = st.caption
 
     # 수출대기 화면을 다녀온 뒤 남은 화면 모드가 일반 출고 제목을 바꾸지 않게 한다.
     st.session_state.pop("_outbound_screen_mode", None)
@@ -137,12 +150,18 @@ def page_outbound():
     outbound_page.q = patched_q
     st.title = patched_title
     try:
-        return _page_outbound()
+        return outbound_business.page_outbound()
     finally:
         outbound_page.save_outbound_order = original_save
         outbound_page._inventory_query_for_outbound = original_inventory_query
         outbound_page.q = original_q
         st.title = original_title
+
+        outbound_business._BASE_TEXT_INPUT = previous_base_text_input
+        outbound_business._BASE_CHECKBOX = previous_base_checkbox
+        outbound_business._BASE_DATA_EDITOR = previous_base_data_editor
+        outbound_business._BASE_MARKDOWN = previous_base_markdown
+        outbound_business._BASE_CAPTION = previous_base_caption
 
         if original_last_sale_text is None:
             try:
