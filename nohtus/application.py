@@ -61,6 +61,8 @@ def _inject_mobile_login_css():
 
 def page_export_waiting():
     """수출대기 화면에서 혼재된 출고 헬퍼 함수 시그니처와 누락 함수를 호환한다."""
+    st.session_state["_outbound_screen_mode"] = "export_waiting"
+
     from datetime import date, datetime
 
     import nohtus.pages.outbound as outbound_page
