@@ -11,6 +11,8 @@ from nohtus.services.outbound_cart import _add_rows_to_outbound_cart, _cart_expi
 from nohtus.services.outbound import build_outbound_order_title, outbound_excel_bytes, outbound_pdf_bytes, recommend_picks
 from datetime import date, datetime
 
+import html
+
 import pandas as pd
 import streamlit as st
 
@@ -328,6 +330,95 @@ def _render_last_sale_importer():
                 st.error(str(exc))
 
 
+
+def _recent_outbound_history(customer_name, product_name, limit=5):
+    """선택한 거래처·제품 조합의 최근 출고지시를 LOT별로 묶어 반환한다."""
+    customer = str(customer_name or "").strip()
+    product = str(product_name or "").strip()
+    if not customer or not product:
+        return []
+
+    _ensure_outbound_customer_columns()
+    rows = q(
+        """
+        SELECT
+            o.id AS order_id,
+            COALESCE(NULLIF(TRIM(o.order_date), ''), SUBSTR(o.created_at, 1, 10)) AS order_date,
+            i.qty,
+            i.lot,
+            i.exp_date
+        FROM outbound_orders o
+        JOIN outbound_order_items i ON i.order_id=o.id
+        WHERE TRIM(COALESCE(o.customer_name, ''))=?
+          AND TRIM(COALESCE(i.product_name, ''))=?
+          AND TRIM(COALESCE(o.status, '')) NOT LIKE '%취소%'
+        ORDER BY order_date DESC, o.id DESC, i.id
+        """,
+        (customer, product),
+    )
+    if rows.empty:
+        return []
+
+    history = []
+    for order_id, group in rows.groupby("order_id", sort=False):
+        first = group.iloc[0]
+        lots = []
+        total_qty = 0
+        for item in group.itertuples(index=False):
+            qty = _safe_int(getattr(item, "qty", 0), 0)
+            total_qty += qty
+            lot = str(getattr(item, "lot", "") or "-").strip() or "-"
+            exp_date = display_date_only(getattr(item, "exp_date", "") or "-")
+            lots.append({"qty": qty, "lot": lot, "exp_date": exp_date})
+        history.append({
+            "order_id": int(order_id),
+            "order_date": str(first.get("order_date") or "-")[:10],
+            "total_qty": total_qty,
+            "lots": lots,
+        })
+        if len(history) >= int(limit):
+            break
+    return history
+
+
+def _render_recent_outbound_history(customer_name, product_name):
+    history = _recent_outbound_history(customer_name, product_name, limit=5)
+    if history:
+        cards = []
+        for order in history:
+            lot_lines = "".join(
+                "<div class='out-history-lot'>"
+                f"LOT {html.escape(str(item['lot']))} · "
+                f"{html.escape(str(item['exp_date']))} · "
+                f"{int(item['qty']):,}EA"
+                "</div>"
+                for item in order["lots"]
+            )
+            cards.append(
+                "<div class='out-history-order'>"
+                f"<div class='out-history-date'>{html.escape(order['order_date'])}"
+                f"<span>{int(order['total_qty']):,}EA</span></div>"
+                f"{lot_lines}</div>"
+            )
+        content = "".join(cards)
+    else:
+        content = "<div class='out-history-empty'>이 거래처와 제품의 이전 출고지시가 없습니다.</div>"
+
+    st.markdown(
+        f"""
+        <div class="out-history-wrap">
+          <span class="out-history-trigger">최근 거래 <b>ⓘ</b></span>
+          <div class="out-history-tooltip">
+            <div class="out-history-title">{html.escape(str(customer_name))} · {html.escape(str(product_name))}</div>
+            {content}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+
 def _inventory_query_for_outbound(selected_product, selected_company, ignore_company=False):
     if not selected_product:
         return pd.DataFrame()
@@ -403,6 +494,19 @@ def page_outbound():
       div[data-testid="stMetric"] label, div[data-testid="stMetric"] [data-testid="stMetricLabel"] {width:100%; justify-content:center; text-align:center;}
       div[data-testid="stNumberInput"] input {font-size: 2.15rem !important; font-weight: 600 !important; height: 3.25rem !important; text-align:center !important; padding-left:19px !important;}
       .out-req-label {font-size: 0.92rem; color: #64748b; margin: 0 0 0.25rem 0; text-align:left !important; width:100%; display:block;}
+      .out-history-wrap {position:relative; display:inline-block; margin:0.15rem 0 0.65rem 0; z-index:20;}
+      .out-history-trigger {display:inline-flex; align-items:center; gap:0.25rem; color:#2563eb; font-size:0.9rem; font-weight:700; cursor:help;}
+      .out-history-trigger b {font-size:1rem;}
+      .out-history-tooltip {visibility:hidden; opacity:0; position:absolute; z-index:9999; top:calc(100% + 8px); right:0; width:390px; max-width:min(390px, 80vw); padding:14px; border:1px solid #cbd5e1; border-radius:12px; background:#ffffff; box-shadow:0 12px 30px rgba(15,23,42,.18); color:#0f172a; transition:opacity .12s ease;}
+      .out-history-wrap:hover .out-history-tooltip {visibility:visible; opacity:1;}
+      .out-history-tooltip:before {content:""; position:absolute; top:-6px; right:28px; width:10px; height:10px; background:#fff; border-left:1px solid #cbd5e1; border-top:1px solid #cbd5e1; transform:rotate(45deg);}
+      .out-history-title {font-weight:800; font-size:0.92rem; padding-bottom:8px; border-bottom:1px solid #e2e8f0;}
+      .out-history-order {padding:9px 0; border-bottom:1px solid #e2e8f0;}
+      .out-history-order:last-child {border-bottom:0; padding-bottom:0;}
+      .out-history-date {display:flex; justify-content:space-between; gap:12px; font-weight:750; font-size:0.88rem;}
+      .out-history-date span {color:#2563eb;}
+      .out-history-lot {margin-top:4px; color:#475569; font-size:0.8rem; line-height:1.35;}
+      .out-history-empty {padding-top:10px; color:#64748b; font-size:0.84rem;}
     </style>
     """, unsafe_allow_html=True)
 
@@ -481,6 +585,10 @@ def page_outbound():
             st.info("제품을 검색하세요.")
         else:
             selected_product = st.selectbox("제품 선택", opts["standard_name"].dropna().astype(str).drop_duplicates().tolist())
+            customer_payload = _current_customer_payload(selected_customer)
+            customer_name_for_history = str(customer_payload.get("customer_name") or "").strip()
+            if customer_name_for_history:
+                _render_recent_outbound_history(customer_name_for_history, selected_product)
             if ignore_company:
                 st.caption("추천 범위: 전체 사업장 재고")
             elif selected_company and selected_company in COMPANIES:
