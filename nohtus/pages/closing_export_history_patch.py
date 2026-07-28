@@ -53,7 +53,11 @@ def _patched_export_waiting_rows(original_q, ds):
                t.product_name AS 표준제품명,
                COALESCE(t.lot, '-') AS 제조번호,
                COALESCE(t.exp_date, '-') AS 유통기한,
-               t.qty AS 출고수량
+               CASE
+                   WHEN TRIM(COALESCE(t.from_location,''))='P'
+                       THEN -ABS(COALESCE(t.qty, 0))
+                   ELSE ABS(COALESCE(t.qty, 0))
+               END AS 출고수량
         FROM transactions t
         JOIN export_waiting_orders o
           ON COALESCE(t.memo,'') LIKE '%수출번호: ' || o.export_no || '%'
