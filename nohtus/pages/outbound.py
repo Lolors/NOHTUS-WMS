@@ -517,15 +517,24 @@ def page_outbound():
     with top_left:
         st.markdown("### 매출처")
         _render_last_sale_importer()
-        customer_search_col, direct_col, history_col = st.columns([3.2, 1.05, 1.25], gap="small")
+        show_recent_history = str(st.session_state.get("_outbound_screen_mode") or "outbound") != "export_waiting"
+        if show_recent_history:
+            customer_search_col, direct_col, history_col = st.columns([3.2, 1.05, 1.25], gap="small")
+        else:
+            customer_search_col, direct_col = st.columns([4, 1], gap="small")
+            history_col = None
+
         with customer_search_col:
             cust_term = st.text_input("매출처 검색", placeholder="거래처명을 입력하세요", key="out_customer_term")
         with direct_col:
             st.markdown('<div style="height:1.75rem"></div>', unsafe_allow_html=True)
             direct_customer = st.checkbox("직접입력", value=False, key="out_customer_direct")
-        with history_col:
-            st.markdown('<div style="height:1.75rem"></div>', unsafe_allow_html=True)
-            recent_history_slot = st.empty()
+
+        recent_history_slot = None
+        if history_col is not None:
+            with history_col:
+                st.markdown('<div style="height:1.75rem"></div>', unsafe_allow_html=True)
+                recent_history_slot = st.empty()
         cust_df = pd.DataFrame()
 
         if direct_customer:
@@ -568,13 +577,14 @@ def page_outbound():
                 else:
                     st.info("거래처를 검색하거나 직접입력을 체크하세요.")
 
-        customer_payload_for_history = _current_customer_payload(selected_customer)
-        customer_name_for_history = str(customer_payload_for_history.get("customer_name") or "").strip()
-        with recent_history_slot.container():
-            if customer_name_for_history:
-                _render_recent_outbound_history(customer_name_for_history)
-            else:
-                st.caption("최근 거래")
+        if recent_history_slot is not None:
+            customer_payload_for_history = _current_customer_payload(selected_customer)
+            customer_name_for_history = str(customer_payload_for_history.get("customer_name") or "").strip()
+            with recent_history_slot.container():
+                if customer_name_for_history:
+                    _render_recent_outbound_history(customer_name_for_history)
+                else:
+                    st.caption("최근 거래")
 
         st.markdown("### 재고 선택 옵션")
         ignore_company = st.checkbox("사업장 구분 없이", value=False, key="out_ignore_company")
