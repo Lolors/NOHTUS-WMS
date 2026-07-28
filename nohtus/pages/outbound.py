@@ -331,11 +331,10 @@ def _render_last_sale_importer():
 
 
 
-def _recent_outbound_history(customer_name, product_name, limit=5):
-    """선택한 거래처·제품 조합의 최근 출고일과 총수량을 반환한다."""
+def _recent_outbound_history(customer_name, limit=5):
+    """선택한 매출처의 최근 출고일과 출고지시 총수량을 반환한다."""
     customer = str(customer_name or "").strip()
-    product = str(product_name or "").strip()
-    if not customer or not product:
+    if not customer:
         return []
 
     _ensure_outbound_customer_columns()
@@ -344,17 +343,14 @@ def _recent_outbound_history(customer_name, product_name, limit=5):
         SELECT
             o.id AS order_id,
             COALESCE(NULLIF(TRIM(o.order_date), ''), SUBSTR(o.created_at, 1, 10)) AS order_date,
-            i.qty,
-            i.lot,
-            i.exp_date
+            i.qty
         FROM outbound_orders o
         JOIN outbound_order_items i ON i.order_id=o.id
         WHERE TRIM(COALESCE(o.customer_name, ''))=?
-          AND TRIM(COALESCE(i.product_name, ''))=?
           AND TRIM(COALESCE(o.status, '')) NOT LIKE '%취소%'
         ORDER BY order_date DESC, o.id DESC, i.id
         """,
-        (customer, product),
+        (customer,),
     )
     if rows.empty:
         return []
@@ -362,27 +358,19 @@ def _recent_outbound_history(customer_name, product_name, limit=5):
     history = []
     for order_id, group in rows.groupby("order_id", sort=False):
         first = group.iloc[0]
-        lots = []
-        total_qty = 0
-        for item in group.itertuples(index=False):
-            qty = _safe_int(getattr(item, "qty", 0), 0)
-            total_qty += qty
-            lot = str(getattr(item, "lot", "") or "-").strip() or "-"
-            exp_date = display_date_only(getattr(item, "exp_date", "") or "-")
-            lots.append({"qty": qty, "lot": lot, "exp_date": exp_date})
+        total_qty = sum(_safe_int(qty, 0) for qty in group["qty"].tolist())
         history.append({
             "order_id": int(order_id),
             "order_date": str(first.get("order_date") or "-")[:10],
             "total_qty": total_qty,
-            "lots": lots,
         })
         if len(history) >= int(limit):
             break
     return history
 
 
-def _render_recent_outbound_history(customer_name, product_name):
-    history = _recent_outbound_history(customer_name, product_name, limit=5)
+def _render_recent_outbound_history(customer_name):
+    history = _recent_outbound_history(customer_name, limit=5)
     if history:
         cards = []
         for order in history:
@@ -394,21 +382,20 @@ def _render_recent_outbound_history(customer_name, product_name):
             )
         content = "".join(cards)
     else:
-        content = "<div class='out-history-empty'>이 거래처와 제품의 이전 출고지시가 없습니다.</div>"
+        content = "<div class='out-history-empty'>이 매출처의 이전 출고지시가 없습니다.</div>"
 
     st.markdown(
         f"""
         <div class="out-history-wrap">
           <span class="out-history-trigger">최근 거래 <b>ⓘ</b></span>
           <div class="out-history-tooltip">
-            <div class="out-history-title">{html.escape(str(customer_name))} · {html.escape(str(product_name))}</div>
+            <div class="out-history-title">{html.escape(str(customer_name))}</div>
             {content}
           </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
 
 
 def _inventory_query_for_outbound(selected_product, selected_company, ignore_company=False):
@@ -517,8 +504,15 @@ def page_outbound():
     with top_left:
         st.markdown("### 매출처")
         _render_last_sale_importer()
-        cust_term = st.text_input("매출처 검색", placeholder="거래처명을 입력하세요", key="out_customer_term")
-        direct_customer = st.checkbox("직접입력", value=False, key="out_customer_direct")
+        customer_search_col, direct_col, history_col = st.columns([3.2, 1.05, 1.25], gap="small")
+        with customer_search_col:
+            cust_term = st.text_input("매출처 검색", placeholder="거래처명을 입력하세요", key="out_customer_term")
+        with direct_col:
+            st.markdown('<div style="height:1.75rem"></div>', unsafe_allow_html=True)
+            direct_customer = st.checkbox("직접입력", value=False, key="out_customer_direct")
+        with history_col:
+            st.markdown('<div style="height:1.75rem"></div>', unsafe_allow_html=True)
+            recent_history_slot = st.empty()
         cust_df = pd.DataFrame()
 
         if direct_customer:
@@ -561,6 +555,14 @@ def page_outbound():
                 else:
                     st.info("거래처를 검색하거나 직접입력을 체크하세요.")
 
+        customer_payload_for_history = _current_customer_payload(selected_customer)
+        customer_name_for_history = str(customer_payload_for_history.get("customer_name") or "").strip()
+        with recent_history_slot.container():
+            if customer_name_for_history:
+                _render_recent_outbound_history(customer_name_for_history)
+            else:
+                st.caption("최근 거래")
+
         st.markdown("### 재고 선택 옵션")
         ignore_company = st.checkbox("사업장 구분 없이", value=False, key="out_ignore_company")
         manual_pick = st.checkbox("특정 재고 선택", value=False, key="out_manual_pick")
@@ -577,10 +579,6 @@ def page_outbound():
             st.info("제품을 검색하세요.")
         else:
             selected_product = st.selectbox("제품 선택", opts["standard_name"].dropna().astype(str).drop_duplicates().tolist())
-            customer_payload = _current_customer_payload(selected_customer)
-            customer_name_for_history = str(customer_payload.get("customer_name") or "").strip()
-            if customer_name_for_history:
-                _render_recent_outbound_history(customer_name_for_history, selected_product)
             if ignore_company:
                 st.caption("추천 범위: 전체 사업장 재고")
             elif selected_company and selected_company in COMPANIES:
