@@ -332,7 +332,7 @@ def _render_last_sale_importer():
 
 
 def _recent_outbound_history(customer_name, product_name, limit=5):
-    """선택한 거래처·제품 조합의 최근 출고지시를 LOT별로 묶어 반환한다."""
+    """선택한 거래처·제품 조합의 최근 출고일과 총수량을 반환한다."""
     customer = str(customer_name or "").strip()
     product = str(product_name or "").strip()
     if not customer or not product:
@@ -386,19 +386,11 @@ def _render_recent_outbound_history(customer_name, product_name):
     if history:
         cards = []
         for order in history:
-            lot_lines = "".join(
-                "<div class='out-history-lot'>"
-                f"LOT {html.escape(str(item['lot']))} · "
-                f"{html.escape(str(item['exp_date']))} · "
-                f"{int(item['qty']):,}EA"
-                "</div>"
-                for item in order["lots"]
-            )
             cards.append(
                 "<div class='out-history-order'>"
                 f"<div class='out-history-date'>{html.escape(order['order_date'])}"
                 f"<span>{int(order['total_qty']):,}EA</span></div>"
-                f"{lot_lines}</div>"
+                "</div>"
             )
         content = "".join(cards)
     else:
