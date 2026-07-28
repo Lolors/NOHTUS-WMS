@@ -6,6 +6,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import nohtus.pages.closing_date_fix as closing_date_fix
+import nohtus.pages.closing_export_history_patch  # noqa: F401
 
 
 _PRINT_BUTTON_LABEL = "마감 체크리스트 출력"
