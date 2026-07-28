@@ -332,7 +332,7 @@ def _render_last_sale_importer():
 
 
 def _recent_outbound_history(customer_name, limit=5):
-    """선택한 매출처의 최근 출고일과 출고지시 총수량을 반환한다."""
+    """선택한 매출처의 최근 출고일과 제품별 수량을 반환한다."""
     customer = str(customer_name or "").strip()
     if not customer:
         return []
@@ -343,6 +343,7 @@ def _recent_outbound_history(customer_name, limit=5):
         SELECT
             o.id AS order_id,
             COALESCE(NULLIF(TRIM(o.order_date), ''), SUBSTR(o.created_at, 1, 10)) AS order_date,
+            i.product_name,
             i.qty
         FROM outbound_orders o
         JOIN outbound_order_items i ON i.order_id=o.id
@@ -358,11 +359,15 @@ def _recent_outbound_history(customer_name, limit=5):
     history = []
     for order_id, group in rows.groupby("order_id", sort=False):
         first = group.iloc[0]
-        total_qty = sum(_safe_int(qty, 0) for qty in group["qty"].tolist())
+        products = []
+        for product_name, product_group in group.groupby("product_name", sort=False, dropna=False):
+            name = str(product_name or "-").strip() or "-"
+            qty = sum(_safe_int(value, 0) for value in product_group["qty"].tolist())
+            products.append({"product_name": name, "qty": qty})
         history.append({
             "order_id": int(order_id),
             "order_date": str(first.get("order_date") or "-")[:10],
-            "total_qty": total_qty,
+            "products": products,
         })
         if len(history) >= int(limit):
             break
@@ -374,10 +379,17 @@ def _render_recent_outbound_history(customer_name):
     if history:
         cards = []
         for order in history:
+            product_rows = "".join(
+                "<div class='out-history-product-row'>"
+                f"<span>{html.escape(item['product_name'])}</span>"
+                f"<b>{int(item['qty']):,}EA</b>"
+                "</div>"
+                for item in order["products"]
+            )
             cards.append(
                 "<div class='out-history-order'>"
-                f"<div class='out-history-date'>{html.escape(order['order_date'])}"
-                f"<span>{int(order['total_qty']):,}EA</span></div>"
+                f"<div class='out-history-date'>{html.escape(order['order_date'])}</div>"
+                f"{product_rows}"
                 "</div>"
             )
         content = "".join(cards)
@@ -482,9 +494,10 @@ def page_outbound():
       .out-history-title {font-weight:800; font-size:0.92rem; padding-bottom:8px; border-bottom:1px solid #e2e8f0;}
       .out-history-order {padding:9px 0; border-bottom:1px solid #e2e8f0;}
       .out-history-order:last-child {border-bottom:0; padding-bottom:0;}
-      .out-history-date {display:flex; justify-content:space-between; gap:12px; font-weight:750; font-size:0.88rem;}
-      .out-history-date span {color:#2563eb;}
-      .out-history-lot {margin-top:4px; color:#475569; font-size:0.8rem; line-height:1.35;}
+      .out-history-date {font-weight:800; font-size:0.86rem; color:#334155; margin-bottom:5px;}
+      .out-history-product-row {display:flex; justify-content:space-between; align-items:flex-start; gap:12px; color:#475569; font-size:0.82rem; line-height:1.4; padding:2px 0;}
+      .out-history-product-row span {min-width:0; overflow-wrap:anywhere;}
+      .out-history-product-row b {flex:none; color:#2563eb; white-space:nowrap;}
       .out-history-empty {padding-top:10px; color:#64748b; font-size:0.84rem;}
     </style>
     """, unsafe_allow_html=True)
