@@ -377,8 +377,7 @@ def _recent_outbound_history(customer_name, company, limit=5):
     return history
 
 
-def _render_recent_outbound_history(customer_name, company):
-    history = _recent_outbound_history(customer_name, company, limit=5)
+def _recent_outbound_history_html(customer_name, history):
     if history:
         cards = []
         for order in history:
@@ -399,16 +398,21 @@ def _render_recent_outbound_history(customer_name, company):
     else:
         content = "<div class='out-history-empty'>이 매출처의 이전 출고지시가 없습니다.</div>"
 
-    st.markdown(
-        f"""
+    return f"""
         <div class="out-history-wrap">
           <span class="out-history-trigger">최근 거래 <b>ⓘ</b></span>
-          <div class="out-history-tooltip">
+          <div class="out-history-tooltip" style="display:none">
             <div class="out-history-title">{html.escape(str(customer_name))}</div>
             {content}
           </div>
         </div>
-        """,
+        """
+
+
+def _render_recent_outbound_history(customer_name, company):
+    history = _recent_outbound_history(customer_name, company, limit=5)
+    st.markdown(
+        _recent_outbound_history_html(customer_name, history),
         unsafe_allow_html=True,
     )
 
@@ -491,8 +495,8 @@ def page_outbound():
       .out-history-wrap {position:relative; display:inline-block; margin:0.15rem 0 0.65rem 0; z-index:20;}
       .out-history-trigger {display:inline-flex; align-items:center; gap:0.25rem; color:#2563eb; font-size:0.9rem; font-weight:700; cursor:help;}
       .out-history-trigger b {font-size:1rem;}
-      .out-history-tooltip {visibility:hidden; opacity:0; position:absolute; z-index:9999; top:calc(100% + 8px); right:0; width:390px; max-width:min(390px, 80vw); padding:14px; border:1px solid #cbd5e1; border-radius:12px; background:#ffffff; box-shadow:0 12px 30px rgba(15,23,42,.18); color:#0f172a; transition:opacity .12s ease;}
-      .out-history-wrap:hover .out-history-tooltip {visibility:visible; opacity:1;}
+      .out-history-tooltip {display:none; visibility:hidden; opacity:0; position:absolute; z-index:9999; top:calc(100% + 8px); right:0; width:390px; max-width:min(390px, 80vw); padding:14px; border:1px solid #cbd5e1; border-radius:12px; background:#ffffff; box-shadow:0 12px 30px rgba(15,23,42,.18); color:#0f172a; transition:opacity .12s ease;}
+      .out-history-wrap:hover .out-history-tooltip {display:block !important; visibility:visible; opacity:1;}
       .out-history-tooltip:before {content:""; position:absolute; top:-6px; right:28px; width:10px; height:10px; background:#fff; border-left:1px solid #cbd5e1; border-top:1px solid #cbd5e1; transform:rotate(45deg);}
       .out-history-title {font-weight:800; font-size:0.92rem; padding-bottom:8px; border-bottom:1px solid #e2e8f0;}
       .out-history-order {padding:9px 0; border-bottom:1px solid #e2e8f0;}
@@ -587,8 +591,6 @@ def page_outbound():
             with recent_history_slot.container():
                 if customer_name_for_history and customer_company_for_history:
                     _render_recent_outbound_history(customer_name_for_history, customer_company_for_history)
-                else:
-                    st.caption("최근 거래")
 
         st.markdown("### 재고 선택 옵션")
         ignore_company = st.checkbox("사업장 구분 없이", value=False, key="out_ignore_company")
