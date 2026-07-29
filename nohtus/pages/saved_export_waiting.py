@@ -304,7 +304,10 @@ def page_saved_export_waiting():
                         display_row[column] = ""
             expanded_rows.append(display_row)
 
-    table = pd.DataFrame(expanded_rows, columns=visible_columns + ["__status", "__order_id"])
+    table = pd.DataFrame(
+        expanded_rows,
+        columns=visible_columns + ["__status", "__order_id"],
+    ).reset_index(drop=True)
     styled = table.style.apply(_order_row_style, axis=1)
     event = st.dataframe(
         styled,
