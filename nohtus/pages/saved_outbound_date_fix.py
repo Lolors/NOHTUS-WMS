@@ -8,6 +8,24 @@ from nohtus.db import connect, q
 import nohtus.pages.saved_outbound_business_v4 as saved_v4
 
 
+SAVED_OUTBOUND_TRANSITION_GUARD = """
+<span class="saved-outbound-transition-marker"></span>
+<style>
+body:has(.saved-outbound-transition-marker) .out-history-wrap {
+    display: none !important;
+}
+body:has(.saved-outbound-transition-marker)
+div[data-testid="stExpander"]:has(.out-customer-detail-marker) {
+    display: none !important;
+}
+</style>
+"""
+
+
+def _render_saved_outbound_transition_guard():
+    st.markdown(SAVED_OUTBOUND_TRANSITION_GUARD, unsafe_allow_html=True)
+
+
 def _extend_default_range_to_scheduled_orders():
     today = date.today()
     latest_df = q("""
@@ -114,6 +132,8 @@ def _refresh_customer_last_sale(customer_name, company, cancelled_date):
 
 
 def page_saved_outbound():
+    # 새 페이지의 DB 조회가 끝날 때까지 남아 있는 출고지시 DOM 잔상을 먼저 숨긴다.
+    _render_saved_outbound_transition_guard()
     _extend_default_range_to_scheduled_orders()
 
     original_cancel_order = saved_v4.saved_v2._cancel_order

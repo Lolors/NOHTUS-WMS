@@ -573,6 +573,7 @@ def page_outbound():
                 last_sale = _last_sale_text(selected_customer.get("customer_name"), selected_company, exact_sales_map, name_sales_map)
                 st.markdown(f"**사업장 :** {selected_company or '-'} &nbsp;&nbsp;&nbsp; **최근거래 :** {last_sale.replace('최근거래 ', '')} &nbsp;&nbsp;&nbsp; **유형 :** {selected_customer.get('customer_type') or '-'} &nbsp;&nbsp;&nbsp; **담당자 :** {selected_customer.get('manager') or '-'}")
                 with st.expander("거래처 상세정보", expanded=False):
+                    st.markdown('<span class="out-customer-detail-marker"></span>', unsafe_allow_html=True)
                     st.write(f"주소 : {selected_customer.get('address') or '-'}")
                     st.write(f"연락처 : {selected_customer.get('phone') or '-'}")
             else:
