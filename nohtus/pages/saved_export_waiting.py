@@ -24,7 +24,6 @@ from nohtus.services.export_waiting_excel import (
 
 STATUS_LABELS = {"waiting": "수출대기", "partial": "일부 확정", "confirmed": "수출확정", "cancelled": "취소됨"}
 _SELECTED_ORDER_KEY = "saved_export_waiting_selected_order_id"
-_EDIT_FIELD_KEY = "saved_export_waiting_edit_field"
 _EDITABLE_ORDER_FIELDS = {
     "country": ("국가", "country"),
     "buyer": ("바이어", "buyer"),
@@ -226,6 +225,67 @@ def _update_export_order_metadata(order_id, field, new_value):
     return values[field]
 
 
+@st.dialog("수출대기 정보 수정")
+def _edit_export_order_dialog(order_id, field, current_value, order_title):
+    if field not in _EDITABLE_ORDER_FIELDS:
+        st.error("수정할 수 없는 수출대기 정보입니다.")
+        return
+
+    edit_label, _ = _EDITABLE_ORDER_FIELDS[field]
+    input_key = f"edit_export_order_dialog_value_{field}_{int(order_id)}"
+    current_value = str(current_value or "").strip()
+
+    if field == "transport_method":
+        current_transport = current_value or "미지정"
+        transport_index = (
+            TRANSPORT_METHODS.index(current_transport)
+            if current_transport in TRANSPORT_METHODS
+            else 0
+        )
+        edited_value = st.selectbox(
+            edit_label,
+            TRANSPORT_METHODS,
+            index=transport_index,
+            key=input_key,
+        )
+    else:
+        edited_value = st.text_input(
+            edit_label,
+            value=current_value,
+            key=input_key,
+            placeholder=(
+                "비워두면 미지정으로 표시됩니다."
+                if field == "buyer"
+                else None
+            ),
+        )
+
+    save_col, cancel_col = st.columns(2)
+    with save_col:
+        if st.button(
+            "저장",
+            type="primary",
+            use_container_width=True,
+            key=f"save_export_order_dialog_{field}_{int(order_id)}",
+        ):
+            try:
+                saved_value = _update_export_order_metadata(order_id, field, edited_value)
+                display_value = saved_value or "미지정"
+                st.session_state["_export_waiting_message"] = (
+                    f"{order_title}의 {edit_label}을(를) {display_value}(으)로 변경했습니다."
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+    with cancel_col:
+        if st.button(
+            "취소",
+            use_container_width=True,
+            key=f"cancel_export_order_dialog_{field}_{int(order_id)}",
+        ):
+            st.rerun()
+
+
 def page_saved_export_waiting():
     ensure_export_waiting_tables()
     _ensure_order_date_column()
@@ -373,93 +433,60 @@ def page_saved_export_waiting():
     confirmed_count, total_count = int(selected["confirmed_items"] or 0), int(selected["total_items"] or 0)
     st.markdown(f"### {selected['title']}")
     c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("상태", STATUS_LABELS.get(status, status))
-    c2.metric("진행상황", f"{confirmed_count} / {total_count}")
-
-    editable_cards = [
-        (c3, "country", "국가", str(selected["country"] or "-")),
-        (c4, "buyer", "바이어", str(selected["buyer"] or "미지정")),
-        (c5, "transport_method", "운송방식", str(selected["transport_method"] or "미지정")),
-        (c6, "export_no", "수출번호", str(selected["export_no"] or "-")),
+    summary_cards = [
+        (c1, "status", "상태", STATUS_LABELS.get(status, status), None),
+        (c2, "progress", "진행상황", f"{confirmed_count} / {total_count}", None),
+        (c3, "country", "국가", str(selected["country"] or "-"), "country"),
+        (c4, "buyer", "바이어", str(selected["buyer"] or "미지정"), "buyer"),
+        (
+            c5,
+            "transport_method",
+            "운송방식",
+            str(selected["transport_method"] or "미지정"),
+            "transport_method",
+        ),
+        (c6, "export_no", "수출번호", str(selected["export_no"] or "-"), "export_no"),
     ]
-    for column, field, label, value in editable_cards:
+    for column, card_key, label, value, edit_field in summary_cards:
         with column:
-            if st.button(
-                f"{label}\n\n{value}",
+            clicked = st.button(
+                f"{label}\\n\\n{value}",
                 use_container_width=True,
-                key=f"edit_export_order_{field}_{order_id}",
-                help=f"{label} 수정",
-            ):
-                st.session_state.pop(f"edit_export_order_value_{field}_{order_id}", None)
-                st.session_state[_EDIT_FIELD_KEY] = {"order_id": order_id, "field": field}
+                disabled=edit_field is None,
+                key=f"summary_export_order_{card_key}_{order_id}",
+                help=f"{label} 수정" if edit_field else None,
+            )
+            if clicked and edit_field:
+                selected_column = _EDITABLE_ORDER_FIELDS[edit_field][1]
+                _edit_export_order_dialog(
+                    order_id,
+                    edit_field,
+                    selected[selected_column],
+                    str(selected["title"] or ""),
+                )
 
     st.markdown(
         """<style>
-        div[data-testid="stButton"] button p {white-space:pre-line}
+        [class*="st-key-summary_export_order_"] button {
+            min-height:5.25rem;
+            padding:0.65rem 0.75rem;
+            align-items:flex-start;
+            justify-content:flex-start;
+            text-align:left;
+        }
+        [class*="st-key-summary_export_order_"] button p {
+            white-space:pre-line;
+            line-height:1.15;
+        }
+        [class*="st-key-summary_export_order_"] button:disabled {
+            opacity:1;
+            color:inherit;
+            cursor:default;
+        }
         </style>""",
         unsafe_allow_html=True,
     )
     _fit_summary_metric_values()
-
-    editing = st.session_state.get(_EDIT_FIELD_KEY)
-    if isinstance(editing, dict) and int(editing.get("order_id") or 0) == order_id:
-        edit_field = str(editing.get("field") or "")
-        if edit_field in _EDITABLE_ORDER_FIELDS:
-            edit_label, selected_column = _EDITABLE_ORDER_FIELDS[edit_field]
-            current_value = str(selected[selected_column] or "").strip()
-            input_key = f"edit_export_order_value_{edit_field}_{order_id}"
-
-            edit_input_col, save_edit_col, cancel_edit_col = st.columns([4, 1, 1])
-            with edit_input_col:
-                if edit_field == "transport_method":
-                    current_transport = current_value or "미지정"
-                    transport_index = (
-                        TRANSPORT_METHODS.index(current_transport)
-                        if current_transport in TRANSPORT_METHODS
-                        else 0
-                    )
-                    edited_value = st.selectbox(
-                        f"{edit_label} 수정",
-                        TRANSPORT_METHODS,
-                        index=transport_index,
-                        key=input_key,
-                    )
-                else:
-                    edited_value = st.text_input(
-                        f"{edit_label} 수정",
-                        value=current_value,
-                        key=input_key,
-                        placeholder="바이어는 비워두면 미지정으로 표시됩니다."
-                        if edit_field == "buyer"
-                        else None,
-                    )
-            with save_edit_col:
-                st.markdown("<div style='height:1.78rem'></div>", unsafe_allow_html=True)
-                if st.button(
-                    "저장",
-                    type="primary",
-                    use_container_width=True,
-                    key=f"save_export_order_{edit_field}_{order_id}",
-                ):
-                    try:
-                        saved_value = _update_export_order_metadata(order_id, edit_field, edited_value)
-                        display_value = saved_value or "미지정"
-                        st.session_state.pop(_EDIT_FIELD_KEY, None)
-                        st.session_state["_export_waiting_message"] = (
-                            f"{selected['title']}의 {edit_label}을(를) {display_value}(으)로 변경했습니다."
-                        )
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(str(exc))
-            with cancel_edit_col:
-                st.markdown("<div style='height:1.78rem'></div>", unsafe_allow_html=True)
-                if st.button(
-                    "취소",
-                    use_container_width=True,
-                    key=f"cancel_export_order_{edit_field}_{order_id}",
-                ):
-                    st.session_state.pop(_EDIT_FIELD_KEY, None)
-                    st.rerun()
 
     if status == "confirmed":
         date_col, save_date_col = st.columns([3, 1])
