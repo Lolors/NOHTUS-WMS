@@ -450,7 +450,7 @@ def page_saved_export_waiting():
     for column, card_key, label, value, edit_field in summary_cards:
         with column:
             clicked = st.button(
-                f"{label}\\n\\n{value}",
+                f"{label}\n\n{value}",
                 use_container_width=True,
                 disabled=edit_field is None,
                 key=f"summary_export_order_{card_key}_{order_id}",
