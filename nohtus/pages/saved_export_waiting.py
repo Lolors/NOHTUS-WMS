@@ -10,6 +10,7 @@ from nohtus.config import COMPANIES
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only
 from nohtus.services.export_waiting import (
+    TRANSPORT_METHODS,
     cancel_export_waiting_order,
     confirm_export_waiting_items,
     ensure_export_waiting_tables,
@@ -23,6 +24,13 @@ from nohtus.services.export_waiting_excel import (
 
 STATUS_LABELS = {"waiting": "수출대기", "partial": "일부 확정", "confirmed": "수출확정", "cancelled": "취소됨"}
 _SELECTED_ORDER_KEY = "saved_export_waiting_selected_order_id"
+_EDIT_FIELD_KEY = "saved_export_waiting_edit_field"
+_EDITABLE_ORDER_FIELDS = {
+    "country": ("국가", "country"),
+    "buyer": ("바이어", "buyer"),
+    "transport_method": ("운송방식", "transport_method"),
+    "export_no": ("수출번호", "export_no"),
+}
 
 
 def _fit_summary_metric_values():
@@ -166,6 +174,56 @@ def _update_export_order_date(order_id, new_date):
             (date_text, now, int(order_id)),
         )
         con.commit()
+
+
+def _update_export_order_metadata(order_id, field, new_value):
+    if field not in _EDITABLE_ORDER_FIELDS:
+        raise ValueError("수정할 수 없는 수출대기 정보입니다.")
+
+    value = str(new_value or "").strip()
+    with connect() as con:
+        row = con.execute(
+            """SELECT country,buyer,transport_method,export_no
+               FROM export_waiting_orders WHERE id=?""",
+            (int(order_id),),
+        ).fetchone()
+        if not row:
+            raise ValueError("수정할 수출대기 건을 찾을 수 없습니다.")
+
+        values = {
+            "country": str(row[0] or "").strip(),
+            "buyer": str(row[1] or "").strip(),
+            "transport_method": str(row[2] or "").strip() or "미지정",
+            "export_no": str(row[3] or "").strip(),
+        }
+        values[field] = value
+
+        if not values["country"]:
+            raise ValueError("국가를 입력하세요.")
+        if not values["export_no"]:
+            raise ValueError("수출번호를 입력하세요.")
+        if values["transport_method"] not in TRANSPORT_METHODS:
+            raise ValueError("운송방식을 항공, 해상, 핸드캐리, 미지정 중에서 선택하세요.")
+
+        buyer_title = values["buyer"] or "미지정"
+        title = f"{values['country']}-{buyer_title}-{values['transport_method']}"
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        con.execute(
+            """UPDATE export_waiting_orders
+               SET country=?,buyer=?,transport_method=?,export_no=?,title=?,updated_at=?
+               WHERE id=?""",
+            (
+                values["country"],
+                values["buyer"],
+                values["transport_method"],
+                values["export_no"],
+                title,
+                now,
+                int(order_id),
+            ),
+        )
+        con.commit()
+    return values[field]
 
 
 def page_saved_export_waiting():
@@ -317,11 +375,92 @@ def page_saved_export_waiting():
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("상태", STATUS_LABELS.get(status, status))
     c2.metric("진행상황", f"{confirmed_count} / {total_count}")
-    c3.metric("국가", str(selected["country"] or "-"))
-    c4.metric("바이어", str(selected["buyer"] or "미지정"))
-    c5.metric("운송방식", str(selected["transport_method"] or "미지정"))
-    c6.metric("수출번호", str(selected["export_no"] or "-"))
+
+    editable_cards = [
+        (c3, "country", "국가", str(selected["country"] or "-")),
+        (c4, "buyer", "바이어", str(selected["buyer"] or "미지정")),
+        (c5, "transport_method", "운송방식", str(selected["transport_method"] or "미지정")),
+        (c6, "export_no", "수출번호", str(selected["export_no"] or "-")),
+    ]
+    for column, field, label, value in editable_cards:
+        with column:
+            if st.button(
+                f"{label}\n\n{value}",
+                use_container_width=True,
+                key=f"edit_export_order_{field}_{order_id}",
+                help=f"{label} 수정",
+            ):
+                st.session_state[_EDIT_FIELD_KEY] = {"order_id": order_id, "field": field}
+
+    st.markdown(
+        """<style>
+        div[data-testid="stButton"] button p {white-space:pre-line}
+        </style>""",
+        unsafe_allow_html=True,
+    )
     _fit_summary_metric_values()
+
+    editing = st.session_state.get(_EDIT_FIELD_KEY)
+    if isinstance(editing, dict) and int(editing.get("order_id") or 0) == order_id:
+        edit_field = str(editing.get("field") or "")
+        if edit_field in _EDITABLE_ORDER_FIELDS:
+            edit_label, selected_column = _EDITABLE_ORDER_FIELDS[edit_field]
+            current_value = str(selected[selected_column] or "").strip()
+            input_key = f"edit_export_order_value_{edit_field}_{order_id}"
+
+            edit_input_col, save_edit_col, cancel_edit_col = st.columns([4, 1, 1])
+            with edit_input_col:
+                if edit_field == "transport_method":
+                    current_transport = current_value or "미지정"
+                    transport_index = (
+                        TRANSPORT_METHODS.index(current_transport)
+                        if current_transport in TRANSPORT_METHODS
+                        else 0
+                    )
+                    edited_value = st.selectbox(
+                        f"{edit_label} 수정",
+                        TRANSPORT_METHODS,
+                        index=transport_index,
+                        key=input_key,
+                    )
+                else:
+                    edited_value = st.text_input(
+                        f"{edit_label} 수정",
+                        value=current_value,
+                        key=input_key,
+                        placeholder="바이어는 비워두면 미지정으로 표시됩니다."
+                        if edit_field == "buyer"
+                        else None,
+                    )
+            with save_edit_col:
+                st.markdown("<div style='height:1.78rem'></div>", unsafe_allow_html=True)
+                if st.button(
+                    "저장",
+                    type="primary",
+                    use_container_width=True,
+                    key=f"save_export_order_{edit_field}_{order_id}",
+                ):
+                    try:
+                        saved_value = _update_export_order_metadata(order_id, edit_field, edited_value)
+                        display_value = saved_value or "미지정"
+                        st.session_state.pop(_EDIT_FIELD_KEY, None)
+                        st.session_state.pop(input_key, None)
+                        st.session_state["_export_waiting_message"] = (
+                            f"{selected['title']}의 {edit_label}을(를) {display_value}(으)로 변경했습니다."
+                        )
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+            with cancel_edit_col:
+                st.markdown("<div style='height:1.78rem'></div>", unsafe_allow_html=True)
+                if st.button(
+                    "취소",
+                    use_container_width=True,
+                    key=f"cancel_export_order_{edit_field}_{order_id}",
+                ):
+                    st.session_state.pop(_EDIT_FIELD_KEY, None)
+                    st.session_state.pop(input_key, None)
+                    st.rerun()
 
     if status == "confirmed":
         date_col, save_date_col = st.columns([3, 1])
