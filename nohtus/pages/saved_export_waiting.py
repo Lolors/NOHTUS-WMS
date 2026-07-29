@@ -450,7 +450,7 @@ def page_saved_export_waiting():
     for column, card_key, label, value, edit_field in summary_cards:
         with column:
             clicked = st.button(
-                f"{label}\n\n{value}",
+                f"{label}\n{value}",
                 use_container_width=True,
                 disabled=edit_field is None,
                 key=f"summary_export_order_{card_key}_{order_id}",
@@ -470,13 +470,20 @@ def page_saved_export_waiting():
         [class*="st-key-summary_export_order_"] button {
             min-height:5.25rem;
             padding:0.65rem 0.75rem;
-            align-items:flex-start;
-            justify-content:flex-start;
-            text-align:left;
+            align-items:center;
+            justify-content:center;
+            text-align:center;
         }
         [class*="st-key-summary_export_order_"] button p {
+            width:100%;
+            margin:0;
             white-space:pre-line;
-            line-height:1.15;
+            line-height:1.2;
+            text-align:center;
+        }
+        [class*="st-key-summary_export_order_"] button p::first-line {
+            font-size:calc(1em + 10pt);
+            font-weight:700;
         }
         [class*="st-key-summary_export_order_"] button:disabled {
             opacity:1;
