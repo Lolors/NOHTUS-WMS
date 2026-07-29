@@ -156,45 +156,80 @@ def _take_source(cur, inventory_id, qty, now, fallback=None):
     return s
 
 
+def _normalized_inventory_text(value):
+    return " ".join(str(value or "").strip().split()).casefold()
+
+
+def _normalized_lot(value):
+    text = _normalized_inventory_text(value)
+    return "" if text in {"", "-"} else text
+
+
+def _normalized_exp_date(value):
+    text = _normalized_inventory_text(value)
+    if text in {"", "-"}:
+        return ""
+    digits = "".join(ch for ch in text if ch.isdigit())
+    return digits if len(digits) == 8 else text
+
+
 def _take_p(cur, item, now, qty=None):
     take_qty = int(item.get("qty") or 0) if qty is None else int(qty or 0)
     if take_qty <= 0:
         return
 
-    # P 재고가 중복 행으로 나뉘었거나 창고명 공백 표기가 달라도
-    # 동일 사업장·제품·LOT·유통기한 재고라면 합산해서 사용한다.
-    rows = cur.execute(
-        """SELECT id,qty
+    company_key = _normalized_inventory_text(item.get("company"))
+    product_key = _normalized_inventory_text(item.get("product_name"))
+    lot_key = _normalized_lot(item.get("lot"))
+    exp_key = _normalized_exp_date(item.get("exp_date"))
+
+    # DB 문자열에 앞뒤 공백이나 날짜 구분자 차이가 있어도 화면상 같은 P 재고는
+    # 같은 재고로 판정할 수 있도록 후보를 가져온 뒤 정규화해서 비교한다.
+    candidate_rows = cur.execute(
+        """SELECT id,qty,company,product_name,warehouse_name,lot,exp_date
            FROM inventory
-           WHERE company=?
-             AND product_name=?
-             AND IFNULL(lot,'-')=?
-             AND IFNULL(exp_date,'-')=?
-             AND location=?
+           WHERE UPPER(TRIM(COALESCE(location,'')))=?
              AND COALESCE(qty,0)>0
-           ORDER BY CASE WHEN IFNULL(warehouse_name,'')=? THEN 0 ELSE 1 END, id""",
-        (
-            item.get("company", ""),
-            item.get("product_name", ""),
-            item.get("lot", "-") or "-",
-            item.get("exp_date", "-") or "-",
-            P,
-            item.get("warehouse_name", "") or "",
-        ),
+           ORDER BY id""",
+        (P,),
     ).fetchall()
+
+    same_product_rows = [
+        row for row in candidate_rows
+        if _normalized_inventory_text(row[2]) == company_key
+        and _normalized_inventory_text(row[3]) == product_key
+    ]
+    rows = [
+        row for row in same_product_rows
+        if _normalized_lot(row[5]) == lot_key
+        and _normalized_exp_date(row[6]) == exp_key
+    ]
+    rows.sort(
+        key=lambda row: (
+            0 if _normalized_inventory_text(row[4])
+            == _normalized_inventory_text(item.get("warehouse_name")) else 1,
+            int(row[0]),
+        )
+    )
+
     available = sum(int(row[1] or 0) for row in rows)
     if available < take_qty:
-        raise ValueError(f"P 로케이션의 {item['product_name']} 재고가 부족합니다.")
+        same_product_total = sum(int(row[1] or 0) for row in same_product_rows)
+        raise ValueError(
+            f"P 로케이션의 {item['product_name']} 재고가 부족합니다. "
+            f"필요 {take_qty}EA / 동일 LOT·유통기한 {available}EA / "
+            f"같은 사업장·제품 전체 P재고 {same_product_total}EA"
+        )
 
     remaining = take_qty
-    for inventory_id, current_qty in rows:
+    for row in rows:
         if remaining <= 0:
             break
-        current_qty = int(current_qty or 0)
+        inventory_id, current_qty = int(row[0]), int(row[1] or 0)
         deducted = min(current_qty, remaining)
         cur.execute(
             "UPDATE inventory SET qty=?,updated_at=? WHERE id=?",
-            (current_qty - deducted, now, int(inventory_id)),
+            (current_qty - deducted, now, inventory_id),
         )
         remaining -= deducted
 
