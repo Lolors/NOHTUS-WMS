@@ -158,10 +158,45 @@ def _take_source(cur, inventory_id, qty, now, fallback=None):
 
 def _take_p(cur, item, now, qty=None):
     take_qty = int(item.get("qty") or 0) if qty is None else int(qty or 0)
-    row = _find(cur, item, P)
-    if not row or int(row[1] or 0) < take_qty:
+    if take_qty <= 0:
+        return
+
+    # P 재고가 중복 행으로 나뉘었거나 창고명 공백 표기가 달라도
+    # 동일 사업장·제품·LOT·유통기한 재고라면 합산해서 사용한다.
+    rows = cur.execute(
+        """SELECT id,qty
+           FROM inventory
+           WHERE company=?
+             AND product_name=?
+             AND IFNULL(lot,'-')=?
+             AND IFNULL(exp_date,'-')=?
+             AND location=?
+             AND COALESCE(qty,0)>0
+           ORDER BY CASE WHEN IFNULL(warehouse_name,'')=? THEN 0 ELSE 1 END, id""",
+        (
+            item.get("company", ""),
+            item.get("product_name", ""),
+            item.get("lot", "-") or "-",
+            item.get("exp_date", "-") or "-",
+            P,
+            item.get("warehouse_name", "") or "",
+        ),
+    ).fetchall()
+    available = sum(int(row[1] or 0) for row in rows)
+    if available < take_qty:
         raise ValueError(f"P 로케이션의 {item['product_name']} 재고가 부족합니다.")
-    cur.execute("UPDATE inventory SET qty=?,updated_at=? WHERE id=?", (int(row[1] or 0) - take_qty, now, int(row[0])))
+
+    remaining = take_qty
+    for inventory_id, current_qty in rows:
+        if remaining <= 0:
+            break
+        current_qty = int(current_qty or 0)
+        deducted = min(current_qty, remaining)
+        cur.execute(
+            "UPDATE inventory SET qty=?,updated_at=? WHERE id=?",
+            (current_qty - deducted, now, int(inventory_id)),
+        )
+        remaining -= deducted
 
 
 def _items(cur, order_id, *, confirmed=None):
