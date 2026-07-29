@@ -294,7 +294,8 @@ def _days_ago_label(date_text):
 def _last_sale_text(customer_name, company, exact_map, name_map):
     customer = _normalize_customer_name(customer_name)
     company = str(company or "").strip()
-    last_date = exact_map.get((customer, company)) or name_map.get(customer) or ""
+    # 사업장이 지정된 거래처는 이름만 같은 다른 사업장의 거래 이력을 대신 쓰지 않는다.
+    last_date = exact_map.get((customer, company), "") if company else name_map.get(customer, "")
     if not last_date:
         return "최근거래 없음"
     ago = _days_ago_label(last_date)
@@ -331,10 +332,11 @@ def _render_last_sale_importer():
 
 
 
-def _recent_outbound_history(customer_name, limit=5):
-    """선택한 매출처의 최근 출고일과 제품별 수량을 반환한다."""
+def _recent_outbound_history(customer_name, company, limit=5):
+    """선택한 매출처·사업장의 최근 출고일과 제품별 수량을 반환한다."""
     customer = str(customer_name or "").strip()
-    if not customer:
+    selected_company = str(company or "").strip()
+    if not customer or not selected_company:
         return []
 
     _ensure_outbound_customer_columns()
@@ -348,10 +350,11 @@ def _recent_outbound_history(customer_name, limit=5):
         FROM outbound_orders o
         JOIN outbound_order_items i ON i.order_id=o.id
         WHERE TRIM(COALESCE(o.customer_name, ''))=?
+          AND TRIM(COALESCE(o.customer_company, ''))=?
           AND TRIM(COALESCE(o.status, '')) NOT LIKE '%취소%'
         ORDER BY order_date DESC, o.id DESC, i.id
         """,
-        (customer,),
+        (customer, selected_company),
     )
     if rows.empty:
         return []
@@ -374,8 +377,8 @@ def _recent_outbound_history(customer_name, limit=5):
     return history
 
 
-def _render_recent_outbound_history(customer_name):
-    history = _recent_outbound_history(customer_name, limit=5)
+def _render_recent_outbound_history(customer_name, company):
+    history = _recent_outbound_history(customer_name, company, limit=5)
     if history:
         cards = []
         for order in history:
@@ -580,9 +583,10 @@ def page_outbound():
         if recent_history_slot is not None:
             customer_payload_for_history = _current_customer_payload(selected_customer)
             customer_name_for_history = str(customer_payload_for_history.get("customer_name") or "").strip()
+            customer_company_for_history = str(customer_payload_for_history.get("company") or "").strip()
             with recent_history_slot.container():
-                if customer_name_for_history:
-                    _render_recent_outbound_history(customer_name_for_history)
+                if customer_name_for_history and customer_company_for_history:
+                    _render_recent_outbound_history(customer_name_for_history, customer_company_for_history)
                 else:
                     st.caption("최근 거래")
 
