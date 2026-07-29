@@ -105,7 +105,7 @@ def _date_value(value):
     return parsed.date()
 
 
-def _confirmed_destination_lines(order_ids):
+def _confirmed_destination_summary(order_ids):
     order_ids = [int(order_id) for order_id in order_ids]
     if not order_ids:
         return {}
@@ -132,13 +132,13 @@ def _confirmed_destination_lines(order_ids):
             (str(row.confirmed_company), str(row.confirmed_customer_name))
         )
 
-    return {
-        order_id: (
-            "\n".join(company for company, _ in pairs),
-            "\n".join(customer_name for _, customer_name in pairs),
-        )
-        for order_id, pairs in pairs_by_order.items()
-    }
+    summaries = {}
+    for order_id, pairs in pairs_by_order.items():
+        companies = list(dict.fromkeys(company for company, _ in pairs))
+        customer_names = list(dict.fromkeys(customer_name for _, customer_name in pairs))
+        company_summary = companies[0] if len(companies) == 1 else f"{len(companies)}곳"
+        summaries[order_id] = (company_summary, " / ".join(customer_names))
+    return summaries
 
 
 def _ensure_order_date_column():
@@ -264,7 +264,7 @@ def page_saved_export_waiting():
     view = orders.copy()
     view["상태"] = view["status"].map(STATUS_LABELS).fillna(view["status"])
     view["포함된 품목"] = view["product_names"].apply(summarize_products)
-    confirmed_destinations = _confirmed_destination_lines(view["id"].tolist())
+    confirmed_destinations = _confirmed_destination_summary(view["id"].tolist())
     view["사업장"] = view["id"].apply(
         lambda order_id: confirmed_destinations.get(int(order_id), ("-", "-"))[0]
     )
@@ -284,30 +284,8 @@ def page_saved_export_waiting():
     view["운송방식"] = view["운송방식"].fillna("").astype(str).replace("", "미지정")
     view["__status"] = orders["status"].astype(str).values
     visible_columns = ["출고일자", "국가", "바이어", "운송방식", "수출번호", "상태", "포함된 품목", "사업장", "ERP 매출처명", "등록일"]
-    base_table = view[visible_columns + ["__status"]].reset_index(drop=True)
-
-    # Streamlit 기본 표는 셀 안의 줄바꿈을 한 줄 공백처럼 렌더링한다.
-    # 여러 사업장·매출처 조합은 같은 주문 아래의 연속 행으로 펼쳐 실제 세로 목록으로 보이게 한다.
-    expanded_rows = []
-    for base_index, row in base_table.iterrows():
-        companies = str(row["사업장"] or "-").splitlines() or ["-"]
-        customers = str(row["ERP 매출처명"] or "-").splitlines() or ["-"]
-        pair_count = max(len(companies), len(customers))
-        for pair_index in range(pair_count):
-            display_row = row.copy()
-            display_row["사업장"] = companies[pair_index] if pair_index < len(companies) else "-"
-            display_row["ERP 매출처명"] = customers[pair_index] if pair_index < len(customers) else "-"
-            display_row["__order_id"] = int(orders.iloc[base_index]["id"])
-            if pair_index:
-                for column in visible_columns:
-                    if column not in {"사업장", "ERP 매출처명"}:
-                        display_row[column] = ""
-            expanded_rows.append(display_row)
-
-    table = pd.DataFrame(
-        expanded_rows,
-        columns=visible_columns + ["__status", "__order_id"],
-    ).reset_index(drop=True)
+    table = view[visible_columns + ["__status"]].reset_index(drop=True)
+    table["__order_id"] = orders["id"].astype(int).values
     styled = table.style.apply(_order_row_style, axis=1)
     event = st.dataframe(
         styled,
