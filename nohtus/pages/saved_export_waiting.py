@@ -105,6 +105,42 @@ def _date_value(value):
     return parsed.date()
 
 
+def _confirmed_destination_lines(order_ids):
+    order_ids = [int(order_id) for order_id in order_ids]
+    if not order_ids:
+        return {}
+
+    placeholders = ",".join("?" for _ in order_ids)
+    destinations = q(
+        f"""SELECT order_id,
+                    TRIM(confirmed_company) AS confirmed_company,
+                    TRIM(confirmed_customer_name) AS confirmed_customer_name,
+                    MIN(id) AS first_item_id
+             FROM export_waiting_items
+             WHERE order_id IN ({placeholders})
+               AND COALESCE(confirmed,0)=1
+               AND TRIM(COALESCE(confirmed_company,''))<>''
+               AND TRIM(COALESCE(confirmed_customer_name,''))<>''
+             GROUP BY order_id,TRIM(confirmed_company),TRIM(confirmed_customer_name)
+             ORDER BY order_id,first_item_id""",
+        tuple(order_ids),
+    )
+
+    pairs_by_order = {}
+    for row in destinations.itertuples(index=False):
+        pairs_by_order.setdefault(int(row.order_id), []).append(
+            (str(row.confirmed_company), str(row.confirmed_customer_name))
+        )
+
+    return {
+        order_id: (
+            "\n".join(company for company, _ in pairs),
+            "\n".join(customer_name for _, customer_name in pairs),
+        )
+        for order_id, pairs in pairs_by_order.items()
+    }
+
+
 def _ensure_order_date_column():
     with connect() as con:
         cur = con.cursor()
@@ -228,14 +264,19 @@ def page_saved_export_waiting():
     view = orders.copy()
     view["상태"] = view["status"].map(STATUS_LABELS).fillna(view["status"])
     view["포함된 품목"] = view["product_names"].apply(summarize_products)
+    confirmed_destinations = _confirmed_destination_lines(view["id"].tolist())
+    view["사업장"] = view["id"].apply(
+        lambda order_id: confirmed_destinations.get(int(order_id), ("-", "-"))[0]
+    )
+    view["ERP 매출처명"] = view["id"].apply(
+        lambda order_id: confirmed_destinations.get(int(order_id), ("-", "-"))[1]
+    )
     view = view.rename(
         columns={
             "country": "국가",
             "buyer": "바이어",
             "transport_method": "운송방식",
             "export_no": "수출번호",
-            "erp_company": "사업장",
-            "erp_customer_name": "ERP 매출처명",
             "created_at": "등록일",
         }
     )
@@ -244,6 +285,11 @@ def page_saved_export_waiting():
     view["__status"] = orders["status"].astype(str).values
     table_columns = ["출고일자", "국가", "바이어", "운송방식", "수출번호", "상태", "포함된 품목", "사업장", "ERP 매출처명", "등록일", "__status"]
     table = view[table_columns].reset_index(drop=True)
+    max_destination_lines = max(
+        table["사업장"].astype(str).str.count("\n").add(1).max(),
+        table["ERP 매출처명"].astype(str).str.count("\n").add(1).max(),
+    )
+    destination_row_height = min(120, max(35, int(max_destination_lines) * 24))
     styled = table.style.apply(_order_row_style, axis=1)
     event = st.dataframe(
         styled,
@@ -253,6 +299,7 @@ def page_saved_export_waiting():
         on_select="rerun",
         selection_mode="single-row",
         column_config={"__status": None},
+        row_height=destination_row_height,
     )
 
     selected_rows = list(getattr(getattr(event, "selection", None), "rows", []) or [])
