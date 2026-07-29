@@ -27,6 +27,7 @@ from nohtus.pages.purchase_history_single import page_purchase_history
 from nohtus.pages.saved_outbound_date_fix import page_saved_outbound as page_saved_outbound_refactored
 from nohtus.pages.shippable_inventory import page_shippable_inventory
 from nohtus.pages.stocktake_business import page_stocktake
+from nohtus.services.customer_recent_sales import resolve_customer_last_sale_date
 
 
 def _inject_mobile_login_css():
@@ -170,9 +171,7 @@ def page_export_waiting():
         return f"{days}일 전"
 
     def compatible_last_sale_text(customer_name, company, exact_map, name_map):
-        customer = str(customer_name or "").strip()
-        company = str(company or "").strip()
-        last_date = exact_map.get((customer, company)) or name_map.get(customer) or ""
+        last_date = resolve_customer_last_sale_date(customer_name, company, exact_map, name_map)
         if not last_date:
             return "최근거래 없음"
         ago = compatible_days_ago_label(last_date)
