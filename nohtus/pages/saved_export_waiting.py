@@ -390,6 +390,7 @@ def page_saved_export_waiting():
                 key=f"edit_export_order_{field}_{order_id}",
                 help=f"{label} 수정",
             ):
+                st.session_state.pop(f"edit_export_order_value_{field}_{order_id}", None)
                 st.session_state[_EDIT_FIELD_KEY] = {"order_id": order_id, "field": field}
 
     st.markdown(
@@ -444,7 +445,6 @@ def page_saved_export_waiting():
                         saved_value = _update_export_order_metadata(order_id, edit_field, edited_value)
                         display_value = saved_value or "미지정"
                         st.session_state.pop(_EDIT_FIELD_KEY, None)
-                        st.session_state.pop(input_key, None)
                         st.session_state["_export_waiting_message"] = (
                             f"{selected['title']}의 {edit_label}을(를) {display_value}(으)로 변경했습니다."
                         )
@@ -459,7 +459,6 @@ def page_saved_export_waiting():
                     key=f"cancel_export_order_{edit_field}_{order_id}",
                 ):
                     st.session_state.pop(_EDIT_FIELD_KEY, None)
-                    st.session_state.pop(input_key, None)
                     st.rerun()
 
     if status == "confirmed":
