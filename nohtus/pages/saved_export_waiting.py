@@ -480,9 +480,10 @@ def page_saved_export_waiting():
             white-space:pre-line;
             line-height:1.2;
             text-align:center;
+            font-size:calc(1em + 3pt);
         }
         [class*="st-key-summary_export_order_"] button p::first-line {
-            font-size:calc(1em + 10pt);
+            font-size:calc(1em + 2pt);
             font-weight:700;
         }
         [class*="st-key-summary_export_order_"] button:disabled {
