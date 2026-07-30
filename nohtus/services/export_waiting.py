@@ -49,34 +49,8 @@ def ensure_export_waiting_tables(cur=None):
     c.execute("CREATE INDEX IF NOT EXISTS idx_export_waiting_items_moved_at ON export_waiting_items(moved_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_export_waiting_items_confirmed ON export_waiting_items(order_id,confirmed)")
 
-    # P 재고행 자체의 ID를 보존하지 않았던 기존 데이터는 먼저 현재 저장값과
-    # 정확히 일치하는 P 재고로 연결한다.
-    c.execute(
-        """
-        UPDATE export_waiting_items AS waiting
-        SET waiting_inventory_id=(
-            SELECT MIN(inv.id)
-            FROM inventory AS inv
-            WHERE UPPER(TRIM(COALESCE(inv.location,'')))='P'
-              AND TRIM(COALESCE(inv.company,''))=TRIM(COALESCE(waiting.company,''))
-              AND TRIM(COALESCE(inv.product_name,''))=TRIM(COALESCE(waiting.product_name,''))
-              AND TRIM(COALESCE(inv.warehouse_name,''))=TRIM(COALESCE(waiting.warehouse_name,''))
-              AND TRIM(COALESCE(inv.lot,'-'))=TRIM(COALESCE(waiting.lot,'-'))
-              AND TRIM(COALESCE(inv.exp_date,'-'))=TRIM(COALESCE(waiting.exp_date,'-'))
-        )
-        WHERE COALESCE(waiting.confirmed,0)=0
-          AND waiting.waiting_inventory_id IS NULL
-          AND EXISTS(
-              SELECT 1 FROM inventory AS inv
-              WHERE UPPER(TRIM(COALESCE(inv.location,'')))='P'
-                AND TRIM(COALESCE(inv.company,''))=TRIM(COALESCE(waiting.company,''))
-                AND TRIM(COALESCE(inv.product_name,''))=TRIM(COALESCE(waiting.product_name,''))
-                AND TRIM(COALESCE(inv.warehouse_name,''))=TRIM(COALESCE(waiting.warehouse_name,''))
-                AND TRIM(COALESCE(inv.lot,'-'))=TRIM(COALESCE(waiting.lot,'-'))
-                AND TRIM(COALESCE(inv.exp_date,'-'))=TRIM(COALESCE(waiting.exp_date,'-'))
-          )
-        """
-    )
+    # 과거 데이터는 같은 제품명의 다른 LOT를 잘못 연결하지 않도록
+    # 문자열이 같다는 이유만으로 P 재고 ID를 자동 지정하지 않는다.
 
     # 같은 사업장·제품·창고 안에서 정확히 일치하는 LOT/유통기한을 제외한 뒤
     # 미연결 대기 서명과 P 재고 서명이 각각 하나만 남으면 제품마스터 변경 건으로
