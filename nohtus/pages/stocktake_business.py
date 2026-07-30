@@ -70,7 +70,8 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
         current = con.execute(
             """
             SELECT product_name, company, COALESCE(warehouse_name,''),
-                   COALESCE(location,''), qty
+                   COALESCE(location,''), qty,
+                   COALESCE(lot,'-'), COALESCE(exp_date,'-')
             FROM inventory
             WHERE id=?
             """,
@@ -84,6 +85,8 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
         warehouse_name = str(current[2] or "").strip()
         location = str(current[3] or "").strip()
         current_qty = int(current[4] or 0)
+        old_lot = stocktake_page._normalize_master_text(current[5])
+        old_exp_date = normalize_exp_date(current[6])
 
         existing_rows = con.execute(
             """
@@ -162,33 +165,37 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
                 (product_name, lot, exp_date, int(inv_id), int(inv_id)),
             )
 
-            # 과거 데이터에 P 재고 ID가 없더라도, 지금 수정한 P 행과 사업장·제품·
-            # 창고·수량이 일치하는 미연결 대기 품목이 단 하나라면 그 행으로 연결한다.
-            # 같은 제품의 후보가 둘 이상이면 임의로 바꾸지 않는다.
+            # 과거 수출대기에는 P 재고 ID가 없을 수 있다. 이때 수량이나 제품명만으로
+            # 후보 하나를 추정하면 같은 제품의 다른 제조번호를 잘못 고르거나, 후보가
+            # 여러 개라는 이유로 아무것도 갱신하지 못한다. 저장 직전 P 재고의 전체
+            # 서명(사업장·제품·창고·제조번호·유통기한)과 정확히 같은 미연결 품목을
+            # 모두 현재 P 재고에 연결한다. 같은 서명의 품목들은 실제로 하나의 P
+            # 재고행에 합산되는 동일 재고 묶음이므로 함께 갱신하는 것이 맞다.
             if location.upper() == "P":
-                candidates = con.execute(
+                con.execute(
                     """
-                    SELECT id
-                    FROM export_waiting_items
+                    UPDATE export_waiting_items
+                    SET waiting_inventory_id=?, product_name=?, lot=?, exp_date=?
                     WHERE COALESCE(confirmed,0)=0
                       AND waiting_inventory_id IS NULL
                       AND TRIM(COALESCE(company,''))=?
                       AND TRIM(COALESCE(product_name,''))=?
                       AND TRIM(COALESCE(warehouse_name,''))=?
-                      AND COALESCE(qty,0)=?
-                    ORDER BY id
+                      AND TRIM(COALESCE(lot,'-'))=?
+                      AND TRIM(COALESCE(exp_date,'-'))=?
                     """,
-                    (company, old_product_name, warehouse_name, current_qty),
-                ).fetchall()
-                if len(candidates) == 1:
-                    con.execute(
-                        """
-                        UPDATE export_waiting_items
-                        SET waiting_inventory_id=?, product_name=?, lot=?, exp_date=?
-                        WHERE id=?
-                        """,
-                        (int(inv_id), product_name, lot, exp_date, int(candidates[0][0])),
-                    )
+                    (
+                        int(inv_id),
+                        product_name,
+                        lot,
+                        exp_date,
+                        company,
+                        old_product_name,
+                        warehouse_name,
+                        old_lot,
+                        old_exp_date,
+                    ),
+                )
 
             kept_ids = set()
             for _, mapping in mapping_rows.iterrows():
