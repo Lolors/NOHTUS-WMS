@@ -130,6 +130,13 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
             if duplicate:
                 duplicate_id = int(duplicate[0])
                 merged_qty += int(duplicate[1] or 0)
+                # 병합되어 삭제될 P 재고를 가리키는 수출대기 연결은 유지되는 행으로 옮긴다.
+                con.execute(
+                    """UPDATE export_waiting_items
+                       SET waiting_inventory_id=?
+                       WHERE COALESCE(confirmed,0)=0 AND waiting_inventory_id=?""",
+                    (int(inv_id), duplicate_id),
+                )
                 con.execute("DELETE FROM inventory WHERE id=?", (duplicate_id,))
 
             con.execute(
@@ -139,6 +146,18 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
                 WHERE id=?
                 """,
                 (product_name, lot, exp_date, merged_qty, int(inv_id)),
+            )
+
+            # 실제 재고실사 화면이 사용하는 저장 경로에서 원본 재고 또는
+            # P 재고 ID로 연결된 미확정 수출대기 품목만 정확히 갱신한다.
+            con.execute(
+                """
+                UPDATE export_waiting_items
+                SET product_name=?, lot=?, exp_date=?
+                WHERE COALESCE(confirmed,0)=0
+                  AND (source_inventory_id=? OR waiting_inventory_id=?)
+                """,
+                (product_name, lot, exp_date, int(inv_id), int(inv_id)),
             )
 
             kept_ids = set()
