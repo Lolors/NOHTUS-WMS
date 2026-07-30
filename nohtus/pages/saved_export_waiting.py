@@ -10,6 +10,7 @@ from nohtus.config import COMPANIES
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only
 from nohtus.services.export_waiting import (
+    TRANSPORT_METHODS,
     cancel_export_waiting_order,
     confirm_export_waiting_items,
     ensure_export_waiting_tables,
@@ -23,6 +24,12 @@ from nohtus.services.export_waiting_excel import (
 
 STATUS_LABELS = {"waiting": "수출대기", "partial": "일부 확정", "confirmed": "수출확정", "cancelled": "취소됨"}
 _SELECTED_ORDER_KEY = "saved_export_waiting_selected_order_id"
+_EDITABLE_ORDER_FIELDS = {
+    "country": ("국가", "country"),
+    "buyer": ("바이어", "buyer"),
+    "transport_method": ("운송방식", "transport_method"),
+    "export_no": ("수출번호", "export_no"),
+}
 
 
 def _fit_summary_metric_values():
@@ -105,6 +112,42 @@ def _date_value(value):
     return parsed.date()
 
 
+def _confirmed_destination_summary(order_ids):
+    order_ids = [int(order_id) for order_id in order_ids]
+    if not order_ids:
+        return {}
+
+    placeholders = ",".join("?" for _ in order_ids)
+    destinations = q(
+        f"""SELECT order_id,
+                    TRIM(confirmed_company) AS confirmed_company,
+                    TRIM(confirmed_customer_name) AS confirmed_customer_name,
+                    MIN(id) AS first_item_id
+             FROM export_waiting_items
+             WHERE order_id IN ({placeholders})
+               AND COALESCE(confirmed,0)=1
+               AND TRIM(COALESCE(confirmed_company,''))<>''
+               AND TRIM(COALESCE(confirmed_customer_name,''))<>''
+             GROUP BY order_id,TRIM(confirmed_company),TRIM(confirmed_customer_name)
+             ORDER BY order_id,first_item_id""",
+        tuple(order_ids),
+    )
+
+    pairs_by_order = {}
+    for row in destinations.itertuples(index=False):
+        pairs_by_order.setdefault(int(row.order_id), []).append(
+            (str(row.confirmed_company), str(row.confirmed_customer_name))
+        )
+
+    summaries = {}
+    for order_id, pairs in pairs_by_order.items():
+        companies = list(dict.fromkeys(company for company, _ in pairs))
+        customer_names = list(dict.fromkeys(customer_name for _, customer_name in pairs))
+        company_summary = companies[0] if len(companies) == 1 else f"{len(companies)}곳"
+        summaries[order_id] = (company_summary, " / ".join(customer_names))
+    return summaries
+
+
 def _ensure_order_date_column():
     with connect() as con:
         cur = con.cursor()
@@ -130,6 +173,117 @@ def _update_export_order_date(order_id, new_date):
             (date_text, now, int(order_id)),
         )
         con.commit()
+
+
+def _update_export_order_metadata(order_id, field, new_value):
+    if field not in _EDITABLE_ORDER_FIELDS:
+        raise ValueError("수정할 수 없는 수출대기 정보입니다.")
+
+    value = str(new_value or "").strip()
+    with connect() as con:
+        row = con.execute(
+            """SELECT country,buyer,transport_method,export_no
+               FROM export_waiting_orders WHERE id=?""",
+            (int(order_id),),
+        ).fetchone()
+        if not row:
+            raise ValueError("수정할 수출대기 건을 찾을 수 없습니다.")
+
+        values = {
+            "country": str(row[0] or "").strip(),
+            "buyer": str(row[1] or "").strip(),
+            "transport_method": str(row[2] or "").strip() or "미지정",
+            "export_no": str(row[3] or "").strip(),
+        }
+        values[field] = value
+
+        if not values["country"]:
+            raise ValueError("국가를 입력하세요.")
+        if not values["export_no"]:
+            raise ValueError("수출번호를 입력하세요.")
+        if values["transport_method"] not in TRANSPORT_METHODS:
+            raise ValueError("운송방식을 항공, 해상, 핸드캐리, 미지정 중에서 선택하세요.")
+
+        buyer_title = values["buyer"] or "미지정"
+        title = f"{values['country']}-{buyer_title}-{values['transport_method']}"
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        con.execute(
+            """UPDATE export_waiting_orders
+               SET country=?,buyer=?,transport_method=?,export_no=?,title=?,updated_at=?
+               WHERE id=?""",
+            (
+                values["country"],
+                values["buyer"],
+                values["transport_method"],
+                values["export_no"],
+                title,
+                now,
+                int(order_id),
+            ),
+        )
+        con.commit()
+    return values[field]
+
+
+@st.dialog("수출대기 정보 수정")
+def _edit_export_order_dialog(order_id, field, current_value, order_title):
+    if field not in _EDITABLE_ORDER_FIELDS:
+        st.error("수정할 수 없는 수출대기 정보입니다.")
+        return
+
+    edit_label, _ = _EDITABLE_ORDER_FIELDS[field]
+    input_key = f"edit_export_order_dialog_value_{field}_{int(order_id)}"
+    current_value = str(current_value or "").strip()
+
+    if field == "transport_method":
+        current_transport = current_value or "미지정"
+        transport_index = (
+            TRANSPORT_METHODS.index(current_transport)
+            if current_transport in TRANSPORT_METHODS
+            else 0
+        )
+        edited_value = st.selectbox(
+            edit_label,
+            TRANSPORT_METHODS,
+            index=transport_index,
+            key=input_key,
+        )
+    else:
+        edited_value = st.text_input(
+            edit_label,
+            value=current_value,
+            key=input_key,
+            placeholder=(
+                "비워두면 미지정으로 표시됩니다."
+                if field == "buyer"
+                else None
+            ),
+        )
+
+    save_col, cancel_col = st.columns(2)
+    with save_col:
+        if st.button(
+            "저장",
+            type="primary",
+            use_container_width=True,
+            key=f"save_export_order_dialog_{field}_{int(order_id)}",
+        ):
+            try:
+                saved_value = _update_export_order_metadata(order_id, field, edited_value)
+                display_value = saved_value or "미지정"
+                st.session_state["_export_waiting_message"] = (
+                    f"{order_title}의 {edit_label}을(를) {display_value}(으)로 변경했습니다."
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+    with cancel_col:
+        if st.button(
+            "취소",
+            use_container_width=True,
+            key=f"cancel_export_order_dialog_{field}_{int(order_id)}",
+        ):
+            st.rerun()
 
 
 def page_saved_export_waiting():
@@ -228,22 +382,28 @@ def page_saved_export_waiting():
     view = orders.copy()
     view["상태"] = view["status"].map(STATUS_LABELS).fillna(view["status"])
     view["포함된 품목"] = view["product_names"].apply(summarize_products)
+    confirmed_destinations = _confirmed_destination_summary(view["id"].tolist())
+    view["사업장"] = view["id"].apply(
+        lambda order_id: confirmed_destinations.get(int(order_id), ("-", "-"))[0]
+    )
+    view["ERP 매출처명"] = view["id"].apply(
+        lambda order_id: confirmed_destinations.get(int(order_id), ("-", "-"))[1]
+    )
     view = view.rename(
         columns={
             "country": "국가",
             "buyer": "바이어",
             "transport_method": "운송방식",
             "export_no": "수출번호",
-            "erp_company": "사업장",
-            "erp_customer_name": "ERP 매출처명",
             "created_at": "등록일",
         }
     )
     view["바이어"] = view["바이어"].fillna("").astype(str).replace("", "미지정")
     view["운송방식"] = view["운송방식"].fillna("").astype(str).replace("", "미지정")
     view["__status"] = orders["status"].astype(str).values
-    table_columns = ["출고일자", "국가", "바이어", "운송방식", "수출번호", "상태", "포함된 품목", "사업장", "ERP 매출처명", "등록일", "__status"]
-    table = view[table_columns].reset_index(drop=True)
+    visible_columns = ["출고일자", "국가", "바이어", "운송방식", "수출번호", "상태", "포함된 품목", "사업장", "ERP 매출처명", "등록일"]
+    table = view[visible_columns + ["__status"]].reset_index(drop=True)
+    table["__order_id"] = orders["id"].astype(int).values
     styled = table.style.apply(_order_row_style, axis=1)
     event = st.dataframe(
         styled,
@@ -252,14 +412,15 @@ def page_saved_export_waiting():
         key="saved_export_waiting_orders_table",
         on_select="rerun",
         selection_mode="single-row",
-        column_config={"__status": None},
+        column_config={"__status": None, "__order_id": None},
+        row_height=35,
     )
 
     selected_rows = list(getattr(getattr(event, "selection", None), "rows", []) or [])
     if selected_rows:
         row_index = int(selected_rows[0])
-        if 0 <= row_index < len(orders):
-            st.session_state[_SELECTED_ORDER_KEY] = int(orders.iloc[row_index]["id"])
+        if 0 <= row_index < len(table):
+            st.session_state[_SELECTED_ORDER_KEY] = int(table.iloc[row_index]["__order_id"])
     selected_id = int(st.session_state.get(_SELECTED_ORDER_KEY) or orders.iloc[0]["id"])
     matched = orders.index[orders["id"].astype(int) == selected_id].tolist()
     if not matched:
@@ -272,12 +433,67 @@ def page_saved_export_waiting():
     confirmed_count, total_count = int(selected["confirmed_items"] or 0), int(selected["total_items"] or 0)
     st.markdown(f"### {selected['title']}")
     c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("상태", STATUS_LABELS.get(status, status))
-    c2.metric("진행상황", f"{confirmed_count} / {total_count}")
-    c3.metric("국가", str(selected["country"] or "-"))
-    c4.metric("바이어", str(selected["buyer"] or "미지정"))
-    c5.metric("운송방식", str(selected["transport_method"] or "미지정"))
-    c6.metric("수출번호", str(selected["export_no"] or "-"))
+    summary_cards = [
+        (c1, "status", "상태", STATUS_LABELS.get(status, status), None),
+        (c2, "progress", "진행상황", f"{confirmed_count} / {total_count}", None),
+        (c3, "country", "국가", str(selected["country"] or "-"), "country"),
+        (c4, "buyer", "바이어", str(selected["buyer"] or "미지정"), "buyer"),
+        (
+            c5,
+            "transport_method",
+            "운송방식",
+            str(selected["transport_method"] or "미지정"),
+            "transport_method",
+        ),
+        (c6, "export_no", "수출번호", str(selected["export_no"] or "-"), "export_no"),
+    ]
+    for column, card_key, label, value, edit_field in summary_cards:
+        with column:
+            clicked = st.button(
+                f"{label}\n{value}",
+                use_container_width=True,
+                disabled=edit_field is None,
+                key=f"summary_export_order_{card_key}_{order_id}",
+                help=f"{label} 수정" if edit_field else None,
+            )
+            if clicked and edit_field:
+                selected_column = _EDITABLE_ORDER_FIELDS[edit_field][1]
+                _edit_export_order_dialog(
+                    order_id,
+                    edit_field,
+                    selected[selected_column],
+                    str(selected["title"] or ""),
+                )
+
+    st.markdown(
+        """<style>
+        [class*="st-key-summary_export_order_"] button {
+            min-height:5.25rem;
+            padding:0.65rem 0.75rem;
+            align-items:center;
+            justify-content:center;
+            text-align:center;
+        }
+        [class*="st-key-summary_export_order_"] button p {
+            width:100%;
+            margin:0;
+            white-space:pre-line;
+            line-height:1.2;
+            text-align:center;
+            font-size:calc(1em + 3pt);
+        }
+        [class*="st-key-summary_export_order_"] button p::first-line {
+            font-size:calc(1em + 2pt);
+            font-weight:700;
+        }
+        [class*="st-key-summary_export_order_"] button:disabled {
+            opacity:1;
+            color:inherit;
+            cursor:default;
+        }
+        </style>""",
+        unsafe_allow_html=True,
+    )
     _fit_summary_metric_values()
 
     if status == "confirmed":
@@ -310,12 +526,32 @@ def page_saved_export_waiting():
     st.caption(f"전체 {len(items)}개 재고행 / {total_qty}EA · 남은 수출대기 {len(remaining_items)}개 / {remaining_qty}EA")
 
     erp_sales_rows = build_export_waiting_erp_sales_rows(items)
-    if not erp_sales_rows.empty:
-        unmatched_count = int((erp_sales_rows["매칭상태"] == "확인필요").sum())
-        download_col, notice_col = st.columns([2, 3])
-        with download_col:
+    unmatched_count = (
+        int((erp_sales_rows["매칭상태"] == "확인필요").sum())
+        if not erp_sales_rows.empty
+        else 0
+    )
+
+    edit_col, merge_col, download_col, cancel_col = st.columns(4)
+    with edit_col:
+        if status == "waiting":
+            if st.button("수출대기 수정", type="primary", use_container_width=True):
+                st.session_state["export_editing_order_id"] = order_id
+                st.session_state.pop("_export_edit_loaded", None)
+                st.session_state["page"] = "수출대기 등록"
+                st.rerun()
+        else:
+            st.button("수출대기 수정", disabled=True, use_container_width=True)
+    with merge_col:
+        if status == "waiting":
+            if st.button("주문 합치기", use_container_width=True):
+                st.session_state["confirm_export_merge_source_id"] = order_id
+        else:
+            st.button("주문 합치기", disabled=True, use_container_width=True)
+    with download_col:
+        if not erp_sales_rows.empty:
             st.download_button(
-                "ERP 매출입력용 리스트 엑셀 다운로드",
+                "ERP 매출입력용 리스트",
                 data=export_waiting_erp_sales_excel_bytes(erp_sales_rows),
                 file_name=(
                     f"NOHTUS_ERP_매출입력용_"
@@ -326,11 +562,17 @@ def page_saved_export_waiting():
                 use_container_width=True,
                 key=f"export_waiting_erp_sales_download_{order_id}",
             )
-        with notice_col:
-            if unmatched_count:
-                st.warning(f"제품매칭표에 해당 사업장 ERP명이 없는 품목이 {unmatched_count}개 있습니다. 엑셀에서 `확인필요`로 표시됩니다.")
-            else:
-                st.success("모든 품목의 사업장별 ERP명이 매칭되었습니다.")
+        else:
+            st.button("ERP 매출입력용 리스트", disabled=True, use_container_width=True)
+    with cancel_col:
+        if status in {"waiting", "partial"}:
+            if st.button("남은 품목 취소", use_container_width=True):
+                st.session_state["confirm_export_cancel_id"] = order_id
+        else:
+            st.button("남은 품목 취소", disabled=True, use_container_width=True)
+
+    if unmatched_count:
+        st.warning(f"제품매칭표에 해당 사업장 ERP명이 없는 품목이 {unmatched_count}개 있습니다. 엑셀에서 `확인필요`로 표시됩니다.")
 
     if status == "cancelled":
         st.error("취소된 건입니다. 확정되지 않았던 품목은 등록 당시 원래 로케이션으로 복구되었습니다.")
@@ -338,26 +580,6 @@ def page_saved_export_waiting():
     if status == "confirmed":
         st.success("모든 품목의 수출확정이 완료되었습니다. 출고일자는 위에서 수정할 수 있습니다.")
         return
-
-    edit_col, merge_col, cancel_col = st.columns(3)
-    with edit_col:
-        if status == "waiting":
-            if st.button("수출대기 수정", type="primary", use_container_width=True):
-                st.session_state["export_editing_order_id"] = order_id
-                st.session_state.pop("_export_edit_loaded", None)
-                st.session_state["page"] = "수출대기 등록"
-                st.rerun()
-        else:
-            st.button("일부 확정 후에는 수정할 수 없음", disabled=True, use_container_width=True)
-    with merge_col:
-        if status == "waiting":
-            if st.button("수출대기 병합", use_container_width=True):
-                st.session_state["confirm_export_merge_source_id"] = order_id
-        else:
-            st.button("일부 확정 후에는 병합할 수 없음", disabled=True, use_container_width=True)
-    with cancel_col:
-        if st.button("남은 수출대기 취소", use_container_width=True):
-            st.session_state["confirm_export_cancel_id"] = order_id
 
     if st.session_state.get("confirm_export_merge_source_id") == order_id:
         merge_targets = q(

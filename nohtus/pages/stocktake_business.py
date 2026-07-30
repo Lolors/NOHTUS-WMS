@@ -8,6 +8,7 @@ import nohtus.services.stocktake as stocktake_service
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only, normalize_exp_date
 from nohtus.services.inventory import insert_transaction_log
+from nohtus.services.export_waiting import ensure_export_waiting_tables
 
 
 def full_inventory_excel_bytes_business(exclude_zero=True):
@@ -65,10 +66,12 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
         mapping_rows.insert(0, "id", None)
 
     with connect() as con:
+        ensure_export_waiting_tables(con.cursor())
         current = con.execute(
             """
             SELECT product_name, company, COALESCE(warehouse_name,''),
-                   COALESCE(location,''), qty
+                   COALESCE(location,''), qty,
+                   COALESCE(lot,'-'), COALESCE(exp_date,'-')
             FROM inventory
             WHERE id=?
             """,
@@ -82,6 +85,8 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
         warehouse_name = str(current[2] or "").strip()
         location = str(current[3] or "").strip()
         current_qty = int(current[4] or 0)
+        old_lot = stocktake_page._normalize_master_text(current[5])
+        old_exp_date = normalize_exp_date(current[6])
 
         existing_rows = con.execute(
             """
@@ -130,6 +135,13 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
             if duplicate:
                 duplicate_id = int(duplicate[0])
                 merged_qty += int(duplicate[1] or 0)
+                # 병합되어 삭제될 P 재고를 가리키는 수출대기 연결은 유지되는 행으로 옮긴다.
+                con.execute(
+                    """UPDATE export_waiting_items
+                       SET waiting_inventory_id=?
+                       WHERE COALESCE(confirmed,0)=0 AND waiting_inventory_id=?""",
+                    (int(inv_id), duplicate_id),
+                )
                 con.execute("DELETE FROM inventory WHERE id=?", (duplicate_id,))
 
             con.execute(
@@ -140,6 +152,50 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
                 """,
                 (product_name, lot, exp_date, merged_qty, int(inv_id)),
             )
+
+            # 실제 재고실사 화면이 사용하는 저장 경로에서 원본 재고 또는
+            # P 재고 ID로 연결된 미확정 수출대기 품목만 정확히 갱신한다.
+            con.execute(
+                """
+                UPDATE export_waiting_items
+                SET product_name=?, lot=?, exp_date=?
+                WHERE COALESCE(confirmed,0)=0
+                  AND (source_inventory_id=? OR waiting_inventory_id=?)
+                """,
+                (product_name, lot, exp_date, int(inv_id), int(inv_id)),
+            )
+
+            # 과거 수출대기에는 P 재고 ID가 없을 수 있다. 이때 수량이나 제품명만으로
+            # 후보 하나를 추정하면 같은 제품의 다른 제조번호를 잘못 고르거나, 후보가
+            # 여러 개라는 이유로 아무것도 갱신하지 못한다. 저장 직전 P 재고의 전체
+            # 서명(사업장·제품·창고·제조번호·유통기한)과 정확히 같은 미연결 품목을
+            # 모두 현재 P 재고에 연결한다. 같은 서명의 품목들은 실제로 하나의 P
+            # 재고행에 합산되는 동일 재고 묶음이므로 함께 갱신하는 것이 맞다.
+            if location.upper() == "P":
+                con.execute(
+                    """
+                    UPDATE export_waiting_items
+                    SET waiting_inventory_id=?, product_name=?, lot=?, exp_date=?
+                    WHERE COALESCE(confirmed,0)=0
+                      AND waiting_inventory_id IS NULL
+                      AND TRIM(COALESCE(company,''))=?
+                      AND TRIM(COALESCE(product_name,''))=?
+                      AND TRIM(COALESCE(warehouse_name,''))=?
+                      AND TRIM(COALESCE(lot,'-'))=?
+                      AND TRIM(COALESCE(exp_date,'-'))=?
+                    """,
+                    (
+                        int(inv_id),
+                        product_name,
+                        lot,
+                        exp_date,
+                        company,
+                        old_product_name,
+                        warehouse_name,
+                        old_lot,
+                        old_exp_date,
+                    ),
+                )
 
             kept_ids = set()
             for _, mapping in mapping_rows.iterrows():

@@ -8,6 +8,7 @@ import streamlit as st
 import nohtus.pages.outbound as outbound_page
 import nohtus.pages.outbound_business as outbound_business
 from nohtus.db import connect
+from nohtus.services.customer_recent_sales import resolve_customer_last_sale_date
 
 
 _BLOCKED_OUTBOUND_LOCATIONS = {"N-홍보물랙", "G1", "G2"}
@@ -47,9 +48,7 @@ def _days_ago_label(date_text):
 
 
 def _last_sale_text(customer_name, company, exact_map, name_map):
-    customer = str(customer_name or "").strip()
-    company = str(company or "").strip()
-    last_date = exact_map.get((customer, company)) or name_map.get(customer) or ""
+    last_date = resolve_customer_last_sale_date(customer_name, company, exact_map, name_map)
     if not last_date:
         return "최근거래 없음"
 
