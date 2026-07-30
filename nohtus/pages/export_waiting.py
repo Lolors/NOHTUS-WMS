@@ -7,6 +7,7 @@ import nohtus.pages.outbound as outbound_page
 from nohtus.db import connect, q
 from nohtus.pages.outbound_business import page_outbound as _page_outbound
 from nohtus.services.export_waiting import TRANSPORT_METHODS, ensure_export_waiting_tables, save_export_waiting_order
+from nohtus.services import export_program_link
 
 _ALL_COMPANY_SELECTION_KEYS = ("out_all_company_manual_pick", "out_ignore_company", "out_manual_pick")
 _P_MATCH_REQUEST_KEY = "_export_p_match_request"
@@ -193,6 +194,45 @@ def _render_p_match_dialog():
         body()
 
 
+
+def _render_export_program_order_selector():
+    with st.expander("수출관리 프로그램 주문 연결", expanded=True):
+        path_text = st.text_input("수출관리 export.db 경로", value=export_program_link.configured_db_path(), placeholder=r"예: C:\\EXPORT\\export.db", key="export_program_db_path_input")
+        if st.button("연결 경로 저장", use_container_width=True, key="save_export_program_db_path"):
+            try:
+                export_program_link.save_db_path(path_text)
+                st.success("수출관리 프로그램 DB에 연결했습니다.")
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+        try:
+            orders = export_program_link.list_active_orders()
+        except Exception as exc:
+            st.error(str(exc))
+            return
+        if not orders:
+            st.info("연결된 수출관리 주문이 없습니다. export.db 경로를 먼저 설정하세요.")
+            return
+        labels = {
+            f"{row['export_no']} · {row['country'] or '-'} · {row['buyer'] or '-'} · {int(row['item_count'] or 0)}품목 / {float(row['order_qty'] or 0):g}EA": int(row["id"])
+            for row in orders
+        }
+        selected_label = st.selectbox("수출관리 주문 선택", list(labels), key="linked_export_program_order")
+        selected_id = labels[selected_label]
+        selected = next(row for row in orders if int(row["id"]) == selected_id)
+        items = export_program_link.order_items(selected_id)
+        if items:
+            st.dataframe(pd.DataFrame(items).rename(columns={"product_name": "주문제품", "quantity": "주문수량", "unit": "단위"}), hide_index=True, use_container_width=True)
+        if st.button("이 주문 정보 적용", type="primary", use_container_width=True, key="apply_linked_export_order"):
+            transport_map = {"AIR": "항공", "SEA": "해상", "HAND CARRY": "핸드캐리", "HANDCARRY": "핸드캐리"}
+            raw_transport = str(selected.get("transport_mode") or "").strip().upper()
+            st.session_state["export_waiting_country"] = str(selected.get("country") or "")
+            st.session_state["export_waiting_buyer"] = str(selected.get("buyer") or "") or "미지정"
+            st.session_state["export_waiting_transport_method"] = transport_map.get(raw_transport, "미지정")
+            st.session_state["export_waiting_number"] = str(selected.get("export_no") or "")
+            st.session_state["linked_export_program_case_id"] = selected_id
+            st.rerun()
+
 def page_export_waiting():
     ensure_export_waiting_tables()
     _load_editing_order()
@@ -290,6 +330,7 @@ def page_export_waiting():
                     st.session_state["export_waiting_buyer"] = "미지정"
                 if "export_waiting_transport_method" not in st.session_state:
                     st.session_state["export_waiting_transport_method"] = "미지정"
+                _render_export_program_order_selector()
                 c1, c2, c3, c4 = st.columns(4, gap="medium")
                 with c1:
                     original_text_input("국가 *", placeholder="필수 입력", key="export_waiting_country")
