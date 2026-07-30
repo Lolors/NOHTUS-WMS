@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -13,6 +14,8 @@ BACKUP_INTERVAL = timedelta(hours=1)
 MAX_BACKUPS = 20
 LOCAL_BACKUP_DIR = PROJECT_ROOT / "backups"
 STATE_PATH = LOCAL_BACKUP_DIR / ".backup_state.json"
+_WORKER_LOCK = threading.Lock()
+_WORKER_STARTED = False
 
 
 def _read_state() -> dict:
@@ -89,3 +92,22 @@ def backup_to_usb_now() -> list[str]:
         state.setdefault("usb", {})[str(directory)] = now.isoformat(timespec="seconds")
     _write_state(state)
     return paths
+
+
+def _backup_worker() -> None:
+    while True:
+        threading.Event().wait(BACKUP_INTERVAL.total_seconds())
+        try:
+            run_due_backups()
+        except Exception:
+            # 백업 오류가 앱 서버를 중단시키지 않도록 다음 주기에 재시도한다.
+            continue
+
+
+def start_backup_worker() -> None:
+    global _WORKER_STARTED
+    with _WORKER_LOCK:
+        if _WORKER_STARTED:
+            return
+        threading.Thread(target=_backup_worker, name="nohtus-db-backup", daemon=True).start()
+        _WORKER_STARTED = True
