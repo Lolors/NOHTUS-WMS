@@ -7,12 +7,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from nohtus.config import DB_PATH, PROJECT_ROOT
-from nohtus.services.usb_storage import removable_roots
 
 
 BACKUP_INTERVAL = timedelta(hours=1)
 MAX_BACKUPS = 20
 LOCAL_BACKUP_DIR = PROJECT_ROOT / "backups"
+GOOGLE_DRIVE_FOLDER_NAME = "NOHTUS_WMS_BACKUP"
 STATE_PATH = LOCAL_BACKUP_DIR / ".backup_state.json"
 _WORKER_LOCK = threading.Lock()
 _WORKER_STARTED = False
@@ -41,16 +41,44 @@ def _backup_to(directory: Path, now: datetime) -> Path:
     return destination
 
 
-def _usb_backup_dirs() -> list[Path]:
-    return [root / "NOHTUS_WMS_BACKUP" for root in removable_roots()]
+def google_drive_root() -> str:
+    return str(_read_state().get("google_drive_root") or "").strip()
+
+
+def google_drive_backup_dir() -> Path | None:
+    configured = google_drive_root()
+    if not configured:
+        return None
+    return Path(configured).expanduser() / GOOGLE_DRIVE_FOLDER_NAME
+
+
+def set_google_drive_root(path_text: str) -> Path:
+    configured = str(path_text or "").strip().strip('"')
+    if not configured:
+        raise ValueError("Google Drive 동기화 폴더 경로를 입력해 주세요.")
+
+    root = Path(configured).expanduser()
+    if not root.exists() or not root.is_dir():
+        raise ValueError("입력한 Google Drive 동기화 폴더를 찾을 수 없습니다.")
+
+    backup_dir = root / GOOGLE_DRIVE_FOLDER_NAME
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    state = _read_state()
+    if state.get("google_drive_root") != str(root):
+        state.pop("last_google_drive", None)
+    state["google_drive_root"] = str(root)
+    _write_state(state)
+    return backup_dir
 
 
 def run_due_backups() -> dict:
     if not DB_PATH.is_file():
-        return {"local": None, "usb": [], "errors": []}
+        return {"local": None, "google_drive": None, "errors": []}
+
     now = datetime.now()
     state = _read_state()
-    result = {"local": None, "usb": [], "errors": []}
+    result = {"local": None, "google_drive": None, "errors": []}
 
     try:
         last_local = datetime.fromisoformat(state.get("last_local", ""))
@@ -63,35 +91,32 @@ def run_due_backups() -> dict:
         except (OSError, sqlite3.Error) as exc:
             result["errors"].append(f"로컬 백업 실패: {exc}")
 
-    for directory in _usb_backup_dirs():
-        key = str(directory)
+    drive_dir = google_drive_backup_dir()
+    if drive_dir is not None:
         try:
-            last_usb = datetime.fromisoformat(state.get("usb", {}).get(key, ""))
+            last_drive = datetime.fromisoformat(state.get("last_google_drive", ""))
         except ValueError:
-            last_usb = datetime.min
-        if now - last_usb < BACKUP_INTERVAL:
-            continue
-        try:
-            result["usb"].append(str(_backup_to(directory, now)))
-            state.setdefault("usb", {})[key] = now.isoformat(timespec="seconds")
-        except (OSError, sqlite3.Error) as exc:
-            result["errors"].append(f"USB 백업 실패({directory}): {exc}")
+            last_drive = datetime.min
+        if now - last_drive >= BACKUP_INTERVAL:
+            try:
+                result["google_drive"] = str(_backup_to(drive_dir, now))
+                state["last_google_drive"] = now.isoformat(timespec="seconds")
+            except (OSError, sqlite3.Error) as exc:
+                result["errors"].append(f"Google Drive 백업 실패({drive_dir}): {exc}")
 
     _write_state(state)
     return result
 
 
-def backup_to_usb_now() -> list[str]:
-    directories = _usb_backup_dirs()
-    if not directories:
-        raise ValueError("연결된 외장 USB를 찾을 수 없습니다.")
-    now = datetime.now()
-    paths = [str(_backup_to(directory, now)) for directory in directories]
+def backup_to_google_drive_now() -> str:
+    directory = google_drive_backup_dir()
+    if directory is None:
+        raise ValueError("먼저 Google Drive 동기화 폴더 경로를 저장해 주세요.")
+    path = _backup_to(directory, datetime.now())
     state = _read_state()
-    for directory in directories:
-        state.setdefault("usb", {})[str(directory)] = now.isoformat(timespec="seconds")
+    state["last_google_drive"] = datetime.now().isoformat(timespec="seconds")
     _write_state(state)
-    return paths
+    return str(path)
 
 
 def _backup_worker() -> None:
