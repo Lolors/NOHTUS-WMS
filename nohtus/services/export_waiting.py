@@ -48,6 +48,32 @@ def ensure_export_waiting_tables(cur=None):
     c.execute("CREATE INDEX IF NOT EXISTS idx_export_waiting_items_moved_at ON export_waiting_items(moved_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_export_waiting_items_confirmed ON export_waiting_items(order_id,confirmed)")
 
+    # 기존에 저장된 미확정 수출대기도 이동 전 원본 재고 ID를 기준으로
+    # 제품명·LOT·유통기한을 복구한다. 같은 제품명이 여러 행에 있어도
+    # 다른 재고의 값을 가져오지 않는다.
+    c.execute(
+        """
+        UPDATE export_waiting_items AS waiting
+        SET product_name=(
+                SELECT inv.product_name FROM inventory AS inv
+                WHERE inv.id=waiting.source_inventory_id
+            ),
+            lot=(
+                SELECT COALESCE(inv.lot,'-') FROM inventory AS inv
+                WHERE inv.id=waiting.source_inventory_id
+            ),
+            exp_date=(
+                SELECT COALESCE(inv.exp_date,'-') FROM inventory AS inv
+                WHERE inv.id=waiting.source_inventory_id
+            )
+        WHERE COALESCE(waiting.confirmed,0)=0
+          AND EXISTS(
+              SELECT 1 FROM inventory AS inv
+              WHERE inv.id=waiting.source_inventory_id
+          )
+        """
+    )
+
     # 제품마스터 수정 기능이 추가되기 전에 변경되어 이미 어긋난 대기 품목도
     # 동일 사업장·제품·창고명·LOT의 P 재고 유통기한이 하나뿐일 때만 안전하게 복구한다.
     c.execute(
