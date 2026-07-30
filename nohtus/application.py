@@ -4,6 +4,7 @@ from styles import apply_style
 from nohtus.auth import allowed_pages_for_current_user, can_access_page, is_admin, render_user_box, require_login
 from nohtus.config import APP_TITLE, VERSION
 from nohtus.db_init import init_db
+from nohtus.services import database_backup
 import nohtus.services.export_waiting_history_patch  # noqa: F401
 from nohtus.device import is_mobile, sync_mobile_flag
 from nohtus.navigation import render_sidebar
@@ -219,6 +220,7 @@ def page_export_waiting():
 def main():
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     init_db()
+    backup_result = database_backup.run_due_backups()
     apply_style()
     sync_mobile_flag()
 
@@ -237,6 +239,17 @@ def main():
     allowed_pages = allowed_pages_for_current_user()
     menu = render_sidebar(APP_TITLE, VERSION, allowed_pages=allowed_pages)
     render_user_box()
+    if is_admin():
+        with st.sidebar.expander("데이터 백업"):
+            st.caption("WMS DB는 매시간 자동 백업되며 로컬과 USB에 각각 최대 20개를 보관합니다.")
+            if st.button("지금 USB에 백업", use_container_width=True, key="backup_wms_to_usb_now"):
+                try:
+                    paths = database_backup.backup_to_usb_now()
+                    st.success(f"USB 백업 완료: {len(paths)}개 드라이브")
+                except Exception as exc:
+                    st.error(str(exc))
+            for error in backup_result.get("errors", []):
+                st.warning(error)
     if not can_access_page(menu):
         st.warning("이 계정은 해당 메뉴에 접근할 수 없습니다.")
         return
