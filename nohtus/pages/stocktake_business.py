@@ -8,6 +8,7 @@ import nohtus.services.stocktake as stocktake_service
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only, normalize_exp_date
 from nohtus.services.inventory import insert_transaction_log
+from nohtus.services.export_waiting import ensure_export_waiting_tables
 
 
 def full_inventory_excel_bytes_business(exclude_zero=True):
@@ -65,6 +66,7 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
         mapping_rows.insert(0, "id", None)
 
     with connect() as con:
+        ensure_export_waiting_tables(con.cursor())
         current = con.execute(
             """
             SELECT product_name, company, COALESCE(warehouse_name,''),
@@ -159,6 +161,34 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
                 """,
                 (product_name, lot, exp_date, int(inv_id), int(inv_id)),
             )
+
+            # 과거 데이터에 P 재고 ID가 없더라도, 지금 수정한 P 행과 사업장·제품·
+            # 창고·수량이 일치하는 미연결 대기 품목이 단 하나라면 그 행으로 연결한다.
+            # 같은 제품의 후보가 둘 이상이면 임의로 바꾸지 않는다.
+            if location.upper() == "P":
+                candidates = con.execute(
+                    """
+                    SELECT id
+                    FROM export_waiting_items
+                    WHERE COALESCE(confirmed,0)=0
+                      AND waiting_inventory_id IS NULL
+                      AND TRIM(COALESCE(company,''))=?
+                      AND TRIM(COALESCE(product_name,''))=?
+                      AND TRIM(COALESCE(warehouse_name,''))=?
+                      AND COALESCE(qty,0)=?
+                    ORDER BY id
+                    """,
+                    (company, old_product_name, warehouse_name, current_qty),
+                ).fetchall()
+                if len(candidates) == 1:
+                    con.execute(
+                        """
+                        UPDATE export_waiting_items
+                        SET waiting_inventory_id=?, product_name=?, lot=?, exp_date=?
+                        WHERE id=?
+                        """,
+                        (int(inv_id), product_name, lot, exp_date, int(candidates[0][0])),
+                    )
 
             kept_ids = set()
             for _, mapping in mapping_rows.iterrows():
