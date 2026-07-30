@@ -242,11 +242,27 @@ def main():
     render_user_box()
     if is_admin():
         with st.sidebar.expander("데이터 백업"):
-            st.caption("WMS DB는 매시간 자동 백업되며 로컬과 USB에 각각 최대 20개를 보관합니다.")
-            if st.button("지금 USB에 백업", use_container_width=True, key="backup_wms_to_usb_now"):
+            st.caption("WMS DB는 매시간 로컬과 Google Drive에 자동 백업되며 각각 최신 20개를 보관합니다.")
+            drive_path = st.text_input(
+                "Google Drive 동기화 폴더",
+                value=database_backup.google_drive_root(),
+                placeholder=r"G:\\내 드라이브 또는 C:\\Users\\사용자\\My Drive",
+                key="google_drive_backup_root",
+            )
+            if st.button("Google Drive 경로 저장", use_container_width=True, key="save_google_drive_backup_root"):
                 try:
-                    paths = database_backup.backup_to_usb_now()
-                    st.success(f"USB 백업 완료: {len(paths)}개 드라이브")
+                    backup_dir = database_backup.set_google_drive_root(drive_path)
+                    st.success(f"백업 폴더 설정 완료: {backup_dir}")
+                except Exception as exc:
+                    st.error(str(exc))
+            if st.button(
+                "지금 Google Drive에 백업",
+                use_container_width=True,
+                key="backup_wms_to_google_drive_now",
+            ):
+                try:
+                    path = database_backup.backup_to_google_drive_now()
+                    st.success(f"Google Drive 백업 완료: {path}")
                 except Exception as exc:
                     st.error(str(exc))
             for error in backup_result.get("errors", []):
