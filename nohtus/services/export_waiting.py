@@ -484,7 +484,7 @@ def merge_export_waiting_orders(source_order_id, target_order_id):
         if not int(source_summary[0] or 0):
             raise ValueError("원본 수출대기 건에 합칠 품목이 없습니다.")
 
-        grouped_items = cur.execute("""SELECT source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
+        grouped_items = cur.execute("""SELECT source_inventory_id,MIN(waiting_inventory_id),company,product_name,warehouse_name,lot,exp_date,
                       source_location,waiting_location,SUM(qty) AS qty,MIN(moved_at) AS moved_at
                FROM export_waiting_items
                WHERE order_id IN (?,?)
@@ -495,9 +495,9 @@ def merge_export_waiting_orders(source_order_id, target_order_id):
         cur.execute("DELETE FROM export_waiting_items WHERE order_id IN (?,?)",(target_order_id, source_order_id))
         for item in grouped_items:
             cur.execute("""INSERT INTO export_waiting_items(
-                       order_id,source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
+                       order_id,source_inventory_id,waiting_inventory_id,company,product_name,warehouse_name,lot,exp_date,
                        source_location,waiting_location,qty,moved_at,confirmed
-                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,0)""",(target_order_id, *item))
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)""",(target_order_id, *item))
 
         cur.execute("DELETE FROM export_waiting_orders WHERE id=?", (source_order_id,))
         cur.execute("UPDATE export_waiting_orders SET updated_at=? WHERE id=?",(now, target_order_id))
@@ -512,7 +512,7 @@ def merge_export_waiting_orders(source_order_id, target_order_id):
         "merged_row_count": int(source_summary[0] or 0),
         "merged_qty": int(source_summary[1] or 0),
         "result_row_count": len(grouped_items),
-        "result_qty": sum(int(item[8] or 0) for item in grouped_items),
+        "result_qty": sum(int(item[9] or 0) for item in grouped_items),
     }
 
 
