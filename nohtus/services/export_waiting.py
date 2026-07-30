@@ -47,6 +47,36 @@ def ensure_export_waiting_tables(cur=None):
     c.execute("CREATE INDEX IF NOT EXISTS idx_export_waiting_items_order ON export_waiting_items(order_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_export_waiting_items_moved_at ON export_waiting_items(moved_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_export_waiting_items_confirmed ON export_waiting_items(order_id,confirmed)")
+
+    # 제품마스터 수정 기능이 추가되기 전에 변경되어 이미 어긋난 대기 품목도
+    # 동일 사업장·제품·창고명·LOT의 P 재고 유통기한이 하나뿐일 때만 안전하게 복구한다.
+    c.execute(
+        """
+        UPDATE export_waiting_items AS waiting
+        SET exp_date=(
+            SELECT MIN(TRIM(COALESCE(inv.exp_date,'-')))
+            FROM inventory AS inv
+            WHERE UPPER(TRIM(COALESCE(inv.location,'')))='P'
+              AND COALESCE(inv.qty,0)>0
+              AND TRIM(COALESCE(inv.company,''))=TRIM(COALESCE(waiting.company,''))
+              AND TRIM(COALESCE(inv.product_name,''))=TRIM(COALESCE(waiting.product_name,''))
+              AND TRIM(COALESCE(inv.warehouse_name,''))=TRIM(COALESCE(waiting.warehouse_name,''))
+              AND TRIM(COALESCE(inv.lot,'-'))=TRIM(COALESCE(waiting.lot,'-'))
+        )
+        WHERE COALESCE(waiting.confirmed,0)=0
+          AND UPPER(TRIM(COALESCE(waiting.waiting_location,'')))='P'
+          AND 1=(
+              SELECT COUNT(DISTINCT TRIM(COALESCE(inv.exp_date,'-')))
+              FROM inventory AS inv
+              WHERE UPPER(TRIM(COALESCE(inv.location,'')))='P'
+                AND COALESCE(inv.qty,0)>0
+                AND TRIM(COALESCE(inv.company,''))=TRIM(COALESCE(waiting.company,''))
+                AND TRIM(COALESCE(inv.product_name,''))=TRIM(COALESCE(waiting.product_name,''))
+                AND TRIM(COALESCE(inv.warehouse_name,''))=TRIM(COALESCE(waiting.warehouse_name,''))
+                AND TRIM(COALESCE(inv.lot,'-'))=TRIM(COALESCE(waiting.lot,'-'))
+          )
+        """
+    )
     if own:
         con.commit(); con.close()
 
