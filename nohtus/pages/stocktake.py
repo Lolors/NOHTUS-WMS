@@ -130,9 +130,21 @@ def _update_inventory_and_product_mappings(inv_id, product_name, lot, exp_date, 
                 (product_name, lot, exp_date, int(inv_id)),
             )
 
-            # 수출대기 품목은 P 이동 당시의 제품 정보를 별도로 보관한다.
-            # P 재고의 제품마스터가 바뀌면 아직 확정되지 않은 동일 재고행도
-            # 함께 갱신해 목록·확정·취소가 최신 제품정보를 사용하도록 한다.
+            # 수출대기 품목은 이동 전 원본 재고 ID를 보관한다. 원래 로케이션의
+            # 재고행을 수정해도 미확정 수출대기가 같은 제품정보를 사용하도록
+            # 문자열 추정이 아니라 source_inventory_id로 먼저 동기화한다.
+            con.execute(
+                """
+                UPDATE export_waiting_items
+                SET product_name=?, lot=?, exp_date=?
+                WHERE COALESCE(confirmed,0)=0
+                  AND source_inventory_id=?
+                """,
+                (product_name, lot, exp_date, int(inv_id)),
+            )
+
+            # 과거 데이터 중 원본 ID 연결이 끊긴 항목은 P 재고를 직접 수정한
+            # 경우에만 기존의 정확한 전체 서명으로 보조 동기화한다.
             if old_location.upper() == "P":
                 con.execute(
                     """
