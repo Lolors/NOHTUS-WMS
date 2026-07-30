@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from nohtus.db import connect
+from nohtus.services.usb_storage import find_files
 
 
 _SETTING_KEY = "export_program_db_path"
@@ -17,10 +18,16 @@ def _ensure_settings(cur) -> None:
     )""")
 
 
-def configured_db_path() -> str:
-    env_path = str(os.getenv("NOHTUS_EXPORT_DB_PATH") or "").strip()
-    if env_path:
-        return env_path
+def _is_export_db(path: Path) -> bool:
+    try:
+        with sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True) as external:
+            tables = {row[0] for row in external.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        return {"export_cases", "order_items"}.issubset(tables)
+    except (OSError, sqlite3.Error):
+        return False
+
+
+def _saved_db_path() -> str:
     with connect() as con:
         cur = con.cursor()
         _ensure_settings(cur)
@@ -29,14 +36,25 @@ def configured_db_path() -> str:
     return str(row[0] or "").strip() if row else ""
 
 
+def configured_db_path() -> str:
+    env_path = str(os.getenv("NOHTUS_EXPORT_DB_PATH") or "").strip()
+    if env_path and _is_export_db(Path(env_path)):
+        return env_path
+    saved_path = _saved_db_path()
+    if saved_path and _is_export_db(Path(saved_path)):
+        return saved_path
+    for candidate in find_files("export.db"):
+        if _is_export_db(candidate):
+            return str(candidate.resolve())
+    return ""
+
+
 def save_db_path(path_text: str) -> str:
     path = Path(str(path_text or "").strip()).expanduser()
     if not path.is_file():
         raise ValueError("수출관리 export.db 파일을 찾을 수 없습니다.")
-    with sqlite3.connect(path) as external:
-        tables = {row[0] for row in external.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        if not {"export_cases", "order_items"}.issubset(tables):
-            raise ValueError("선택한 파일은 수출관리 프로그램의 export.db가 아닙니다.")
+    if not _is_export_db(path):
+        raise ValueError("선택한 파일은 수출관리 프로그램의 export.db가 아닙니다.")
     resolved = str(path.resolve())
     with connect() as con:
         cur = con.cursor()
@@ -52,7 +70,7 @@ def save_db_path(path_text: str) -> str:
 
 def list_active_orders() -> list[dict]:
     path_text = configured_db_path()
-    if not path_text or not Path(path_text).is_file():
+    if not path_text:
         return []
     try:
         with sqlite3.connect(f"file:{Path(path_text).resolve()}?mode=ro", uri=True) as con:
@@ -73,7 +91,7 @@ def list_active_orders() -> list[dict]:
 
 def order_items(case_id: int) -> list[dict]:
     path_text = configured_db_path()
-    if not path_text or not Path(path_text).is_file():
+    if not path_text:
         return []
     with sqlite3.connect(f"file:{Path(path_text).resolve()}?mode=ro", uri=True) as con:
         con.row_factory = sqlite3.Row
