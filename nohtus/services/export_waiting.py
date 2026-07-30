@@ -34,6 +34,7 @@ def ensure_export_waiting_tables(cur=None):
         FOREIGN KEY(order_id) REFERENCES export_waiting_orders(id))""")
     item_cols = {r[1] for r in c.execute("PRAGMA table_info(export_waiting_items)").fetchall()}
     additions = {
+        "waiting_inventory_id": "INTEGER",
         "moved_at": "TEXT",
         "confirmed": "INTEGER NOT NULL DEFAULT 0",
         "confirmed_company": "TEXT",
@@ -48,61 +49,87 @@ def ensure_export_waiting_tables(cur=None):
     c.execute("CREATE INDEX IF NOT EXISTS idx_export_waiting_items_moved_at ON export_waiting_items(moved_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_export_waiting_items_confirmed ON export_waiting_items(order_id,confirmed)")
 
-    # 기존에 저장된 미확정 수출대기도 이동 전 원본 재고 ID를 기준으로
-    # 제품명·LOT·유통기한을 복구한다. 같은 제품명이 여러 행에 있어도
-    # 다른 재고의 값을 가져오지 않는다.
+    # P 재고행 자체의 ID를 보존하지 않았던 기존 데이터는 먼저 현재 저장값과
+    # 정확히 일치하는 P 재고로 연결한다.
     c.execute(
         """
         UPDATE export_waiting_items AS waiting
-        SET product_name=(
-                SELECT inv.product_name FROM inventory AS inv
-                WHERE inv.id=waiting.source_inventory_id
-            ),
-            lot=(
-                SELECT COALESCE(inv.lot,'-') FROM inventory AS inv
-                WHERE inv.id=waiting.source_inventory_id
-            ),
-            exp_date=(
-                SELECT COALESCE(inv.exp_date,'-') FROM inventory AS inv
-                WHERE inv.id=waiting.source_inventory_id
-            )
-        WHERE COALESCE(waiting.confirmed,0)=0
-          AND EXISTS(
-              SELECT 1 FROM inventory AS inv
-              WHERE inv.id=waiting.source_inventory_id
-          )
-        """
-    )
-
-    # 제품마스터 수정 기능이 추가되기 전에 변경되어 이미 어긋난 대기 품목도
-    # 동일 사업장·제품·창고명·LOT의 P 재고 유통기한이 하나뿐일 때만 안전하게 복구한다.
-    c.execute(
-        """
-        UPDATE export_waiting_items AS waiting
-        SET exp_date=(
-            SELECT MIN(TRIM(COALESCE(inv.exp_date,'-')))
+        SET waiting_inventory_id=(
+            SELECT MIN(inv.id)
             FROM inventory AS inv
             WHERE UPPER(TRIM(COALESCE(inv.location,'')))='P'
-              AND COALESCE(inv.qty,0)>0
               AND TRIM(COALESCE(inv.company,''))=TRIM(COALESCE(waiting.company,''))
               AND TRIM(COALESCE(inv.product_name,''))=TRIM(COALESCE(waiting.product_name,''))
               AND TRIM(COALESCE(inv.warehouse_name,''))=TRIM(COALESCE(waiting.warehouse_name,''))
               AND TRIM(COALESCE(inv.lot,'-'))=TRIM(COALESCE(waiting.lot,'-'))
+              AND TRIM(COALESCE(inv.exp_date,'-'))=TRIM(COALESCE(waiting.exp_date,'-'))
         )
         WHERE COALESCE(waiting.confirmed,0)=0
-          AND UPPER(TRIM(COALESCE(waiting.waiting_location,'')))='P'
-          AND 1=(
-              SELECT COUNT(DISTINCT TRIM(COALESCE(inv.exp_date,'-')))
-              FROM inventory AS inv
+          AND waiting.waiting_inventory_id IS NULL
+          AND EXISTS(
+              SELECT 1 FROM inventory AS inv
               WHERE UPPER(TRIM(COALESCE(inv.location,'')))='P'
-                AND COALESCE(inv.qty,0)>0
                 AND TRIM(COALESCE(inv.company,''))=TRIM(COALESCE(waiting.company,''))
                 AND TRIM(COALESCE(inv.product_name,''))=TRIM(COALESCE(waiting.product_name,''))
                 AND TRIM(COALESCE(inv.warehouse_name,''))=TRIM(COALESCE(waiting.warehouse_name,''))
                 AND TRIM(COALESCE(inv.lot,'-'))=TRIM(COALESCE(waiting.lot,'-'))
+                AND TRIM(COALESCE(inv.exp_date,'-'))=TRIM(COALESCE(waiting.exp_date,'-'))
           )
         """
     )
+
+    # 같은 사업장·제품·창고 안에서 정확히 일치하는 LOT/유통기한을 제외한 뒤
+    # 미연결 대기 서명과 P 재고 서명이 각각 하나만 남으면 제품마스터 변경 건으로
+    # 확정할 수 있다. 이 경우에만 기존 잘못된 대기값을 안전하게 복구한다.
+    groups = c.execute(
+        """
+        SELECT DISTINCT TRIM(COALESCE(company,'')), TRIM(COALESCE(product_name,'')),
+                        TRIM(COALESCE(warehouse_name,''))
+        FROM export_waiting_items
+        WHERE COALESCE(confirmed,0)=0 AND waiting_inventory_id IS NULL
+        """
+    ).fetchall()
+    for company, product_name, warehouse_name in groups:
+        waiting_signatures = c.execute(
+            """
+            SELECT TRIM(COALESCE(lot,'-')), TRIM(COALESCE(exp_date,'-'))
+            FROM export_waiting_items
+            WHERE COALESCE(confirmed,0)=0 AND waiting_inventory_id IS NULL
+              AND TRIM(COALESCE(company,''))=?
+              AND TRIM(COALESCE(product_name,''))=?
+              AND TRIM(COALESCE(warehouse_name,''))=?
+            GROUP BY TRIM(COALESCE(lot,'-')), TRIM(COALESCE(exp_date,'-'))
+            """,
+            (company, product_name, warehouse_name),
+        ).fetchall()
+        p_signatures = c.execute(
+            """
+            SELECT MIN(id), TRIM(COALESCE(lot,'-')), TRIM(COALESCE(exp_date,'-'))
+            FROM inventory
+            WHERE UPPER(TRIM(COALESCE(location,'')))='P' AND COALESCE(qty,0)>0
+              AND TRIM(COALESCE(company,''))=?
+              AND TRIM(COALESCE(product_name,''))=?
+              AND TRIM(COALESCE(warehouse_name,''))=?
+            GROUP BY TRIM(COALESCE(lot,'-')), TRIM(COALESCE(exp_date,'-'))
+            """,
+            (company, product_name, warehouse_name),
+        ).fetchall()
+        if len(waiting_signatures) == 1 and len(p_signatures) == 1:
+            old_lot, old_exp = waiting_signatures[0]
+            p_id, new_lot, new_exp = p_signatures[0]
+            c.execute(
+                """
+                UPDATE export_waiting_items
+                SET waiting_inventory_id=?, lot=?, exp_date=?
+                WHERE COALESCE(confirmed,0)=0 AND waiting_inventory_id IS NULL
+                  AND TRIM(COALESCE(company,''))=?
+                  AND TRIM(COALESCE(product_name,''))=?
+                  AND TRIM(COALESCE(warehouse_name,''))=?
+                  AND TRIM(COALESCE(lot,'-'))=?
+                  AND TRIM(COALESCE(exp_date,'-'))=?
+                """,
+                (int(p_id), new_lot, new_exp, company, product_name, warehouse_name, old_lot, old_exp),
+            )
     if own:
         con.commit(); con.close()
 
@@ -296,11 +323,11 @@ def _items(cur, order_id, *, confirmed=None):
     if confirmed is not None:
         where += " AND COALESCE(confirmed,0)=?"
         params.append(int(bool(confirmed)))
-    rows = cur.execute(f"""SELECT id,source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
+    rows = cur.execute(f"""SELECT id,source_inventory_id,waiting_inventory_id,company,product_name,warehouse_name,lot,exp_date,
         source_location,waiting_location,qty,moved_at,COALESCE(confirmed,0),confirmed_company,
         confirmed_customer_code,confirmed_customer_name,confirmed_at
         FROM export_waiting_items WHERE {where} ORDER BY id""", tuple(params)).fetchall()
-    keys = ["id","source_inventory_id","company","product_name","warehouse_name","lot","exp_date",
+    keys = ["id","source_inventory_id","waiting_inventory_id","company","product_name","warehouse_name","lot","exp_date",
             "source_location","waiting_location","qty","moved_at","confirmed","confirmed_company",
             "confirmed_customer_code","confirmed_customer_name","confirmed_at"]
     return [dict(zip(keys, r)) for r in rows]
@@ -358,11 +385,11 @@ def _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now
         hint = source_hints.get(source_id) or restored_source_rows.get(source_id)
         source = _take_source(cur, source_id, qty, now, hint)
         resolved_inventory_id = int(source.get("_resolved_inventory_id") or source.get("id") or source_id)
-        _add(cur, source, P, qty, now, 0)
-        cur.execute("""INSERT INTO export_waiting_items(order_id,source_inventory_id,company,product_name,
+        waiting_inventory_id = _add(cur, source, P, qty, now, 0)
+        cur.execute("""INSERT INTO export_waiting_items(order_id,source_inventory_id,waiting_inventory_id,company,product_name,
             warehouse_name,lot,exp_date,source_location,waiting_location,qty,moved_at,confirmed)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,0)""",
-            (order_id,resolved_inventory_id,source.get("company", ""),source.get("product_name", ""),source.get("warehouse_name", "") or "",
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)""",
+            (order_id,resolved_inventory_id,waiting_inventory_id,source.get("company", ""),source.get("product_name", ""),source.get("warehouse_name", "") or "",
              source.get("lot", "-") or "-",source.get("exp_date", "-") or "-",source.get("location", ""),P,qty,now))
         insert_transaction_log(
             cur,
@@ -438,11 +465,11 @@ def save_export_waiting_order(cart, *, country, buyer="", transport_method="미�
             for inventory_id, qty in grouped.items():
                 s = _take_source(cur, inventory_id, qty, now, source_hints.get(inventory_id))
                 resolved_inventory_id = int(s.get("_resolved_inventory_id") or s.get("id") or inventory_id)
-                _add(cur, s, P, qty, now, 0)
-                cur.execute("""INSERT INTO export_waiting_items(order_id,source_inventory_id,company,product_name,
+                waiting_inventory_id = _add(cur, s, P, qty, now, 0)
+                cur.execute("""INSERT INTO export_waiting_items(order_id,source_inventory_id,waiting_inventory_id,company,product_name,
                     warehouse_name,lot,exp_date,source_location,waiting_location,qty,moved_at,confirmed)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,0)""",
-                    (order_id,resolved_inventory_id,s.get("company", ""),s.get("product_name", ""),s.get("warehouse_name", "") or "",
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)""",
+                    (order_id,resolved_inventory_id,waiting_inventory_id,s.get("company", ""),s.get("product_name", ""),s.get("warehouse_name", "") or "",
                      s.get("lot", "-") or "-",s.get("exp_date", "-") or "-",s.get("location", ""),P,qty,now))
                 insert_transaction_log(cur, created_at=now, tx_type="위치이동", product_name=s.get("product_name", ""),
                     warehouse_name=s.get("warehouse_name", "") or "", lot=s.get("lot", "-"), exp_date=s.get("exp_date", "-"),
