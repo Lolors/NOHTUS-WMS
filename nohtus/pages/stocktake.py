@@ -89,12 +89,19 @@ def _update_inventory_and_product_mappings(inv_id, product_name, lot, exp_date, 
 
     with connect() as con:
         current = con.execute(
-            "SELECT product_name FROM inventory WHERE id=?",
+            """SELECT company,product_name,IFNULL(warehouse_name,''),IFNULL(lot,'-'),
+                      IFNULL(exp_date,'-'),location
+               FROM inventory WHERE id=?""",
             (int(inv_id),),
         ).fetchone()
         if not current:
             raise ValueError("수정할 재고를 찾을 수 없습니다.")
-        old_product_name = str(current[0] or "").strip()
+        old_company = str(current[0] or "").strip()
+        old_product_name = str(current[1] or "").strip()
+        old_warehouse_name = str(current[2] or "").strip()
+        old_lot = str(current[3] or "-").strip() or "-"
+        old_exp_date = str(current[4] or "-").strip() or "-"
+        old_location = str(current[5] or "").strip()
 
         existing_rows = con.execute(
             """
@@ -122,6 +129,34 @@ def _update_inventory_and_product_mappings(inv_id, product_name, lot, exp_date, 
                 """,
                 (product_name, lot, exp_date, int(inv_id)),
             )
+
+            # 수출대기 품목은 P 이동 당시의 제품 정보를 별도로 보관한다.
+            # P 재고의 제품마스터가 바뀌면 아직 확정되지 않은 동일 재고행도
+            # 함께 갱신해 목록·확정·취소가 최신 제품정보를 사용하도록 한다.
+            if old_location.upper() == "P":
+                con.execute(
+                    """
+                    UPDATE export_waiting_items
+                    SET product_name=?, lot=?, exp_date=?
+                    WHERE COALESCE(confirmed,0)=0
+                      AND UPPER(TRIM(COALESCE(waiting_location,'')))='P'
+                      AND TRIM(COALESCE(company,''))=?
+                      AND TRIM(COALESCE(product_name,''))=?
+                      AND TRIM(COALESCE(warehouse_name,''))=?
+                      AND TRIM(COALESCE(lot,'-'))=?
+                      AND TRIM(COALESCE(exp_date,'-'))=?
+                    """,
+                    (
+                        product_name,
+                        lot,
+                        exp_date,
+                        old_company,
+                        old_product_name,
+                        old_warehouse_name,
+                        old_lot,
+                        old_exp_date,
+                    ),
+                )
 
             kept_ids = set()
             for _, mapping in mapping_rows.iterrows():
