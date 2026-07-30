@@ -221,6 +221,7 @@ def main():
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     init_db()
     backup_result = database_backup.run_due_backups()
+    database_backup.start_backup_worker()
     apply_style()
     sync_mobile_flag()
 
