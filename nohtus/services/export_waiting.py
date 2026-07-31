@@ -151,19 +151,22 @@ def _resolve_source_row(cur, inventory_id, fallback=None):
         return None
 
     if warehouse_name:
-        row = _dict_row(cur, """SELECT * FROM inventory
+        return _dict_row(cur, """SELECT * FROM inventory
             WHERE company=? AND product_name=? AND IFNULL(warehouse_name,'')=?
               AND IFNULL(lot,'-')=? AND IFNULL(exp_date,'-')=? AND location=?
-            ORDER BY qty DESC,id LIMIT 1""",
+            ORDER BY id LIMIT 1""",
             (company, product_name, warehouse_name, lot, exp_date, location))
-        if row:
-            return row
 
-    return _dict_row(cur, """SELECT * FROM inventory
+    # ERP 원본명이 없는 옛 장바구니는 나머지 전체 키가 같은 후보가 하나일 때만 복구한다.
+    # 둘 이상이면 임의로 수량이 큰 행을 고르지 않고 사용자가 다시 선택하게 한다.
+    rows = cur.execute("""SELECT * FROM inventory
         WHERE company=? AND product_name=? AND IFNULL(lot,'-')=?
           AND IFNULL(exp_date,'-')=? AND location=?
-        ORDER BY qty DESC,id LIMIT 1""",
-        (company, product_name, lot, exp_date, location))
+        ORDER BY id LIMIT 2""",
+        (company, product_name, lot, exp_date, location)).fetchall()
+    if len(rows) != 1:
+        return None
+    return dict(zip([d[0] for d in cur.description], rows[0]))
 
 
 def _take_source(cur, inventory_id, qty, now, fallback=None):
