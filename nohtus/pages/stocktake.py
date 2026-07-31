@@ -257,9 +257,19 @@ def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
 
 
 def _render_stock_comparison():
-    from nohtus.services.stock_compare import compare_stock_files
+    from nohtus.services.stock_compare import (
+        add_ignored_problems,
+        compare_stock_files,
+        comparison_excel_bytes,
+        filter_ignored_problems,
+        list_ignored_problems,
+        remove_ignored_problems,
+    )
 
     st.subheader("WMS · ERP · 실사재고 비교")
+    ignore_message = st.session_state.pop("_stock_compare_ignore_message", None)
+    if ignore_message:
+        st.success(ignore_message)
     st.caption(
         "ERP는 사업장·제품별 총수량으로 비교하고, 지엠메딕 실사재고는 "
         "노투스팜의 지엠메딕 로케이션 재고를 제품·유통기한별로 비교합니다."
@@ -311,7 +321,7 @@ def _render_stock_comparison():
     if not result:
         return
 
-    problems = result["problems"]
+    problems = filter_ignored_problems(result["problems"])
     erp_result = result["erp"]
     gm_result = result["gmmedic"]
 
@@ -328,19 +338,73 @@ def _render_stock_comparison():
 
     st.markdown("#### 문제목록")
     if problems.empty:
-        st.success("업로드한 파일 기준으로 발견된 문제가 없습니다.")
+        st.success("업로드한 파일 기준으로 확인이 필요한 문제가 없습니다.")
     else:
         st.error(f"확인이 필요한 문제가 {len(problems):,}건 있습니다.")
-        st.dataframe(
-            problems,
+        problem_editor = problems.copy()
+        problem_editor.insert(0, "무시", False)
+        edited_problems = st.data_editor(
+            problem_editor,
             hide_index=True,
             use_container_width=True,
+            key="stock_compare_problem_editor",
+            disabled=[column for column in problem_editor.columns if column != "무시"],
             column_config={
+                "무시": st.column_config.CheckboxColumn(
+                    "무시", help="의도적으로 유지할 차이라면 체크하세요."
+                ),
                 "WMS수량": st.column_config.NumberColumn(format="%d"),
                 "비교수량": st.column_config.NumberColumn(format="%d"),
                 "차이": st.column_config.NumberColumn(format="%+d"),
             },
         )
+        selected_problems = edited_problems[edited_problems["무시"] == True]
+        if st.button(
+            "선택 항목 문제목록에서 무시",
+            disabled=selected_problems.empty,
+            use_container_width=True,
+            key="stock_compare_ignore_selected",
+        ):
+            added = add_ignored_problems(selected_problems)
+            st.session_state["_stock_compare_ignore_message"] = (
+                f"{added:,}개 항목을 무시 목록에 등록했습니다."
+            )
+            st.rerun()
+
+    ignored_problems = list_ignored_problems()
+    with st.expander(f"무시 목록 관리 ({len(ignored_problems):,}건)"):
+        st.caption(
+            "무시된 항목도 아래 ERP·실사 비교결과에는 실제 값 그대로 표시됩니다. "
+            "해제하면 다음 비교부터 문제목록에 다시 나타납니다."
+        )
+        if ignored_problems.empty:
+            st.info("현재 무시 중인 항목이 없습니다.")
+        else:
+            ignored_editor = ignored_problems.copy()
+            ignored_editor.insert(0, "해제", False)
+            edited_ignored = st.data_editor(
+                ignored_editor,
+                hide_index=True,
+                use_container_width=True,
+                key="stock_compare_ignored_editor",
+                disabled=[column for column in ignored_editor.columns if column != "해제"],
+                column_config={
+                    "해제": st.column_config.CheckboxColumn("해제"),
+                    "ID": None,
+                },
+            )
+            selected_ignored = edited_ignored[edited_ignored["해제"] == True]
+            if st.button(
+                "선택 항목 무시 해제",
+                disabled=selected_ignored.empty,
+                use_container_width=True,
+                key="stock_compare_unignore_selected",
+            ):
+                removed = remove_ignored_problems(selected_ignored["ID"].tolist())
+                st.session_state["_stock_compare_ignore_message"] = (
+                    f"{removed:,}개 항목의 무시를 해제했습니다."
+                )
+                st.rerun()
 
     tab_erp, tab_gm = st.tabs(["ERP 비교결과", "지엠메딕 실사 비교결과"])
     with tab_erp:
@@ -374,7 +438,7 @@ def _render_stock_comparison():
 
     st.download_button(
         "비교결과 엑셀 다운로드",
-        data=result["excel"],
+        data=comparison_excel_bytes(erp_result, gm_result, problems),
         file_name=f"NOHTUS_재고비교결과_{date.today().strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
