@@ -27,13 +27,15 @@ def ensure_export_waiting_tables(cur=None):
 
     c.execute("""CREATE TABLE IF NOT EXISTS export_waiting_items(
         id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, source_inventory_id INTEGER,
-        company TEXT NOT NULL, product_name TEXT NOT NULL, warehouse_name TEXT, lot TEXT, exp_date TEXT,
+        waiting_inventory_id INTEGER, company TEXT NOT NULL, product_name TEXT NOT NULL,
+        warehouse_name TEXT, lot TEXT, exp_date TEXT,
         source_location TEXT NOT NULL, waiting_location TEXT NOT NULL DEFAULT 'P', qty INTEGER NOT NULL,
         moved_at TEXT, confirmed INTEGER NOT NULL DEFAULT 0, confirmed_company TEXT,
         confirmed_customer_code TEXT, confirmed_customer_name TEXT, confirmed_at TEXT,
         FOREIGN KEY(order_id) REFERENCES export_waiting_orders(id))""")
     item_cols = {r[1] for r in c.execute("PRAGMA table_info(export_waiting_items)").fetchall()}
     additions = {
+        "waiting_inventory_id": "INTEGER",
         "moved_at": "TEXT",
         "confirmed": "INTEGER NOT NULL DEFAULT 0",
         "confirmed_company": "TEXT",
@@ -47,6 +49,36 @@ def ensure_export_waiting_tables(cur=None):
     c.execute("CREATE INDEX IF NOT EXISTS idx_export_waiting_items_order ON export_waiting_items(order_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_export_waiting_items_moved_at ON export_waiting_items(moved_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_export_waiting_items_confirmed ON export_waiting_items(order_id,confirmed)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_export_waiting_items_waiting_inventory ON export_waiting_items(waiting_inventory_id)")
+    # 기존 수출대기 자료는 제품명만으로 추정하지 않는다. 사업장·원본 ERP명·LOT·
+    # 유통기한까지 모두 같은 P 재고가 정확히 한 행일 때만 고유 ID를 복구한다.
+    c.execute("""
+        UPDATE export_waiting_items
+        SET waiting_inventory_id=(
+            SELECT inv.id
+            FROM inventory inv
+            WHERE inv.location='P'
+              AND inv.company=export_waiting_items.company
+              AND inv.product_name=export_waiting_items.product_name
+              AND IFNULL(inv.warehouse_name,'')=IFNULL(export_waiting_items.warehouse_name,'')
+              AND IFNULL(inv.lot,'-')=IFNULL(export_waiting_items.lot,'-')
+              AND IFNULL(inv.exp_date,'-')=IFNULL(export_waiting_items.exp_date,'-')
+            ORDER BY inv.id
+            LIMIT 1
+        )
+        WHERE waiting_inventory_id IS NULL
+          AND COALESCE(confirmed,0)=0
+          AND (
+              SELECT COUNT(*)
+              FROM inventory inv
+              WHERE inv.location='P'
+                AND inv.company=export_waiting_items.company
+                AND inv.product_name=export_waiting_items.product_name
+                AND IFNULL(inv.warehouse_name,'')=IFNULL(export_waiting_items.warehouse_name,'')
+                AND IFNULL(inv.lot,'-')=IFNULL(export_waiting_items.lot,'-')
+                AND IFNULL(inv.exp_date,'-')=IFNULL(export_waiting_items.exp_date,'-')
+          )=1
+    """)
     if own:
         con.commit(); con.close()
 
@@ -158,7 +190,23 @@ def _take_source(cur, inventory_id, qty, now, fallback=None):
 
 def _take_p(cur, item, now, qty=None):
     take_qty = int(item.get("qty") or 0) if qty is None else int(qty or 0)
-    row = _find(cur, item, P)
+    waiting_inventory_id = int(item.get("waiting_inventory_id") or 0)
+    row = None
+    if waiting_inventory_id:
+        row = cur.execute(
+            "SELECT id,qty FROM inventory WHERE id=? AND location=?",
+            (waiting_inventory_id, P),
+        ).fetchone()
+    if not row:
+        # 과거 자료에 연결 ID가 없을 때만 전체 재고키가 정확히 같은 P 행을 사용한다.
+        # 제품명이나 LOT 일부만 같은 다른 행을 임의로 고르지 않는다.
+        row = _find(cur, item, P)
+        if row and item.get("id"):
+            cur.execute(
+                "UPDATE export_waiting_items SET waiting_inventory_id=? WHERE id=?",
+                (int(row[0]), int(item["id"])),
+            )
+            item["waiting_inventory_id"] = int(row[0])
     if not row or int(row[1] or 0) < take_qty:
         raise ValueError(f"P 로케이션의 {item['product_name']} 재고가 부족합니다.")
     cur.execute("UPDATE inventory SET qty=?,updated_at=? WHERE id=?", (int(row[1] or 0) - take_qty, now, int(row[0])))
@@ -170,11 +218,11 @@ def _items(cur, order_id, *, confirmed=None):
     if confirmed is not None:
         where += " AND COALESCE(confirmed,0)=?"
         params.append(int(bool(confirmed)))
-    rows = cur.execute(f"""SELECT id,source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
+    rows = cur.execute(f"""SELECT id,source_inventory_id,waiting_inventory_id,company,product_name,warehouse_name,lot,exp_date,
         source_location,waiting_location,qty,moved_at,COALESCE(confirmed,0),confirmed_company,
         confirmed_customer_code,confirmed_customer_name,confirmed_at
         FROM export_waiting_items WHERE {where} ORDER BY id""", tuple(params)).fetchall()
-    keys = ["id","source_inventory_id","company","product_name","warehouse_name","lot","exp_date",
+    keys = ["id","source_inventory_id","waiting_inventory_id","company","product_name","warehouse_name","lot","exp_date",
             "source_location","waiting_location","qty","moved_at","confirmed","confirmed_company",
             "confirmed_customer_code","confirmed_customer_name","confirmed_at"]
     return [dict(zip(keys, r)) for r in rows]
@@ -232,11 +280,11 @@ def _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now
         hint = source_hints.get(source_id) or restored_source_rows.get(source_id)
         source = _take_source(cur, source_id, qty, now, hint)
         resolved_inventory_id = int(source.get("_resolved_inventory_id") or source.get("id") or source_id)
-        _add(cur, source, P, qty, now, 0)
-        cur.execute("""INSERT INTO export_waiting_items(order_id,source_inventory_id,company,product_name,
+        waiting_inventory_id = _add(cur, source, P, qty, now, 0)
+        cur.execute("""INSERT INTO export_waiting_items(order_id,source_inventory_id,waiting_inventory_id,company,product_name,
             warehouse_name,lot,exp_date,source_location,waiting_location,qty,moved_at,confirmed)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,0)""",
-            (order_id,resolved_inventory_id,source.get("company", ""),source.get("product_name", ""),source.get("warehouse_name", "") or "",
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)""",
+            (order_id,resolved_inventory_id,waiting_inventory_id,source.get("company", ""),source.get("product_name", ""),source.get("warehouse_name", "") or "",
              source.get("lot", "-") or "-",source.get("exp_date", "-") or "-",source.get("location", ""),P,qty,now))
         insert_transaction_log(
             cur,
@@ -312,11 +360,11 @@ def save_export_waiting_order(cart, *, country, buyer="", transport_method="미�
             for inventory_id, qty in grouped.items():
                 s = _take_source(cur, inventory_id, qty, now, source_hints.get(inventory_id))
                 resolved_inventory_id = int(s.get("_resolved_inventory_id") or s.get("id") or inventory_id)
-                _add(cur, s, P, qty, now, 0)
-                cur.execute("""INSERT INTO export_waiting_items(order_id,source_inventory_id,company,product_name,
+                waiting_inventory_id = _add(cur, s, P, qty, now, 0)
+                cur.execute("""INSERT INTO export_waiting_items(order_id,source_inventory_id,waiting_inventory_id,company,product_name,
                     warehouse_name,lot,exp_date,source_location,waiting_location,qty,moved_at,confirmed)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,0)""",
-                    (order_id,resolved_inventory_id,s.get("company", ""),s.get("product_name", ""),s.get("warehouse_name", "") or "",
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)""",
+                    (order_id,resolved_inventory_id,waiting_inventory_id,s.get("company", ""),s.get("product_name", ""),s.get("warehouse_name", "") or "",
                      s.get("lot", "-") or "-",s.get("exp_date", "-") or "-",s.get("location", ""),P,qty,now))
                 insert_transaction_log(cur, created_at=now, tx_type="위치이동", product_name=s.get("product_name", ""),
                     warehouse_name=s.get("warehouse_name", "") or "", lot=s.get("lot", "-"), exp_date=s.get("exp_date", "-"),
@@ -357,20 +405,20 @@ def merge_export_waiting_orders(source_order_id, target_order_id):
         if not int(source_summary[0] or 0):
             raise ValueError("원본 수출대기 건에 합칠 품목이 없습니다.")
 
-        grouped_items = cur.execute("""SELECT source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
+        grouped_items = cur.execute("""SELECT source_inventory_id,waiting_inventory_id,company,product_name,warehouse_name,lot,exp_date,
                       source_location,waiting_location,SUM(qty) AS qty,MIN(moved_at) AS moved_at
                FROM export_waiting_items
                WHERE order_id IN (?,?)
-               GROUP BY source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
+               GROUP BY source_inventory_id,waiting_inventory_id,company,product_name,warehouse_name,lot,exp_date,
                         source_location,waiting_location
                ORDER BY MIN(id)""",(target_order_id, source_order_id)).fetchall()
 
         cur.execute("DELETE FROM export_waiting_items WHERE order_id IN (?,?)",(target_order_id, source_order_id))
         for item in grouped_items:
             cur.execute("""INSERT INTO export_waiting_items(
-                       order_id,source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
+                       order_id,source_inventory_id,waiting_inventory_id,company,product_name,warehouse_name,lot,exp_date,
                        source_location,waiting_location,qty,moved_at,confirmed
-                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,0)""",(target_order_id, *item))
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)""",(target_order_id, *item))
 
         cur.execute("DELETE FROM export_waiting_orders WHERE id=?", (source_order_id,))
         cur.execute("UPDATE export_waiting_orders SET updated_at=? WHERE id=?",(now, target_order_id))
@@ -385,7 +433,7 @@ def merge_export_waiting_orders(source_order_id, target_order_id):
         "merged_row_count": int(source_summary[0] or 0),
         "merged_qty": int(source_summary[1] or 0),
         "result_row_count": len(grouped_items),
-        "result_qty": sum(int(item[8] or 0) for item in grouped_items),
+        "result_qty": sum(int(item[9] or 0) for item in grouped_items),
     }
 
 
@@ -419,13 +467,13 @@ def confirm_export_waiting_items(order_id, item_ids, *, erp_company, customer_co
             raise ValueError("확정할 수출대기 건이 없거나 이미 처리되었습니다.")
 
         placeholders = ",".join("?" for _ in selected_ids)
-        rows = cur.execute(f"""SELECT id,source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
+        rows = cur.execute(f"""SELECT id,source_inventory_id,waiting_inventory_id,company,product_name,warehouse_name,lot,exp_date,
             source_location,waiting_location,qty,moved_at,COALESCE(confirmed,0),confirmed_company,
             confirmed_customer_code,confirmed_customer_name,confirmed_at
             FROM export_waiting_items
             WHERE order_id=? AND id IN ({placeholders}) AND COALESCE(confirmed,0)=0 ORDER BY id""",
             (int(order_id), *selected_ids)).fetchall()
-        keys = ["id","source_inventory_id","company","product_name","warehouse_name","lot","exp_date",
+        keys = ["id","source_inventory_id","waiting_inventory_id","company","product_name","warehouse_name","lot","exp_date",
                 "source_location","waiting_location","qty","moved_at","confirmed","confirmed_company",
                 "confirmed_customer_code","confirmed_customer_name","confirmed_at"]
         items = [dict(zip(keys, row)) for row in rows]
