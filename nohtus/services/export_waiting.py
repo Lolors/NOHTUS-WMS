@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
 
 from nohtus.db import connect
 from nohtus.services.inventory import insert_transaction_log
@@ -24,6 +24,8 @@ def ensure_export_waiting_tables(cur=None):
         c.execute("ALTER TABLE export_waiting_orders ADD COLUMN buyer TEXT")
     if "transport_method" not in order_cols:
         c.execute("ALTER TABLE export_waiting_orders ADD COLUMN transport_method TEXT")
+    if "order_date" not in order_cols:
+        c.execute("ALTER TABLE export_waiting_orders ADD COLUMN order_date TEXT")
 
     c.execute("""CREATE TABLE IF NOT EXISTS export_waiting_items(
         id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, source_inventory_id INTEGER,
@@ -490,10 +492,31 @@ def cancel_export_waiting_order(order_id):
         con.commit()
 
 
-def confirm_export_waiting_items(order_id, item_ids, *, erp_company, customer_code, customer_name):
+def _normalize_shipment_date(value):
+    if isinstance(value, datetime):
+        value = value.date()
+    if isinstance(value, date):
+        return value.strftime("%Y-%m-%d")
+    text = str(value or "").strip()
+    try:
+        return datetime.strptime(text[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        raise ValueError("출고일자를 선택하세요.")
+
+
+def confirm_export_waiting_items(
+    order_id,
+    item_ids,
+    *,
+    erp_company,
+    customer_code,
+    customer_name,
+    shipment_date,
+):
     erp_company = str(erp_company or "").strip()
     customer_code = str(customer_code or "").strip()
     customer_name = str(customer_name or "").strip()
+    order_date = _normalize_shipment_date(shipment_date)
     selected_ids = sorted({int(x) for x in (item_ids or [])})
     if not selected_ids:
         raise ValueError("수출확정할 품목을 선택하세요.")
@@ -526,7 +549,7 @@ def confirm_export_waiting_items(order_id, item_ids, *, erp_company, customer_co
             insert_transaction_log(cur, created_at=now, tx_type="출고", product_name=item["product_name"],
                 warehouse_name=item.get("warehouse_name", ""), lot=item.get("lot", "-"), exp_date=item.get("exp_date", "-"),
                 from_company=item["company"], from_location=P, to_company=erp_company,
-                to_location="", qty=item["qty"], memo=f"수출확정 / {order[0]} / {customer_name}")
+                to_location="", qty=item["qty"], memo=f"수출확정 / {order[0]} / {customer_name} / 출고일자: {order_date}")
             cur.execute("""UPDATE export_waiting_items
                 SET confirmed=1,confirmed_company=?,confirmed_customer_code=?,confirmed_customer_name=?,confirmed_at=?
                 WHERE id=?""", (erp_company,customer_code,customer_name,now,int(item["id"])))
@@ -536,8 +559,8 @@ def confirm_export_waiting_items(order_id, item_ids, *, erp_company, customer_co
         confirmed_count = int(total_count or 0) - int(remaining or 0)
         status = "confirmed" if int(remaining or 0) == 0 else "partial"
         cur.execute("""UPDATE export_waiting_orders
-            SET status=?,erp_company=?,erp_customer_code=?,erp_customer_name=?,confirmed_at=?,updated_at=?
-            WHERE id=?""", (status,erp_company,customer_code,customer_name,now,now,int(order_id)))
+            SET status=?,erp_company=?,erp_customer_code=?,erp_customer_name=?,order_date=?,confirmed_at=?,updated_at=?
+            WHERE id=?""", (status,erp_company,customer_code,customer_name,order_date,now,now,int(order_id)))
         con.commit()
 
     return {
@@ -545,4 +568,5 @@ def confirm_export_waiting_items(order_id, item_ids, *, erp_company, customer_co
         "selected_count": len(selected_ids),
         "confirmed_count": confirmed_count,
         "total_count": int(total_count or 0),
+        "order_date": order_date,
     }
