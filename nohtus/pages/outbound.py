@@ -294,7 +294,8 @@ def _days_ago_label(date_text):
 def _last_sale_text(customer_name, company, exact_map, name_map):
     customer = _normalize_customer_name(customer_name)
     company = str(company or "").strip()
-    last_date = exact_map.get((customer, company)) or name_map.get(customer) or ""
+    # 사업장이 지정된 거래처는 이름만 같은 다른 사업장의 거래일을 대신 쓰지 않는다.
+    last_date = exact_map.get((customer, company), "") if company else name_map.get(customer, "")
     if not last_date:
         return "최근거래 없음"
     ago = _days_ago_label(last_date)
@@ -348,12 +349,27 @@ def _recent_outbound_history(customer_name, company, limit=5):
             i.qty
         FROM outbound_orders o
         JOIN outbound_order_items i ON i.order_id=o.id
-        WHERE TRIM(COALESCE(o.customer_name, ''))=?
-          AND TRIM(COALESCE(o.customer_company, ''))=?
+        WHERE (
+                TRIM(COALESCE(o.customer_name, ''))=?
+                OR (
+                    TRIM(COALESCE(o.customer_name, ''))=''
+                    AND (
+                        TRIM(COALESCE(o.title, ''))=?
+                        OR SUBSTR(TRIM(COALESCE(o.title, '')), 1, LENGTH(?) + 3)=? || ' - '
+                    )
+                )
+              )
+          AND (
+                TRIM(COALESCE(o.customer_company, ''))=?
+                OR (
+                    TRIM(COALESCE(o.customer_company, ''))=''
+                    AND TRIM(COALESCE(i.company, ''))=?
+                )
+              )
           AND TRIM(COALESCE(o.status, '')) NOT LIKE '%취소%'
         ORDER BY order_date DESC, o.id DESC, i.id
         """,
-        (customer, selected_company),
+        (customer, customer, customer, customer, selected_company, selected_company),
     )
     if rows.empty:
         return []
