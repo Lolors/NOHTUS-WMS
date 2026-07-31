@@ -296,23 +296,44 @@ def _render_stock_comparison():
         )
 
     uploaded = [nohtuspharm_file, noh_file, nohtus_file, gmmedic_file]
-    if st.button(
-        "재고 비교하기",
-        type="primary",
-        use_container_width=True,
-        disabled=not any(uploaded),
-        key="stock_compare_run",
-    ):
+
+    def run_stock_comparison():
+        for file in uploaded:
+            if file is not None:
+                file.seek(0)
+        st.session_state["stock_compare_result"] = compare_stock_files(
+            nohtuspharm_file=nohtuspharm_file,
+            noh_file=noh_file,
+            nohtus_file=nohtus_file,
+            gmmedic_file=gmmedic_file,
+        )
+        # 비교 대상 행이 달라질 수 있으므로 이전 표의 체크 상태는 버린다.
+        st.session_state.pop("stock_compare_problem_editor", None)
+        st.session_state.pop("stock_compare_ignored_editor", None)
+
+    compare_col, refresh_col = st.columns(2, gap="large")
+    with compare_col:
+        compare_clicked = st.button(
+            "재고 비교하기",
+            type="primary",
+            use_container_width=True,
+            disabled=not any(uploaded),
+            key="stock_compare_run",
+        )
+    with refresh_col:
+        refresh_clicked = st.button(
+            "비교결과 새로고침",
+            use_container_width=True,
+            disabled=not any(uploaded) or "stock_compare_result" not in st.session_state,
+            key="stock_compare_refresh",
+            help="업로드한 파일은 그대로 두고 현재 WMS 재고를 다시 읽어 비교합니다.",
+        )
+
+    if compare_clicked or refresh_clicked:
         try:
-            for file in uploaded:
-                if file is not None:
-                    file.seek(0)
-            st.session_state["stock_compare_result"] = compare_stock_files(
-                nohtuspharm_file=nohtuspharm_file,
-                noh_file=noh_file,
-                nohtus_file=nohtus_file,
-                gmmedic_file=gmmedic_file,
-            )
+            run_stock_comparison()
+            if refresh_clicked:
+                st.success("최신 WMS 재고로 비교결과를 새로고침했습니다.")
         except Exception as exc:
             st.session_state.pop("stock_compare_result", None)
             st.error(f"비교 실패: {exc}")
