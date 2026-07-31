@@ -230,15 +230,16 @@ def _upsert_customer_last_sales(rows_df):
                 (customer_name, company),
             ).fetchone()
             if old:
-                old_date = str(old[1] or "")
-                final_date = max(old_date, last_sale_date) if old_date else last_sale_date
+                # 업로드 파일은 해당 사업장의 전체 매출 자료에서 계산한 최신일이다.
+                # 예전에 다른 사업장의 날짜가 잘못 저장됐더라도 재업로드로 바로잡을 수 있도록
+                # 기존 값과 max()를 취하지 않고 이번에 계산한 날짜로 교체한다.
                 cur.execute(
                     """
                     UPDATE customer_last_sales
                     SET last_sale_date=?, source_company=?, updated_at=?
                     WHERE id=?
                     """,
-                    (final_date, company, now, int(old[0])),
+                    (last_sale_date, company, now, int(old[0])),
                 )
             else:
                 cur.execute(
@@ -305,7 +306,15 @@ def _last_sale_text(customer_name, company, exact_map, name_map):
 def _customer_select_label(row, exact_map, name_map):
     customer = str(getattr(row, "customer_name", "") or "").strip()
     company = str(getattr(row, "company", "") or "").strip()
-    return f"{customer} | {company or '-'} | {_last_sale_text(customer, company, exact_map, name_map)}"
+    # 드롭다운은 반드시 거래처명+사업장이 모두 일치하는 날짜만 표시한다.
+    # 사업장이 비어 있거나 일치 자료가 없을 때 이름만 같은 다른 사업장 날짜를 쓰지 않는다.
+    last_date = exact_map.get((customer, company), "") if company else ""
+    if not last_date:
+        last_sale = "최근거래 없음"
+    else:
+        ago = _days_ago_label(last_date)
+        last_sale = f"최근거래 {last_date} ({ago})" if ago else f"최근거래 {last_date}"
+    return f"{customer} | {company or '-'} | {last_sale}"
 
 
 def _render_last_sale_importer():
