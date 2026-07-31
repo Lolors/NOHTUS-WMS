@@ -133,44 +133,77 @@ def _cart_source_hint(row):
     }
 
 
-def _resolve_source_row(cur, inventory_id, fallback=None):
+def _source_identity_matches(row, hint):
+    """장바구니가 가리키던 재고와 현재 ID 행이 같은 재고인지 확인한다."""
+    if not row:
+        return False
+    hint = hint or {}
+    checks = (
+        ("company", "company", ""),
+        ("product_name", "product_name", ""),
+        ("warehouse_name", "warehouse_name", ""),
+        ("lot", "lot", "-"),
+        ("exp_date", "exp_date", "-"),
+    )
+    for row_key, hint_key, default in checks:
+        expected = str(hint.get(hint_key) or default).strip() or default
+        # 예전 장바구니에 저장되지 않은 ERP 원본명은 비교 조건에서 제외한다.
+        if hint_key == "warehouse_name" and not expected:
+            continue
+        actual = str(row.get(row_key) or default).strip() or default
+        if expected and actual != expected:
+            return False
+    expected_location = str(
+        hint.get("location") or hint.get("source_location") or ""
+    ).strip()
+    return not expected_location or str(row.get("location") or "").strip() == expected_location
+
+
+def _resolve_source_row(cur, inventory_id, fallback=None, required_qty=0):
     source_id = int(inventory_id or 0)
+    hint = fallback or {}
+    required_qty = max(0, int(required_qty or 0))
+
     if source_id:
         row = _dict_row(cur, "SELECT * FROM inventory WHERE id=?", (source_id,))
-        if row:
+        if (
+            row
+            and str(row.get("location") or "").strip() != P
+            and _source_identity_matches(row, hint)
+            and int(row.get("qty") or 0) >= required_qty
+        ):
             return row
 
-    hint = fallback or {}
     company = str(hint.get("company") or "").strip()
     product_name = str(hint.get("product_name") or "").strip()
     lot = str(hint.get("lot") or "-").strip() or "-"
     exp_date = str(hint.get("exp_date") or "-").strip() or "-"
     location = str(hint.get("location") or hint.get("source_location") or "").strip()
     warehouse_name = str(hint.get("warehouse_name") or "").strip()
-    if not company or not product_name or not location:
+    if not company or not product_name or not location or location == P:
         return None
 
-    if warehouse_name:
-        return _dict_row(cur, """SELECT * FROM inventory
-            WHERE company=? AND product_name=? AND IFNULL(warehouse_name,'')=?
-              AND IFNULL(lot,'-')=? AND IFNULL(exp_date,'-')=? AND location=?
-            ORDER BY id LIMIT 1""",
-            (company, product_name, warehouse_name, lot, exp_date, location))
-
-    # ERP 원본명이 없는 옛 장바구니는 나머지 전체 키가 같은 후보가 하나일 때만 복구한다.
-    # 둘 이상이면 임의로 수량이 큰 행을 고르지 않고 사용자가 다시 선택하게 한다.
-    rows = cur.execute("""SELECT * FROM inventory
+    sql = """SELECT * FROM inventory
         WHERE company=? AND product_name=? AND IFNULL(lot,'-')=?
-          AND IFNULL(exp_date,'-')=? AND location=?
-        ORDER BY id LIMIT 2""",
-        (company, product_name, lot, exp_date, location)).fetchall()
-    if len(rows) != 1:
-        return None
-    return dict(zip([d[0] for d in cur.description], rows[0]))
+          AND IFNULL(exp_date,'-')=? AND location=? AND COALESCE(qty,0)>0"""
+    params = [company, product_name, lot, exp_date, location]
+    if warehouse_name:
+        sql += " AND IFNULL(warehouse_name,'')=?"
+        params.append(warehouse_name)
+    sql += " ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END, qty DESC, id"
+    params.append(source_id)
+
+    rows = cur.execute(sql, tuple(params)).fetchall()
+    columns = [d[0] for d in cur.description]
+    candidates = [dict(zip(columns, row)) for row in rows]
+    for candidate in candidates:
+        if int(candidate.get("qty") or 0) >= required_qty:
+            return candidate
+    return None
 
 
 def _take_source(cur, inventory_id, qty, now, fallback=None):
-    s = _resolve_source_row(cur, inventory_id, fallback)
+    s = _resolve_source_row(cur, inventory_id, fallback, required_qty=qty)
     if not s:
         hint = fallback or {}
         label = " / ".join(x for x in [
@@ -336,8 +369,13 @@ def save_export_waiting_order(cart, *, country, buyer="", transport_method="미�
     with connect() as con:
         cur = con.cursor(); ensure_export_waiting_tables(cur)
 
-        for inventory_id in grouped:
-            current = _resolve_source_row(cur, inventory_id, source_hints.get(inventory_id))
+        for inventory_id, requested_qty in grouped.items():
+            current = _resolve_source_row(
+                cur,
+                inventory_id,
+                source_hints.get(inventory_id),
+                required_qty=requested_qty,
+            )
             if current:
                 source_hints[inventory_id] = current
 
