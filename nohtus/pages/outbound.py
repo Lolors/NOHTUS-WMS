@@ -331,11 +331,11 @@ def _render_last_sale_importer():
 
 
 
-def _recent_outbound_history(customer_name, product_name, limit=5):
-    """선택한 거래처·제품 조합의 최근 출고일과 총수량을 반환한다."""
+def _recent_outbound_history(customer_name, company, limit=5):
+    """선택한 매출처·사업장의 최근 출고일과 제품별 수량을 반환한다."""
     customer = str(customer_name or "").strip()
-    product = str(product_name or "").strip()
-    if not customer or not product:
+    selected_company = str(company or "").strip()
+    if not customer or not selected_company:
         return []
 
     _ensure_outbound_customer_columns()
@@ -344,17 +344,16 @@ def _recent_outbound_history(customer_name, product_name, limit=5):
         SELECT
             o.id AS order_id,
             COALESCE(NULLIF(TRIM(o.order_date), ''), SUBSTR(o.created_at, 1, 10)) AS order_date,
-            i.qty,
-            i.lot,
-            i.exp_date
+            i.product_name,
+            i.qty
         FROM outbound_orders o
         JOIN outbound_order_items i ON i.order_id=o.id
         WHERE TRIM(COALESCE(o.customer_name, ''))=?
-          AND TRIM(COALESCE(i.product_name, ''))=?
+          AND TRIM(COALESCE(o.customer_company, ''))=?
           AND TRIM(COALESCE(o.status, '')) NOT LIKE '%취소%'
         ORDER BY order_date DESC, o.id DESC, i.id
         """,
-        (customer, product),
+        (customer, selected_company),
     )
     if rows.empty:
         return []
@@ -362,53 +361,59 @@ def _recent_outbound_history(customer_name, product_name, limit=5):
     history = []
     for order_id, group in rows.groupby("order_id", sort=False):
         first = group.iloc[0]
-        lots = []
-        total_qty = 0
-        for item in group.itertuples(index=False):
-            qty = _safe_int(getattr(item, "qty", 0), 0)
-            total_qty += qty
-            lot = str(getattr(item, "lot", "") or "-").strip() or "-"
-            exp_date = display_date_only(getattr(item, "exp_date", "") or "-")
-            lots.append({"qty": qty, "lot": lot, "exp_date": exp_date})
+        products = []
+        for product_name, product_group in group.groupby("product_name", sort=False, dropna=False):
+            name = str(product_name or "-").strip() or "-"
+            qty = sum(_safe_int(value, 0) for value in product_group["qty"].tolist())
+            products.append({"product_name": name, "qty": qty})
         history.append({
             "order_id": int(order_id),
             "order_date": str(first.get("order_date") or "-")[:10],
-            "total_qty": total_qty,
-            "lots": lots,
+            "products": products,
         })
         if len(history) >= int(limit):
             break
     return history
 
 
-def _render_recent_outbound_history(customer_name, product_name):
-    history = _recent_outbound_history(customer_name, product_name, limit=5)
+def _recent_outbound_history_html(customer_name, history):
     if history:
         cards = []
         for order in history:
+            product_rows = "".join(
+                "<div class='out-history-product-row'>"
+                f"<span>{html.escape(item['product_name'])}</span>"
+                f"<b>{int(item['qty']):,}EA</b>"
+                "</div>"
+                for item in order["products"]
+            )
             cards.append(
                 "<div class='out-history-order'>"
-                f"<div class='out-history-date'>{html.escape(order['order_date'])}"
-                f"<span>{int(order['total_qty']):,}EA</span></div>"
+                f"<div class='out-history-date'>{html.escape(order['order_date'])}</div>"
+                f"{product_rows}"
                 "</div>"
             )
         content = "".join(cards)
     else:
-        content = "<div class='out-history-empty'>이 거래처와 제품의 이전 출고지시가 없습니다.</div>"
+        content = "<div class='out-history-empty'>이 매출처의 이전 출고지시가 없습니다.</div>"
 
-    st.markdown(
-        f"""
+    return f"""
         <div class="out-history-wrap">
           <span class="out-history-trigger">최근 거래 <b>ⓘ</b></span>
-          <div class="out-history-tooltip">
-            <div class="out-history-title">{html.escape(str(customer_name))} · {html.escape(str(product_name))}</div>
+          <div class="out-history-tooltip" style="display:none">
+            <div class="out-history-title">{html.escape(str(customer_name))}</div>
             {content}
           </div>
         </div>
-        """,
+        """
+
+
+def _render_recent_outbound_history(customer_name, company):
+    history = _recent_outbound_history(customer_name, company, limit=5)
+    st.markdown(
+        _recent_outbound_history_html(customer_name, history),
         unsafe_allow_html=True,
     )
-
 
 
 def _inventory_query_for_outbound(selected_product, selected_company, ignore_company=False):
@@ -489,15 +494,16 @@ def page_outbound():
       .out-history-wrap {position:relative; display:inline-block; margin:0.15rem 0 0.65rem 0; z-index:20;}
       .out-history-trigger {display:inline-flex; align-items:center; gap:0.25rem; color:#2563eb; font-size:0.9rem; font-weight:700; cursor:help;}
       .out-history-trigger b {font-size:1rem;}
-      .out-history-tooltip {visibility:hidden; opacity:0; position:absolute; z-index:9999; top:calc(100% + 8px); right:0; width:390px; max-width:min(390px, 80vw); padding:14px; border:1px solid #cbd5e1; border-radius:12px; background:#ffffff; box-shadow:0 12px 30px rgba(15,23,42,.18); color:#0f172a; transition:opacity .12s ease;}
-      .out-history-wrap:hover .out-history-tooltip {visibility:visible; opacity:1;}
+      .out-history-tooltip {display:none; visibility:hidden; opacity:0; position:absolute; z-index:9999; top:calc(100% + 8px); right:0; width:390px; max-width:min(390px, 80vw); padding:14px; border:1px solid #cbd5e1; border-radius:12px; background:#ffffff; box-shadow:0 12px 30px rgba(15,23,42,.18); color:#0f172a; transition:opacity .12s ease;}
+      .out-history-wrap:hover .out-history-tooltip {display:block !important; visibility:visible; opacity:1;}
       .out-history-tooltip:before {content:""; position:absolute; top:-6px; right:28px; width:10px; height:10px; background:#fff; border-left:1px solid #cbd5e1; border-top:1px solid #cbd5e1; transform:rotate(45deg);}
       .out-history-title {font-weight:800; font-size:0.92rem; padding-bottom:8px; border-bottom:1px solid #e2e8f0;}
       .out-history-order {padding:9px 0; border-bottom:1px solid #e2e8f0;}
       .out-history-order:last-child {border-bottom:0; padding-bottom:0;}
-      .out-history-date {display:flex; justify-content:space-between; gap:12px; font-weight:750; font-size:0.88rem;}
-      .out-history-date span {color:#2563eb;}
-      .out-history-lot {margin-top:4px; color:#475569; font-size:0.8rem; line-height:1.35;}
+      .out-history-date {font-weight:800; font-size:0.86rem; color:#334155; margin-bottom:5px;}
+      .out-history-product-row {display:flex; justify-content:space-between; align-items:flex-start; gap:12px; color:#475569; font-size:0.82rem; line-height:1.4; padding:2px 0;}
+      .out-history-product-row span {min-width:0; overflow-wrap:anywhere;}
+      .out-history-product-row b {flex:none; color:#2563eb; white-space:nowrap;}
       .out-history-empty {padding-top:10px; color:#64748b; font-size:0.84rem;}
     </style>
     """, unsafe_allow_html=True)
@@ -517,8 +523,24 @@ def page_outbound():
     with top_left:
         st.markdown("### 매출처")
         _render_last_sale_importer()
-        cust_term = st.text_input("매출처 검색", placeholder="거래처명을 입력하세요", key="out_customer_term")
-        direct_customer = st.checkbox("직접입력", value=False, key="out_customer_direct")
+        show_recent_history = str(st.session_state.get("_outbound_screen_mode") or "outbound") != "export_waiting"
+        if show_recent_history:
+            customer_search_col, direct_col, history_col = st.columns([3.2, 1.05, 1.25], gap="small")
+        else:
+            customer_search_col, direct_col = st.columns([4, 1], gap="small")
+            history_col = None
+
+        with customer_search_col:
+            cust_term = st.text_input("매출처 검색", placeholder="거래처명을 입력하세요", key="out_customer_term")
+        with direct_col:
+            st.markdown('<div style="height:1.75rem"></div>', unsafe_allow_html=True)
+            direct_customer = st.checkbox("직접입력", value=False, key="out_customer_direct")
+
+        recent_history_slot = None
+        if history_col is not None:
+            with history_col:
+                st.markdown('<div style="height:1.75rem"></div>', unsafe_allow_html=True)
+                recent_history_slot = st.empty()
         cust_df = pd.DataFrame()
 
         if direct_customer:
@@ -561,6 +583,14 @@ def page_outbound():
                 else:
                     st.info("거래처를 검색하거나 직접입력을 체크하세요.")
 
+        if recent_history_slot is not None:
+            customer_payload_for_history = _current_customer_payload(selected_customer)
+            customer_name_for_history = str(customer_payload_for_history.get("customer_name") or "").strip()
+            customer_company_for_history = str(customer_payload_for_history.get("company") or "").strip()
+            with recent_history_slot.container():
+                if customer_name_for_history and customer_company_for_history:
+                    _render_recent_outbound_history(customer_name_for_history, customer_company_for_history)
+
         st.markdown("### 재고 선택 옵션")
         ignore_company = st.checkbox("사업장 구분 없이", value=False, key="out_ignore_company")
         manual_pick = st.checkbox("특정 재고 선택", value=False, key="out_manual_pick")
@@ -577,10 +607,6 @@ def page_outbound():
             st.info("제품을 검색하세요.")
         else:
             selected_product = st.selectbox("제품 선택", opts["standard_name"].dropna().astype(str).drop_duplicates().tolist())
-            customer_payload = _current_customer_payload(selected_customer)
-            customer_name_for_history = str(customer_payload.get("customer_name") or "").strip()
-            if customer_name_for_history:
-                _render_recent_outbound_history(customer_name_for_history, selected_product)
             if ignore_company:
                 st.caption("추천 범위: 전체 사업장 재고")
             elif selected_company and selected_company in COMPANIES:
