@@ -294,7 +294,8 @@ def page_export_waiting():
 
     def patched_q(sql, params=()):
         normalized = " ".join(str(sql or "").lower().split())
-        if " from customers " in f" {normalized} ":
+        is_export_edit = bool(st.session_state.get("export_editing_order_id"))
+        if " from customers " in f" {normalized} " and not is_export_edit:
             return pd.DataFrame()
         return original_q(sql, params)
 
@@ -336,7 +337,11 @@ def page_export_waiting():
 
     def patched_text_input(label, *args, **kwargs):
         key = kwargs.get("key")
-        if key in {"out_customer_term", "out_customer_manual_name"}:
+        if key == "out_customer_term":
+            if st.session_state.get("export_editing_order_id"):
+                return original_text_input(label, *args, **kwargs)
+            return ""
+        if key == "out_customer_manual_name":
             return ""
         if label == "출고지시서 제목":
             st.session_state["export_waiting_auto_title"] = _export_title()
