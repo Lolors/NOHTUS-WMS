@@ -371,7 +371,6 @@ def _render_stock_comparison():
             key="stock_compare_ignore_selected",
         ):
             added = add_ignored_problems(selected_problems, ignore_reason)
-            st.session_state["stock_compare_ignore_reason"] = ""
             st.session_state["_stock_compare_ignore_message"] = (
                 f"{added:,}개 항목을 '{str(ignore_reason).strip()}' 원인으로 무시 목록에 등록했습니다."
             )
