@@ -29,9 +29,16 @@ def _load_editing_order():
     if order.empty or str(order.iloc[0]["status"]) != "waiting":
         st.session_state.pop("export_editing_order_id", None)
         return
-    items = q("""SELECT source_inventory_id AS id,source_location AS 로케이션,company AS 사업장,
-                   product_name AS 제품명,lot AS LOT,exp_date AS 유통기한,qty AS 요청수량
-            FROM export_waiting_items WHERE order_id=? ORDER BY id""", (int(order_id),))
+    items = q("""SELECT i.source_inventory_id AS id,i.source_location AS 로케이션,
+                   COALESCE(p.company,i.company) AS 사업장,
+                   COALESCE(p.product_name,i.product_name) AS 제품명,
+                   COALESCE(p.lot,i.lot) AS LOT,
+                   COALESCE(p.exp_date,i.exp_date) AS 유통기한,
+                   i.qty AS 요청수량
+            FROM export_waiting_items i
+            LEFT JOIN inventory p
+              ON p.id=i.waiting_inventory_id AND p.location='P'
+            WHERE i.order_id=? ORDER BY i.id""", (int(order_id),))
     st.session_state["export_waiting_country"] = str(order.iloc[0]["country"] or "")
     st.session_state["export_waiting_buyer"] = str(order.iloc[0].get("buyer") or "") or "미지정"
     method = str(order.iloc[0].get("transport_method") or "").strip()
@@ -46,19 +53,16 @@ def _find_unmatched_p_item(order_id):
     if not order_id:
         return None
     df = q(
-        """SELECT i.id,i.company,i.product_name,i.warehouse_name,i.lot,i.exp_date,i.qty,i.source_location,
-                  COALESCE(SUM(inv.qty),0) AS p_qty
+        """SELECT i.id,i.waiting_inventory_id,i.company,i.product_name,i.warehouse_name,
+                  i.lot,i.exp_date,i.qty,i.source_location,
+                  p.id AS linked_p_id,COALESCE(p.qty,0) AS p_qty,
+                  p.product_name AS current_product_name,p.warehouse_name AS current_warehouse_name,
+                  p.lot AS current_lot,p.exp_date AS current_exp_date
            FROM export_waiting_items i
-           LEFT JOIN inventory inv
-             ON inv.company=i.company
-            AND inv.product_name=i.product_name
-            AND IFNULL(inv.warehouse_name,'')=IFNULL(i.warehouse_name,'')
-            AND IFNULL(inv.lot,'-')=IFNULL(i.lot,'-')
-            AND IFNULL(inv.exp_date,'-')=IFNULL(i.exp_date,'-')
-            AND inv.location='P'
+           LEFT JOIN inventory p
+             ON p.id=i.waiting_inventory_id AND p.location='P'
            WHERE i.order_id=? AND COALESCE(i.confirmed,0)=0
-           GROUP BY i.id
-           HAVING COALESCE(SUM(inv.qty),0) < i.qty
+             AND (p.id IS NULL OR COALESCE(p.qty,0) < i.qty)
            ORDER BY i.id
            LIMIT 1""",
         (int(order_id),),
@@ -66,20 +70,30 @@ def _find_unmatched_p_item(order_id):
     return None if df.empty else df.iloc[0].to_dict()
 
 
-def _p_inventory_candidates(term=""):
+def _p_inventory_candidates(term="", *, company="", required_qty=0):
     term = str(term or "").strip()
+    company = str(company or "").strip()
+    required_qty = max(0, int(required_qty or 0))
     params = []
-    where = ["location='P'", "COALESCE(qty,0)>0"]
+    where = ["location='P'", "COALESCE(qty,0)>=?"]
+    params.append(required_qty)
+    if company:
+        where.append("company=?")
+        params.append(company)
     if term:
-        where.append("product_name LIKE ?")
-        params.append(f"%{term}%")
+        where.append("""(
+            product_name LIKE ? OR IFNULL(warehouse_name,'') LIKE ?
+            OR IFNULL(lot,'') LIKE ? OR IFNULL(exp_date,'') LIKE ?
+        )""")
+        like = f"%{term}%"
+        params.extend([like, like, like, like])
     return q(
         f"""SELECT id,company AS 사업장,product_name AS 제품명,
                    IFNULL(warehouse_name,'') AS 창고명,IFNULL(lot,'-') AS LOT,
                    IFNULL(exp_date,'-') AS 유통기한,qty AS P재고
             FROM inventory
             WHERE {' AND '.join(where)}
-            ORDER BY product_name,company,lot,exp_date
+            ORDER BY product_name,lot,exp_date,id
             LIMIT 200""",
         tuple(params),
     )
@@ -97,9 +111,14 @@ def _apply_p_inventory_match(waiting_item_id, inventory_id):
         if not row:
             raise ValueError("선택한 P 재고를 찾을 수 없습니다.")
         company, product_name, warehouse_name, lot, exp_date, qty = row
-        waiting = con.execute("SELECT qty FROM export_waiting_items WHERE id=?", (int(waiting_item_id),)).fetchone()
+        waiting = con.execute(
+            "SELECT qty,company FROM export_waiting_items WHERE id=?",
+            (int(waiting_item_id),),
+        ).fetchone()
         if not waiting:
             raise ValueError("연결할 수출대기 품목을 찾을 수 없습니다.")
+        if str(company or "").strip() != str(waiting[1] or "").strip():
+            raise ValueError("다른 사업장의 P 재고는 연결할 수 없습니다.")
         if int(qty or 0) < int(waiting[0] or 0):
             raise ValueError(f"선택한 P 재고가 부족합니다. 필요 {int(waiting[0] or 0)}EA / 현재 {int(qty or 0)}EA")
         con.execute(
@@ -143,11 +162,16 @@ def _render_p_match_dialog():
         )
         term = st.text_input(
             "P 로케이션 제품 검색",
-            value=old_name,
-            placeholder="현재 제품명 일부를 입력하세요",
+            value="",
+            placeholder=f"현재 제품명·LOT·유통기한 검색 (기존: {old_name})",
             key=f"export_p_match_term_{request.get('id')}",
         )
-        candidates = _p_inventory_candidates(term)
+        candidates = _p_inventory_candidates(
+            term,
+            company=request.get("company", ""),
+            required_qty=request.get("qty", 0),
+        )
+        st.caption("같은 사업장이면서 필요한 수량 이상인 P 재고만 표시됩니다.")
         if candidates.empty:
             st.info("검색 결과가 없습니다. 제품명의 다른 일부를 입력해 보세요.")
             return
@@ -169,6 +193,10 @@ def _render_p_match_dialog():
             if st.button("이 재고로 연결하고 저장", type="primary", use_container_width=True, key=f"export_p_match_apply_{request.get('id')}"):
                 try:
                     _apply_p_inventory_match(int(request["id"]), int(selected["id"]))
+                    next_unmatched = _find_unmatched_p_item(pending["editing_order_id"])
+                    if next_unmatched:
+                        st.session_state[_P_MATCH_REQUEST_KEY] = next_unmatched
+                        st.rerun()
                     st.session_state.pop(_P_MATCH_REQUEST_KEY, None)
                     result = save_export_waiting_order(
                         pending["cart"],
