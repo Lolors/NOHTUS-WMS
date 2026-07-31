@@ -310,10 +310,15 @@ def page_saved_export_waiting():
     st.caption(f"전체 {len(items)}개 재고행 / {total_qty}EA · 남은 수출대기 {len(remaining_items)}개 / {remaining_qty}EA")
 
     erp_sales_rows = build_export_waiting_erp_sales_rows(items)
-    if not erp_sales_rows.empty:
-        unmatched_count = int((erp_sales_rows["매칭상태"] == "확인필요").sum())
-        download_col, notice_col = st.columns([2, 3])
-        with download_col:
+    unmatched_count = (
+        int((erp_sales_rows["매칭상태"] == "확인필요").sum())
+        if not erp_sales_rows.empty
+        else 0
+    )
+
+    download_col, edit_col, merge_col, cancel_col = st.columns(4)
+    with download_col:
+        if not erp_sales_rows.empty:
             st.download_button(
                 "ERP 매출입력용 리스트 엑셀 다운로드",
                 data=export_waiting_erp_sales_excel_bytes(erp_sales_rows),
@@ -326,20 +331,13 @@ def page_saved_export_waiting():
                 use_container_width=True,
                 key=f"export_waiting_erp_sales_download_{order_id}",
             )
-        with notice_col:
-            if unmatched_count:
-                st.warning(f"제품매칭표에 해당 사업장 ERP명이 없는 품목이 {unmatched_count}개 있습니다. 엑셀에서 `확인필요`로 표시됩니다.")
-            else:
-                st.success("모든 품목의 사업장별 ERP명이 매칭되었습니다.")
-
-    if status == "cancelled":
-        st.error("취소된 건입니다. 확정되지 않았던 품목은 등록 당시 원래 로케이션으로 복구되었습니다.")
-        return
-    if status == "confirmed":
-        st.success("모든 품목의 수출확정이 완료되었습니다. 출고일자는 위에서 수정할 수 있습니다.")
-        return
-
-    edit_col, merge_col, cancel_col = st.columns(3)
+        else:
+            st.button(
+                "ERP 매출입력용 리스트 엑셀 다운로드",
+                disabled=True,
+                use_container_width=True,
+                key=f"export_waiting_erp_sales_download_empty_{order_id}",
+            )
     with edit_col:
         if status == "waiting":
             if st.button("수출대기 수정", type="primary", use_container_width=True):
@@ -348,16 +346,33 @@ def page_saved_export_waiting():
                 st.session_state["page"] = "수출대기 등록"
                 st.rerun()
         else:
-            st.button("일부 확정 후에는 수정할 수 없음", disabled=True, use_container_width=True)
+            st.button("수출대기 수정", disabled=True, use_container_width=True)
     with merge_col:
         if status == "waiting":
             if st.button("수출대기 병합", use_container_width=True):
                 st.session_state["confirm_export_merge_source_id"] = order_id
         else:
-            st.button("일부 확정 후에는 병합할 수 없음", disabled=True, use_container_width=True)
+            st.button("수출대기 병합", disabled=True, use_container_width=True)
     with cancel_col:
-        if st.button("남은 수출대기 취소", use_container_width=True):
+        if st.button(
+            "주문 취소",
+            use_container_width=True,
+            disabled=status in {"confirmed", "cancelled"},
+        ):
             st.session_state["confirm_export_cancel_id"] = order_id
+
+    if unmatched_count:
+        st.warning(
+            f"제품매칭표에 해당 사업장 ERP명이 없는 품목이 {unmatched_count}개 있습니다. "
+            "엑셀에서 `확인필요`로 표시됩니다."
+        )
+
+    if status == "cancelled":
+        st.error("취소된 건입니다. 확정되지 않았던 품목은 등록 당시 원래 로케이션으로 복구되었습니다.")
+        return
+    if status == "confirmed":
+        st.success("모든 품목의 수출확정이 완료되었습니다. 출고일자는 위에서 수정할 수 있습니다.")
+        return
 
     if st.session_state.get("confirm_export_merge_source_id") == order_id:
         merge_targets = q(
