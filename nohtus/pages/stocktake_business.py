@@ -8,6 +8,7 @@ import nohtus.services.stocktake as stocktake_service
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only, normalize_exp_date
 from nohtus.services.inventory import insert_transaction_log
+from nohtus.services.export_waiting import ensure_export_waiting_tables
 
 
 def full_inventory_excel_bytes_business(exclude_zero=True):
@@ -53,6 +54,171 @@ def full_inventory_excel_bytes_business(exclude_zero=True):
     return bio.getvalue()
 
 
+def _merge_inventory_rows(con, keep_id, duplicate_ids):
+    """같은 실제 재고키로 합쳐지는 행의 수량과 수출대기 연결 ID를 보존한다."""
+    keep_id = int(keep_id)
+    for duplicate_id in sorted({int(x) for x in duplicate_ids if int(x) != keep_id}):
+        row = con.execute("SELECT qty FROM inventory WHERE id=?", (duplicate_id,)).fetchone()
+        if not row:
+            continue
+        con.execute(
+            "UPDATE export_waiting_items SET source_inventory_id=? WHERE source_inventory_id=?",
+            (keep_id, duplicate_id),
+        )
+        con.execute(
+            "UPDATE export_waiting_items SET waiting_inventory_id=? WHERE waiting_inventory_id=?",
+            (keep_id, duplicate_id),
+        )
+        con.execute(
+            "UPDATE inventory SET qty=COALESCE(qty,0)+? WHERE id=?",
+            (int(row[0] or 0), keep_id),
+        )
+        con.execute("DELETE FROM inventory WHERE id=?", (duplicate_id,))
+
+
+def _update_inventory_identity(con, inventory_id, product_name, lot, exp_date, now):
+    """한 고유 재고행을 수정하고, 새 키와 충돌하는 행은 ID 참조를 옮긴 뒤 합친다."""
+    inventory_id = int(inventory_id)
+    row = con.execute(
+        """SELECT company,COALESCE(warehouse_name,''),location
+           FROM inventory WHERE id=?""",
+        (inventory_id,),
+    ).fetchone()
+    if not row:
+        return
+    company, warehouse_name, location = row
+    duplicates = con.execute(
+        """SELECT id FROM inventory
+           WHERE id<>? AND company=? AND product_name=?
+             AND COALESCE(warehouse_name,'')=?
+             AND COALESCE(lot,'-')=? AND COALESCE(exp_date,'-')=?
+             AND location=?
+           ORDER BY id""",
+        (inventory_id, company, product_name, warehouse_name, lot, exp_date, location),
+    ).fetchall()
+    _merge_inventory_rows(con, inventory_id, [row[0] for row in duplicates])
+    con.execute(
+        """UPDATE inventory
+           SET product_name=?,lot=?,exp_date=?,updated_at=?
+           WHERE id=?""",
+        (product_name, lot, exp_date, now, inventory_id),
+    )
+
+
+def _linked_waiting_items(con, inventory_id, current):
+    """선택 재고와 고유 ID 또는 과거의 완전한 재고키로 연결되는 미확정 수출대기를 찾는다."""
+    company, warehouse_name, location, _qty, old_lot, old_exp = current[1:]
+    old_product_name = str(current[0] or "").strip()
+    return con.execute(
+        """
+        SELECT id,source_inventory_id,waiting_inventory_id,company,product_name,
+               COALESCE(warehouse_name,''),COALESCE(lot,'-'),COALESCE(exp_date,'-')
+        FROM export_waiting_items
+        WHERE COALESCE(confirmed,0)=0
+          AND (
+              source_inventory_id=?
+              OR waiting_inventory_id=?
+              OR (
+                  ?='P'
+                  AND company=?
+                  AND product_name=?
+                  AND COALESCE(warehouse_name,'')=?
+                  AND COALESCE(lot,'-')=?
+                  AND COALESCE(exp_date,'-')=?
+              )
+          )
+        ORDER BY id
+        """,
+        (
+            int(inventory_id),
+            int(inventory_id),
+            location,
+            company,
+            old_product_name,
+            warehouse_name,
+            old_lot,
+            old_exp,
+        ),
+    ).fetchall()
+
+
+def _synchronize_export_waiting_master(con, inventory_id, current, product_name, lot, exp_date, now):
+    """원본 재고·P 재고·미확정 수출대기행을 같은 제품마스터 값으로 원자적으로 갱신한다."""
+    ensure_export_waiting_tables(con.cursor())
+    rows = _linked_waiting_items(con, inventory_id, current)
+    if not rows:
+        _update_inventory_identity(con, inventory_id, product_name, lot, exp_date, now)
+        return
+
+    selected_location = str(current[3] or "")
+    related_item_ids = {int(row[0]) for row in rows}
+    waiting_ids = {int(row[2]) for row in rows if int(row[2] or 0) > 0}
+
+    # 연결 ID가 없던 과거 엑셀 자료는 전체 재고키가 완전히 같은 P 행만 묶는다.
+    # 동일 키의 P 행이 여러 개면 먼저 한 행으로 합쳐 참조 대상을 하나로 만든다.
+    for row in rows:
+        item_id, _source_id, waiting_id, company, item_product, warehouse_name, item_lot, item_exp = row
+        if int(waiting_id or 0) > 0:
+            continue
+        candidates = con.execute(
+            """SELECT id FROM inventory
+               WHERE location='P' AND company=? AND product_name=?
+                 AND COALESCE(warehouse_name,'')=?
+                 AND COALESCE(lot,'-')=? AND COALESCE(exp_date,'-')=?
+               ORDER BY id""",
+            (company, item_product, warehouse_name, item_lot, item_exp),
+        ).fetchall()
+        candidate_ids = [int(candidate[0]) for candidate in candidates]
+        if not candidate_ids:
+            continue
+        keep_id = int(inventory_id) if selected_location == "P" and int(inventory_id) in candidate_ids else candidate_ids[0]
+        _merge_inventory_rows(con, keep_id, candidate_ids)
+        con.execute(
+            """UPDATE export_waiting_items
+               SET waiting_inventory_id=?
+               WHERE COALESCE(confirmed,0)=0
+                 AND waiting_inventory_id IS NULL
+                 AND company=? AND product_name=?
+                 AND COALESCE(warehouse_name,'')=?
+                 AND COALESCE(lot,'-')=? AND COALESCE(exp_date,'-')=?""",
+            (keep_id, company, item_product, warehouse_name, item_lot, item_exp),
+        )
+        waiting_ids.add(keep_id)
+
+    if waiting_ids:
+        placeholders = ",".join("?" for _ in waiting_ids)
+        expanded = con.execute(
+            f"""SELECT id FROM export_waiting_items
+                WHERE COALESCE(confirmed,0)=0
+                  AND waiting_inventory_id IN ({placeholders})""",
+            tuple(sorted(waiting_ids)),
+        ).fetchall()
+        related_item_ids.update(int(row[0]) for row in expanded)
+
+    placeholders = ",".join("?" for _ in related_item_ids)
+    final_links = con.execute(
+        f"""SELECT source_inventory_id,waiting_inventory_id
+            FROM export_waiting_items
+            WHERE id IN ({placeholders})""",
+        tuple(sorted(related_item_ids)),
+    ).fetchall()
+    linked_inventory_ids = {int(inventory_id)}
+    for source_id, waiting_id in final_links:
+        if int(source_id or 0) > 0:
+            linked_inventory_ids.add(int(source_id))
+        if int(waiting_id or 0) > 0:
+            linked_inventory_ids.add(int(waiting_id))
+
+    con.execute(
+        f"""UPDATE export_waiting_items
+            SET product_name=?,lot=?,exp_date=?
+            WHERE id IN ({placeholders})""",
+        (product_name, lot, exp_date, *sorted(related_item_ids)),
+    )
+    for linked_id in sorted(linked_inventory_ids):
+        _update_inventory_identity(con, linked_id, product_name, lot, exp_date, now)
+
+
 def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, exp_date, edited_mappings):
     product_name = str(product_name or "").strip()
     if not product_name:
@@ -68,7 +234,7 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
         current = con.execute(
             """
             SELECT product_name, company, COALESCE(warehouse_name,''),
-                   COALESCE(location,''), qty
+                   COALESCE(location,''), qty, COALESCE(lot,'-'), COALESCE(exp_date,'-')
             FROM inventory
             WHERE id=?
             """,
@@ -82,6 +248,17 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
         warehouse_name = str(current[2] or "").strip()
         location = str(current[3] or "").strip()
         current_qty = int(current[4] or 0)
+        old_lot = str(current[5] or "-")
+        old_exp = str(current[6] or "-")
+        current = (
+            old_product_name,
+            company,
+            warehouse_name,
+            location,
+            current_qty,
+            old_lot,
+            old_exp,
+        )
 
         existing_rows = con.execute(
             """
@@ -101,44 +278,15 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
         }
 
         try:
-            duplicate = con.execute(
-                """
-                SELECT id, qty
-                FROM inventory
-                WHERE id<>?
-                  AND company=?
-                  AND product_name=?
-                  AND COALESCE(warehouse_name,'')=?
-                  AND COALESCE(lot,'-')=?
-                  AND COALESCE(exp_date,'-')=?
-                  AND location=?
-                ORDER BY id
-                LIMIT 1
-                """,
-                (
-                    int(inv_id),
-                    company,
-                    product_name,
-                    warehouse_name,
-                    lot,
-                    exp_date,
-                    location,
-                ),
-            ).fetchone()
-
-            merged_qty = current_qty
-            if duplicate:
-                duplicate_id = int(duplicate[0])
-                merged_qty += int(duplicate[1] or 0)
-                con.execute("DELETE FROM inventory WHERE id=?", (duplicate_id,))
-
-            con.execute(
-                """
-                UPDATE inventory
-                SET product_name=?, lot=?, exp_date=?, qty=?
-                WHERE id=?
-                """,
-                (product_name, lot, exp_date, merged_qty, int(inv_id)),
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            _synchronize_export_waiting_master(
+                con,
+                int(inv_id),
+                current,
+                product_name,
+                lot,
+                exp_date,
+                now,
             )
 
             kept_ids = set()
