@@ -38,11 +38,23 @@ def _ensure_ignored_problem_table():
                 company TEXT NOT NULL DEFAULT '',
                 product_name TEXT NOT NULL,
                 expiry TEXT NOT NULL DEFAULT '-',
+                reason TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(issue_type, company, product_name, expiry)
             )
             """
         )
+        columns = {
+            row[1]
+            for row in con.execute(
+                "PRAGMA table_info(stock_compare_ignored_problems)"
+            ).fetchall()
+        }
+        if "reason" not in columns:
+            con.execute(
+                "ALTER TABLE stock_compare_ignored_problems "
+                "ADD COLUMN reason TEXT NOT NULL DEFAULT ''"
+            )
         con.commit()
 
 
@@ -68,7 +80,7 @@ def list_ignored_problems():
             """
             SELECT id AS ID, issue_type AS 구분, company AS 사업장,
                    product_name AS 표준제품명, expiry AS 유통기한,
-                   created_at AS 무시등록일시
+                   reason AS 차이원인, created_at AS 무시등록일시
             FROM stock_compare_ignored_problems
             ORDER BY created_at DESC, id DESC
             """,
@@ -76,25 +88,29 @@ def list_ignored_problems():
         )
 
 
-def add_ignored_problems(problem_rows):
+def add_ignored_problems(problem_rows, reason=""):
     if problem_rows is None or problem_rows.empty:
         return 0
+    reason = str(reason or "").strip()
+    if not reason:
+        raise ValueError("차이 원인을 입력하세요.")
     _ensure_ignored_problem_table()
     keys = {_issue_key(row) for _, row in problem_rows.iterrows()}
     keys = {key for key in keys if key[0] and key[2]}
+    rows = [(*key, reason) for key in sorted(keys)]
     with connect() as con:
-        before = con.total_changes
         con.executemany(
             """
-            INSERT OR IGNORE INTO stock_compare_ignored_problems(
-                issue_type, company, product_name, expiry
-            ) VALUES(?,?,?,?)
+            INSERT INTO stock_compare_ignored_problems(
+                issue_type, company, product_name, expiry, reason
+            ) VALUES(?,?,?,?,?)
+            ON CONFLICT(issue_type, company, product_name, expiry)
+            DO UPDATE SET reason=excluded.reason
             """,
-            sorted(keys),
+            rows,
         )
-        added = con.total_changes - before
         con.commit()
-    return int(added)
+    return len(rows)
 
 
 def remove_ignored_problems(ignore_ids):
