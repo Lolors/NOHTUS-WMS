@@ -6,13 +6,114 @@ import re
 
 import pandas as pd
 
-from nohtus.db import q
+from nohtus.db import connect, q
 from nohtus.dates import normalize_exp_date
 
 
 ERP_COLUMNS = ["사업장", "표준제품명", "ERP제품명", "WMS수량", "ERP수량", "차이", "상태"]
 GM_COLUMNS = ["표준제품명", "유통기한", "WMS수량", "실사수량", "차이", "상태"]
 ISSUE_COLUMNS = ["구분", "사업장", "표준제품명", "유통기한", "WMS수량", "비교수량", "차이", "문제"]
+IGNORE_KEY_COLUMNS = ["구분", "사업장", "표준제품명", "유통기한"]
+
+
+def _ensure_ignored_problem_table():
+    with connect() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS stock_compare_ignored_problems (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                issue_type TEXT NOT NULL,
+                company TEXT NOT NULL DEFAULT '',
+                product_name TEXT NOT NULL,
+                expiry TEXT NOT NULL DEFAULT '-',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(issue_type, company, product_name, expiry)
+            )
+            """
+        )
+        con.commit()
+
+
+def _issue_key(row):
+    def clean(value, default=""):
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return default
+        text = str(value).strip()
+        return text if text and text.lower() != "nan" else default
+
+    return (
+        clean(row.get("구분")),
+        clean(row.get("사업장")),
+        clean(row.get("표준제품명")),
+        clean(row.get("유통기한"), "-"),
+    )
+
+
+def list_ignored_problems():
+    _ensure_ignored_problem_table()
+    with connect() as con:
+        return pd.read_sql_query(
+            """
+            SELECT id AS ID, issue_type AS 구분, company AS 사업장,
+                   product_name AS 표준제품명, expiry AS 유통기한,
+                   created_at AS 무시등록일시
+            FROM stock_compare_ignored_problems
+            ORDER BY created_at DESC, id DESC
+            """,
+            con,
+        )
+
+
+def add_ignored_problems(problem_rows):
+    if problem_rows is None or problem_rows.empty:
+        return 0
+    _ensure_ignored_problem_table()
+    keys = {_issue_key(row) for _, row in problem_rows.iterrows()}
+    keys = {key for key in keys if key[0] and key[2]}
+    with connect() as con:
+        before = con.total_changes
+        con.executemany(
+            """
+            INSERT OR IGNORE INTO stock_compare_ignored_problems(
+                issue_type, company, product_name, expiry
+            ) VALUES(?,?,?,?)
+            """,
+            sorted(keys),
+        )
+        added = con.total_changes - before
+        con.commit()
+    return int(added)
+
+
+def remove_ignored_problems(ignore_ids):
+    ids = sorted({int(value) for value in ignore_ids})
+    if not ids:
+        return 0
+    _ensure_ignored_problem_table()
+    placeholders = ",".join("?" for _ in ids)
+    with connect() as con:
+        before = con.total_changes
+        con.execute(
+            f"DELETE FROM stock_compare_ignored_problems WHERE id IN ({placeholders})",
+            ids,
+        )
+        removed = con.total_changes - before
+        con.commit()
+    return int(removed)
+
+
+def filter_ignored_problems(problems):
+    if problems is None or problems.empty:
+        return pd.DataFrame(columns=ISSUE_COLUMNS)
+    ignored = list_ignored_problems()
+    if ignored.empty:
+        return problems.reset_index(drop=True)
+    ignored_keys = {_issue_key(row) for _, row in ignored.iterrows()}
+    keep = [
+        _issue_key(row) not in ignored_keys
+        for _, row in problems.iterrows()
+    ]
+    return problems.loc[keep, ISSUE_COLUMNS].reset_index(drop=True)
 
 
 def compare_stock_files(nohtuspharm_file=None, noh_file=None, nohtus_file=None, gmmedic_file=None):
@@ -44,7 +145,7 @@ def compare_stock_files(nohtuspharm_file=None, noh_file=None, nohtus_file=None, 
         import_issues.extend(gm_issues)
         gm_result = _compare_gmmedic(gm_mapped)
 
-    problems = _build_problem_list(erp_result, gm_result, import_issues)
+    problems = filter_ignored_problems(_build_problem_list(erp_result, gm_result, import_issues))
     return {
         "erp": erp_result,
         "gmmedic": gm_result,
