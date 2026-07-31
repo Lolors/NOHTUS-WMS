@@ -14,6 +14,18 @@ ERP_COLUMNS = ["사업장", "표준제품명", "ERP제품명", "WMS수량", "ERP
 GM_COLUMNS = ["표준제품명", "유통기한", "WMS수량", "실사수량", "차이", "상태"]
 ISSUE_COLUMNS = ["구분", "사업장", "표준제품명", "유통기한", "WMS수량", "비교수량", "차이", "문제"]
 IGNORE_KEY_COLUMNS = ["구분", "사업장", "표준제품명", "유통기한"]
+EXCLUDED_PRODUCT_NAMES = {"배송비", "폐기물 처리비용"}
+
+
+def _is_excluded_product(value):
+    """재고 비교에서 제외할 비재고성 비용 항목인지 확인한다."""
+    return str(value or "").strip() in EXCLUDED_PRODUCT_NAMES
+
+
+def _exclude_product_rows(df, column):
+    if df is None or df.empty or column not in df.columns:
+        return df
+    return df[~df[column].apply(_is_excluded_product)].copy().reset_index(drop=True)
 
 
 def _ensure_ignored_problem_table():
@@ -240,7 +252,7 @@ def _read_standard_erp(uploaded_file):
     _require_columns(df, ["제품명", "현재고수량"])
     out = df[["제품명", "현재고수량"]].copy()
     out.columns = ["ERP제품명", "ERP수량"]
-    return _clean_quantity_rows(out)
+    return _exclude_product_rows(_clean_quantity_rows(out), "ERP제품명")
 
 
 def _read_nohtus_erp(uploaded_file):
@@ -250,7 +262,7 @@ def _read_nohtus_erp(uploaded_file):
     _require_columns(df, ["품목명/규격", "현재재고"])
     out = df[["품목명/규격", "현재재고"]].copy()
     out.columns = ["ERP제품명", "ERP수량"]
-    return _clean_quantity_rows(out)
+    return _exclude_product_rows(_clean_quantity_rows(out), "ERP제품명")
 
 
 def _read_gmmedic(uploaded_file):
@@ -279,7 +291,7 @@ def _read_gmmedic(uploaded_file):
     out["실사수량"] = out["실사수량"].apply(_to_number)
     out = out[(out["실사제품명"] != "") & out["실사수량"].notna()].copy()
     out["실사수량"] = out["실사수량"].astype(int)
-    return out
+    return _exclude_product_rows(out, "실사제품명")
 
 
 def _map_erp_products(raw, company):
@@ -289,6 +301,8 @@ def _map_erp_products(raw, company):
     for r in raw.itertuples(index=False):
         erp_name = str(r.ERP제품명 or "").strip()
         standard = name_map.get(_name_key(erp_name), "")
+        if _is_excluded_product(erp_name) or _is_excluded_product(standard):
+            continue
         if not standard:
             issues.append({
                 "구분": "제품매칭", "사업장": company, "표준제품명": erp_name,
@@ -307,6 +321,8 @@ def _map_gmmedic_products(raw):
     for r in raw.itertuples(index=False):
         raw_name = str(r.실사제품명 or "").strip()
         standard = name_map.get(_name_key(raw_name), "")
+        if _is_excluded_product(raw_name) or _is_excluded_product(standard):
+            continue
         if not standard:
             issues.append({
                 "구분": "제품매칭", "사업장": "지엠메딕", "표준제품명": raw_name,
@@ -330,6 +346,7 @@ def _compare_erp(erp_source):
         SELECT company AS 사업장, product_name AS 표준제품명, SUM(qty) AS WMS수량
         FROM inventory
         WHERE company IN ('노투스팜', 'NOH', '노투스')
+          AND TRIM(product_name) NOT IN ('배송비', '폐기물 처리비용')
         GROUP BY company, product_name
     """)
     companies = erp["사업장"].drop_duplicates().tolist()
@@ -350,6 +367,7 @@ def _compare_gmmedic(gm_source):
         SELECT product_name AS 표준제품명, exp_date AS 유통기한, SUM(qty) AS WMS수량
         FROM inventory
         WHERE company='노투스팜' AND location LIKE '%지엠메딕%'
+          AND TRIM(product_name) NOT IN ('배송비', '폐기물 처리비용')
         GROUP BY product_name, exp_date
     """)
     if not wms.empty:
