@@ -111,7 +111,7 @@ def _ensure_order_date_column():
         cols = {r[1] for r in cur.execute("PRAGMA table_info(export_waiting_orders)").fetchall()}
         if "order_date" not in cols:
             cur.execute("ALTER TABLE export_waiting_orders ADD COLUMN order_date TEXT")
-        cur.execute("UPDATE export_waiting_orders SET order_date=NULL WHERE status<>'confirmed'")
+        cur.execute("UPDATE export_waiting_orders SET order_date=NULL WHERE status NOT IN ('partial','confirmed')")
         cur.execute("UPDATE export_waiting_orders SET order_date=DATE(confirmed_at) WHERE status='confirmed' AND TRIM(COALESCE(order_date,''))='' AND TRIM(COALESCE(confirmed_at,''))<>''")
         con.commit()
 
@@ -450,7 +450,7 @@ def page_saved_export_waiting():
 
     st.markdown("---")
     st.markdown("### 선택 품목 수출확정")
-    st.caption("아직 확정되지 않은 품목을 체크하고, 해당 품목에 적용할 ERP 매출 사업장과 매출처를 선택하세요.")
+    st.caption("아직 확정되지 않은 품목을 체크하고, ERP 매출 정보와 출고일자를 설정하세요.")
     selection_source = remaining_items[["id", "사업장", "제품명", "LOT", "유통기한", "수량", "원래로케이션"]].copy()
     selection_source.insert(0, "선택", False)
     edited = st.data_editor(
@@ -466,16 +466,43 @@ def page_saved_export_waiting():
     selected_qty = int(selected_rows["수량"].sum()) if not selected_rows.empty else 0
     st.caption(f"선택: {len(selected_ids)}개 품목 / {selected_qty}EA")
 
-    default_company = str(selected_rows.iloc[0]["사업장"] or "") if not selected_rows.empty else str(remaining_items.iloc[0]["사업장"] or "")
-    default_index = COMPANIES.index(default_company) if default_company in COMPANIES else 0
-    erp_company = st.selectbox("ERP 매출 사업장", COMPANIES, index=default_index, key=f"export_confirm_company_{order_id}_{confirmed_count}")
-    term = st.text_input("ERP 수출 매출처 검색", placeholder="매출처명 일부를 입력하세요", key=f"export_customer_term_{order_id}_{confirmed_count}")
-    customers = _customer_options(erp_company, term)
-    if customers.empty:
-        st.warning("해당 사업장의 ERP 매출처가 없습니다. 거래처 관리에서 ERP 매출처 목록을 먼저 등록하거나 갱신하세요.")
-        return
-    labels = [f"{str(r.customer_code or '').strip() or '-'} | {r.customer_name}" for r in customers.itertuples()]
-    customer = customers.iloc[labels.index(st.selectbox("ERP 수출 매출처", labels, key=f"export_customer_select_{order_id}_{confirmed_count}"))]
+    confirm_info_col, shipment_date_col = st.columns(2)
+    with confirm_info_col:
+        default_company = str(selected_rows.iloc[0]["사업장"] or "") if not selected_rows.empty else str(remaining_items.iloc[0]["사업장"] or "")
+        default_index = COMPANIES.index(default_company) if default_company in COMPANIES else 0
+        erp_company = st.selectbox(
+            "ERP 매출 사업장",
+            COMPANIES,
+            index=default_index,
+            key=f"export_confirm_company_{order_id}_{confirmed_count}",
+        )
+        term = st.text_input(
+            "ERP 수출 매출처 검색",
+            placeholder="매출처명 일부를 입력하세요",
+            key=f"export_customer_term_{order_id}_{confirmed_count}",
+        )
+        customers = _customer_options(erp_company, term)
+        if customers.empty:
+            st.warning("해당 사업장의 ERP 매출처가 없습니다. 거래처 관리에서 ERP 매출처 목록을 먼저 등록하거나 갱신하세요.")
+            return
+        labels = [f"{str(r.customer_code or '').strip() or '-'} | {r.customer_name}" for r in customers.itertuples()]
+        customer = customers.iloc[
+            labels.index(
+                st.selectbox(
+                    "ERP 수출 매출처",
+                    labels,
+                    key=f"export_customer_select_{order_id}_{confirmed_count}",
+                )
+            )
+        ]
+    with shipment_date_col:
+        shipment_date = st.date_input(
+            "출고일자",
+            value=_date_value(selected.get("order_date")),
+            key=f"export_confirm_order_date_{order_id}_{confirmed_count}",
+            help="이번에 선택한 품목에 적용할 출고일자를 선택하세요.",
+        )
+
     if st.button("선택 품목 수출확정", type="primary", use_container_width=True, disabled=not selected_ids):
         try:
             confirm_export_waiting_items(
@@ -484,8 +511,12 @@ def page_saved_export_waiting():
                 erp_company=erp_company,
                 customer_code=customer["customer_code"],
                 customer_name=customer["customer_name"],
+                shipment_date=shipment_date,
             )
-            st.session_state["_export_waiting_message"] = f"{selected['title']}에서 {len(selected_ids)}개 품목 / {selected_qty}EA를 수출확정했습니다."
+            st.session_state["_export_waiting_message"] = (
+                f"{selected['title']}에서 {len(selected_ids)}개 품목 / {selected_qty}EA를 "
+                f"{_normalize_date_text(shipment_date)} 출고로 수출확정했습니다."
+            )
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
