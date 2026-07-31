@@ -359,15 +359,21 @@ def _render_stock_comparison():
             },
         )
         selected_problems = edited_problems[edited_problems["무시"] == True]
+        ignore_reason = st.text_input(
+            "차이 원인",
+            placeholder="선택한 항목에 공통으로 적용할 차이 원인을 입력하세요.",
+            key="stock_compare_ignore_reason",
+        )
         if st.button(
             "선택 항목 문제목록에서 무시",
-            disabled=selected_problems.empty,
+            disabled=selected_problems.empty or not str(ignore_reason or "").strip(),
             use_container_width=True,
             key="stock_compare_ignore_selected",
         ):
-            added = add_ignored_problems(selected_problems)
+            added = add_ignored_problems(selected_problems, ignore_reason)
+            st.session_state["stock_compare_ignore_reason"] = ""
             st.session_state["_stock_compare_ignore_message"] = (
-                f"{added:,}개 항목을 무시 목록에 등록했습니다."
+                f"{added:,}개 항목을 '{str(ignore_reason).strip()}' 원인으로 무시 목록에 등록했습니다."
             )
             st.rerun()
 
@@ -390,6 +396,10 @@ def _render_stock_comparison():
                 disabled=[column for column in ignored_editor.columns if column != "해제"],
                 column_config={
                     "해제": st.column_config.CheckboxColumn("해제"),
+                    "차이원인": st.column_config.TextColumn(
+                        "차이 원인",
+                        help="무시 등록할 때 입력한 공통 원인입니다.",
+                    ),
                     "ID": None,
                 },
             )
