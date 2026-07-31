@@ -294,8 +294,7 @@ def page_export_waiting():
 
     def patched_q(sql, params=()):
         normalized = " ".join(str(sql or "").lower().split())
-        is_export_edit = bool(st.session_state.get("export_editing_order_id"))
-        if " from customers " in f" {normalized} " and not is_export_edit:
+        if " from customers " in f" {normalized} ":
             return pd.DataFrame()
         return original_q(sql, params)
 
@@ -338,8 +337,6 @@ def page_export_waiting():
     def patched_text_input(label, *args, **kwargs):
         key = kwargs.get("key")
         if key == "out_customer_term":
-            if st.session_state.get("export_editing_order_id"):
-                return original_text_input(label, *args, **kwargs)
             return ""
         if key == "out_customer_manual_name":
             return ""
