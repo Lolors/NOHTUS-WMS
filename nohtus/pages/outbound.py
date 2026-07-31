@@ -638,14 +638,22 @@ def page_outbound():
                 st.caption(f"추천 범위: {selected_company} 재고")
             elif selected_customer is not None:
                 st.warning("선택한 매출처의 사업장이 비어 있거나 WMS 사업장과 일치하지 않습니다. 거래처 관리에서 사업장을 확인하세요.")
-            total_col, req_col = st.columns([1, 1], gap="medium")
-            with total_col:
-                df_total = q("SELECT COALESCE(SUM(qty),0) AS qty FROM inventory WHERE product_name=? AND qty>0", (selected_product,))
-                total_qty = int(df_total.iloc[0]["qty"] or 0) if not df_total.empty else 0
-                st.metric("총재고", f"{total_qty} EA")
-            with req_col:
-                st.markdown('<div class="out-req-label">출고 요청 수량</div>', unsafe_allow_html=True)
-                req = st.number_input("출고 요청 수량", min_value=1, step=1, key="out_req_qty", label_visibility="collapsed")
+            export_waiting_mode = str(st.session_state.get("_outbound_screen_mode") or "") == "export_waiting"
+            if export_waiting_mode:
+                _, total_col, _ = st.columns([1, 1, 1], gap="medium")
+                with total_col:
+                    df_total = q("SELECT COALESCE(SUM(qty),0) AS qty FROM inventory WHERE product_name=? AND qty>0", (selected_product,))
+                    total_qty = int(df_total.iloc[0]["qty"] or 0) if not df_total.empty else 0
+                    st.metric("총재고", f"{total_qty} EA")
+            else:
+                total_col, req_col = st.columns([1, 1], gap="medium")
+                with total_col:
+                    df_total = q("SELECT COALESCE(SUM(qty),0) AS qty FROM inventory WHERE product_name=? AND qty>0", (selected_product,))
+                    total_qty = int(df_total.iloc[0]["qty"] or 0) if not df_total.empty else 0
+                    st.metric("총재고", f"{total_qty} EA")
+                with req_col:
+                    st.markdown('<div class="out-req-label">출고 요청 수량</div>', unsafe_allow_html=True)
+                    req = st.number_input("출고 요청 수량", min_value=1, step=1, key="out_req_qty", label_visibility="collapsed")
             if not manual_pick:
                 expiry_short_first = st.checkbox("유통기한 짧은 것 먼저", value=True, key="out_expiry_short_first")
 
