@@ -105,9 +105,9 @@ def _apply_p_inventory_match(waiting_item_id, inventory_id):
             raise ValueError(f"선택한 P 재고가 부족합니다. 필요 {int(waiting[0] or 0)}EA / 현재 {int(qty or 0)}EA")
         con.execute(
             """UPDATE export_waiting_items
-               SET company=?,product_name=?,warehouse_name=?,lot=?,exp_date=?
+               SET waiting_inventory_id=?,company=?,product_name=?,warehouse_name=?,lot=?,exp_date=?
                WHERE id=?""",
-            (company, product_name, warehouse_name, lot, exp_date, int(waiting_item_id)),
+            (int(inventory_id), company, product_name, warehouse_name, lot, exp_date, int(waiting_item_id)),
         )
         con.commit()
 
