@@ -272,6 +272,13 @@ def _build_stocktake_result(_ignored_result=None):
     baseline["전산수량"] = quantity.astype(int)
     baseline["실제수량"] = quantity.astype(int)
     baseline["차이"] = 0
+    baseline = baseline.drop(columns=["수량"])
+
+    columns = list(baseline.columns)
+    if "사업장" in columns and "로케이션" in columns:
+        columns.remove("로케이션")
+        columns.insert(columns.index("사업장") + 1, "로케이션")
+        baseline = baseline[columns]
 
     return baseline
 
@@ -544,8 +551,8 @@ def _render_stock_comparison():
 
     st.markdown("#### 수량 대조용 기준 재고")
     st.caption(
-        "현재 기준 재고 양식을 그대로 만들고, 각 행의 수량을 전산수량과 실제수량에 "
-        "동일하게 기록합니다. 따라서 모든 행의 차이는 0입니다."
+        "현재 기준 재고의 각 행 수량을 전산수량과 실제수량에 동일하게 기록하고 "
+        "차이는 0으로 표시합니다. 원본 수량 컬럼은 결과에서 제외합니다."
     )
     stocktake_result = _build_stocktake_result(ignored_result_source)
     if stocktake_result.empty:
