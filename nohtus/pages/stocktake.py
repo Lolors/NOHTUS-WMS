@@ -264,7 +264,9 @@ def _build_stocktake_result(ignored_result):
     baseline = pd.read_excel(
         BytesIO(current_baseline_stock_excel_bytes(exclude_zero=False)),
         sheet_name="기준재고업로드",
+        dtype={"ERP제품코드": str},
     )
+    baseline["ERP제품코드"] = baseline["ERP제품코드"].fillna("").astype(str)
     for column in ["전산수량", "실제수량", "차이"]:
         baseline[column] = pd.NA
 
@@ -284,13 +286,12 @@ def _build_stocktake_result(ignored_result):
             source["사업장"].fillna("").astype(str).str.strip() != "지엠메딕"
         ].copy()
     source = source[
-        source["WMS수량"].notna()
-        & source["비교수량"].notna()
-        & source["차이"].notna()
+        source["WMS수량"].notna() & source["ERP수량"].notna()
     ].copy()
-    for column in ["WMS수량", "비교수량", "차이"]:
-        source[column] = pd.to_numeric(source[column], errors="coerce")
-    source = source.dropna(subset=["WMS수량", "비교수량", "차이"])
+    source["WMS수량"] = pd.to_numeric(source["WMS수량"], errors="coerce")
+    source["ERP수량"] = pd.to_numeric(source["ERP수량"], errors="coerce")
+    source = source.dropna(subset=["WMS수량", "ERP수량"])
+    source["차이"] = source["WMS수량"] - source["ERP수량"]
 
     baseline_company = baseline["사업장"].fillna("").astype(str).str.strip()
     baseline_product = baseline["표준제품명"].fillna("").astype(str).str.strip()
@@ -307,7 +308,7 @@ def _build_stocktake_result(ignored_result):
         # 무시 목록은 사업장·제품별 총량이므로 기준재고 상세행은 그대로 두고
         # 첫 번째 일치 행에만 비교 결과를 그대로 기록한다.
         target_index = matched_indexes[0]
-        baseline.loc[target_index, "전산수량"] = int(compared["비교수량"])
+        baseline.loc[target_index, "전산수량"] = int(compared["ERP수량"])
         baseline.loc[target_index, "실제수량"] = int(compared["WMS수량"])
         baseline.loc[target_index, "차이"] = int(compared["차이"])
 
@@ -469,35 +470,27 @@ def _render_stock_comparison():
     ignored_result_source = pd.DataFrame()
     with st.expander(f"무시 목록 관리 ({len(ignored_problems):,}건)"):
         st.caption(
-            "현재 비교자료에 포함된 무시 항목은 WMS 수량·비교 수량·차이를 함께 표시합니다. "
+            "현재 ERP 비교결과에 포함된 무시 항목은 WMS 수량·ERP 수량·차이를 함께 표시합니다. "
             "해제하면 다음 비교부터 문제목록에 다시 나타납니다."
         )
         if ignored_problems.empty:
             st.info("현재 무시 중인 항목이 없습니다.")
         else:
             ignored_editor = ignored_problems.copy()
-            all_problems = result.get("all_problems", result["problems"])
             quantity_columns = [
-                "구분", "사업장", "표준제품명", "유통기한",
-                "WMS수량", "비교수량", "차이",
+                "사업장", "표준제품명", "WMS수량", "ERP수량", "차이",
             ]
-            quantity_value_columns = ["WMS수량", "비교수량", "차이"]
+            quantity_value_columns = ["WMS수량", "ERP수량", "차이"]
             for column in quantity_value_columns:
                 ignored_editor[column] = pd.NA
-            if not all_problems.empty:
+            if not erp_result.empty:
                 def quantity_key(row):
-                    problem_type = str(row.get("구분", "") or "").strip()
                     company = str(row.get("사업장", "") or "").strip()
                     product = str(row.get("표준제품명", "") or "").strip()
-                    # ERP는 사업장·제품별 총수량 비교이므로 유통기한을 키로 쓰지 않는다.
-                    # 실사 및 지엠메딕 제품매칭만 제품·유통기한별로 연결한다.
-                    if problem_type == "실사 불일치" or company == "지엠메딕":
-                        expiry = str(row.get("유통기한", "") or "").strip()
-                        return problem_type, company, product, expiry
-                    return problem_type, company, product
+                    return company, product
 
                 quantity_lookup = {}
-                for _, current_row in all_problems[quantity_columns].iterrows():
+                for _, current_row in erp_result[quantity_columns].iterrows():
                     quantity_lookup[quantity_key(current_row)] = tuple(
                         current_row[column] for column in quantity_value_columns
                     )
@@ -513,7 +506,7 @@ def _render_stock_comparison():
                 "사업장",
                 "표준제품명",
                 "WMS수량",
-                "비교수량",
+                "ERP수량",
                 "차이",
                 "차이원인",
                 "ID",
@@ -527,7 +520,7 @@ def _render_stock_comparison():
                 column_config={
                     "해제": st.column_config.CheckboxColumn("해제"),
                     "WMS수량": st.column_config.NumberColumn("WMS 수량", format="%d"),
-                    "비교수량": st.column_config.NumberColumn("비교 수량", format="%d"),
+                    "ERP수량": st.column_config.NumberColumn("ERP 수량", format="%d"),
                     "차이": st.column_config.NumberColumn("수량 차이", format="%+d"),
                     "차이원인": st.column_config.TextColumn(
                         "차이 원인",
@@ -591,7 +584,7 @@ def _render_stock_comparison():
     st.markdown("#### 무시 목록 반영 기준 재고")
     st.caption(
         "현재 기준 재고 양식을 그대로 만들고, 무시 목록과 일치하는 사업장·표준제품명의 "
-        "첫 상세행에 비교 수량→전산수량, WMS 수량→실제수량, 차이→차이를 그대로 기록합니다. "
+        "첫 상세행에 ERP 수량→전산수량, WMS 수량→실제수량, 차이를 그대로 기록합니다. "
         "LOT별 재분배나 미상 행 추가는 하지 않습니다."
     )
     stocktake_result = _build_stocktake_result(ignored_result_source)
