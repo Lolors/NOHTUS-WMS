@@ -258,7 +258,7 @@ def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
 
 
 def _build_stocktake_result(erp_result):
-    """ERP 비교 전체를 재고실사 결과 형식으로 정리한다."""
+    """ERP 비교 전체를 기준재고 엑셀과 같은 WMS 상세 행 단위로 정리한다."""
     result_columns = [
         "사업장", "로케이션", "ERP제품코드", "ERP제품명", "표준제품명",
         "LOT/제조번호", "유통기한", "전산수량", "실제수량", "차이",
@@ -279,7 +279,7 @@ def _build_stocktake_result(erp_result):
         """
         SELECT company AS 사업장, location AS 로케이션,
                product_name AS 표준제품명, lot AS "LOT/제조번호",
-               exp_date AS 유통기한
+               exp_date AS 유통기한, qty AS 실제수량
         FROM inventory
         WHERE company IN ('노투스팜', 'NOH', '노투스')
           AND COALESCE(qty, 0) >= 1
@@ -321,15 +321,15 @@ def _build_stocktake_result(erp_result):
         compared_standard = clean(compared.get("표준제품명"))
         erp_name = clean(compared.get("ERP제품명"), compared_standard)
         erp_names = {name_key(value) for value in erp_name.split(" / ") if name_key(value)}
-        name_column, code_column = company_mapping.get(company, ("erp_nohtuspharm_name", "product_code"))
+        name_column, code_column = company_mapping.get(
+            company, ("erp_nohtuspharm_name", "product_code")
+        )
 
         matched_products = products.iloc[0:0].copy()
         if erp_names and name_column in products.columns:
             matched_products = products[
                 products[name_column].apply(name_key).isin(erp_names)
             ].copy()
-            # 같은 ERP명이 여러 표준제품명에 연결되어 있어도 현재 비교 행의
-            # 표준제품명에 해당하는 제품마스터와 WMS 상세재고만 사용한다.
             if compared_standard:
                 matched_products = matched_products[
                     matched_products["표준제품명"].fillna("").astype(str).str.strip()
@@ -348,26 +348,61 @@ def _build_stocktake_result(erp_result):
 
         matched_inventory = inventory[
             (inventory["사업장"].fillna("").astype(str).str.strip() == company)
-            & (inventory["표준제품명"].fillna("").astype(str).str.strip().isin(standard_names))
+            & (
+                inventory["표준제품명"].fillna("").astype(str).str.strip()
+                .isin(standard_names)
+            )
         ].copy()
 
         erp_code = "-"
         if code_column and not matched_products.empty:
             erp_code = joined_values(matched_products, code_column)
         computer_qty = int(compared["ERP수량"])
-        actual_qty = int(compared["WMS수량"])
-        rows.append({
-            "사업장": company,
-            "로케이션": joined_values(matched_inventory, "로케이션"),
-            "ERP제품코드": erp_code,
-            "ERP제품명": erp_name,
-            "표준제품명": compared_standard,
-            "LOT/제조번호": joined_values(matched_inventory, "LOT/제조번호"),
-            "유통기한": joined_values(matched_inventory, "유통기한"),
-            "전산수량": computer_qty,
-            "실제수량": actual_qty,
-            "차이": actual_qty - computer_qty,
-        })
+
+        if matched_inventory.empty:
+            actual_qty = int(compared["WMS수량"])
+            rows.append({
+                "사업장": company,
+                "로케이션": "-",
+                "ERP제품코드": erp_code,
+                "ERP제품명": erp_name,
+                "표준제품명": compared_standard,
+                "LOT/제조번호": "-",
+                "유통기한": "-",
+                "전산수량": computer_qty,
+                "실제수량": actual_qty,
+                "차이": actual_qty - computer_qty,
+            })
+            continue
+
+        detail_columns = ["로케이션", "LOT/제조번호", "유통기한"]
+        matched_inventory["실제수량"] = pd.to_numeric(
+            matched_inventory["실제수량"], errors="coerce"
+        ).fillna(0)
+        details = (
+            matched_inventory.groupby(detail_columns, dropna=False, as_index=False)["실제수량"]
+            .sum()
+            .sort_values(detail_columns, kind="stable")
+            .reset_index(drop=True)
+        )
+
+        # ERP는 제품별 총수량만 제공하므로 여러 WMS 상세행에 중복시키지 않고
+        # 첫 행에만 기록하여 제품별 전산·실제수량 합계를 보존한다.
+        for detail_index, detail in details.iterrows():
+            detail_computer_qty = computer_qty if detail_index == 0 else 0
+            detail_actual_qty = int(detail["실제수량"])
+            rows.append({
+                "사업장": company,
+                "로케이션": clean(detail["로케이션"], "-"),
+                "ERP제품코드": erp_code,
+                "ERP제품명": erp_name,
+                "표준제품명": compared_standard,
+                "LOT/제조번호": clean(detail["LOT/제조번호"], "-"),
+                "유통기한": display_date_only(clean(detail["유통기한"], "-")),
+                "전산수량": detail_computer_qty,
+                "실제수량": detail_actual_qty,
+                "차이": detail_actual_qty - detail_computer_qty,
+            })
 
     result = pd.DataFrame(rows, columns=result_columns)
     if result.empty:
@@ -375,9 +410,9 @@ def _build_stocktake_result(erp_result):
     for column in ["전산수량", "실제수량", "차이"]:
         result[column] = pd.to_numeric(result[column], errors="coerce").fillna(0).astype(int)
     return result.sort_values(
-        ["사업장", "표준제품명"], kind="stable"
+        ["사업장", "표준제품명", "LOT/제조번호", "유통기한", "로케이션"],
+        kind="stable",
     ).reset_index(drop=True)
-
 
 def _stocktake_result_excel_bytes(stocktake_result):
     bio = BytesIO()
