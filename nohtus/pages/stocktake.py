@@ -379,11 +379,56 @@ def _build_stocktake_result(ignored_result):
             .reset_index(drop=True)
         )
 
-        # ERP는 제품별 총수량만 제공하므로 여러 WMS 상세행에 중복시키지 않고
-        # 첫 행에만 기록하여 제품별 전산·실제수량 합계를 보존한다.
+        # 제조번호와 유통기한이 모두 식별되는 행의 실제수량은 그대로 보존한다.
+        # 무시 목록의 WMS 총수량에서 그 합계를 뺀 잔여량만 식별정보가
+        # 불분명한 행에 기존 수량 비율로 배분하여 제품 총합을 맞춘다.
+        lot_known = details["LOT/제조번호"].apply(lambda value: clean(value) not in ("", "-"))
+        expiry_known = details["유통기한"].apply(lambda value: clean(value) not in ("", "-"))
+        exact_mask = lot_known & expiry_known
+        details["_배분실제수량"] = 0
+
+        exact_total = int(details.loc[exact_mask, "실제수량"].sum())
+        details.loc[exact_mask, "_배분실제수량"] = (
+            details.loc[exact_mask, "실제수량"].round().astype(int)
+        )
+        remaining_qty = max(int(compared["WMS수량"]) - exact_total, 0)
+        unclear_indices = details.index[~exact_mask].tolist()
+
+        if unclear_indices:
+            unclear_weights = details.loc[unclear_indices, "실제수량"].clip(lower=0)
+            weight_total = float(unclear_weights.sum())
+            if weight_total > 0:
+                raw_allocations = unclear_weights * remaining_qty / weight_total
+                allocations = raw_allocations.astype(int)
+                extra_qty = remaining_qty - int(allocations.sum())
+                if extra_qty > 0:
+                    remainder_order = (
+                        (raw_allocations - allocations)
+                        .sort_values(ascending=False, kind="stable")
+                        .index.tolist()
+                    )
+                    for allocation_index in remainder_order[:extra_qty]:
+                        allocations.loc[allocation_index] += 1
+            else:
+                allocations = pd.Series(0, index=unclear_indices, dtype=int)
+                allocations.iloc[0] = remaining_qty
+            details.loc[unclear_indices, "_배분실제수량"] = allocations.astype(int)
+        elif remaining_qty > 0:
+            details = pd.concat([
+                details,
+                pd.DataFrame([{
+                    "로케이션": "-",
+                    "LOT/제조번호": "-",
+                    "유통기한": "-",
+                    "실제수량": 0,
+                    "_배분실제수량": remaining_qty,
+                }]),
+            ], ignore_index=True)
+
+        # ERP 총수량은 첫 상세행에만 기록해 상세행 합계의 중복을 막는다.
         for detail_index, detail in details.iterrows():
             detail_computer_qty = computer_qty if detail_index == 0 else 0
-            detail_actual_qty = int(detail["실제수량"])
+            detail_actual_qty = int(detail["_배분실제수량"])
             rows.append({
                 "사업장": company,
                 "로케이션": clean(detail["로케이션"], "-"),
@@ -693,7 +738,8 @@ def _render_stock_comparison():
     st.markdown("#### 재고 실사 결과")
     st.caption(
         "현재 비교자료에 연결된 무시 목록 항목만 표시합니다. "
-        "전산수량은 무시 목록의 비교 수량, 실제수량은 현재 WMS의 제조번호별 수량이며, "
+        "전산수량은 무시 목록의 비교 수량을 사용하고, 실제수량은 식별 가능한 "
+        "제조번호·유통기한 수량을 보존한 뒤 남은 WMS 총수량을 불분명한 행에 배분합니다. "
         "지엠메딕 실사 업로드 자료는 포함하지 않습니다."
     )
     stocktake_result = _build_stocktake_result(ignored_result_source)
