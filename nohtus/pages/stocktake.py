@@ -258,214 +258,67 @@ def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
 
 
 def _build_stocktake_result(ignored_result):
-    """현재 비교자료에 연결된 무시 항목을 WMS 상세 행 단위로 정리한다."""
-    result_columns = [
-        "사업장", "로케이션", "ERP제품코드", "ERP제품명", "표준제품명",
-        "LOT/제조번호", "유통기한", "전산수량", "실제수량", "차이",
-    ]
-    if ignored_result is None or ignored_result.empty:
-        return pd.DataFrame(columns=result_columns)
+    """기존 기준재고 표에 무시 목록의 비교 수량만 사후 반영한다."""
+    from nohtus.services.stocktake import current_baseline_stock_excel_bytes
+
+    baseline = pd.read_excel(
+        BytesIO(current_baseline_stock_excel_bytes(exclude_zero=False)),
+        sheet_name="기준재고업로드",
+    )
+    for column in ["전산수량", "실제수량", "차이"]:
+        baseline[column] = pd.NA
+
+    if ignored_result is None or ignored_result.empty or baseline.empty:
+        return baseline
 
     def clean(value, default=""):
         if value is None or pd.isna(value):
             return default
-        text = str(value).strip()
-        return text if text and text.lower() != "nan" else default
+        text_value = str(value).strip()
+        return text_value if text_value and text_value.lower() != "nan" else default
 
-    inventory = q(
-        """
-        SELECT company AS 사업장, location AS 로케이션,
-               product_name AS 표준제품명, lot AS "LOT/제조번호",
-               exp_date AS 유통기한, qty AS 실제수량
-        FROM inventory
-        WHERE company IN ('노투스팜', 'NOH', '노투스')
-          AND COALESCE(qty, 0) >= 1
-          AND TRIM(product_name) NOT IN ('배송비', '폐기물 처리비용')
-        """
-    )
-    products = q(
-        """
-        SELECT standard_name AS 표준제품명,
-               product_code, erp_nohtuspharm_name,
-               erp_noh_code, erp_noh_name, erp_nohtus_name
-        FROM products
-        """
-    )
-
-    def joined_values(frame, column, default="-"):
-        if frame is None or frame.empty or column not in frame.columns:
-            return default
-        values = []
-        for value in frame[column].tolist():
-            text = clean(value, "-")
-            if text not in values:
-                values.append(text)
-        return " / ".join(values) if values else default
-
-    company_mapping = {
-        "노투스팜": ("erp_nohtuspharm_name", "product_code"),
-        "NOH": ("erp_noh_name", "erp_noh_code"),
-        "노투스": ("erp_nohtus_name", None),
-    }
-    rows = []
     source = ignored_result.copy()
-    # 결과표는 현재 비교자료에서 수량을 확인할 수 있는 ERP 무시 항목만 사용한다.
     # 지엠메딕 실사 업로드 자료는 위쪽 유통기한 비교표에서만 사용한다.
     if "사업장" in source.columns:
         source = source[
             source["사업장"].fillna("").astype(str).str.strip() != "지엠메딕"
         ].copy()
     source = source[
-        source["WMS수량"].notna() & source["비교수량"].notna()
+        source["WMS수량"].notna()
+        & source["비교수량"].notna()
+        & source["차이"].notna()
     ].copy()
-    source["WMS수량"] = pd.to_numeric(source["WMS수량"], errors="coerce").fillna(0)
-    source["비교수량"] = pd.to_numeric(source["비교수량"], errors="coerce").fillna(0)
+    for column in ["WMS수량", "비교수량", "차이"]:
+        source[column] = pd.to_numeric(source[column], errors="coerce")
+    source = source.dropna(subset=["WMS수량", "비교수량", "차이"])
+
+    baseline_company = baseline["사업장"].fillna("").astype(str).str.strip()
+    baseline_product = baseline["표준제품명"].fillna("").astype(str).str.strip()
 
     for _, compared in source.iterrows():
         company = clean(compared.get("사업장"))
-        compared_standard = clean(compared.get("표준제품명"))
-        name_column, code_column = company_mapping.get(
-            company, ("erp_nohtuspharm_name", "product_code")
-        )
-
-        matched_products = products[
-            products["표준제품명"].fillna("").astype(str).str.strip()
-            == compared_standard
-        ].copy()
-        erp_name = joined_values(matched_products, name_column, compared_standard or "-")
-
-        standard_names = matched_products["표준제품명"].dropna().astype(str).str.strip()
-        standard_names = set(standard_names[standard_names != ""].tolist())
-        if not standard_names and compared_standard:
-            standard_names = {compared_standard}
-
-        matched_inventory = inventory[
-            (inventory["사업장"].fillna("").astype(str).str.strip() == company)
-            & (
-                inventory["표준제품명"].fillna("").astype(str).str.strip()
-                .isin(standard_names)
-            )
-        ].copy()
-
-        erp_code = "-"
-        if code_column and not matched_products.empty:
-            erp_code = joined_values(matched_products, code_column)
-        computer_qty = int(compared["비교수량"])
-
-        if matched_inventory.empty:
-            actual_qty = int(compared["WMS수량"])
-            rows.append({
-                "사업장": company,
-                "로케이션": "-",
-                "ERP제품코드": erp_code,
-                "ERP제품명": erp_name,
-                "표준제품명": compared_standard,
-                "LOT/제조번호": "-",
-                "유통기한": "-",
-                "전산수량": computer_qty,
-                "실제수량": actual_qty,
-                "차이": actual_qty - computer_qty,
-            })
+        standard_name = clean(compared.get("표준제품명"))
+        matched_indexes = baseline.index[
+            (baseline_company == company) & (baseline_product == standard_name)
+        ]
+        if matched_indexes.empty:
             continue
 
-        detail_columns = ["로케이션", "LOT/제조번호", "유통기한"]
-        matched_inventory["실제수량"] = pd.to_numeric(
-            matched_inventory["실제수량"], errors="coerce"
-        ).fillna(0)
-        details = (
-            matched_inventory.groupby(detail_columns, dropna=False, as_index=False)["실제수량"]
-            .sum()
-            .sort_values(detail_columns, kind="stable")
-            .reset_index(drop=True)
-        )
+        # 무시 목록은 사업장·제품별 총량이므로 기준재고 상세행은 그대로 두고
+        # 첫 번째 일치 행에만 비교 결과를 그대로 기록한다.
+        target_index = matched_indexes[0]
+        baseline.loc[target_index, "전산수량"] = int(compared["비교수량"])
+        baseline.loc[target_index, "실제수량"] = int(compared["WMS수량"])
+        baseline.loc[target_index, "차이"] = int(compared["차이"])
 
-        # 제조번호와 유통기한이 모두 식별되는 행의 실제수량은 그대로 보존한다.
-        # 무시 목록의 WMS 총수량에서 그 합계를 뺀 잔여량만 식별정보가
-        # 불분명한 행에 기존 수량 비율로 배분하여 제품 총합을 맞춘다.
-        lot_known = details["LOT/제조번호"].apply(lambda value: clean(value) not in ("", "-"))
-        expiry_known = details["유통기한"].apply(lambda value: clean(value) not in ("", "-"))
-        exact_mask = lot_known & expiry_known
-        details["_배분실제수량"] = 0
+    return baseline
 
-        exact_total = int(details.loc[exact_mask, "실제수량"].sum())
-        details.loc[exact_mask, "_배분실제수량"] = (
-            details.loc[exact_mask, "실제수량"].round().astype(int)
-        )
-        remaining_qty = max(int(compared["WMS수량"]) - exact_total, 0)
-        unclear_indices = details.index[~exact_mask].tolist()
-
-        if unclear_indices:
-            unclear_weights = details.loc[unclear_indices, "실제수량"].clip(lower=0)
-            weight_total = float(unclear_weights.sum())
-            if weight_total > 0:
-                raw_allocations = unclear_weights * remaining_qty / weight_total
-                allocations = raw_allocations.astype(int)
-                extra_qty = remaining_qty - int(allocations.sum())
-                if extra_qty > 0:
-                    remainder_order = (
-                        (raw_allocations - allocations)
-                        .sort_values(ascending=False, kind="stable")
-                        .index.tolist()
-                    )
-                    for allocation_index in remainder_order[:extra_qty]:
-                        allocations.loc[allocation_index] += 1
-            else:
-                allocations = pd.Series(0, index=unclear_indices, dtype=int)
-                allocations.iloc[0] = remaining_qty
-            details.loc[unclear_indices, "_배분실제수량"] = allocations.astype(int)
-        elif remaining_qty > 0:
-            details = pd.concat([
-                details,
-                pd.DataFrame([{
-                    "로케이션": "-",
-                    "LOT/제조번호": "-",
-                    "유통기한": "-",
-                    "실제수량": 0,
-                    "_배분실제수량": remaining_qty,
-                }]),
-            ], ignore_index=True)
-
-        # ERP 총수량은 첫 상세행에만 기록해 상세행 합계의 중복을 막는다.
-        for detail_index, detail in details.iterrows():
-            detail_computer_qty = computer_qty if detail_index == 0 else 0
-            detail_actual_qty = int(detail["_배분실제수량"])
-            rows.append({
-                "사업장": company,
-                "로케이션": clean(detail["로케이션"], "-"),
-                "ERP제품코드": erp_code,
-                "ERP제품명": erp_name,
-                "표준제품명": compared_standard,
-                "LOT/제조번호": clean(detail["LOT/제조번호"], "-"),
-                "유통기한": display_date_only(clean(detail["유통기한"], "-")),
-                "전산수량": detail_computer_qty,
-                "실제수량": detail_actual_qty,
-                "차이": detail_actual_qty - detail_computer_qty,
-            })
-
-    result = pd.DataFrame(rows, columns=result_columns)
-    if result.empty:
-        return result
-    for column in ["전산수량", "실제수량", "차이"]:
-        result[column] = pd.to_numeric(result[column], errors="coerce").fillna(0).astype(int)
-    return result.sort_values(
-        ["사업장", "표준제품명", "LOT/제조번호", "유통기한", "로케이션"],
-        kind="stable",
-    ).reset_index(drop=True)
 
 def _stocktake_result_excel_bytes(stocktake_result):
-    bio = BytesIO()
-    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-        stocktake_result.to_excel(writer, index=False, sheet_name="재고실사결과")
-        worksheet = writer.book["재고실사결과"]
-        worksheet.freeze_panes = "A2"
-        worksheet.auto_filter.ref = worksheet.dimensions
-        for column_cells in worksheet.columns:
-            max_len = max(len(str(cell.value or "")) for cell in column_cells)
-            worksheet.column_dimensions[column_cells[0].column_letter].width = min(
-                max(max_len + 2, 10), 42
-            )
-    bio.seek(0)
-    return bio.getvalue()
+    from nohtus.services.stocktake import _baseline_stock_excel_bytes_from_dataframe
+
+    return _baseline_stock_excel_bytes_from_dataframe(stocktake_result)
+
 
 def _render_stock_comparison():
     from nohtus.services.stock_compare import (
@@ -735,16 +588,15 @@ def _render_stock_comparison():
         key="stock_compare_download",
     )
 
-    st.markdown("#### 재고 실사 결과")
+    st.markdown("#### 무시 목록 반영 기준 재고")
     st.caption(
-        "현재 비교자료에 연결된 무시 목록 항목만 표시합니다. "
-        "전산수량은 무시 목록의 비교 수량을 사용하고, 실제수량은 식별 가능한 "
-        "제조번호·유통기한 수량을 보존한 뒤 남은 WMS 총수량을 불분명한 행에 배분합니다. "
-        "지엠메딕 실사 업로드 자료는 포함하지 않습니다."
+        "현재 기준 재고 양식을 그대로 만들고, 무시 목록과 일치하는 사업장·표준제품명의 "
+        "첫 상세행에 비교 수량→전산수량, WMS 수량→실제수량, 차이→차이를 그대로 기록합니다. "
+        "LOT별 재분배나 미상 행 추가는 하지 않습니다."
     )
     stocktake_result = _build_stocktake_result(ignored_result_source)
     if stocktake_result.empty:
-        st.info("현재 비교자료에 연결된 무시 목록 항목이 없습니다.")
+        st.info("현재 기준 재고가 없습니다.")
     else:
         st.dataframe(
             stocktake_result,
@@ -757,9 +609,9 @@ def _render_stock_comparison():
             },
         )
         st.download_button(
-            "재고 실사 결과 엑셀 다운로드",
+            "무시 목록 반영 기준 재고 엑셀 다운로드",
             data=_stocktake_result_excel_bytes(stocktake_result),
-            file_name=f"NOHTUS_재고실사결과_{date.today().strftime('%Y%m%d')}.xlsx",
+            file_name=f"NOHTUS_무시목록반영_기준재고_{date.today().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
             key="stocktake_result_download",
