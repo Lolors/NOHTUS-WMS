@@ -416,22 +416,31 @@ def _render_stock_comparison():
                 "구분", "사업장", "표준제품명", "유통기한",
                 "WMS수량", "비교수량", "차이",
             ]
+            quantity_value_columns = ["WMS수량", "비교수량", "차이"]
+            for column in quantity_value_columns:
+                ignored_editor[column] = pd.NA
             if not all_problems.empty:
-                current_quantities = (
-                    all_problems[quantity_columns]
-                    .drop_duplicates(
-                        subset=["구분", "사업장", "표준제품명", "유통기한"],
-                        keep="last",
+                def quantity_key(row):
+                    problem_type = str(row.get("구분", "") or "").strip()
+                    company = str(row.get("사업장", "") or "").strip()
+                    product = str(row.get("표준제품명", "") or "").strip()
+                    # ERP는 사업장·제품별 총수량 비교이므로 유통기한을 키로 쓰지 않는다.
+                    # 실사 및 지엠메딕 제품매칭만 제품·유통기한별로 연결한다.
+                    if problem_type == "실사 불일치" or company == "지엠메딕":
+                        expiry = str(row.get("유통기한", "") or "").strip()
+                        return problem_type, company, product, expiry
+                    return problem_type, company, product
+
+                quantity_lookup = {}
+                for _, current_row in all_problems[quantity_columns].iterrows():
+                    quantity_lookup[quantity_key(current_row)] = tuple(
+                        current_row[column] for column in quantity_value_columns
                     )
-                )
-                ignored_editor = ignored_editor.merge(
-                    current_quantities,
-                    how="left",
-                    on=["구분", "사업장", "표준제품명", "유통기한"],
-                )
-            else:
-                for column in ["WMS수량", "비교수량", "차이"]:
-                    ignored_editor[column] = pd.NA
+
+                for index, ignored_row in ignored_editor.iterrows():
+                    quantities = quantity_lookup.get(quantity_key(ignored_row))
+                    if quantities is not None:
+                        ignored_editor.loc[index, quantity_value_columns] = quantities
             ignored_editor.insert(0, "해제", False)
             ignored_editor = ignored_editor[[
                 "해제",
