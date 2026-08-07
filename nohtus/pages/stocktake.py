@@ -400,13 +400,34 @@ def _render_stock_comparison():
     ignored_problems = list_ignored_problems()
     with st.expander(f"무시 목록 관리 ({len(ignored_problems):,}건)"):
         st.caption(
-            "무시된 항목도 아래 ERP·실사 비교결과에는 실제 값 그대로 표시됩니다. "
+            "현재 비교자료에 포함된 무시 항목은 WMS 수량·비교 수량·차이를 함께 표시합니다. "
             "해제하면 다음 비교부터 문제목록에 다시 나타납니다."
         )
         if ignored_problems.empty:
             st.info("현재 무시 중인 항목이 없습니다.")
         else:
             ignored_editor = ignored_problems.copy()
+            all_problems = result.get("all_problems", result["problems"])
+            quantity_columns = [
+                "구분", "사업장", "표준제품명", "유통기한",
+                "WMS수량", "비교수량", "차이",
+            ]
+            if not all_problems.empty:
+                current_quantities = (
+                    all_problems[quantity_columns]
+                    .drop_duplicates(
+                        subset=["구분", "사업장", "표준제품명", "유통기한"],
+                        keep="last",
+                    )
+                )
+                ignored_editor = ignored_editor.merge(
+                    current_quantities,
+                    how="left",
+                    on=["구분", "사업장", "표준제품명", "유통기한"],
+                )
+            else:
+                for column in ["WMS수량", "비교수량", "차이"]:
+                    ignored_editor[column] = pd.NA
             ignored_editor.insert(0, "해제", False)
             edited_ignored = st.data_editor(
                 ignored_editor,
@@ -416,6 +437,9 @@ def _render_stock_comparison():
                 disabled=[column for column in ignored_editor.columns if column != "해제"],
                 column_config={
                     "해제": st.column_config.CheckboxColumn("해제"),
+                    "WMS수량": st.column_config.NumberColumn("WMS 수량", format="%d"),
+                    "비교수량": st.column_config.NumberColumn("비교 수량", format="%d"),
+                    "차이": st.column_config.NumberColumn("수량 차이", format="%+d"),
                     "차이원인": st.column_config.TextColumn(
                         "차이 원인",
                         help="무시 등록할 때 입력한 공통 원인입니다.",
