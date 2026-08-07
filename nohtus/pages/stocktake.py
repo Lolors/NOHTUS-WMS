@@ -257,8 +257,8 @@ def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
             st.error(str(exc))
 
 
-def _build_stocktake_result(_ignored_result=None):
-    """기존 기준재고 표의 수량을 전산수량·실제수량에 그대로 반복한다."""
+def _build_stocktake_result(ignored_result=None):
+    """기준재고 수량을 채우고 무시 목록 제품은 ERP 비교 수량으로 대체한다."""
     from nohtus.services.stocktake import current_baseline_stock_excel_bytes
 
     baseline = pd.read_excel(
@@ -272,8 +272,48 @@ def _build_stocktake_result(_ignored_result=None):
     baseline["전산수량"] = quantity.astype(int)
     baseline["실제수량"] = quantity.astype(int)
     baseline["차이"] = 0
+
+    if ignored_result is not None and not ignored_result.empty and not baseline.empty:
+        source = ignored_result.copy()
+        required_columns = {"사업장", "표준제품명", "WMS수량", "ERP수량"}
+        if required_columns.issubset(source.columns):
+            source = source[
+                source["사업장"].fillna("").astype(str).str.strip() != "지엠메딕"
+            ].copy()
+            source["WMS수량"] = pd.to_numeric(source["WMS수량"], errors="coerce")
+            source["ERP수량"] = pd.to_numeric(source["ERP수량"], errors="coerce")
+            source = source.dropna(subset=["WMS수량", "ERP수량"])
+
+            baseline_company = baseline["사업장"].fillna("").astype(str).str.strip()
+            baseline_product = baseline["표준제품명"].fillna("").astype(str).str.strip()
+
+            for _, compared in source.iterrows():
+                company_value = compared["사업장"]
+                product_value = compared["표준제품명"]
+                company = "" if pd.isna(company_value) else str(company_value).strip()
+                product = "" if pd.isna(product_value) else str(product_value).strip()
+                matched_indexes = baseline.index[
+                    (baseline_company == company) & (baseline_product == product)
+                ]
+                if matched_indexes.empty:
+                    continue
+
+                # ERP 비교값은 사업장·제품별 총량이다. 상세행마다 반복하지 않고
+                # 첫 행에만 기록하며 나머지 LOT·유통기한·로케이션 행은 유지한다.
+                baseline.loc[
+                    matched_indexes, ["전산수량", "실제수량", "차이"]
+                ] = pd.NA
+                target_index = matched_indexes[0]
+                erp_quantity = int(compared["ERP수량"])
+                wms_quantity = int(compared["WMS수량"])
+                baseline.loc[target_index, "전산수량"] = erp_quantity
+                baseline.loc[target_index, "실제수량"] = wms_quantity
+                baseline.loc[target_index, "차이"] = wms_quantity - erp_quantity
+
+    computerized = pd.to_numeric(baseline["전산수량"], errors="coerce")
+    actual = pd.to_numeric(baseline["실제수량"], errors="coerce")
     baseline = baseline[
-        (baseline["전산수량"] != 0) | (baseline["실제수량"] != 0)
+        ~(computerized.eq(0) & actual.eq(0))
     ].copy()
     baseline = baseline.drop(columns=["수량"])
 
@@ -554,8 +594,9 @@ def _render_stock_comparison():
 
     st.markdown("#### 수량 대조용 기준 재고")
     st.caption(
-        "현재 기준 재고의 각 행 수량을 전산수량과 실제수량에 동일하게 기록하고 "
-        "차이는 0으로 표시합니다. 원본 수량 컬럼은 결과에서 제외합니다."
+        "일반 제품은 현재 기준 재고의 각 행 수량을 전산수량과 실제수량에 동일하게 "
+        "기록합니다. 무시 목록 제품은 ERP 비교결과의 ERP수량·WMS수량·차이를 첫 "
+        "상세행에 반영하며, 원본 수량 컬럼은 결과에서 제외합니다."
     )
     stocktake_result = _build_stocktake_result(ignored_result_source)
     if stocktake_result.empty:
