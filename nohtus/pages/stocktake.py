@@ -257,13 +257,13 @@ def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
             st.error(str(exc))
 
 
-def _build_stocktake_result(erp_result):
-    """ERP 비교 전체를 기준재고 엑셀과 같은 WMS 상세 행 단위로 정리한다."""
+def _build_stocktake_result(ignored_result):
+    """현재 비교자료에 연결된 무시 항목을 WMS 상세 행 단위로 정리한다."""
     result_columns = [
         "사업장", "로케이션", "ERP제품코드", "ERP제품명", "표준제품명",
         "LOT/제조번호", "유통기한", "전산수량", "실제수량", "차이",
     ]
-    if erp_result is None or erp_result.empty:
+    if ignored_result is None or ignored_result.empty:
         return pd.DataFrame(columns=result_columns)
 
     def clean(value, default=""):
@@ -271,9 +271,6 @@ def _build_stocktake_result(erp_result):
             return default
         text = str(value).strip()
         return text if text and text.lower() != "nan" else default
-
-    def name_key(value):
-        return "".join(clean(value).lower().split())
 
     inventory = q(
         """
@@ -311,41 +308,31 @@ def _build_stocktake_result(erp_result):
         "노투스": ("erp_nohtus_name", None),
     }
     rows = []
-    source = erp_result.copy()
-    # 재고 실사 결과는 ERP와 현재 WMS만 사용한다. 지엠메딕 업로드 비교행이
-    # 호출 경로 변경 등으로 섞여 들어와도 결과표에는 포함하지 않는다.
+    source = ignored_result.copy()
+    # 결과표는 현재 비교자료에서 수량을 확인할 수 있는 ERP 무시 항목만 사용한다.
+    # 지엠메딕 실사 업로드 자료는 위쪽 유통기한 비교표에서만 사용한다.
     if "사업장" in source.columns:
         source = source[
             source["사업장"].fillna("").astype(str).str.strip() != "지엠메딕"
         ].copy()
+    source = source[
+        source["WMS수량"].notna() & source["비교수량"].notna()
+    ].copy()
     source["WMS수량"] = pd.to_numeric(source["WMS수량"], errors="coerce").fillna(0)
-    source["ERP수량"] = pd.to_numeric(source["ERP수량"], errors="coerce").fillna(0)
-    source = source[~((source["WMS수량"] == 0) & (source["ERP수량"] == 0))]
+    source["비교수량"] = pd.to_numeric(source["비교수량"], errors="coerce").fillna(0)
 
     for _, compared in source.iterrows():
         company = clean(compared.get("사업장"))
         compared_standard = clean(compared.get("표준제품명"))
-        erp_name = clean(compared.get("ERP제품명"), compared_standard)
-        erp_names = {name_key(value) for value in erp_name.split(" / ") if name_key(value)}
         name_column, code_column = company_mapping.get(
             company, ("erp_nohtuspharm_name", "product_code")
         )
 
-        matched_products = products.iloc[0:0].copy()
-        if erp_names and name_column in products.columns:
-            matched_products = products[
-                products[name_column].apply(name_key).isin(erp_names)
-            ].copy()
-            if compared_standard:
-                matched_products = matched_products[
-                    matched_products["표준제품명"].fillna("").astype(str).str.strip()
-                    == compared_standard
-                ].copy()
-        if matched_products.empty:
-            matched_products = products[
-                products["표준제품명"].fillna("").astype(str).str.strip()
-                == compared_standard
-            ].copy()
+        matched_products = products[
+            products["표준제품명"].fillna("").astype(str).str.strip()
+            == compared_standard
+        ].copy()
+        erp_name = joined_values(matched_products, name_column, compared_standard or "-")
 
         standard_names = matched_products["표준제품명"].dropna().astype(str).str.strip()
         standard_names = set(standard_names[standard_names != ""].tolist())
@@ -363,7 +350,7 @@ def _build_stocktake_result(erp_result):
         erp_code = "-"
         if code_column and not matched_products.empty:
             erp_code = joined_values(matched_products, code_column)
-        computer_qty = int(compared["ERP수량"])
+        computer_qty = int(compared["비교수량"])
 
         if matched_inventory.empty:
             actual_qty = int(compared["WMS수량"])
@@ -581,6 +568,7 @@ def _render_stock_comparison():
             st.rerun()
 
     ignored_problems = list_ignored_problems()
+    ignored_result_source = pd.DataFrame()
     with st.expander(f"무시 목록 관리 ({len(ignored_problems):,}건)"):
         st.caption(
             "현재 비교자료에 포함된 무시 항목은 WMS 수량·비교 수량·차이를 함께 표시합니다. "
@@ -620,6 +608,7 @@ def _render_stock_comparison():
                     quantities = quantity_lookup.get(quantity_key(ignored_row))
                     if quantities is not None:
                         ignored_editor.loc[index, quantity_value_columns] = quantities
+            ignored_result_source = ignored_editor.copy()
             ignored_editor.insert(0, "해제", False)
             ignored_editor = ignored_editor[[
                 "해제",
@@ -703,14 +692,13 @@ def _render_stock_comparison():
 
     st.markdown("#### 재고 실사 결과")
     st.caption(
-        "업로드한 ERP와 현재 WMS의 전체 제품을 표시합니다. "
-        "지엠메딕 실사 업로드 자료는 이 표에 사용하지 않으며, "
-        "전산수량은 ERP 수량, 실제수량은 WMS의 제조번호별 현재 수량입니다. "
-        "양쪽 모두 0인 항목은 제외합니다."
+        "현재 비교자료에 연결된 무시 목록 항목만 표시합니다. "
+        "전산수량은 무시 목록의 비교 수량, 실제수량은 현재 WMS의 제조번호별 수량이며, "
+        "지엠메딕 실사 업로드 자료는 포함하지 않습니다."
     )
-    stocktake_result = _build_stocktake_result(erp_result)
+    stocktake_result = _build_stocktake_result(ignored_result_source)
     if stocktake_result.empty:
-        st.info("표시할 ERP · WMS 재고가 없습니다.")
+        st.info("현재 비교자료에 연결된 무시 목록 항목이 없습니다.")
     else:
         st.dataframe(
             stocktake_result,
