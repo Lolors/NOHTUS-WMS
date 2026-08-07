@@ -282,6 +282,7 @@ def _build_stocktake_result(erp_result):
                exp_date AS 유통기한
         FROM inventory
         WHERE company IN ('노투스팜', 'NOH', '노투스')
+          AND COALESCE(qty, 0) >= 1
           AND TRIM(product_name) NOT IN ('배송비', '폐기물 처리비용')
         """
     )
