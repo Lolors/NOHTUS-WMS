@@ -173,11 +173,13 @@ def compare_stock_files(nohtuspharm_file=None, noh_file=None, nohtus_file=None, 
         import_issues.extend(gm_issues)
         gm_result = _compare_gmmedic(gm_mapped)
 
-    problems = filter_ignored_problems(_build_problem_list(erp_result, gm_result, import_issues))
+    all_problems = _build_problem_list(erp_result, gm_result, import_issues)
+    problems = filter_ignored_problems(all_problems)
     return {
         "erp": erp_result,
         "gmmedic": gm_result,
         "problems": problems,
+        "all_problems": all_problems,
         "excel": comparison_excel_bytes(erp_result, gm_result, problems),
     }
 
