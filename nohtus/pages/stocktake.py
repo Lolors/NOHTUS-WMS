@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date
+from io import BytesIO
 
 import pandas as pd
 import streamlit as st
@@ -256,13 +257,13 @@ def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
             st.error(str(exc))
 
 
-def _build_stocktake_result(ignored_problems, all_problems):
-    """현재 비교의 무시 항목을 재고실사 결과 형식으로 정리한다."""
+def _build_stocktake_result(erp_result):
+    """ERP 비교 전체를 재고실사 결과 형식으로 정리한다."""
     result_columns = [
         "사업장", "로케이션", "ERP제품코드", "ERP제품명", "표준제품명",
         "LOT/제조번호", "유통기한", "전산수량", "실제수량", "차이",
     ]
-    if ignored_problems is None or ignored_problems.empty:
+    if erp_result is None or erp_result.empty:
         return pd.DataFrame(columns=result_columns)
 
     def clean(value, default=""):
@@ -271,22 +272,8 @@ def _build_stocktake_result(ignored_problems, all_problems):
         text = str(value).strip()
         return text if text and text.lower() != "nan" else default
 
-    def quantity_key(row):
-        problem_type = clean(row.get("구분"))
-        company = clean(row.get("사업장"))
-        product = clean(row.get("표준제품명"))
-        if problem_type == "실사 불일치" or company == "지엠메딕":
-            return problem_type, company, product, clean(row.get("유통기한"), "-")
-        return problem_type, company, product
-
-    quantity_lookup = {}
-    if all_problems is not None and not all_problems.empty:
-        for _, row in all_problems.iterrows():
-            quantity_lookup[quantity_key(row)] = (
-                row.get("비교수량", pd.NA),
-                row.get("WMS수량", pd.NA),
-                row.get("차이", pd.NA),
-            )
+    def name_key(value):
+        return "".join(clean(value).lower().split())
 
     inventory = q(
         """
@@ -294,7 +281,8 @@ def _build_stocktake_result(ignored_problems, all_problems):
                product_name AS 표준제품명, lot AS "LOT/제조번호",
                exp_date AS 유통기한
         FROM inventory
-        WHERE TRIM(product_name) NOT IN ('배송비', '폐기물 처리비용')
+        WHERE company IN ('노투스팜', 'NOH', '노투스')
+          AND TRIM(product_name) NOT IN ('배송비', '폐기물 처리비용')
         """
     )
     products = q(
@@ -316,68 +304,87 @@ def _build_stocktake_result(ignored_problems, all_problems):
                 values.append(text)
         return " / ".join(values) if values else default
 
+    company_mapping = {
+        "노투스팜": ("erp_nohtuspharm_name", "product_code"),
+        "NOH": ("erp_noh_name", "erp_noh_code"),
+        "노투스": ("erp_nohtus_name", None),
+    }
     rows = []
-    for _, ignored in ignored_problems.iterrows():
-        company = clean(ignored.get("사업장"))
-        product = clean(ignored.get("표준제품명"))
-        expiry = clean(ignored.get("유통기한"), "-")
-        computer_qty, actual_qty, difference = quantity_lookup.get(
-            quantity_key(ignored), (pd.NA, pd.NA, pd.NA)
-        )
+    source = erp_result.copy()
+    source["WMS수량"] = pd.to_numeric(source["WMS수량"], errors="coerce").fillna(0)
+    source["ERP수량"] = pd.to_numeric(source["ERP수량"], errors="coerce").fillna(0)
+    source = source[~((source["WMS수량"] == 0) & (source["ERP수량"] == 0))]
 
-        inventory_company = "노투스팜" if company == "지엠메딕" else company
+    for _, compared in source.iterrows():
+        company = clean(compared.get("사업장"))
+        compared_standard = clean(compared.get("표준제품명"))
+        erp_name = clean(compared.get("ERP제품명"), compared_standard)
+        erp_names = {name_key(value) for value in erp_name.split(" / ") if name_key(value)}
+        name_column, code_column = company_mapping.get(company, ("erp_nohtuspharm_name", "product_code"))
+
+        matched_products = products.iloc[0:0].copy()
+        if erp_names and name_column in products.columns:
+            matched_products = products[
+                products[name_column].apply(name_key).isin(erp_names)
+            ].copy()
+        if matched_products.empty:
+            matched_products = products[
+                products["표준제품명"].fillna("").astype(str).str.strip()
+                == compared_standard
+            ].copy()
+
+        standard_names = matched_products["표준제품명"].dropna().astype(str).str.strip()
+        standard_names = set(standard_names[standard_names != ""].tolist())
+        if not standard_names and compared_standard:
+            standard_names = {compared_standard}
+
         matched_inventory = inventory[
-            (inventory["사업장"].fillna("").astype(str).str.strip() == inventory_company)
-            & (inventory["표준제품명"].fillna("").astype(str).str.strip() == product)
+            (inventory["사업장"].fillna("").astype(str).str.strip() == company)
+            & (inventory["표준제품명"].fillna("").astype(str).str.strip().isin(standard_names))
         ].copy()
-        if company == "지엠메딕":
-            matched_inventory = matched_inventory[
-                matched_inventory["로케이션"].fillna("").astype(str).str.contains(
-                    "지엠메딕", regex=False
-                )
-            ]
-        if expiry != "-":
-            expiry_text = matched_inventory["유통기한"].fillna("-").astype(str).str.strip()
-            matched_inventory = matched_inventory[expiry_text == expiry]
 
-        matched_products = products[
-            products["표준제품명"].fillna("").astype(str).str.strip() == product
-        ]
-        product_row = matched_products.iloc[0] if not matched_products.empty else None
-        erp_company = "노투스팜" if company == "지엠메딕" else company
-        if product_row is None:
-            erp_code = "-"
-            erp_name = product
-        elif erp_company == "NOH":
-            erp_code = clean(product_row.get("erp_noh_code"), "-")
-            erp_name = clean(product_row.get("erp_noh_name"), product)
-        elif erp_company == "노투스":
-            erp_code = "-"
-            erp_name = clean(product_row.get("erp_nohtus_name"), product)
-        else:
-            erp_code = clean(product_row.get("product_code"), "-")
-            erp_name = clean(product_row.get("erp_nohtuspharm_name"), product)
-
+        erp_code = "-"
+        if code_column and not matched_products.empty:
+            erp_code = joined_values(matched_products, code_column)
+        computer_qty = int(compared["ERP수량"])
+        actual_qty = int(compared["WMS수량"])
         rows.append({
             "사업장": company,
             "로케이션": joined_values(matched_inventory, "로케이션"),
             "ERP제품코드": erp_code,
             "ERP제품명": erp_name,
-            "표준제품명": product,
+            "표준제품명": compared_standard,
             "LOT/제조번호": joined_values(matched_inventory, "LOT/제조번호"),
-            "유통기한": joined_values(matched_inventory, "유통기한", expiry),
+            "유통기한": joined_values(matched_inventory, "유통기한"),
             "전산수량": computer_qty,
             "실제수량": actual_qty,
-            "차이": difference,
+            "차이": actual_qty - computer_qty,
         })
 
     result = pd.DataFrame(rows, columns=result_columns)
+    if result.empty:
+        return result
     for column in ["전산수량", "실제수량", "차이"]:
-        result[column] = pd.to_numeric(result[column], errors="coerce").astype("Int64")
+        result[column] = pd.to_numeric(result[column], errors="coerce").fillna(0).astype(int)
     return result.sort_values(
-        ["사업장", "표준제품명", "유통기한"], kind="stable"
+        ["사업장", "표준제품명"], kind="stable"
     ).reset_index(drop=True)
 
+
+def _stocktake_result_excel_bytes(stocktake_result):
+    bio = BytesIO()
+    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
+        stocktake_result.to_excel(writer, index=False, sheet_name="재고실사결과")
+        worksheet = writer.book["재고실사결과"]
+        worksheet.freeze_panes = "A2"
+        worksheet.auto_filter.ref = worksheet.dimensions
+        for column_cells in worksheet.columns:
+            max_len = max(len(str(cell.value or "")) for cell in column_cells)
+            worksheet.column_dimensions[column_cells[0].column_letter].width = min(
+                max(max_len + 2, 10), 42
+            )
+    bio.seek(0)
+    return bio.getvalue()
 
 def _render_stock_comparison():
     from nohtus.services.stock_compare import (
@@ -647,14 +654,12 @@ def _render_stock_comparison():
 
     st.markdown("#### 재고 실사 결과")
     st.caption(
-        "무시 목록의 비교 수량은 전산수량으로, WMS 수량은 실제수량으로 표시합니다."
+        "업로드한 ERP와 현재 WMS의 전체 제품을 표시합니다. "
+        "전산수량은 ERP 수량, 실제수량은 WMS 수량이며 양쪽 모두 0인 항목은 제외합니다."
     )
-    stocktake_result = _build_stocktake_result(
-        ignored_problems,
-        result.get("all_problems", result["problems"]),
-    )
+    stocktake_result = _build_stocktake_result(erp_result)
     if stocktake_result.empty:
-        st.info("현재 비교자료에 포함된 무시 항목이 없습니다.")
+        st.info("표시할 ERP · WMS 재고가 없습니다.")
     else:
         st.dataframe(
             stocktake_result,
@@ -665,6 +670,14 @@ def _render_stock_comparison():
                 "실제수량": st.column_config.NumberColumn(format="%d"),
                 "차이": st.column_config.NumberColumn(format="%+d"),
             },
+        )
+        st.download_button(
+            "재고 실사 결과 엑셀 다운로드",
+            data=_stocktake_result_excel_bytes(stocktake_result),
+            file_name=f"NOHTUS_재고실사결과_{date.today().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="stocktake_result_download",
         )
 
 
