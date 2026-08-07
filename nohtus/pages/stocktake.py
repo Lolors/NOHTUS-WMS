@@ -257,8 +257,8 @@ def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
             st.error(str(exc))
 
 
-def _build_stocktake_result(ignored_result):
-    """기존 기준재고 표에 무시 목록의 비교 수량만 사후 반영한다."""
+def _build_stocktake_result(_ignored_result=None):
+    """기존 기준재고 표의 수량을 전산수량·실제수량에 그대로 반복한다."""
     from nohtus.services.stocktake import current_baseline_stock_excel_bytes
 
     baseline = pd.read_excel(
@@ -267,50 +267,11 @@ def _build_stocktake_result(ignored_result):
         dtype={"ERP제품코드": str},
     )
     baseline["ERP제품코드"] = baseline["ERP제품코드"].fillna("").astype(str)
-    for column in ["전산수량", "실제수량", "차이"]:
-        baseline[column] = pd.NA
 
-    if ignored_result is None or ignored_result.empty or baseline.empty:
-        return baseline
-
-    def clean(value, default=""):
-        if value is None or pd.isna(value):
-            return default
-        text_value = str(value).strip()
-        return text_value if text_value and text_value.lower() != "nan" else default
-
-    source = ignored_result.copy()
-    # 지엠메딕 실사 업로드 자료는 위쪽 유통기한 비교표에서만 사용한다.
-    if "사업장" in source.columns:
-        source = source[
-            source["사업장"].fillna("").astype(str).str.strip() != "지엠메딕"
-        ].copy()
-    source = source[
-        source["WMS수량"].notna() & source["ERP수량"].notna()
-    ].copy()
-    source["WMS수량"] = pd.to_numeric(source["WMS수량"], errors="coerce")
-    source["ERP수량"] = pd.to_numeric(source["ERP수량"], errors="coerce")
-    source = source.dropna(subset=["WMS수량", "ERP수량"])
-    source["차이"] = source["WMS수량"] - source["ERP수량"]
-
-    baseline_company = baseline["사업장"].fillna("").astype(str).str.strip()
-    baseline_product = baseline["표준제품명"].fillna("").astype(str).str.strip()
-
-    for _, compared in source.iterrows():
-        company = clean(compared.get("사업장"))
-        standard_name = clean(compared.get("표준제품명"))
-        matched_indexes = baseline.index[
-            (baseline_company == company) & (baseline_product == standard_name)
-        ]
-        if matched_indexes.empty:
-            continue
-
-        # 무시 목록은 사업장·제품별 총량이므로 기준재고 상세행은 그대로 두고
-        # 첫 번째 일치 행에만 비교 결과를 그대로 기록한다.
-        target_index = matched_indexes[0]
-        baseline.loc[target_index, "전산수량"] = int(compared["ERP수량"])
-        baseline.loc[target_index, "실제수량"] = int(compared["WMS수량"])
-        baseline.loc[target_index, "차이"] = int(compared["차이"])
+    quantity = pd.to_numeric(baseline["수량"], errors="coerce").fillna(0)
+    baseline["전산수량"] = quantity.astype(int)
+    baseline["실제수량"] = quantity.astype(int)
+    baseline["차이"] = 0
 
     return baseline
 
@@ -581,11 +542,10 @@ def _render_stock_comparison():
         key="stock_compare_download",
     )
 
-    st.markdown("#### 무시 목록 반영 기준 재고")
+    st.markdown("#### 수량 대조용 기준 재고")
     st.caption(
-        "현재 기준 재고 양식을 그대로 만들고, 무시 목록과 일치하는 사업장·표준제품명의 "
-        "첫 상세행에 ERP 수량→전산수량, WMS 수량→실제수량, 차이를 그대로 기록합니다. "
-        "LOT별 재분배나 미상 행 추가는 하지 않습니다."
+        "현재 기준 재고 양식을 그대로 만들고, 각 행의 수량을 전산수량과 실제수량에 "
+        "동일하게 기록합니다. 따라서 모든 행의 차이는 0입니다."
     )
     stocktake_result = _build_stocktake_result(ignored_result_source)
     if stocktake_result.empty:
@@ -602,9 +562,9 @@ def _render_stock_comparison():
             },
         )
         st.download_button(
-            "무시 목록 반영 기준 재고 엑셀 다운로드",
+            "수량 대조용 기준 재고 엑셀 다운로드",
             data=_stocktake_result_excel_bytes(stocktake_result),
-            file_name=f"NOHTUS_무시목록반영_기준재고_{date.today().strftime('%Y%m%d')}.xlsx",
+            file_name=f"NOHTUS_수량대조용_기준재고_{date.today().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
             key="stocktake_result_download",
