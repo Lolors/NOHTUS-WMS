@@ -433,6 +433,16 @@ def _render_stock_comparison():
                 for column in ["WMS수량", "비교수량", "차이"]:
                     ignored_editor[column] = pd.NA
             ignored_editor.insert(0, "해제", False)
+            ignored_editor = ignored_editor[[
+                "해제",
+                "사업장",
+                "표준제품명",
+                "WMS수량",
+                "비교수량",
+                "차이",
+                "차이원인",
+                "ID",
+            ]]
             edited_ignored = st.data_editor(
                 ignored_editor,
                 hide_index=True,
