@@ -43,7 +43,7 @@ def page_move():
     from nohtus.ui.location_picker import location_picker
     from nohtus.services.inbound import product_mapping_name_for
     st.title("이동 등록")
-    st.caption("제품 → LOT/유통기한을 선택하면 출발 재고가 자동 표시됩니다.")
+    st.caption("제품 → 유통기한 → LOT/제조번호를 선택하면 출발 재고가 자동 표시됩니다.")
 
     input_col, src_col, dest_col = st.columns([30, 40, 30], gap="large")
 
@@ -65,14 +65,34 @@ def page_move():
             st.info("이동할 제품을 선택하세요.")
             return
 
-        lot_df = q("SELECT DISTINCT lot FROM inventory WHERE product_name=? AND qty>0 ORDER BY lot", (product,))
-        if lot_df.empty:
-            st.info("현재 재고가 0이 아닌 LOT/제조번호가 없습니다.")
+        exp_df = q(
+            "SELECT DISTINCT exp_date FROM inventory "
+            "WHERE product_name=? AND qty>0 ORDER BY exp_date",
+            (product,),
+        )
+        if exp_df.empty:
+            st.info("현재 재고가 0이 아닌 유통기한이 없습니다.")
             return
-        lot = st.selectbox("LOT/제조번호", lot_df["lot"].tolist())
+        exp = st.selectbox(
+            "유통기한",
+            exp_df["exp_date"].tolist(),
+            format_func=display_date_only,
+            key=f"move_exp_{product}",
+        )
 
-        exp_df = q("SELECT DISTINCT exp_date FROM inventory WHERE product_name=? AND lot=? AND qty>0 ORDER BY exp_date", (product, lot))
-        exp = st.selectbox("유통기한", exp_df["exp_date"].tolist(), format_func=display_date_only)
+        lot_df = q(
+            "SELECT DISTINCT lot FROM inventory "
+            "WHERE product_name=? AND exp_date=? AND qty>0 ORDER BY lot",
+            (product, exp),
+        )
+        if lot_df.empty:
+            st.info("선택한 유통기한에 재고가 0이 아닌 LOT/제조번호가 없습니다.")
+            return
+        lot = st.selectbox(
+            "LOT/제조번호",
+            lot_df["lot"].tolist(),
+            key=f"move_lot_{product}_{exp}",
+        )
 
     src_df = q("""SELECT id, company AS 출발사업장, location AS 출발위치, qty AS 현재수량, warehouse_name AS 전산상명칭
                   FROM inventory
