@@ -257,6 +257,28 @@ def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
             st.error(str(exc))
 
 
+def _allocate_erp_quantity_by_detail(actual_quantities, erp_quantity):
+    """실제 상세수량을 최대한 확정하고 ERP 잔량은 한 상세행에 배정한다."""
+    actual = pd.to_numeric(pd.Series(actual_quantities), errors="coerce").fillna(0).astype(int)
+    allocated = pd.Series(0, index=actual.index, dtype="int64")
+    if actual.empty:
+        return allocated
+
+    remaining = int(erp_quantity)
+    # 작은 상세수량부터 1:1로 확정한다. 가장 큰 행은 총량 차이를 흡수하는
+    # 대표행으로 남겨 유통기한별 실제수량을 합산하지 않는다.
+    ordered_indexes = actual.sort_values(kind="stable").index.tolist()
+    for index in ordered_indexes[:-1]:
+        quantity = int(actual.loc[index])
+        if quantity < 0 or remaining < quantity:
+            continue
+        allocated.loc[index] = quantity
+        remaining -= quantity
+
+    allocated.loc[ordered_indexes[-1]] += remaining
+    return allocated
+
+
 def _build_stocktake_result(ignored_result=None):
     """기준재고 수량을 채우고 무시 목록 제품은 ERP 비교 수량으로 대체한다."""
     from nohtus.services.stocktake import current_baseline_stock_excel_bytes
@@ -298,17 +320,16 @@ def _build_stocktake_result(ignored_result=None):
                 if matched_indexes.empty:
                     continue
 
-                # ERP 비교값은 사업장·제품별 총량이다. 상세행마다 반복하지 않고
-                # 첫 행에만 기록하며 나머지 LOT·유통기한·로케이션 행은 유지한다.
-                baseline.loc[
-                    matched_indexes, ["전산수량", "실제수량", "차이"]
-                ] = pd.NA
-                target_index = matched_indexes[0]
                 erp_quantity = int(compared["ERP수량"])
-                wms_quantity = int(compared["WMS수량"])
-                baseline.loc[target_index, "전산수량"] = erp_quantity
-                baseline.loc[target_index, "실제수량"] = wms_quantity
-                baseline.loc[target_index, "차이"] = wms_quantity - erp_quantity
+                actual_quantities = pd.to_numeric(
+                    baseline.loc[matched_indexes, "실제수량"], errors="coerce"
+                ).fillna(0).astype(int)
+                allocated = _allocate_erp_quantity_by_detail(
+                    actual_quantities, erp_quantity
+                )
+                baseline.loc[matched_indexes, "전산수량"] = allocated
+                baseline.loc[matched_indexes, "실제수량"] = actual_quantities
+                baseline.loc[matched_indexes, "차이"] = actual_quantities - allocated
 
     computerized = pd.to_numeric(baseline["전산수량"], errors="coerce")
     actual = pd.to_numeric(baseline["실제수량"], errors="coerce")
@@ -595,8 +616,9 @@ def _render_stock_comparison():
     st.markdown("#### 수량 대조용 기준 재고")
     st.caption(
         "일반 제품은 현재 기준 재고의 각 행 수량을 전산수량과 실제수량에 동일하게 "
-        "기록합니다. 무시 목록 제품은 ERP 비교결과의 ERP수량·WMS수량·차이를 첫 "
-        "상세행에 반영하며, 원본 수량 컬럼은 결과에서 제외합니다."
+        "기록합니다. 무시 목록 제품은 유통기한별 실제수량을 유지하고, 작은 상세수량부터 "
+        "ERP수량을 동일하게 배정한 뒤 남은 전산수량을 대표 상세행에 기록합니다. "
+        "원본 수량 컬럼은 결과에서 제외합니다."
     )
     stocktake_result = _build_stocktake_result(ignored_result_source)
     if stocktake_result.empty:
