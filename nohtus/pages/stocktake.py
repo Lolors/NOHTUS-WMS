@@ -342,7 +342,11 @@ def _render_stock_comparison():
     if not result:
         return
 
-    problems = filter_ignored_problems(result["problems"])
+    # 저장된 원본 문제를 현재 무시 목록 기준으로 매번 다시 필터링한다.
+    # 무시 등록/해제 후에도 파일을 다시 비교하지 않고 즉시 목록에 반영된다.
+    problems = filter_ignored_problems(
+        result.get("all_problems", result["problems"])
+    )
     erp_result = result["erp"]
     gm_result = result["gmmedic"]
 
