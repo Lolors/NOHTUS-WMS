@@ -615,10 +615,9 @@ def _render_stock_comparison():
 
     st.markdown("#### 수량 대조용 기준 재고")
     st.caption(
-        "일반 제품은 현재 기준 재고의 각 행 수량을 전산수량과 실제수량에 동일하게 "
-        "기록합니다. 무시 목록 제품은 유통기한별 실제수량을 유지하고, 작은 상세수량부터 "
-        "ERP수량을 동일하게 배정한 뒤 남은 전산수량을 대표 상세행에 기록합니다. "
-        "원본 수량 컬럼은 결과에서 제외합니다."
+        "일반 제품은 전산수량과 실제수량을 똑같이 표시합니다. "
+        "무시 목록 제품은 유통기한별 수량을 그대로 보여주고, "
+        "ERP수량을 각 유통기한에 맞게 나누어 표시합니다."
     )
     stocktake_result = _build_stocktake_result(ignored_result_source)
     if stocktake_result.empty:
