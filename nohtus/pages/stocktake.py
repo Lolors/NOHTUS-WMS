@@ -272,6 +272,9 @@ def _build_stocktake_result(_ignored_result=None):
     baseline["전산수량"] = quantity.astype(int)
     baseline["실제수량"] = quantity.astype(int)
     baseline["차이"] = 0
+    baseline = baseline[
+        (baseline["전산수량"] != 0) | (baseline["실제수량"] != 0)
+    ].copy()
     baseline = baseline.drop(columns=["수량"])
 
     columns = list(baseline.columns)
