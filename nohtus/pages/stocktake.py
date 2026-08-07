@@ -312,6 +312,12 @@ def _build_stocktake_result(erp_result):
     }
     rows = []
     source = erp_result.copy()
+    # 재고 실사 결과는 ERP와 현재 WMS만 사용한다. 지엠메딕 업로드 비교행이
+    # 호출 경로 변경 등으로 섞여 들어와도 결과표에는 포함하지 않는다.
+    if "사업장" in source.columns:
+        source = source[
+            source["사업장"].fillna("").astype(str).str.strip() != "지엠메딕"
+        ].copy()
     source["WMS수량"] = pd.to_numeric(source["WMS수량"], errors="coerce").fillna(0)
     source["ERP수량"] = pd.to_numeric(source["ERP수량"], errors="coerce").fillna(0)
     source = source[~((source["WMS수량"] == 0) & (source["ERP수량"] == 0))]
@@ -698,7 +704,9 @@ def _render_stock_comparison():
     st.markdown("#### 재고 실사 결과")
     st.caption(
         "업로드한 ERP와 현재 WMS의 전체 제품을 표시합니다. "
-        "전산수량은 ERP 수량, 실제수량은 WMS 수량이며 양쪽 모두 0인 항목은 제외합니다."
+        "지엠메딕 실사 업로드 자료는 이 표에 사용하지 않으며, "
+        "전산수량은 ERP 수량, 실제수량은 WMS의 제조번호별 현재 수량입니다. "
+        "양쪽 모두 0인 항목은 제외합니다."
     )
     stocktake_result = _build_stocktake_result(erp_result)
     if stocktake_result.empty:
