@@ -328,6 +328,13 @@ def _build_stocktake_result(erp_result):
             matched_products = products[
                 products[name_column].apply(name_key).isin(erp_names)
             ].copy()
+            # 같은 ERP명이 여러 표준제품명에 연결되어 있어도 현재 비교 행의
+            # 표준제품명에 해당하는 제품마스터와 WMS 상세재고만 사용한다.
+            if compared_standard:
+                matched_products = matched_products[
+                    matched_products["표준제품명"].fillna("").astype(str).str.strip()
+                    == compared_standard
+                ].copy()
         if matched_products.empty:
             matched_products = products[
                 products["표준제품명"].fillna("").astype(str).str.strip()
