@@ -131,17 +131,27 @@ def remove_ignored_problems(ignore_ids):
 
 
 def filter_ignored_problems(problems):
+    """문제목록에서 무시 항목과 양쪽 수량이 모두 0인 행을 제외한다."""
     if problems is None or problems.empty:
         return pd.DataFrame(columns=ISSUE_COLUMNS)
+
+    filtered = problems.loc[:, ISSUE_COLUMNS].copy()
+    wms_qty = pd.to_numeric(filtered["WMS수량"], errors="coerce").fillna(0)
+    compare_qty = pd.to_numeric(filtered["비교수량"], errors="coerce").fillna(0)
+    filtered = filtered.loc[~((wms_qty == 0) & (compare_qty == 0))].copy()
+    if filtered.empty:
+        return pd.DataFrame(columns=ISSUE_COLUMNS)
+
     ignored = list_ignored_problems()
     if ignored.empty:
-        return problems.reset_index(drop=True)
+        return filtered.reset_index(drop=True)
+
     ignored_keys = {_issue_key(row) for _, row in ignored.iterrows()}
     keep = [
         _issue_key(row) not in ignored_keys
-        for _, row in problems.iterrows()
+        for _, row in filtered.iterrows()
     ]
-    return problems.loc[keep, ISSUE_COLUMNS].reset_index(drop=True)
+    return filtered.loc[keep, ISSUE_COLUMNS].reset_index(drop=True)
 
 
 def compare_stock_files(nohtuspharm_file=None, noh_file=None, nohtus_file=None, gmmedic_file=None):
