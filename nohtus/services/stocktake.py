@@ -263,23 +263,43 @@ def _baseline_stock_excel_bytes_from_dataframe(df):
         ws = writer.book["기준재고업로드"]
 
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+        from openpyxl.utils import get_column_letter
 
         thin = Side(style="thin", color="000000")
         border = Border(left=thin, right=thin, top=thin, bottom=thin)
         header_fill = PatternFill("solid", fgColor="E5E7EB")
         optional_fill = PatternFill("solid", fgColor="EEF2FF")
-        widths = {"A": 14, "B": 18, "C": 34, "D": 30, "E": 18, "F": 16, "G": 18, "H": 10}
-        for col, width in widths.items():
-            ws.column_dimensions[col].width = width
+        header_widths = {
+            "사업장": 14,
+            "로케이션": 18,
+            "ERP제품코드": 18,
+            "ERP제품명": 34,
+            "표준제품명": 30,
+            "LOT/제조번호": 18,
+            "유통기한": 16,
+            "전산수량": 12,
+            "실제수량": 12,
+            "차이": 10,
+            "수량": 10,
+        }
+        headers = {
+            cell.value: cell.column
+            for cell in ws[1]
+            if cell.value is not None
+        }
+        for header, column_index in headers.items():
+            ws.column_dimensions[get_column_letter(column_index)].width = header_widths.get(header, 18)
 
         ws.freeze_panes = "A2"
         max_row = max(1, len(df) + 1)
-        ws.auto_filter.ref = f"A1:H{max_row}"
+        max_column = max(1, len(df.columns))
+        ws.auto_filter.ref = f"A1:{get_column_letter(max_column)}{max_row}"
+        product_code_column = headers.get("ERP제품코드")
         for row in ws.iter_rows():
             for cell in row:
                 cell.border = border
                 cell.alignment = Alignment(vertical="center", wrap_text=True)
-                if cell.column_letter == "B":
+                if product_code_column and cell.column == product_code_column and cell.row > 1:
                     cell.number_format = "@"
                     if cell.value is not None:
                         cell.value = str(cell.value)
