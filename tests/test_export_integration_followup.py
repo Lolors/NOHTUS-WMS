@@ -130,7 +130,7 @@ class ExportIntegrationFollowupTests(TestCase):
 
     def test_export_sales_registration_is_after_shipment_intake(self):
         navigation = Path("nohtus/navigation.py").read_text(encoding="utf-8")
-        self.assertLess(navigation.index('"수출대기 입고"'), navigation.index('"수출확정 매출 등록"'))
+        self.assertLess(navigation.index('"수출대기 저장"'), navigation.index('"수출확정 매출 등록"'))
         self.assertLess(navigation.index('"수출확정 매출 등록"'), navigation.index('"박스 패킹"'))
 
         application = Path("nohtus/application.py").read_text(encoding="utf-8")
