@@ -44,7 +44,9 @@ def render() -> None:
         '국가': orders['country'],
         '바이어': orders['buyer'].fillna(''),
         '운송방식': orders['transport_method'].fillna(''),
-        '입고 건': orders['title'],
+        '주문 요약': orders['order_summary'],
+        '확정사업장': orders['confirmed_company_count'].map(lambda value: f'{int(value)}곳'),
+        '확정매출처': orders['confirmed_customer_count'].map(lambda value: f'{int(value)}곳'),
         '상태': orders['status'].map({
             'waiting': '수출대기',
             'partial': '일부 확정',
