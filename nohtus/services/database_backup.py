@@ -8,6 +8,7 @@ from pathlib import Path
 
 from nohtus.config import DB_PATH, PROJECT_ROOT
 
+EXPORT_DB_PATH = PROJECT_ROOT / "data" / "export.db"
 
 BACKUP_INTERVAL = timedelta(hours=1)
 MAX_BACKUPS = 20
@@ -16,6 +17,12 @@ GOOGLE_DRIVE_FOLDER_NAME = "NOHTUS_WMS_BACKUP"
 STATE_PATH = LOCAL_BACKUP_DIR / ".backup_state.json"
 _WORKER_LOCK = threading.Lock()
 _WORKER_STARTED = False
+
+# (소스 DB 경로, 백업 파일명 접두사, 로컬 상태 키, Google Drive 상태 키)
+_BACKUP_TARGETS = (
+    (DB_PATH, "nohtus", "last_local", "last_google_drive"),
+    (EXPORT_DB_PATH, "export", "last_local_export", "last_google_drive_export"),
+)
 
 
 def _read_state() -> dict:
@@ -30,12 +37,12 @@ def _write_state(state: dict) -> None:
     STATE_PATH.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
 
 
-def _backup_to(directory: Path, now: datetime) -> Path:
+def _backup_to(source_path: Path, directory: Path, now: datetime, prefix: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
-    destination = directory / f"nohtus_{now:%Y%m%d_%H%M%S}.db"
-    with sqlite3.connect(DB_PATH) as source, sqlite3.connect(destination) as target:
+    destination = directory / f"{prefix}_{now:%Y%m%d_%H%M%S}.db"
+    with sqlite3.connect(source_path) as source, sqlite3.connect(destination) as target:
         source.backup(target)
-    backups = sorted(directory.glob("nohtus_*.db"), key=lambda path: path.stat().st_mtime, reverse=True)
+    backups = sorted(directory.glob(f"{prefix}_*.db"), key=lambda path: path.stat().st_mtime, reverse=True)
     for old_backup in backups[MAX_BACKUPS:]:
         old_backup.unlink(missing_ok=True)
     return destination
@@ -73,36 +80,39 @@ def set_google_drive_root(path_text: str) -> Path:
 
 
 def run_due_backups() -> dict:
-    if not DB_PATH.is_file():
-        return {"local": None, "google_drive": None, "errors": []}
-
     now = datetime.now()
     state = _read_state()
     result = {"local": None, "google_drive": None, "errors": []}
-
-    try:
-        last_local = datetime.fromisoformat(state.get("last_local", ""))
-    except ValueError:
-        last_local = datetime.min
-    if now - last_local >= BACKUP_INTERVAL:
-        try:
-            result["local"] = str(_backup_to(LOCAL_BACKUP_DIR, now))
-            state["last_local"] = now.isoformat(timespec="seconds")
-        except (OSError, sqlite3.Error) as exc:
-            result["errors"].append(f"로컬 백업 실패: {exc}")
-
     drive_dir = google_drive_backup_dir()
-    if drive_dir is not None:
+
+    for source_path, prefix, local_key, drive_key in _BACKUP_TARGETS:
+        if not source_path.is_file():
+            continue
+
         try:
-            last_drive = datetime.fromisoformat(state.get("last_google_drive", ""))
+            last_local = datetime.fromisoformat(state.get(local_key, ""))
         except ValueError:
-            last_drive = datetime.min
-        if now - last_drive >= BACKUP_INTERVAL:
+            last_local = datetime.min
+        if now - last_local >= BACKUP_INTERVAL:
             try:
-                result["google_drive"] = str(_backup_to(drive_dir, now))
-                state["last_google_drive"] = now.isoformat(timespec="seconds")
+                path = str(_backup_to(source_path, LOCAL_BACKUP_DIR, now, prefix))
+                result["local"] = result["local"] or path
+                state[local_key] = now.isoformat(timespec="seconds")
             except (OSError, sqlite3.Error) as exc:
-                result["errors"].append(f"Google Drive 백업 실패({drive_dir}): {exc}")
+                result["errors"].append(f"로컬 백업 실패({prefix}): {exc}")
+
+        if drive_dir is not None:
+            try:
+                last_drive = datetime.fromisoformat(state.get(drive_key, ""))
+            except ValueError:
+                last_drive = datetime.min
+            if now - last_drive >= BACKUP_INTERVAL:
+                try:
+                    path = str(_backup_to(source_path, drive_dir, now, prefix))
+                    result["google_drive"] = result["google_drive"] or path
+                    state[drive_key] = now.isoformat(timespec="seconds")
+                except (OSError, sqlite3.Error) as exc:
+                    result["errors"].append(f"Google Drive 백업 실패({prefix}, {drive_dir}): {exc}")
 
     _write_state(state)
     return result
@@ -112,11 +122,17 @@ def backup_to_google_drive_now() -> str:
     directory = google_drive_backup_dir()
     if directory is None:
         raise ValueError("먼저 Google Drive 동기화 폴더 경로를 저장해 주세요.")
-    path = _backup_to(directory, datetime.now())
+
+    now = datetime.now()
     state = _read_state()
-    state["last_google_drive"] = datetime.now().isoformat(timespec="seconds")
+    paths = []
+    for source_path, prefix, _local_key, drive_key in _BACKUP_TARGETS:
+        if not source_path.is_file():
+            continue
+        paths.append(str(_backup_to(source_path, directory, now, prefix)))
+        state[drive_key] = now.isoformat(timespec="seconds")
     _write_state(state)
-    return str(path)
+    return "\n".join(paths)
 
 
 def _backup_worker() -> None:

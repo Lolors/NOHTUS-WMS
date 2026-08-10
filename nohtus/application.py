@@ -15,6 +15,7 @@ from styles import apply_style
 from nohtus.auth import allowed_pages_for_current_user, can_access_page, is_admin, render_user_box, require_login
 from nohtus.config import APP_TITLE, VERSION
 from nohtus.db_init import init_db
+from nohtus.export_app_bridge import init_export_app
 from nohtus.services import database_backup
 import nohtus.services.export_waiting_history_patch  # noqa: F401
 from nohtus.device import is_mobile, sync_mobile_flag
@@ -221,6 +222,7 @@ def page_export_waiting():
 def main():
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     init_db()
+    init_export_app()
     backup_result = database_backup.run_due_backups()
     database_backup.start_backup_worker()
     apply_style()
@@ -243,7 +245,7 @@ def main():
     render_user_box()
     if is_admin():
         with st.sidebar.expander("데이터 백업"):
-            st.caption("WMS DB는 매시간 로컬과 Google Drive에 자동 백업되며 각각 최신 20개를 보관합니다.")
+            st.caption("WMS DB와 수출관리 DB는 매시간 로컬과 Google Drive에 자동 백업되며 각각 최신 20개를 보관합니다.")
             drive_path = st.text_input(
                 "Google Drive 동기화 폴더",
                 value=database_backup.google_drive_root(),
@@ -262,8 +264,8 @@ def main():
                 key="backup_wms_to_google_drive_now",
             ):
                 try:
-                    path = database_backup.backup_to_google_drive_now()
-                    st.success(f"Google Drive 백업 완료: {path}")
+                    paths = database_backup.backup_to_google_drive_now()
+                    st.success("Google Drive 백업 완료:  \n" + paths.replace("\n", "  \n"))
                 except Exception as exc:
                     st.error(str(exc))
             for error in backup_result.get("errors", []):
