@@ -57,6 +57,8 @@ def list_active_orders() -> pd.DataFrame:
     summaries: dict[int, str] = {}
     company_counts: dict[int, int] = {}
     customer_counts: dict[int, int] = {}
+    company_labels: dict[int, str] = {}
+    customer_labels: dict[int, str] = {}
     for order_id, rows in item_rows.groupby("order_id", sort=False):
         ordered = (
             rows.groupby("product_name", as_index=False, dropna=False)["qty"]
@@ -68,11 +70,17 @@ def list_active_orders() -> pd.DataFrame:
         remaining = max(len(ordered.index) - 2, 0)
         summaries[int(order_id)] = ", ".join(visible) + (f" + 그 외 {remaining}품목" if remaining else "")
         confirmed_rows = rows[rows["confirmed"] == 1]
-        company_counts[int(order_id)] = confirmed_rows["confirmed_company"].fillna("").str.strip().replace("", pd.NA).nunique()
-        customer_counts[int(order_id)] = confirmed_rows["confirmed_customer_name"].fillna("").str.strip().replace("", pd.NA).nunique()
+        companies = confirmed_rows["confirmed_company"].fillna("").str.strip().replace("", pd.NA).dropna().unique()
+        customers = confirmed_rows["confirmed_customer_name"].fillna("").str.strip().replace("", pd.NA).dropna().unique()
+        company_counts[int(order_id)] = len(companies)
+        customer_counts[int(order_id)] = len(customers)
+        company_labels[int(order_id)] = str(companies[0]) if len(companies) == 1 else ""
+        customer_labels[int(order_id)] = str(customers[0]) if len(customers) == 1 else ""
     orders["order_summary"] = orders["id"].map(summaries).fillna("-")
     orders["confirmed_company_count"] = orders["id"].map(company_counts).fillna(0).astype(int)
     orders["confirmed_customer_count"] = orders["id"].map(customer_counts).fillna(0).astype(int)
+    orders["confirmed_company_label"] = orders["id"].map(company_labels).fillna("")
+    orders["confirmed_customer_label"] = orders["id"].map(customer_labels).fillna("")
     return orders
 
 
