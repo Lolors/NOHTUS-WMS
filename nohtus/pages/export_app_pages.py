@@ -11,6 +11,7 @@ from nohtus.export_app.views import (
     실출고_입력,
     오버뷰,
     주문_검색_및_수정,
+    수출확정_매출_등록,
 )
 
 
@@ -32,6 +33,11 @@ def page_export_order_search():
 def page_export_shipment_intake():
     with export_db.connection_session():
         실출고_입력.render()
+
+
+def page_export_sales_registration():
+    with export_db.connection_session():
+        수출확정_매출_등록.render()
 
 
 def page_export_packing():

@@ -1,0 +1,57 @@
+from __future__ import annotations
+
+import pandas as pd
+import streamlit as st
+
+from nohtus.export_app.services import export_confirm_service
+from nohtus.export_app.views.주문_검색_및_수정 import render_wms_confirmation_section
+
+
+def render() -> None:
+    st.title('수출확정 매출 등록')
+    st.caption(
+        '수출대기 입고가 끝난 품목의 ERP 매출 사업장과 수출처를 선택해 확정합니다. '
+        '표준제품명 옆의 출고사업장 ERP명을 참고해 ERP에서 제품을 검색하세요.'
+    )
+
+    orders = export_confirm_service.list_active_orders()
+    if orders.empty:
+        st.info('수출확정할 수출대기 입고 건이 없습니다.')
+        return
+
+    duplicate_export_nos = orders['export_no'][orders['export_no'].duplicated(keep=False)].dropna().unique()
+    if len(duplicate_export_nos):
+        st.error(
+            '같은 수출번호에 진행 중인 실재고 연결 건이 여러 개입니다: '
+            + ', '.join(map(str, duplicate_export_nos))
+            + '. 주문을 병합하거나 새 수출번호를 사용하세요.'
+        )
+
+    table = pd.DataFrame({
+        '_id': orders['id'].astype(int),
+        '수출번호': orders['export_no'],
+        '국가': orders['country'],
+        '바이어': orders['buyer'].fillna(''),
+        '운송방식': orders['transport_method'].fillna(''),
+        '입고 건': orders['title'],
+        '상태': orders['status'].map({'waiting': '수출대기', 'partial': '일부 확정'}).fillna(orders['status']),
+    })
+    event = st.dataframe(
+        table,
+        hide_index=True,
+        use_container_width=True,
+        on_select='rerun',
+        selection_mode='single-row',
+        column_config={'_id': None},
+        key='export_sales_registration_orders',
+    )
+    if not event.selection.rows:
+        st.info('매출 등록할 수출번호를 선택하세요.')
+        return
+
+    selected = table.iloc[int(event.selection.rows[0])]
+    export_no = str(selected['수출번호'] or '').strip()
+    if export_no in set(map(str, duplicate_export_nos)):
+        st.warning('중복된 수출번호는 병합하거나 새 번호로 변경한 뒤 확정할 수 있습니다.')
+        return
+    render_wms_confirmation_section(export_no)

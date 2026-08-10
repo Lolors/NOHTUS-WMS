@@ -21,7 +21,7 @@ from nohtus.export_app.services.order_edit_service import (
 from nohtus.services.export_waiting import cancel_export_waiting_order, confirm_export_waiting_items
 
 
-def _render_wms_link_section(case_id: int, export_no: str) -> None:
+def render_wms_confirmation_section(export_no: str) -> None:
     wms_orders = export_confirm_service.list_orders_for_export_no(export_no)
     if wms_orders.empty:
         return
@@ -56,7 +56,7 @@ def _render_wms_link_section(case_id: int, export_no: str) -> None:
     if total_count:
         st.progress(confirmed_count / total_count, text=f'{confirmed_count} / {total_count} 품목 확정')
 
-    display_cols = ['사업장', '제품명', 'LOT', '유통기한', '수량', '원래로케이션', '확정사업장', '확정매출처', '확정일시']
+    display_cols = ['출고사업장', '표준제품명', '출고사업장ERP명', 'LOT', '유통기한', '수량', '원래로케이션', '확정사업장', '확정매출처', '확정일시']
     st.dataframe(items[display_cols], hide_index=True, use_container_width=True)
 
     cancel_key = f'confirm_wms_link_cancel_{order_id}'
@@ -91,14 +91,14 @@ def _render_wms_link_section(case_id: int, export_no: str) -> None:
 
     st.markdown('#### 선택 품목 수출확정')
     st.caption('아직 확정되지 않은 품목을 체크하고, ERP 매출 정보와 출고일자를 설정하세요.')
-    selection_source = remaining_items[['id', '사업장', '제품명', 'LOT', '유통기한', '수량', '원래로케이션']].copy()
+    selection_source = remaining_items[['id', '출고사업장', '표준제품명', '출고사업장ERP명', 'LOT', '유통기한', '수량', '원래로케이션']].copy()
     selection_source.insert(0, '선택', False)
     edited = st.data_editor(
         selection_source,
         hide_index=True,
         use_container_width=True,
         key=f'export_link_confirm_items_{order_id}_{confirmed_count}',
-        disabled=['id', '사업장', '제품명', 'LOT', '유통기한', '수량', '원래로케이션'],
+        disabled=['id', '출고사업장', '표준제품명', '출고사업장ERP명', 'LOT', '유통기한', '수량', '원래로케이션'],
         column_config={'선택': st.column_config.CheckboxColumn('선택', help='이번에 같은 ERP 사업장으로 확정할 품목'), 'id': None},
     )
     selected_rows = edited[edited['선택'] == True] if not edited.empty else pd.DataFrame()  # noqa: E712
@@ -109,9 +109,9 @@ def _render_wms_link_section(case_id: int, export_no: str) -> None:
     confirm_info_col, shipment_date_col = st.columns(2)
     with confirm_info_col:
         default_company = (
-            str(selected_rows.iloc[0]['사업장'] or '')
+            str(selected_rows.iloc[0]['출고사업장'] or '')
             if not selected_rows.empty
-            else str(remaining_items.iloc[0]['사업장'] or '')
+            else str(remaining_items.iloc[0]['출고사업장'] or '')
         )
         default_index = COMPANIES.index(default_company) if default_company in COMPANIES else 0
         erp_company = st.selectbox(
@@ -274,9 +274,6 @@ def render() -> None:
         edited=order_editor(existing,key=f'orders_{case_id}')
         if st.button('주문 목록 저장',type='primary'):
             order_service.save_order_items(case_id,edited); folder_service.sync_case_folder(case_id); st.rerun()
-
-    if not is_his:
-        _render_wms_link_section(case_id, case['export_no'])
 
     st.divider()
     action_left, action_right = st.columns([7, 3], gap='large')

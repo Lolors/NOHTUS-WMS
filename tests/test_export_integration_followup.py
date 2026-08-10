@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from nohtus.export_app.services import dashboard_view_service, wms_link_service
+from nohtus.export_app.services import dashboard_view_service, export_confirm_service, wms_link_service
 
 
 class ExportIntegrationFollowupTests(TestCase):
@@ -78,3 +78,38 @@ class ExportIntegrationFollowupTests(TestCase):
         first_row_use = source.index("active_rows.iloc[0]")
         self.assertLess(duplicate_guard, first_row_use)
         self.assertIn("주문 병합으로 하나로 합치거나", source)
+
+    def test_export_sales_registration_is_after_shipment_intake(self):
+        navigation = Path("nohtus/navigation.py").read_text(encoding="utf-8")
+        self.assertLess(navigation.index('"수출대기 입고"'), navigation.index('"수출확정 매출 등록"'))
+        self.assertLess(navigation.index('"수출확정 매출 등록"'), navigation.index('"박스 패킹"'))
+
+        application = Path("nohtus/application.py").read_text(encoding="utf-8")
+        self.assertIn('elif menu == "수출확정 매출 등록": page_export_sales_registration()', application)
+
+    def test_confirmation_was_removed_from_order_edit_and_moved_to_own_page(self):
+        order_edit = Path("nohtus/export_app/views/주문_검색_및_수정.py").read_text(encoding="utf-8")
+        dedicated = Path("nohtus/export_app/views/수출확정_매출_등록.py").read_text(encoding="utf-8")
+        self.assertNotIn("render_wms_confirmation_section(case['export_no'])", order_edit)
+        self.assertIn("render_wms_confirmation_section(export_no)", dedicated)
+        self.assertIn("주문을 병합하거나 새 수출번호를 사용하세요", dedicated)
+
+    def test_confirmation_items_include_standard_and_source_erp_names(self):
+        raw = pd.DataFrame([{
+            "id": 1,
+            "출고사업장": "NOH",
+            "원래로케이션": "A1-01-01",
+            "표준제품명": "표준 제품",
+            "출고사업장ERP명": "ERP 검색 제품명",
+            "LOT": "L1",
+            "유통기한": "2027-01-01",
+            "수량": 2,
+            "confirmed": 0,
+            "확정사업장": None,
+            "확정매출처": None,
+            "확정일시": None,
+        }])
+        with patch.object(export_confirm_service, "wms_q", return_value=raw):
+            result = export_confirm_service.order_items(1)
+        self.assertEqual(result.loc[0, "표준제품명"], "표준 제품")
+        self.assertEqual(result.loc[0, "출고사업장ERP명"], "ERP 검색 제품명")

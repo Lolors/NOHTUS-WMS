@@ -41,6 +41,7 @@ from nohtus.pages.export_app_pages import (
     page_export_packing,
     page_export_shared_documents,
     page_export_shipment_intake,
+    page_export_sales_registration,
     page_export_statistics,
 )
 from nohtus.pages.own_product_status import page_own_product_status
@@ -309,6 +310,7 @@ def main():
     elif menu == "주문 입력": page_export_order_entry()
     elif menu == "주문 검색 및 수정": page_export_order_search()
     elif menu == "수출대기 입고": page_export_shipment_intake()
+    elif menu == "수출확정 매출 등록": page_export_sales_registration()
     elif menu == "박스 패킹": page_export_packing()
     elif menu == "국내배송": page_export_domestic_delivery()
     elif menu == "공유용 자료": page_export_shared_documents()

@@ -22,10 +22,22 @@ def list_orders_for_export_no(export_no: str) -> pd.DataFrame:
     )
 
 
+def list_active_orders() -> pd.DataFrame:
+    """수출확정 매출 등록 화면에서 처리할 진행 중 WMS 연결 건."""
+    return wms_q(
+        """SELECT id, export_no, country, buyer, transport_method, title, status,
+                  order_date, created_at
+           FROM export_waiting_orders
+           WHERE status IN ('waiting','partial')
+           ORDER BY created_at, id"""
+    )
+
+
 def order_items(order_id: int) -> pd.DataFrame:
     df = wms_q(
-        """SELECT id,company AS 사업장,source_location AS 원래로케이션,
-                  product_name AS 제품명,lot AS LOT,exp_date AS 유통기한,qty AS 수량,
+        """SELECT id,company AS 출고사업장,source_location AS 원래로케이션,
+                  product_name AS 표준제품명,COALESCE(warehouse_name,'') AS 출고사업장ERP명,
+                  lot AS LOT,exp_date AS 유통기한,qty AS 수량,
                   COALESCE(confirmed,0) AS confirmed,confirmed_company AS 확정사업장,
                   confirmed_customer_name AS 확정매출처,confirmed_at AS 확정일시
            FROM export_waiting_items WHERE order_id=?
@@ -34,7 +46,7 @@ def order_items(order_id: int) -> pd.DataFrame:
     )
     if not df.empty:
         df["유통기한"] = df["유통기한"].apply(display_date_only)
-        for col in ["확정사업장", "확정매출처", "확정일시"]:
+        for col in ["출고사업장ERP명", "확정사업장", "확정매출처", "확정일시"]:
             df[col] = df[col].fillna("").astype(str).replace("", "-")
     return df
 
