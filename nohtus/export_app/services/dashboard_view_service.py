@@ -3,7 +3,8 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 
-from nohtus.export_app.services import export_service
+from nohtus.export_app import db
+from nohtus.export_app.services import export_service, order_service
 
 
 STAGE_LABELS = {
@@ -189,3 +190,63 @@ def order_products_detail(case_id: int) -> str:
         unit = str(item['unit'] or '').strip()
         lines.append(f'{name} · {quantity_text}{unit}')
     return '\n'.join(lines) or '주문목록 없음'
+
+
+def summarize_product_names(value: object) -> str:
+    """Same shortening rule as order_products_summary, but from an already
+    fetched GROUP_CONCAT string so the dashboard doesn't need a query per case."""
+    names = [name.strip() for name in str(value or '').split(',') if name.strip()]
+    if not names:
+        return '-'
+    visible_names = names[:2]
+    summary = ', '.join(visible_names)
+    remaining_count = len(names) - len(visible_names)
+    if remaining_count > 0:
+        summary += f' + 그 외 {remaining_count}품목'
+    return summary
+
+
+def active_and_recent_cases(*, reference: date | None = None, recent_days: int = 7) -> list[dict]:
+    """Cases still in progress (stage not yet 국내배송), plus 국내배송 cases
+    whose actual_ship_date falls within the last `recent_days` days."""
+    reference_date = reference or date.today()
+    cutoff = reference_date - timedelta(days=recent_days)
+    cases = []
+    for case in order_service.list_editable_cases():
+        if str(case['case_type'] or '') == 'historical':
+            continue
+        stage = str(case['stage'] or '').strip()
+        if stage != '국내배송':
+            cases.append(case)
+            continue
+        if _parse_case_date(case['actual_ship_date']) >= cutoff:
+            cases.append(case)
+    return cases
+
+
+def intake_progress_percentages(case_ids: list[int]) -> dict[int, float]:
+    """Bulk 실제 수출대기 입고 수량 / 주문목록 총 수량 ratio per case, as a 0-100 percentage."""
+    ids = sorted({int(case_id) for case_id in case_ids})
+    if not ids:
+        return {}
+    placeholders = ','.join('?' for _ in ids)
+    rows = db.rows(
+        f'''SELECT o.case_id AS case_id,
+                   SUM(o.quantity) AS ordered_qty,
+                   COALESCE(SUM(r.received_qty), 0) AS received_qty
+            FROM order_items o
+            LEFT JOIN (
+                SELECT order_item_id, SUM(requested_qty) AS received_qty
+                FROM shipment_items
+                GROUP BY order_item_id
+            ) r ON r.order_item_id = o.id
+            WHERE o.case_id IN ({placeholders})
+            GROUP BY o.case_id''',
+        tuple(ids),
+    )
+    result: dict[int, float] = {}
+    for row in rows:
+        ordered_qty = float(row['ordered_qty'] or 0)
+        received_qty = float(row['received_qty'] or 0)
+        result[int(row['case_id'])] = min(100.0, received_qty / ordered_qty * 100.0) if ordered_qty > 0 else 0.0
+    return result

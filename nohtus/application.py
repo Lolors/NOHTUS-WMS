@@ -305,7 +305,7 @@ def main():
     elif menu == "거래처 관리": page_customer_master()
     elif menu == "매입가 조회": page_purchase_history()
     elif menu == "이력 조회": page_history()
-    elif menu == "대시보드": page_export_dashboard()
+    elif menu == "수출 현황": page_export_dashboard()
     elif menu == "주문 입력": page_export_order_entry()
     elif menu == "주문 검색 및 수정": page_export_order_search()
     elif menu == "수출대기 입고": page_export_shipment_intake()

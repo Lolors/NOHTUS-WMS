@@ -130,6 +130,9 @@ def render() -> None:
         cases,
         key_prefix='shipment_export_selector',
         saved_case_id=st.session_state.get('actual_packing_case_id'),
+        show_stage=False,
+        show_transport=True,
+        case_label='product_summary',
     )
 
     st.session_state['actual_packing_case_id'] = case_id
@@ -309,17 +312,42 @@ def render() -> None:
             if not kept_rows:
                 st.caption('아직 연결된 실재고가 없습니다.')
             else:
-                for row in kept_rows:
-                    row_id = int(row['id'])
-                    row_col, delete_col = st.columns([5, 1])
-                    row_col.write(
+                row_labels = {
+                    (
                         f"{row['business_unit'] or '-'} · {row['product_name']} · "
-                        f"LOT {row['lot_no'] or '-'} · 유통기한 {row['expiry_date'] or '-'} · "
+                        f"{row['lot_no'] or '-'} · {row['expiry_date'] or '-'} · "
                         f"{fmt_number(safe_number(row['requested_qty']))}{unit}"
-                    )
-                    if delete_col.button('삭제', key=f'wms_pick_remove_current_{case_id}_{selected_order_id}_{row_id}'):
-                        removed_ids.add(row_id)
-                        st.rerun()
+                    ): int(row['id'])
+                    for row in kept_rows
+                }
+                st.dataframe(
+                    pd.DataFrame([
+                        {
+                            '사업장': row['business_unit'] or '',
+                            '실제 제품명': row['product_name'] or '',
+                            '제조번호': row['lot_no'] or '',
+                            '유통기한': row['expiry_date'] or '',
+                            '출고수량': safe_number(row['requested_qty']),
+                            '단위': unit,
+                        }
+                        for row in kept_rows
+                    ]),
+                    hide_index=True,
+                    use_container_width=True,
+                )
+                rows_to_remove = st.multiselect(
+                    '연결을 해제할 항목 선택',
+                    list(row_labels),
+                    key=f'wms_pick_remove_select_{case_id}_{selected_order_id}',
+                )
+                if st.button(
+                    '선택한 연결 해제',
+                    disabled=not rows_to_remove,
+                    key=f'wms_pick_remove_apply_{case_id}_{selected_order_id}',
+                ):
+                    for label in rows_to_remove:
+                        removed_ids.add(row_labels[label])
+                    st.rerun()
 
             if legacy_current:
                 st.caption(
@@ -358,86 +386,87 @@ def render() -> None:
                     '실재고 연결을 바꿔도 그대로 유지됩니다. 새로 담은 행만 미패킹 상태로 생성됩니다.'
                 )
 
-            st.markdown('##### WMS 실재고에서 담기')
-            search_key = f'wms_pick_search_{case_id}_{selected_order_id}'
-            search_term = st.text_input(
-                '제품 검색',
-                value=st.session_state.get(search_key, selected_order_name),
-                key=search_key,
-            ).strip()
-            products_df = wms_inventory_picker_service.search_products(search_term)
-            if products_df.empty:
-                st.info('일치하는 WMS 제품이 없습니다. 검색어를 바꿔 보세요.')
-            else:
-                product_choices = products_df['standard_name'].tolist()
-                picked_product = st.selectbox(
-                    '추천 제품',
-                    product_choices,
-                    key=f'wms_pick_product_{case_id}_{selected_order_id}',
-                )
-                expiry_choices = wms_inventory_picker_service.expiry_options(picked_product)
-                if not expiry_choices:
-                    st.info(f'{picked_product}의 재고가 없습니다.')
+            if not kept_rows:
+                st.markdown('##### WMS 실재고에서 담기')
+                search_key = f'wms_pick_search_{case_id}_{selected_order_id}'
+                search_term = st.text_input(
+                    '제품 검색',
+                    value=st.session_state.get(search_key, selected_order_name),
+                    key=search_key,
+                ).strip()
+                products_df = wms_inventory_picker_service.search_products(search_term)
+                if products_df.empty:
+                    st.info('일치하는 WMS 제품이 없습니다. 검색어를 바꿔 보세요.')
                 else:
-                    picked_expiry = st.selectbox(
-                        '유통기한',
-                        expiry_choices,
-                        key=f'wms_pick_exp_{case_id}_{selected_order_id}_{picked_product}',
+                    product_choices = products_df['standard_name'].tolist()
+                    picked_product = st.selectbox(
+                        '추천 제품',
+                        product_choices,
+                        key=f'wms_pick_product_{case_id}_{selected_order_id}',
                     )
-                    lot_choices = wms_inventory_picker_service.lot_options(picked_product, picked_expiry)
-                    picked_lot = st.selectbox(
-                        'LOT/제조번호',
-                        lot_choices,
-                        key=f'wms_pick_lot_{case_id}_{selected_order_id}_{picked_product}_{picked_expiry}',
-                    )
-                    stock_rows = wms_inventory_picker_service.resolve_stock_rows(
-                        picked_product, picked_lot, picked_expiry
-                    )
-                    if stock_rows.empty:
-                        st.info('선택한 조건의 재고가 없습니다.')
+                    expiry_choices = wms_inventory_picker_service.expiry_options(picked_product)
+                    if not expiry_choices:
+                        st.info(f'{picked_product}의 재고가 없습니다.')
                     else:
-                        if len(stock_rows) == 1:
-                            stock_row = stock_rows.iloc[0]
-                            st.caption(
-                                f"{stock_row['company']} / {stock_row['location']} / "
-                                f"현재고 {int(stock_row['qty'])}EA"
-                            )
-                        else:
-                            stock_labels = [
-                                f"{r['company']} / {r['location']} / {int(r['qty'])}EA"
-                                for _, r in stock_rows.iterrows()
-                            ]
-                            stock_choice = st.selectbox(
-                                '사업장/위치',
-                                stock_labels,
-                                key=f'wms_pick_stock_{case_id}_{selected_order_id}',
-                            )
-                            stock_row = stock_rows.iloc[stock_labels.index(stock_choice)]
-
-                        max_qty = int(stock_row['qty'])
-                        pick_qty = st.number_input(
-                            '담을 수량',
-                            min_value=0,
-                            max_value=max_qty,
-                            step=1,
-                            key=f'wms_pick_qty_{case_id}_{selected_order_id}',
+                        picked_expiry = st.selectbox(
+                            '유통기한',
+                            expiry_choices,
+                            key=f'wms_pick_exp_{case_id}_{selected_order_id}_{picked_product}',
                         )
-                        if st.button(
-                            '이 항목에 담기',
-                            use_container_width=True,
-                            disabled=pick_qty <= 0,
-                            key=f'wms_pick_add_{case_id}_{selected_order_id}',
-                        ):
-                            pending.append({
-                                'inventory_id': int(stock_row['id']),
-                                'company': stock_row['company'],
-                                'product_name': picked_product,
-                                'lot': picked_lot,
-                                'exp_date': picked_expiry,
-                                'location': stock_row['location'],
-                                'qty': float(pick_qty),
-                            })
-                            st.rerun()
+                        lot_choices = wms_inventory_picker_service.lot_options(picked_product, picked_expiry)
+                        picked_lot = st.selectbox(
+                            'LOT/제조번호',
+                            lot_choices,
+                            key=f'wms_pick_lot_{case_id}_{selected_order_id}_{picked_product}_{picked_expiry}',
+                        )
+                        stock_rows = wms_inventory_picker_service.resolve_stock_rows(
+                            picked_product, picked_lot, picked_expiry
+                        )
+                        if stock_rows.empty:
+                            st.info('선택한 조건의 재고가 없습니다.')
+                        else:
+                            if len(stock_rows) == 1:
+                                stock_row = stock_rows.iloc[0]
+                                st.caption(
+                                    f"{stock_row['company']} / {stock_row['location']} / "
+                                    f"현재고 {int(stock_row['qty'])}EA"
+                                )
+                            else:
+                                stock_labels = [
+                                    f"{r['company']} / {r['location']} / {int(r['qty'])}EA"
+                                    for _, r in stock_rows.iterrows()
+                                ]
+                                stock_choice = st.selectbox(
+                                    '사업장/위치',
+                                    stock_labels,
+                                    key=f'wms_pick_stock_{case_id}_{selected_order_id}',
+                                )
+                                stock_row = stock_rows.iloc[stock_labels.index(stock_choice)]
+    
+                            max_qty = int(stock_row['qty'])
+                            pick_qty = st.number_input(
+                                '담을 수량',
+                                min_value=0,
+                                max_value=max_qty,
+                                step=1,
+                                key=f'wms_pick_qty_{case_id}_{selected_order_id}',
+                            )
+                            if st.button(
+                                '이 항목에 담기',
+                                use_container_width=True,
+                                disabled=pick_qty <= 0,
+                                key=f'wms_pick_add_{case_id}_{selected_order_id}',
+                            ):
+                                pending.append({
+                                    'inventory_id': int(stock_row['id']),
+                                    'company': stock_row['company'],
+                                    'product_name': picked_product,
+                                    'lot': picked_lot,
+                                    'exp_date': picked_expiry,
+                                    'location': stock_row['location'],
+                                    'qty': float(pick_qty),
+                                })
+                                st.rerun()
 
             if st.button(
                 '실재고 연결 저장',
