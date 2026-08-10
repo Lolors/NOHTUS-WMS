@@ -361,6 +361,7 @@ def _render_stock_comparison():
         filter_ignored_problems,
         list_ignored_problems,
         remove_ignored_problems,
+        update_ignored_problem_reasons,
     )
 
     st.subheader("WMS · ERP · 실사재고 비교")
@@ -548,7 +549,11 @@ def _render_stock_comparison():
                 hide_index=True,
                 use_container_width=True,
                 key="stock_compare_ignored_editor",
-                disabled=[column for column in ignored_editor.columns if column != "해제"],
+                disabled=[
+                    column
+                    for column in ignored_editor.columns
+                    if column not in {"해제", "차이원인"}
+                ],
                 column_config={
                     "해제": st.column_config.CheckboxColumn("해제"),
                     "WMS수량": st.column_config.NumberColumn("WMS 수량", format="%d"),
@@ -556,11 +561,43 @@ def _render_stock_comparison():
                     "차이": st.column_config.NumberColumn("수량 차이", format="%+d"),
                     "차이원인": st.column_config.TextColumn(
                         "차이 원인",
-                        help="무시 등록할 때 입력한 공통 원인입니다.",
+                        help="기존 사유를 수정한 뒤 아래 저장 버튼을 누르세요.",
+                        required=True,
                     ),
                     "ID": None,
                 },
             )
+            original_reasons = {
+                int(row["ID"]): str(row["차이원인"] or "").strip()
+                for _, row in ignored_editor.iterrows()
+            }
+            reason_updates = {}
+            has_blank_reason = False
+            for _, row in edited_ignored.iterrows():
+                ignore_id = int(row["ID"])
+                value = row["차이원인"]
+                edited_reason = "" if pd.isna(value) else str(value).strip()
+                if edited_reason != original_reasons[ignore_id]:
+                    if edited_reason:
+                        reason_updates[ignore_id] = edited_reason
+                    else:
+                        has_blank_reason = True
+
+            if has_blank_reason:
+                st.warning("차이 원인은 비워둘 수 없습니다.")
+            if st.button(
+                "수정한 사유 저장",
+                disabled=not reason_updates or has_blank_reason,
+                use_container_width=True,
+                key="stock_compare_save_ignored_reasons",
+            ):
+                updated = update_ignored_problem_reasons(reason_updates)
+                st.session_state["_stock_compare_ignore_message"] = (
+                    f"{updated:,}개 항목의 차이 원인을 수정했습니다."
+                )
+                st.session_state.pop("stock_compare_ignored_editor", None)
+                st.rerun()
+
             selected_ignored = edited_ignored[edited_ignored["해제"] == True]
             if st.button(
                 "선택 항목 무시 해제",
