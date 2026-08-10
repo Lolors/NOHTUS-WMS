@@ -44,3 +44,14 @@ def resolve_stock_rows(product_name: str, lot: str, exp_date: str) -> pd.DataFra
            ORDER BY company, location""",
         (product_name, lot, exp_date),
     )
+
+
+def product_stock_rows(product_name: str) -> pd.DataFrame:
+    """선택한 표준제품명의 출고 가능한 실재고를 한 표로 반환한다."""
+    return wms_q(
+        """SELECT id, company, location, product_name, lot, exp_date, qty, warehouse_name
+           FROM inventory
+           WHERE product_name=? AND qty>0 AND location<>'P'
+           ORDER BY company, exp_date, lot, location""",
+        (product_name,),
+    )
