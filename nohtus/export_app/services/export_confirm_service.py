@@ -28,7 +28,7 @@ def list_active_orders() -> pd.DataFrame:
     완전 확정 건도 이후 출고 목록 수정으로 다시 처리할 수 있으므로 목록에서
     유지한다. 당장 매출 등록이 필요한 수출대기 건을 가장 먼저 보여준다.
     """
-    return wms_q(
+    orders = wms_q(
         """SELECT id, export_no, country, buyer, transport_method, title, status,
                   order_date, created_at
            FROM export_waiting_orders
@@ -41,6 +41,39 @@ def list_active_orders() -> pd.DataFrame:
                     END,
                     created_at, id"""
     )
+    if orders.empty:
+        return orders
+
+    item_rows = wms_q(
+        """SELECT order_id, product_name, qty, COALESCE(confirmed,0) AS confirmed,
+                  confirmed_company, confirmed_customer_name
+           FROM export_waiting_items
+           WHERE order_id IN ({})
+           ORDER BY order_id, product_name""".format(
+               ",".join("?" for _ in orders.index)
+           ),
+        tuple(int(value) for value in orders["id"]),
+    )
+    summaries: dict[int, str] = {}
+    company_counts: dict[int, int] = {}
+    customer_counts: dict[int, int] = {}
+    for order_id, rows in item_rows.groupby("order_id", sort=False):
+        ordered = (
+            rows.groupby("product_name", as_index=False, dropna=False)["qty"]
+            .sum()
+            .sort_values(["qty", "product_name"], ascending=[False, True])
+        )
+        visible = [f"{row.product_name} {int(row.qty) if float(row.qty).is_integer() else row.qty}EA"
+                   for row in ordered.head(2).itertuples()]
+        remaining = max(len(ordered.index) - 2, 0)
+        summaries[int(order_id)] = ", ".join(visible) + (f" + 그 외 {remaining}품목" if remaining else "")
+        confirmed_rows = rows[rows["confirmed"] == 1]
+        company_counts[int(order_id)] = confirmed_rows["confirmed_company"].fillna("").str.strip().replace("", pd.NA).nunique()
+        customer_counts[int(order_id)] = confirmed_rows["confirmed_customer_name"].fillna("").str.strip().replace("", pd.NA).nunique()
+    orders["order_summary"] = orders["id"].map(summaries).fillna("-")
+    orders["confirmed_company_count"] = orders["id"].map(company_counts).fillna(0).astype(int)
+    orders["confirmed_customer_count"] = orders["id"].map(customer_counts).fillna(0).astype(int)
+    return orders
 
 
 def order_items(order_id: int) -> pd.DataFrame:
