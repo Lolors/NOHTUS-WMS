@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import pandas as pd
 import streamlit as st
 
@@ -75,7 +77,7 @@ def render_wms_confirmation_section(export_no: str) -> None:
         )
 
     if active_rows.empty:
-        st.info('진행 중인 실재고 연결 건이 없습니다. 수출대기 입고에서 실재고를 먼저 연결하세요.')
+        st.info('진행 중인 실재고 연결 건이 없습니다. 수출대기 저장에서 실재고를 먼저 연결하세요.')
         return
     if len(active_rows.index) > 1:
         st.error(
@@ -100,7 +102,7 @@ def render_wms_confirmation_section(export_no: str) -> None:
         st.markdown('#### 확정 품목 매출·출고 등록 및 수정')
         st.caption(
             '확정 품목을 선택해 ERP 사업장·수출처·출고일자를 다시 저장할 수 있습니다. '
-            '제품 교체나 수량 변경은 수출대기 입고에서 수정하면 기존 출고가 원복되고 새 품목이 수출대기로 전환됩니다.'
+            '제품 교체나 수량 변경은 수출대기 저장에서 수정하면 기존 출고가 원복되고 새 품목이 수출대기로 전환됩니다.'
         )
         confirmed_source = confirmed_items[
             ['id', '출고사업장', '표준제품명', '출고사업장ERP명', 'LOT', '유통기한', '수량', '확정사업장', '확정매출처']
@@ -278,18 +280,26 @@ def render() -> None:
     if not cases:
         st.info('수정할 수출 건이 없습니다.'); st.stop()
 
-    cols=st.columns([1.5,1.5,3,4])
-    years=sorted({int(txt(c['actual_ship_date'])[:4]) for c in cases if txt(c['actual_ship_date'])[:4].isdigit()},reverse=True)
-    year=cols[0].selectbox('연도',['전체']+years)
-    month=cols[1].selectbox('월',['전체']+list(range(1,13)))
-    country_filter=cols[2].selectbox('국가',['전체']+sorted({txt(c['country']) for c in cases if txt(c['country'])}))
-    query=cols[3].text_input('제품명 검색').strip().casefold()
+    cols=st.columns([2.2,1.4,1.8,1.5,2.5])
+    today=date.today()
+    period=cols[0].date_input('기간',value=(today-timedelta(days=30),today),key='editable_case_period')
+    if isinstance(period,(tuple,list)) and len(period)==2:
+        start_date,end_date=period
+    else:
+        start_date=end_date=period
+    country_filter=cols[1].selectbox('국가',['전체']+sorted({txt(c['country']) for c in cases if txt(c['country'])}))
+    buyer_filter=cols[2].selectbox('바이어',['전체']+sorted({txt(c['buyer']) for c in cases if txt(c['buyer'])}))
+    transport_filter=cols[3].selectbox('운송방식',['전체']+sorted({txt(c['transport_mode']) for c in cases if txt(c['transport_mode'])}))
+    query=cols[4].text_input('제품명 검색').strip().casefold()
     filtered=[]
     for c in cases:
-        d=txt(c['actual_ship_date']); cy=int(d[:4]) if d[:4].isdigit() else None; cm=int(d[5:7]) if len(d)>=7 and d[5:7].isdigit() else None
-        if year!='전체' and cy!=year: continue
-        if month!='전체' and cm!=month: continue
+        d=txt(c['actual_ship_date'])[:10] or txt(c['created_at'])[:10]
+        try: case_date=date.fromisoformat(d)
+        except ValueError: case_date=None
+        if case_date is None or case_date<start_date or case_date>end_date: continue
         if country_filter!='전체' and txt(c['country'])!=country_filter: continue
+        if buyer_filter!='전체' and txt(c['buyer'])!=buyer_filter: continue
+        if transport_filter!='전체' and txt(c['transport_mode'])!=transport_filter: continue
         if query and query not in txt(c['product_names']).casefold(): continue
         filtered.append(c)
     if not filtered:
