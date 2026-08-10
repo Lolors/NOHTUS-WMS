@@ -334,6 +334,7 @@ def init_db() -> None:
 
         _remove_expected_ship_date_column(conn)
         _add_column(conn, 'shipment_items', 'order_item_id INTEGER')
+        _add_column(conn, 'shipment_items', 'source_inventory_id INTEGER')
         _add_column(conn, 'order_items', 'purchase_price REAL NOT NULL DEFAULT 0')
 
         conn.execute("UPDATE export_cases SET stage='패킹 대기' WHERE stage='출고 대기'")

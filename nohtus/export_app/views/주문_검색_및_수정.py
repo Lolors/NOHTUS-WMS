@@ -3,10 +3,11 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from nohtus.config import COMPANIES
 from nohtus.export_app.components.delivery_method_input import delivery_method_input, is_courier_delivery
 from nohtus.export_app.components.editors import historical_box_editor, historical_order_editor, order_editor
 from nohtus.export_app.config import TRANSPORT_MODES
-from nohtus.export_app.services import export_service, folder_service, history_service, order_save_guard, order_service
+from nohtus.export_app.services import export_confirm_service, export_service, folder_service, history_service, order_save_guard, order_service
 from nohtus.export_app.services.case_merge_service import merge_case_into
 from nohtus.export_app.services.order_edit_service import (
     box_items,
@@ -17,6 +18,155 @@ from nohtus.export_app.services.order_edit_service import (
     save_historical,
     text_value as txt,
 )
+from nohtus.services.export_waiting import cancel_export_waiting_order, confirm_export_waiting_items
+
+
+def _render_wms_link_section(case_id: int, export_no: str) -> None:
+    wms_orders = export_confirm_service.list_orders_for_export_no(export_no)
+    if wms_orders.empty:
+        return
+
+    st.divider()
+    st.markdown('### 실재고 수출확정')
+
+    active_rows = wms_orders[wms_orders['status'].isin(['waiting', 'partial'])]
+    done_rows = wms_orders[~wms_orders['status'].isin(['waiting', 'partial'])]
+
+    if not done_rows.empty:
+        st.caption(
+            '이미 처리된 실재고 연결: '
+            + ', '.join(f"{row['title']} ({row['status']})" for _, row in done_rows.iterrows())
+        )
+
+    if active_rows.empty:
+        st.info('진행 중인 실재고 연결 건이 없습니다. 수출대기 입고에서 실재고를 먼저 연결하세요.')
+        return
+
+    order_id = int(active_rows.iloc[0]['id'])
+    order_title = str(active_rows.iloc[0]['title'] or export_no)
+    items = export_confirm_service.order_items(order_id)
+    confirmed_count = int((items['confirmed'] == 1).sum()) if not items.empty else 0
+    total_count = len(items)
+    if total_count:
+        st.progress(confirmed_count / total_count, text=f'{confirmed_count} / {total_count} 품목 확정')
+
+    display_cols = ['사업장', '제품명', 'LOT', '유통기한', '수량', '원래로케이션', '확정사업장', '확정매출처', '확정일시']
+    st.dataframe(items[display_cols], hide_index=True, use_container_width=True)
+
+    cancel_key = f'confirm_wms_link_cancel_{order_id}'
+    if st.session_state.get(cancel_key):
+        st.warning('이미 확정된 품목은 유지되고, 아직 확정되지 않은 품목만 원래 위치로 복구됩니다.')
+        no_col, yes_col = st.columns(2)
+        with no_col:
+            if st.button('취소하지 않기', use_container_width=True, key=f'wms_link_cancel_no_{order_id}'):
+                st.session_state.pop(cancel_key, None)
+                st.rerun()
+        with yes_col:
+            if st.button(
+                '남은 실재고 연결을 원래 위치로 복구',
+                type='primary',
+                use_container_width=True,
+                key=f'wms_link_cancel_yes_{order_id}',
+            ):
+                try:
+                    cancel_export_waiting_order(order_id)
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state.pop(cancel_key, None)
+                    st.success(f'{order_title}의 남은 실재고 연결을 취소하고 원래 위치로 복구했습니다.')
+                    st.rerun()
+        return
+
+    remaining_items = items[items['confirmed'] == 0].copy() if not items.empty else pd.DataFrame()
+    if remaining_items.empty:
+        st.success('이 실재고 연결 건의 모든 품목이 수출확정되었습니다.')
+        return
+
+    st.markdown('#### 선택 품목 수출확정')
+    st.caption('아직 확정되지 않은 품목을 체크하고, ERP 매출 정보와 출고일자를 설정하세요.')
+    selection_source = remaining_items[['id', '사업장', '제품명', 'LOT', '유통기한', '수량', '원래로케이션']].copy()
+    selection_source.insert(0, '선택', False)
+    edited = st.data_editor(
+        selection_source,
+        hide_index=True,
+        use_container_width=True,
+        key=f'export_link_confirm_items_{order_id}_{confirmed_count}',
+        disabled=['id', '사업장', '제품명', 'LOT', '유통기한', '수량', '원래로케이션'],
+        column_config={'선택': st.column_config.CheckboxColumn('선택', help='이번에 같은 ERP 사업장으로 확정할 품목'), 'id': None},
+    )
+    selected_rows = edited[edited['선택'] == True] if not edited.empty else pd.DataFrame()  # noqa: E712
+    selected_ids = selected_rows['id'].astype(int).tolist() if not selected_rows.empty else []
+    selected_qty = int(selected_rows['수량'].sum()) if not selected_rows.empty else 0
+    st.caption(f'선택: {len(selected_ids)}개 품목 / {selected_qty}EA')
+
+    confirm_info_col, shipment_date_col = st.columns(2)
+    with confirm_info_col:
+        default_company = (
+            str(selected_rows.iloc[0]['사업장'] or '')
+            if not selected_rows.empty
+            else str(remaining_items.iloc[0]['사업장'] or '')
+        )
+        default_index = COMPANIES.index(default_company) if default_company in COMPANIES else 0
+        erp_company = st.selectbox(
+            'ERP 매출 사업장',
+            COMPANIES,
+            index=default_index,
+            key=f'export_link_confirm_company_{order_id}_{confirmed_count}',
+        )
+        term = st.text_input(
+            'ERP 수출 매출처 검색',
+            placeholder='매출처명 일부를 입력하세요',
+            key=f'export_link_customer_term_{order_id}_{confirmed_count}',
+        )
+        customers = export_confirm_service.customer_options(erp_company, term)
+        if customers.empty:
+            st.warning('해당 사업장의 ERP 매출처가 없습니다. 거래처 관리에서 ERP 매출처 목록을 먼저 등록하거나 갱신하세요.')
+            return
+        labels = [f"{str(row.customer_code or '').strip() or '-'} | {row.customer_name}" for row in customers.itertuples()]
+        customer = customers.iloc[
+            labels.index(
+                st.selectbox(
+                    'ERP 수출 매출처',
+                    labels,
+                    key=f'export_link_customer_select_{order_id}_{confirmed_count}',
+                )
+            )
+        ]
+    with shipment_date_col:
+        shipment_date = st.date_input(
+            '출고일자',
+            key=f'export_link_confirm_order_date_{order_id}_{confirmed_count}',
+            help='이번에 선택한 품목에 적용할 출고일자를 선택하세요.',
+        )
+
+    action_col, cancel_link_col = st.columns([3, 1])
+    with action_col:
+        if st.button(
+            '선택 품목 수출확정',
+            type='primary',
+            use_container_width=True,
+            disabled=not selected_ids,
+            key=f'export_link_confirm_{order_id}_{confirmed_count}',
+        ):
+            try:
+                confirm_export_waiting_items(
+                    order_id,
+                    selected_ids,
+                    erp_company=erp_company,
+                    customer_code=customer['customer_code'],
+                    customer_name=customer['customer_name'],
+                    shipment_date=shipment_date,
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.success(f'{order_title}에서 {len(selected_ids)}개 품목 / {selected_qty}EA를 수출확정했습니다.')
+                st.rerun()
+    with cancel_link_col:
+        if st.button('실재고 연결 취소', use_container_width=True, key=f'wms_link_cancel_open_{order_id}'):
+            st.session_state[cancel_key] = True
+            st.rerun()
 
 
 def render() -> None:
@@ -118,6 +268,9 @@ def render() -> None:
         edited=order_editor(existing,key=f'orders_{case_id}')
         if st.button('주문 목록 저장',type='primary'):
             order_service.save_order_items(case_id,edited); folder_service.sync_case_folder(case_id); st.rerun()
+
+    if not is_his:
+        _render_wms_link_section(case_id, case['export_no'])
 
     st.divider()
     action_left, action_right = st.columns([7, 3], gap='large')

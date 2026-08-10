@@ -164,6 +164,7 @@ def _cached_case_items(
                       NULLIF(TRIM(s.location), ''),
                       ''
                   ) AS business_unit,
+                  s.location AS source_location, s.source_inventory_id,
                   s.product_name, s.lot_no, s.expiry_date,
                   s.requested_qty, s.box_no, o.unit
            FROM shipment_items s
@@ -331,8 +332,12 @@ def save_for_order(case_id: int, order_item_id: int, rows: list[dict]) -> float:
                 shipment_id = candidate_id
 
         total += quantity
+        raw_source_inventory_id = item.get('source_inventory_id')
+        source_inventory_id = int(raw_source_inventory_id) if raw_source_inventory_id else None
         fields = (
             str(item.get('business_unit', '') or '').strip(),
+            str(item.get('location', '') or '').strip(),
+            source_inventory_id,
             product_name,
             str(item.get('lot_no', '') or '').strip(),
             str(item.get('expiry_date', '') or '').strip(),
@@ -346,8 +351,8 @@ def save_for_order(case_id: int, order_item_id: int, rows: list[dict]) -> float:
                 packing_structure_changed = True
             db.execute(
                 '''UPDATE shipment_items
-                   SET business_unit=?, product_name=?, lot_no=?, expiry_date=?,
-                       requested_qty=?, updated_at=?
+                   SET business_unit=?, location=?, source_inventory_id=?, product_name=?,
+                       lot_no=?, expiry_date=?, requested_qty=?, updated_at=?
                    WHERE id=? AND case_id=? AND order_item_id=?''',
                 (*fields, now, shipment_id, case_id, order_item_id),
             )
@@ -357,11 +362,12 @@ def save_for_order(case_id: int, order_item_id: int, rows: list[dict]) -> float:
                 case_id,
                 order_item_id,
                 fields[0],
-                '',
                 fields[1],
                 fields[2],
                 fields[3],
                 fields[4],
+                fields[5],
+                fields[6],
                 None,
                 now,
                 now,
@@ -378,9 +384,9 @@ def save_for_order(case_id: int, order_item_id: int, rows: list[dict]) -> float:
     if new_values:
         db.executemany(
             '''INSERT INTO shipment_items(
-                   case_id, order_item_id, business_unit, location, product_name,
-                   lot_no, expiry_date, requested_qty, box_no, created_at, updated_at
-               ) VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+                   case_id, order_item_id, business_unit, location, source_inventory_id,
+                   product_name, lot_no, expiry_date, requested_qty, box_no, created_at, updated_at
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
             new_values,
         )
 

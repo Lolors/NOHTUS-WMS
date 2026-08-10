@@ -25,7 +25,6 @@ from nohtus.pages.closing_print import page_closing
 from nohtus.pages.expiry_alerts import page_expiry_alerts
 import nohtus.pages.export_waiting as export_waiting_page
 from nohtus.pages.export_waiting import page_export_waiting as _page_export_waiting
-from nohtus.pages.saved_export_waiting import page_saved_export_waiting
 from nohtus.pages.history_business import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.location_map_business import page_map
@@ -292,8 +291,6 @@ def main():
     elif menu == "최근 조회": page_recent_products()
     elif menu == "출고지시": page_outbound()
     elif menu == "저장된 출고지시": page_saved_outbound_refactored()
-    elif menu == "수출대기 등록": page_export_waiting()
-    elif menu == "저장된 수출대기": page_saved_export_waiting()
     elif menu == "마감": page_closing()
     elif menu == "재고 찾기": page_mobile_stock_finder()
     elif menu == "입고 등록": page_inbound_refactored()
