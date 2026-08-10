@@ -15,6 +15,7 @@ from nohtus.services.export_waiting import (
     confirm_export_waiting_items,
     ensure_export_waiting_tables,
     merge_export_waiting_orders,
+    update_confirmed_export_waiting_metadata,
 )
 from nohtus.services.export_waiting_excel import (
     build_export_waiting_erp_sales_rows,
@@ -246,6 +247,62 @@ def _edit_export_order_dialog(order_id, field, current_value, order_title):
             "취소",
             use_container_width=True,
             key=f"cancel_export_order_dialog_{field}_{int(order_id)}",
+        ):
+            st.rerun()
+
+
+@st.dialog("수출대기 수정")
+def _edit_confirmed_export_order_dialog(order_id, selected):
+    st.caption("수출확정된 품목과 매출 출고 이력은 유지하고 주문 정보만 수정합니다.")
+    country = st.text_input(
+        "국가 *",
+        value=str(selected.get("country") or ""),
+        key=f"confirmed_export_country_{order_id}",
+    )
+    buyer = st.text_input(
+        "바이어",
+        value=str(selected.get("buyer") or ""),
+        key=f"confirmed_export_buyer_{order_id}",
+    )
+    current_method = str(selected.get("transport_method") or "미지정").strip() or "미지정"
+    method_index = TRANSPORT_METHODS.index(current_method) if current_method in TRANSPORT_METHODS else 0
+    transport_method = st.selectbox(
+        "운송방식",
+        TRANSPORT_METHODS,
+        index=method_index,
+        key=f"confirmed_export_transport_{order_id}",
+    )
+    export_no = st.text_input(
+        "수출번호 *",
+        value=str(selected.get("export_no") or ""),
+        key=f"confirmed_export_no_{order_id}",
+    )
+
+    save_col, cancel_col = st.columns(2)
+    with save_col:
+        if st.button(
+            "수정 완료",
+            type="primary",
+            use_container_width=True,
+            key=f"save_confirmed_export_{order_id}",
+        ):
+            try:
+                title = update_confirmed_export_waiting_metadata(
+                    order_id,
+                    country=country,
+                    buyer=buyer,
+                    transport_method=transport_method,
+                    export_no=export_no,
+                )
+                st.session_state["_export_waiting_message"] = f"{title}의 수출대기 정보를 수정했습니다."
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+    with cancel_col:
+        if st.button(
+            "닫기",
+            use_container_width=True,
+            key=f"close_confirmed_export_{order_id}",
         ):
             st.rerun()
 
@@ -512,14 +569,21 @@ def page_saved_export_waiting():
                 key=f"export_waiting_erp_sales_download_empty_{order_id}",
             )
     with edit_col:
-        if status == "waiting":
-            if st.button("수출대기 수정", type="primary", use_container_width=True):
+        edit_enabled = status in {"waiting", "confirmed"}
+        if st.button(
+            "수출대기 수정",
+            type="primary" if edit_enabled else "secondary",
+            use_container_width=True,
+            disabled=not edit_enabled,
+            key=f"edit_export_waiting_{order_id}",
+        ):
+            if status == "waiting":
                 st.session_state["export_editing_order_id"] = order_id
                 st.session_state.pop("_export_edit_loaded", None)
                 st.session_state["page"] = "수출대기 등록"
                 st.rerun()
-        else:
-            st.button("수출대기 수정", disabled=True, use_container_width=True)
+            else:
+                _edit_confirmed_export_order_dialog(order_id, selected)
     with merge_col:
         if status == "waiting":
             if st.button("수출대기 병합", use_container_width=True):

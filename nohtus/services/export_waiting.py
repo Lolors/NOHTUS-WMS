@@ -458,6 +458,46 @@ def save_export_waiting_order(cart, *, country, buyer="", transport_method="미�
     return {"order_id":order_id,"row_count":len(grouped),"total_qty":total,"title":title}
 
 
+def update_confirmed_export_waiting_metadata(
+    order_id,
+    *,
+    country,
+    buyer="",
+    transport_method="미지정",
+    export_no,
+):
+    country = str(country or "").strip()
+    buyer = str(buyer or "").strip()
+    transport_method = str(transport_method or "").strip() or "미지정"
+    export_no = str(export_no or "").strip()
+    if not country:
+        raise ValueError("국가를 입력하세요.")
+    if transport_method not in TRANSPORT_METHODS:
+        raise ValueError("운송방식을 항공, 해상, 핸드캐리, 미지정 중에서 선택하세요.")
+    if not export_no:
+        raise ValueError("수출번호를 입력하세요.")
+
+    title = f"{country}-{buyer or '미지정'}-{transport_method}"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with connect() as con:
+        cur = con.cursor()
+        ensure_export_waiting_tables(cur)
+        row = cur.execute(
+            "SELECT status FROM export_waiting_orders WHERE id=?",
+            (int(order_id),),
+        ).fetchone()
+        if not row or str(row[0]) != "confirmed":
+            raise ValueError("수출확정된 건만 이 수정창에서 변경할 수 있습니다.")
+        cur.execute(
+            """UPDATE export_waiting_orders
+               SET country=?,buyer=?,transport_method=?,export_no=?,title=?,updated_at=?
+               WHERE id=?""",
+            (country, buyer, transport_method, export_no, title, now, int(order_id)),
+        )
+        con.commit()
+    return title
+
+
 def merge_export_waiting_orders(source_order_id, target_order_id):
     source_order_id = int(source_order_id or 0)
     target_order_id = int(target_order_id or 0)
