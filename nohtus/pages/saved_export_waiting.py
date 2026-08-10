@@ -605,7 +605,7 @@ def page_saved_export_waiting():
         st.error("취소된 건입니다. 확정되지 않았던 품목은 등록 당시 원래 로케이션으로 복구되었습니다.")
         return
     if status == "confirmed":
-        st.success("모든 품목의 수출확정이 완료되었습니다. 출고일자와 출고 리스트를 수정할 수 있습니다.")
+        st.success("모든 품목의 수출확정이 완료되었습니다. 출고 리스트를 수정해 품목을 추가하면, 기존 확정 품목은 유지되고 추가 품목만 다시 확정합니다.")
         return
 
     if st.session_state.get("confirm_export_merge_source_id") == order_id:
