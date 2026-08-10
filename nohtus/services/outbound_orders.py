@@ -170,15 +170,16 @@ def _requested_by_inventory(cart):
     return result
 
 
-def save_outbound_order(cart, title='', memo=''):
+def save_outbound_order(cart, title='', memo='', order_date=None):
     """장바구니를 출고지시서로 저장한다.
     출고지시 저장 시점에 inventory 현재고를 즉시 차감한다.
     같은 inventory_id가 장바구니에 여러 번 들어와도 합산 검증 후 차감하여 중복 출고를 막는다.
+    order_date를 지정하지 않으면 오늘 날짜로 저장한다.
     """
     if not cart:
         raise ValueError('저장할 출고지시 품목이 없습니다.')
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    order_date = datetime.now().strftime('%Y-%m-%d')
+    order_date = str(order_date or datetime.now().strftime('%Y-%m-%d'))
     valid_cart = [item for item in cart or [] if int(item.get('요청수량', 0) or 0) > 0]
     if not valid_cart:
         raise ValueError('저장할 출고지시 품목이 없습니다.')

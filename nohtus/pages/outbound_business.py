@@ -190,9 +190,8 @@ def page_outbound():
                 prefix = f"수정 대상 출고지시서 #{editing_id}를 찾을 수 없어 새 출고지시서로 저장했습니다."
             else:
                 prefix = ""
-            oid = outbound_page.save_outbound_order(cart, title)
+            oid = outbound_page.save_outbound_order(cart, title, order_date=order_date)
             outbound_page._save_outbound_customer(int(oid), customer_payload)
-            _set_outbound_order_date(int(oid))
             msg = f"{prefix} 출고지시서 #{int(oid)} 저장 완료".strip()
         _upsert_wms_last_sale(customer_payload, order_date)
 

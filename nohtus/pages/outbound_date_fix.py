@@ -7,7 +7,6 @@ import streamlit as st
 
 import nohtus.pages.outbound as outbound_page
 import nohtus.pages.outbound_business as outbound_business
-from nohtus.db import connect
 
 
 _BLOCKED_OUTBOUND_LOCATIONS = {"N-홍보물랙", "G1", "G2"}
@@ -22,14 +21,6 @@ def _is_blocked_outbound_location(value):
     if location in _BLOCKED_OUTBOUND_LOCATIONS:
         return True
     return location.startswith("P") or location.startswith("G1-") or location.startswith("G2-")
-
-
-def _selected_date_text():
-    value = st.session_state.get("outbound_order_date") or date.today()
-    try:
-        return value.strftime("%Y-%m-%d")
-    except Exception:
-        return str(value)[:10]
 
 
 def _days_ago_label(date_text):
@@ -59,7 +50,6 @@ def _last_sale_text(customer_name, company, exact_map, name_map):
 
 def page_outbound():
     """출고일자와 과거/현재 출고 화면 간 헬퍼 시그니처 차이를 보정한다."""
-    original_save = outbound_page.save_outbound_order
     original_last_sale_text = getattr(outbound_page, "_last_sale_text", None)
     original_days_ago_label = getattr(outbound_page, "_days_ago_label", None)
     original_customer_payload = getattr(outbound_page, "_current_customer_payload", None)
@@ -87,16 +77,6 @@ def page_outbound():
         if isinstance(body, str) and body.strip() in {"수출대기 등록", "수출대기 수정"}:
             body = "출고지시"
         return original_title(body, *args, **kwargs)
-
-    def patched_save(cart, title="", memo=""):
-        order_id = original_save(cart, title, memo)
-        with connect() as con:
-            con.execute(
-                "UPDATE outbound_orders SET order_date=? WHERE id=?",
-                (_selected_date_text(), int(order_id)),
-            )
-            con.commit()
-        return order_id
 
     def patched_customer_payload(selected_customer=None):
         if original_customer_payload is None:
@@ -142,7 +122,6 @@ def page_outbound():
             return result.loc[~blocked].copy()
         return result
 
-    outbound_page.save_outbound_order = patched_save
     outbound_page._last_sale_text = _last_sale_text
     outbound_page._days_ago_label = _days_ago_label
     outbound_page._current_customer_payload = patched_customer_payload
@@ -152,7 +131,6 @@ def page_outbound():
     try:
         return outbound_business.page_outbound()
     finally:
-        outbound_page.save_outbound_order = original_save
         outbound_page._inventory_query_for_outbound = original_inventory_query
         outbound_page.q = original_q
         st.title = original_title
