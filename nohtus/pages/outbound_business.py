@@ -123,11 +123,15 @@ def page_outbound():
     previous_data_editor = st.data_editor
     previous_markdown = st.markdown
     previous_caption = st.caption
-    original_text_input = _BASE_TEXT_INPUT
-    original_checkbox = _BASE_CHECKBOX
-    original_data_editor = _BASE_DATA_EDITOR
-    original_markdown = _BASE_MARKDOWN
-    original_caption = _BASE_CAPTION
+    # 일반 출고지시는 화면 진입 시점의 Streamlit 위젯을 사용한다. 모듈 로딩
+    # 시점에 수출대기용 숨김 패치가 걸려 있었더라도 거래처 검색칸이 함께
+    # 사라지지 않게 한다. 수출대기는 별도 렌더러에서 필요한 UI만 패치한다.
+    is_export_waiting = str(st.session_state.get("_outbound_screen_mode") or "") == "export_waiting"
+    original_text_input = _BASE_TEXT_INPUT if is_export_waiting else previous_text_input
+    original_checkbox = _BASE_CHECKBOX if is_export_waiting else previous_checkbox
+    original_data_editor = _BASE_DATA_EDITOR if is_export_waiting else previous_data_editor
+    original_markdown = _BASE_MARKDOWN if is_export_waiting else previous_markdown
+    original_caption = _BASE_CAPTION if is_export_waiting else previous_caption
     original_manual_pick_rows = outbound_page._manual_pick_rows
 
     original_markdown(
