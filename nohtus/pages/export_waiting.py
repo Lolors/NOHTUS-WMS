@@ -31,18 +31,21 @@ def _load_editing_order():
         return
     ensure_export_waiting_tables()
     order = q("SELECT country,buyer,transport_method,export_no,title,status FROM export_waiting_orders WHERE id=?", (int(order_id),))
-    if order.empty or str(order.iloc[0]["status"]) != "waiting":
+    if order.empty or str(order.iloc[0]["status"]) not in {"waiting", "confirmed"}:
         st.session_state.pop("export_editing_order_id", None)
         return
     items = q("""SELECT i.source_inventory_id AS id,i.source_location AS 로케이션,
-                   COALESCE(p.company,i.company) AS 사업장,
-                   COALESCE(p.product_name,i.product_name) AS 제품명,
-                   COALESCE(p.lot,i.lot) AS LOT,
-                   COALESCE(p.exp_date,i.exp_date) AS 유통기한,
+                   COALESCE(s.company,p.company,i.company) AS 사업장,
+                   COALESCE(s.product_name,p.product_name,i.product_name) AS 제품명,
+                   COALESCE(s.warehouse_name,p.warehouse_name,i.warehouse_name,'') AS warehouse_name,
+                   COALESCE(s.lot,p.lot,i.lot) AS LOT,
+                   COALESCE(s.exp_date,p.exp_date,i.exp_date) AS 유통기한,
                    i.qty AS 요청수량
             FROM export_waiting_items i
             LEFT JOIN inventory p
               ON p.id=i.waiting_inventory_id AND p.location='P'
+            LEFT JOIN inventory s
+              ON s.id=i.source_inventory_id AND s.location<>'P'
             WHERE i.order_id=? ORDER BY i.id""", (int(order_id),))
     st.session_state["export_waiting_country"] = str(order.iloc[0]["country"] or "")
     st.session_state["export_waiting_buyer"] = str(order.iloc[0].get("buyer") or "") or "미지정"
@@ -50,6 +53,7 @@ def _load_editing_order():
     st.session_state["export_waiting_transport_method"] = method if method in TRANSPORT_METHODS else "미지정"
     st.session_state["export_waiting_number"] = str(order.iloc[0]["export_no"] or "")
     st.session_state["outbound_cart"] = items.to_dict("records") if not items.empty else []
+    st.session_state["_export_editing_order_status"] = str(order.iloc[0]["status"])
     st.session_state["out_cart_editor_token"] = int(st.session_state.get("out_cart_editor_token", 0) or 0) + 1
     st.session_state["_export_edit_loaded"] = int(order_id)
 
@@ -137,13 +141,19 @@ def _apply_p_inventory_match(waiting_item_id, inventory_id):
 
 
 def _finish_export_save(result):
-    st.session_state["_outbound_last_success"] = (
-        f"수출대기 등록 완료: {result['title']} / 총 {result['total_qty']}EA → 로케이션 P"
-    )
+    if st.session_state.get("_export_editing_order_status") == "confirmed":
+        st.session_state["_outbound_last_success"] = (
+            f"수출확정 출고 리스트 수정 완료: {result['title']} / 총 {result['total_qty']}EA"
+        )
+    else:
+        st.session_state["_outbound_last_success"] = (
+            f"수출대기 등록 완료: {result['title']} / 총 {result['total_qty']}EA → 로케이션 P"
+        )
     for key in [
         "export_waiting_number", "export_waiting_country", "export_waiting_buyer",
         "export_waiting_transport_method", "export_waiting_auto_title",
-        "export_editing_order_id", "_export_edit_loaded", _P_MATCH_REQUEST_KEY, _P_MATCH_SAVE_KEY,
+        "export_editing_order_id", "_export_edit_loaded", "_export_editing_order_status",
+        _P_MATCH_REQUEST_KEY, _P_MATCH_SAVE_KEY,
     ]:
         st.session_state.pop(key, None)
 
@@ -301,7 +311,10 @@ def page_export_waiting():
             editing_order_id=editing_order_id,
         )
         completed["done"] = True
-        completed["message"] = f"수출대기 등록 완료: {result['title']} / 총 {result['total_qty']}EA → 로케이션 P"
+        if st.session_state.get("_export_editing_order_status") == "confirmed":
+            completed["message"] = f"수출확정 출고 리스트 수정 완료: {result['title']} / 총 {result['total_qty']}EA"
+        else:
+            completed["message"] = f"수출대기 등록 완료: {result['title']} / 총 {result['total_qty']}EA → 로케이션 P"
         return 0
 
     def patched_q(sql, params=()):
@@ -318,7 +331,10 @@ def page_export_waiting():
     def patched_caption(body, *args, **kwargs):
         if isinstance(body, str):
             if "출고지시 저장 시" in body:
-                body = "등록 완료 시 선택 재고는 같은 사업장의 P로 이동합니다. 국가는 필수이고 바이어와 운송방식은 미지정으로 둘 수 있습니다."
+                if st.session_state.get("_export_editing_order_status") == "confirmed":
+                    body = "수정 저장 시 기존 출고를 원복한 뒤 새 출고 리스트를 다시 반영합니다. 저장에 실패하면 기존 재고와 출고 리스트가 그대로 유지됩니다."
+                else:
+                    body = "등록 완료 시 선택 재고는 같은 사업장의 P로 이동합니다. 국가는 필수이고 바이어와 운송방식은 미지정으로 둘 수 있습니다."
             else:
                 body = body.replace("출고지시", "수출대기")
         return original_caption(body, *args, **kwargs)
@@ -384,7 +400,7 @@ def page_export_waiting():
         if completed["done"]:
             st.session_state["_outbound_last_success"] = completed["message"]
             completed["done"] = False
-            for key in ["export_waiting_number", "export_waiting_country", "export_waiting_buyer", "export_waiting_transport_method", "export_waiting_auto_title", "export_editing_order_id", "_export_edit_loaded"]:
+            for key in ["export_waiting_number", "export_waiting_country", "export_waiting_buyer", "export_waiting_transport_method", "export_waiting_auto_title", "export_editing_order_id", "_export_edit_loaded", "_export_editing_order_status"]:
                 st.session_state.pop(key, None)
         return original_rerun(*args, **kwargs)
 

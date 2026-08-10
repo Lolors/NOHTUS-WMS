@@ -241,7 +241,9 @@ def _resolve_source_row(cur, inventory_id, fallback=None, required_qty=0):
     for candidate in candidates:
         if int(candidate.get("qty") or 0) >= required_qty:
             return candidate
-    return None
+    # 같은 재고키는 있지만 수량만 부족한 경우에는 행을 반환해 호출부가
+    # 정확한 요청수량/현재수량 부족 안내를 표시하게 한다.
+    return candidates[0] if candidates else None
 
 
 def _take_source(cur, inventory_id, qty, now, fallback=None):
@@ -316,9 +318,9 @@ def _restore(cur, order_id, now, memo):
             to_location=item["source_location"], qty=item["qty"], memo=memo)
 
 
-def _current_item_signature(cur, order_id):
+def _current_item_signature(cur, order_id, *, confirmed=False):
     grouped = defaultdict(int)
-    for item in _items(cur, order_id, confirmed=False):
+    for item in _items(cur, order_id, confirmed=confirmed):
         grouped[int(item.get("source_inventory_id") or 0)] += int(item.get("qty") or 0)
     return dict(grouped)
 
@@ -381,6 +383,107 @@ def _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now
         )
 
 
+def _apply_confirmed_export_item_changes(
+    cur,
+    order_id,
+    grouped,
+    source_hints,
+    now,
+    title,
+    export_no,
+    *,
+    erp_company,
+    customer_code,
+    customer_name,
+    order_date,
+):
+    """확정 출고를 원복한 뒤 수정 목록을 같은 트랜잭션에서 다시 출고한다."""
+    current_items = _items(cur, order_id, confirmed=True)
+    target_qty = {int(k): int(v) for k, v in dict(grouped).items() if int(v) > 0}
+    if not current_items:
+        raise ValueError("수정할 수출확정 품목을 찾을 수 없습니다.")
+
+    restored_source_rows = {}
+    for item in current_items:
+        source_id = int(item.get("source_inventory_id") or 0)
+        restored_id = _add(cur, item, item["source_location"], int(item["qty"]), now, 1)
+        restored = _dict_row(cur, "SELECT * FROM inventory WHERE id=?", (restored_id,))
+        if restored:
+            restored_source_rows[source_id] = restored
+            source_hints[source_id] = restored
+        insert_transaction_log(
+            cur,
+            created_at=now,
+            tx_type="출고지시취소",
+            product_name=item["product_name"],
+            warehouse_name=item.get("warehouse_name", ""),
+            lot=item.get("lot", "-"),
+            exp_date=item.get("exp_date", "-"),
+            from_company=erp_company,
+            from_location="",
+            to_company=item["company"],
+            to_location=item["source_location"],
+            qty=item["qty"],
+            memo=f"수출확정 수정 / 기존 출고 원복 / {title} / 수출번호: {export_no}",
+        )
+
+    cur.execute("DELETE FROM export_waiting_items WHERE order_id=?", (int(order_id),))
+
+    for source_id, qty in target_qty.items():
+        hint = source_hints.get(source_id) or restored_source_rows.get(source_id)
+        source = _take_source(cur, source_id, qty, now, hint)
+        resolved_inventory_id = int(source.get("_resolved_inventory_id") or source.get("id") or source_id)
+        waiting_inventory_id = _add(cur, source, P, qty, now, 0)
+        waiting_item = {
+            **source,
+            "waiting_inventory_id": waiting_inventory_id,
+            "qty": qty,
+        }
+        _take_p(cur, waiting_item, now)
+        cur.execute(
+            """INSERT INTO export_waiting_items(
+                   order_id,source_inventory_id,waiting_inventory_id,company,product_name,
+                   warehouse_name,lot,exp_date,source_location,waiting_location,qty,moved_at,
+                   confirmed,confirmed_company,confirmed_customer_code,confirmed_customer_name,confirmed_at
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)""",
+            (
+                order_id,
+                resolved_inventory_id,
+                waiting_inventory_id,
+                source.get("company", ""),
+                source.get("product_name", ""),
+                source.get("warehouse_name", "") or "",
+                source.get("lot", "-") or "-",
+                source.get("exp_date", "-") or "-",
+                source.get("location", ""),
+                P,
+                qty,
+                now,
+                erp_company,
+                customer_code,
+                customer_name,
+                now,
+            ),
+        )
+        insert_transaction_log(
+            cur,
+            created_at=now,
+            tx_type="출고",
+            product_name=source.get("product_name", ""),
+            warehouse_name=source.get("warehouse_name", "") or "",
+            lot=source.get("lot", "-"),
+            exp_date=source.get("exp_date", "-"),
+            from_company=source.get("company", ""),
+            from_location=P,
+            to_company=erp_company,
+            to_location="",
+            qty=qty,
+            memo=(
+                f"수출확정 수정 / 새 출고 목록 / {title} / {customer_name} / "
+                f"출고일자: {order_date} / 수출번호: {export_no}"
+            ),
+        )
+
 def save_export_waiting_order(cart, *, country, buyer="", transport_method="미지정", export_no, editing_order_id=None):
     country = str(country or "").strip()
     buyer = str(buyer or "").strip()
@@ -422,17 +525,42 @@ def save_export_waiting_order(cart, *, country, buyer="", transport_method="미�
                 source_hints[inventory_id] = current
 
         if editing_order_id:
-            row = cur.execute("SELECT status FROM export_waiting_orders WHERE id=?", (int(editing_order_id),)).fetchone()
-            if not row or row[0] != "waiting":
-                raise ValueError("일부 확정되었거나 완료된 수출대기 건은 수정할 수 없습니다.")
-            items_changed = _current_item_signature(cur, editing_order_id) != dict(grouped)
+            row = _dict_row(
+                cur,
+                """SELECT status,erp_company,erp_customer_code,erp_customer_name,order_date
+                   FROM export_waiting_orders WHERE id=?""",
+                (int(editing_order_id),),
+            )
+            if not row or row["status"] not in {"waiting", "confirmed"}:
+                raise ValueError("일부 확정되었거나 취소된 수출대기 건은 수정할 수 없습니다.")
+            is_confirmed = row["status"] == "confirmed"
+            items_changed = _current_item_signature(
+                cur,
+                editing_order_id,
+                confirmed=is_confirmed,
+            ) != dict(grouped)
             cur.execute("UPDATE export_waiting_orders SET export_no=?,country=?,buyer=?,transport_method=?,title=?,updated_at=? WHERE id=?",
                         (export_no,country,buyer,transport_method,title,now,int(editing_order_id)))
             order_id = int(editing_order_id)
             if not items_changed:
                 con.commit()
                 return {"order_id":order_id,"row_count":len(grouped),"total_qty":sum(grouped.values()),"title":title}
-            _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now, title, export_no)
+            if is_confirmed:
+                _apply_confirmed_export_item_changes(
+                    cur,
+                    order_id,
+                    grouped,
+                    source_hints,
+                    now,
+                    title,
+                    export_no,
+                    erp_company=str(row.get("erp_company") or ""),
+                    customer_code=str(row.get("erp_customer_code") or ""),
+                    customer_name=str(row.get("erp_customer_name") or ""),
+                    order_date=str(row.get("order_date") or ""),
+                )
+            else:
+                _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now, title, export_no)
             total = sum(grouped.values())
         else:
             cur.execute("""INSERT INTO export_waiting_orders(export_no,country,buyer,transport_method,title,status,created_at,updated_at,created_by)

@@ -577,13 +577,10 @@ def page_saved_export_waiting():
             disabled=not edit_enabled,
             key=f"edit_export_waiting_{order_id}",
         ):
-            if status == "waiting":
-                st.session_state["export_editing_order_id"] = order_id
-                st.session_state.pop("_export_edit_loaded", None)
-                st.session_state["page"] = "수출대기 등록"
-                st.rerun()
-            else:
-                _edit_confirmed_export_order_dialog(order_id, selected)
+            st.session_state["export_editing_order_id"] = order_id
+            st.session_state.pop("_export_edit_loaded", None)
+            st.session_state["page"] = "수출대기 등록"
+            st.rerun()
     with merge_col:
         if status == "waiting":
             if st.button("수출대기 병합", use_container_width=True):
@@ -608,7 +605,7 @@ def page_saved_export_waiting():
         st.error("취소된 건입니다. 확정되지 않았던 품목은 등록 당시 원래 로케이션으로 복구되었습니다.")
         return
     if status == "confirmed":
-        st.success("모든 품목의 수출확정이 완료되었습니다. 출고일자는 위에서 수정할 수 있습니다.")
+        st.success("모든 품목의 수출확정이 완료되었습니다. 출고일자와 출고 리스트를 수정할 수 있습니다.")
         return
 
     if st.session_state.get("confirm_export_merge_source_id") == order_id:
