@@ -6,7 +6,7 @@ import streamlit as st
 from nohtus.export_app.components.delivery_method_input import delivery_method_input, is_courier_delivery
 from nohtus.export_app.components.editors import historical_box_editor, historical_order_editor, order_editor
 from nohtus.export_app.config import TRANSPORT_MODES
-from nohtus.export_app.services import export_service, folder_service, history_service, order_service
+from nohtus.export_app.services import export_service, folder_service, history_service, order_save_guard, order_service
 from nohtus.export_app.services.case_merge_service import merge_case_into
 from nohtus.export_app.services.order_edit_service import (
     box_items,
@@ -19,198 +19,199 @@ from nohtus.export_app.services.order_edit_service import (
 )
 
 
-st.title('주문 검색 및 수정')
+def render() -> None:
+    st.title('주문 검색 및 수정')
 
-if message := st.session_state.pop('order_cancel_success_message', None):
-    st.success(message)
+    if message := st.session_state.pop('order_cancel_success_message', None):
+        st.success(message)
 
-cases=order_service.list_editable_cases()
-if not cases:
-    st.info('수정할 수출 건이 없습니다.'); st.stop()
+    cases=order_service.list_editable_cases()
+    if not cases:
+        st.info('수정할 수출 건이 없습니다.'); st.stop()
 
-cols=st.columns([1.5,1.5,3,4])
-years=sorted({int(txt(c['actual_ship_date'])[:4]) for c in cases if txt(c['actual_ship_date'])[:4].isdigit()},reverse=True)
-year=cols[0].selectbox('연도',['전체']+years)
-month=cols[1].selectbox('월',['전체']+list(range(1,13)))
-country_filter=cols[2].selectbox('국가',['전체']+sorted({txt(c['country']) for c in cases if txt(c['country'])}))
-query=cols[3].text_input('제품명 검색').strip().casefold()
-filtered=[]
-for c in cases:
-    d=txt(c['actual_ship_date']); cy=int(d[:4]) if d[:4].isdigit() else None; cm=int(d[5:7]) if len(d)>=7 and d[5:7].isdigit() else None
-    if year!='전체' and cy!=year: continue
-    if month!='전체' and cm!=month: continue
-    if country_filter!='전체' and txt(c['country'])!=country_filter: continue
-    if query and query not in txt(c['product_names']).casefold(): continue
-    filtered.append(c)
-if not filtered:
-    st.warning('조건에 맞는 수출 건이 없습니다.'); st.stop()
+    cols=st.columns([1.5,1.5,3,4])
+    years=sorted({int(txt(c['actual_ship_date'])[:4]) for c in cases if txt(c['actual_ship_date'])[:4].isdigit()},reverse=True)
+    year=cols[0].selectbox('연도',['전체']+years)
+    month=cols[1].selectbox('월',['전체']+list(range(1,13)))
+    country_filter=cols[2].selectbox('국가',['전체']+sorted({txt(c['country']) for c in cases if txt(c['country'])}))
+    query=cols[3].text_input('제품명 검색').strip().casefold()
+    filtered=[]
+    for c in cases:
+        d=txt(c['actual_ship_date']); cy=int(d[:4]) if d[:4].isdigit() else None; cm=int(d[5:7]) if len(d)>=7 and d[5:7].isdigit() else None
+        if year!='전체' and cy!=year: continue
+        if month!='전체' and cm!=month: continue
+        if country_filter!='전체' and txt(c['country'])!=country_filter: continue
+        if query and query not in txt(c['product_names']).casefold(): continue
+        filtered.append(c)
+    if not filtered:
+        st.warning('조건에 맞는 수출 건이 없습니다.'); st.stop()
 
-df=pd.DataFrame([{'_id':int(c['id']),'출고일자':txt(c['actual_ship_date'])[:10],'수출번호':c['export_no'],
-    '국가':c['country'],'바이어':c['buyer'] or '','운송방식':c['transport_mode'],'단계':c['stage'],'주문제품':txt(c['product_names'])} for c in filtered])
-event=st.dataframe(df,hide_index=True,use_container_width=True,on_select='rerun',selection_mode='single-row',column_config={'_id':None},key='editable_case_table_v2')
-if not event.selection.rows:
-    st.info('수정할 수출 건의 행을 선택하세요.'); st.stop()
-idx=int(event.selection.rows[0])
-if idx<0 or idx>=len(df): st.stop()
-case_id=int(df.iloc[idx]['_id']); case=next(c for c in filtered if int(c['id'])==case_id); detail=export_service.get_case(case_id)
-is_his=txt(case['export_no']).upper().startswith('HIS')
+    df=pd.DataFrame([{'_id':int(c['id']),'출고일자':txt(c['actual_ship_date'])[:10],'수출번호':c['export_no'],
+        '국가':c['country'],'바이어':c['buyer'] or '','운송방식':c['transport_mode'],'단계':c['stage'],'주문제품':txt(c['product_names'])} for c in filtered])
+    event=st.dataframe(df,hide_index=True,use_container_width=True,on_select='rerun',selection_mode='single-row',column_config={'_id':None},key='editable_case_table_v2')
+    if not event.selection.rows:
+        st.info('수정할 수출 건의 행을 선택하세요.'); st.stop()
+    idx=int(event.selection.rows[0])
+    if idx<0 or idx>=len(df): st.stop()
+    case_id=int(df.iloc[idx]['_id']); case=next(c for c in filtered if int(c['id'])==case_id); detail=export_service.get_case(case_id)
+    is_his=txt(case['export_no']).upper().startswith('HIS')
 
-st.divider()
-if is_his:
-    st.markdown('### 과거 수출 건 수정')
-    ship_date=st.date_input('과거 수출일',value=dval(detail['actual_ship_date']),key=f'his_date_{case_id}')
-    a=st.columns(3)
-    a[0].text_input('수출번호',value=case['export_no'],disabled=True,key=f'his_no_{case_id}')
-    country=a[1].text_input('국가 *',value=case['country'],key=f'his_country_{case_id}')
-    buyer=a[2].text_input('바이어 (선택)',value=case['buyer'] or '',key=f'his_buyer_{case_id}')
-    b=st.columns(3); ti=TRANSPORT_MODES.index(case['transport_mode']) if case['transport_mode'] in TRANSPORT_MODES else 0
-    transport=b[0].selectbox('운송방식',TRANSPORT_MODES,index=ti,key=f'his_transport_{case_id}')
-    note=b[1].text_input('비고',value=case['note'] or '',key=f'his_note_{case_id}')
-    st.markdown('#### 실출고 제품 및 CTN 연결')
-    edited=historical_order_editor(historical_items(case_id),key=f'his_items_v2_{case_id}')
-    st.markdown('#### CTN 정보'); boxes=historical_box_editor(box_items(case_id),key=f'his_boxes_v2_{case_id}')
-    st.markdown('#### 국내배송 정보')
-    r=st.columns([1,2]); consignee=r[0].text_input('수하인명',value=detail['consignee_name'] or '',key=f'his_consignee_{case_id}'); address=r[1].text_input('수하인주소',value=detail['consignee_address'] or '',key=f'his_address_{case_id}')
-    saved_method=txt(detail['domestic_method'])
-    method=delivery_method_input(saved_method=saved_method,key_prefix=f'his_method_{case_id}')
-    if is_courier_delivery(method):
-        tracking=st.text_input('송장번호',value=detail['tracking_no'] or '',key=f'his_tracking_{case_id}'); driver=phone=''
-    elif method=='퀵배송':
-        q=st.columns(2); driver=q[0].text_input('배송기사 이름',value=detail['driver_name'] or '',key=f'his_driver_{case_id}'); phone=q[1].text_input('배송기사 연락처',value=detail['driver_phone'] or '',key=f'his_phone_{case_id}'); tracking=''
-    else:
-        tracking=driver=phone=''
-    if st.button('과거 수출 건 저장',type='primary',key=f'save_his_{case_id}'):
-        if not country.strip(): st.error('국가는 필수입니다.')
+    st.divider()
+    if is_his:
+        st.markdown('### 과거 수출 건 수정')
+        ship_date=st.date_input('과거 수출일',value=dval(detail['actual_ship_date']),key=f'his_date_{case_id}')
+        a=st.columns(3)
+        a[0].text_input('수출번호',value=case['export_no'],disabled=True,key=f'his_no_{case_id}')
+        country=a[1].text_input('국가 *',value=case['country'],key=f'his_country_{case_id}')
+        buyer=a[2].text_input('바이어 (선택)',value=case['buyer'] or '',key=f'his_buyer_{case_id}')
+        b=st.columns(3); ti=TRANSPORT_MODES.index(case['transport_mode']) if case['transport_mode'] in TRANSPORT_MODES else 0
+        transport=b[0].selectbox('운송방식',TRANSPORT_MODES,index=ti,key=f'his_transport_{case_id}')
+        note=b[1].text_input('비고',value=case['note'] or '',key=f'his_note_{case_id}')
+        st.markdown('#### 실출고 제품 및 CTN 연결')
+        edited=historical_order_editor(historical_items(case_id),key=f'his_items_v2_{case_id}')
+        st.markdown('#### CTN 정보'); boxes=historical_box_editor(box_items(case_id),key=f'his_boxes_v2_{case_id}')
+        st.markdown('#### 국내배송 정보')
+        r=st.columns([1,2]); consignee=r[0].text_input('수하인명',value=detail['consignee_name'] or '',key=f'his_consignee_{case_id}'); address=r[1].text_input('수하인주소',value=detail['consignee_address'] or '',key=f'his_address_{case_id}')
+        saved_method=txt(detail['domestic_method'])
+        method=delivery_method_input(saved_method=saved_method,key_prefix=f'his_method_{case_id}')
+        if is_courier_delivery(method):
+            tracking=st.text_input('송장번호',value=detail['tracking_no'] or '',key=f'his_tracking_{case_id}'); driver=phone=''
+        elif method=='퀵배송':
+            q=st.columns(2); driver=q[0].text_input('배송기사 이름',value=detail['driver_name'] or '',key=f'his_driver_{case_id}'); phone=q[1].text_input('배송기사 연락처',value=detail['driver_phone'] or '',key=f'his_phone_{case_id}'); tracking=''
         else:
-            try: save_historical(case_id,edited,boxes,(country.strip(),buyer.strip(),transport,note.strip(),str(ship_date)),(method,tracking.strip(),driver.strip(),phone.strip(),consignee.strip(),address.strip()))
-            except ValueError as e: st.error(str(e))
+            tracking=driver=phone=''
+        if st.button('과거 수출 건 저장',type='primary',key=f'save_his_{case_id}'):
+            if not country.strip(): st.error('국가는 필수입니다.')
             else:
-                order_service.clear_editable_cases_cache(); folder_service.sync_case_folder(case_id); history_service.add_history(case_id,'과거 수출 건 전체 수정',f'{len(edited)}행'); st.success('저장했습니다.'); st.rerun()
-else:
-    st.markdown('### 주문 수정')
-    a=st.columns(4)
-    country=a[0].text_input('국가 *',value=case['country'])
-    buyer=a[1].text_input('바이어',value=case['buyer'] or '')
-    ti=TRANSPORT_MODES.index(case['transport_mode']) if case['transport_mode'] in TRANSPORT_MODES else 0
-    transport=a[2].selectbox('운송방식',TRANSPORT_MODES,index=ti)
-    note=a[3].text_input('비고',value=case['note'] or '')
-    date_row=st.columns(4)
-    actual_ship_date=date_row[0].date_input(
-        '출고일자',
-        value=odval(detail['actual_ship_date']),
-        key=f'current_ship_date_{case_id}',
-    )
-    if st.button('기본 정보 저장'):
-        export_service.update_basic(
-            case_id,
-            country,
-            buyer,
-            transport,
-            note,
-            actual_ship_date=str(actual_ship_date) if actual_ship_date else '',
-        )
-        order_service.clear_editable_cases_cache()
-        folder_service.sync_case_folder(case_id)
-        st.rerun()
-    existing=order_service.get_order_items_dataframe(case_id)
-    if existing.empty: existing=pd.DataFrame([{'_id':None,'제품명':'','수량':0.0,'단위':'EA','매입가':0.0}])
-    edited=order_editor(existing,key=f'orders_{case_id}')
-    if st.button('주문 목록 저장',type='primary'):
-        order_service.save_order_items(case_id,edited); folder_service.sync_case_folder(case_id); st.rerun()
-
-st.divider()
-action_left, action_right = st.columns([7, 3], gap='large')
-
-with action_left:
-    st.markdown('#### 다른 주문으로 이관·병합')
-    st.caption('현재 수출 건의 주문목록, 연결된 입고 상세정보와 CTN 정보를 대상 수출번호의 기존 내용에 추가한 뒤 현재 건을 취소합니다.')
-
-    merge_targets = [
-        candidate for candidate in cases
-        if int(candidate['id']) != case_id and candidate['case_type'] == case['case_type']
-    ]
-    if merge_targets:
-        target_by_label = {
-            (
-                f"{candidate['export_no']} · {txt(candidate['country'], '-')} · "
-                f"{txt(candidate['buyer'], '바이어 미입력')} · {txt(candidate['stage'])}"
-            ): int(candidate['id'])
-            for candidate in merge_targets
-        }
-        merge_cols = st.columns([4, 3, 2])
-        selected_target_label = merge_cols[0].selectbox(
-            '병합할 대상 수출번호',
-            list(target_by_label),
-            key=f'merge_target_{case_id}',
-        )
-        target_case_id = target_by_label[selected_target_label]
-        target_case = next(candidate for candidate in merge_targets if int(candidate['id']) == target_case_id)
-        merge_confirm = merge_cols[1].checkbox(
-            f"{case['export_no']} → {target_case['export_no']} 이관 확인",
-            key=f'merge_confirm_{case_id}_{target_case_id}',
-        )
-        merge_clicked = merge_cols[2].button(
-            '이관 후 취소',
-            type='secondary',
-            disabled=not merge_confirm,
-            use_container_width=True,
-            key=f'merge_case_{case_id}_{target_case_id}',
-        )
-
-        if merge_clicked:
-            try:
-                result = merge_case_into(case_id, target_case_id)
-                order_service.clear_editable_cases_cache()
-                for folder_case_id in (target_case_id, case_id):
-                    try:
-                        folder_service.sync_case_folder(folder_case_id)
-                    except OSError:
-                        pass
-            except ValueError as exc:
-                st.error(str(exc))
-            else:
-                # The target case may already have an intake-order editor draft in
-                # session state.  Its shipment rows are read directly from the DB,
-                # while that stale draft would hide the newly moved order rows.
-                order_save_guard.reset_intake_order_editor_state(target_case_id)
-                order_save_guard.reset_intake_order_editor_state(case_id)
-                for key in list(st.session_state):
-                    if key in {'editable_case_table_v2', 'order_case_id'} or key.endswith(f'_{case_id}'):
-                        st.session_state.pop(key, None)
-                st.session_state['order_cancel_success_message'] = (
-                    f"{result['source_export_no']}의 주문 {result['order_count']}행과 "
-                    f"입고 상세 {result['shipment_count']}행을 {result['target_export_no']}에 병합하고 "
-                    '원본 주문을 취소했습니다.'
-                )
-                st.rerun()
+                try: save_historical(case_id,edited,boxes,(country.strip(),buyer.strip(),transport,note.strip(),str(ship_date)),(method,tracking.strip(),driver.strip(),phone.strip(),consignee.strip(),address.strip()))
+                except ValueError as e: st.error(str(e))
+                else:
+                    order_service.clear_editable_cases_cache(); folder_service.sync_case_folder(case_id); history_service.add_history(case_id,'과거 수출 건 전체 수정',f'{len(edited)}행'); st.success('저장했습니다.'); st.rerun()
     else:
-        st.info('병합 대상으로 선택할 다른 수출 건이 없습니다.')
-
-with action_right:
-    st.markdown('#### 주문 취소')
-    st.caption('취소한 건은 목록에서 제외되고 기존 데이터는 보관됩니다.')
-    cancel_confirm = st.checkbox(
-        f"{case['export_no']} 주문 취소 확인",
-        key=f'cancel_confirm_{case_id}',
-    )
-    cancel_order = st.button(
-        '주문 취소',
-        type='secondary',
-        disabled=not cancel_confirm,
-        use_container_width=True,
-        key=f'cancel_order_{case_id}',
-    )
-
-    if cancel_order:
-        export_service.cancel_case(case_id)
-        order_service.clear_editable_cases_cache()
-        history_service.add_history(case_id, '주문 취소', case['export_no'])
-        try:
+        st.markdown('### 주문 수정')
+        a=st.columns(4)
+        country=a[0].text_input('국가 *',value=case['country'])
+        buyer=a[1].text_input('바이어',value=case['buyer'] or '')
+        ti=TRANSPORT_MODES.index(case['transport_mode']) if case['transport_mode'] in TRANSPORT_MODES else 0
+        transport=a[2].selectbox('운송방식',TRANSPORT_MODES,index=ti)
+        note=a[3].text_input('비고',value=case['note'] or '')
+        date_row=st.columns(4)
+        actual_ship_date=date_row[0].date_input(
+            '출고일자',
+            value=odval(detail['actual_ship_date']),
+            key=f'current_ship_date_{case_id}',
+        )
+        if st.button('기본 정보 저장'):
+            export_service.update_basic(
+                case_id,
+                country,
+                buyer,
+                transport,
+                note,
+                actual_ship_date=str(actual_ship_date) if actual_ship_date else '',
+            )
+            order_service.clear_editable_cases_cache()
             folder_service.sync_case_folder(case_id)
-        except OSError:
-            pass
-        for key in list(st.session_state):
-            if key in {'editable_case_table_v2', 'order_case_id'} or key.endswith(f'_{case_id}'):
-                st.session_state.pop(key, None)
-        st.session_state['order_cancel_success_message'] = f"{case['export_no']} 주문을 취소했습니다."
-        st.rerun()
+            st.rerun()
+        existing=order_service.get_order_items_dataframe(case_id)
+        if existing.empty: existing=pd.DataFrame([{'_id':None,'제품명':'','수량':0.0,'단위':'EA','매입가':0.0}])
+        edited=order_editor(existing,key=f'orders_{case_id}')
+        if st.button('주문 목록 저장',type='primary'):
+            order_service.save_order_items(case_id,edited); folder_service.sync_case_folder(case_id); st.rerun()
+
+    st.divider()
+    action_left, action_right = st.columns([7, 3], gap='large')
+
+    with action_left:
+        st.markdown('#### 다른 주문으로 이관·병합')
+        st.caption('현재 수출 건의 주문목록, 연결된 입고 상세정보와 CTN 정보를 대상 수출번호의 기존 내용에 추가한 뒤 현재 건을 취소합니다.')
+
+        merge_targets = [
+            candidate for candidate in cases
+            if int(candidate['id']) != case_id and candidate['case_type'] == case['case_type']
+        ]
+        if merge_targets:
+            target_by_label = {
+                (
+                    f"{candidate['export_no']} · {txt(candidate['country'], '-')} · "
+                    f"{txt(candidate['buyer'], '바이어 미입력')} · {txt(candidate['stage'])}"
+                ): int(candidate['id'])
+                for candidate in merge_targets
+            }
+            merge_cols = st.columns([4, 3, 2])
+            selected_target_label = merge_cols[0].selectbox(
+                '병합할 대상 수출번호',
+                list(target_by_label),
+                key=f'merge_target_{case_id}',
+            )
+            target_case_id = target_by_label[selected_target_label]
+            target_case = next(candidate for candidate in merge_targets if int(candidate['id']) == target_case_id)
+            merge_confirm = merge_cols[1].checkbox(
+                f"{case['export_no']} → {target_case['export_no']} 이관 확인",
+                key=f'merge_confirm_{case_id}_{target_case_id}',
+            )
+            merge_clicked = merge_cols[2].button(
+                '이관 후 취소',
+                type='secondary',
+                disabled=not merge_confirm,
+                use_container_width=True,
+                key=f'merge_case_{case_id}_{target_case_id}',
+            )
+
+            if merge_clicked:
+                try:
+                    result = merge_case_into(case_id, target_case_id)
+                    order_service.clear_editable_cases_cache()
+                    for folder_case_id in (target_case_id, case_id):
+                        try:
+                            folder_service.sync_case_folder(folder_case_id)
+                        except OSError:
+                            pass
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    # The target case may already have an intake-order editor draft in
+                    # session state.  Its shipment rows are read directly from the DB,
+                    # while that stale draft would hide the newly moved order rows.
+                    order_save_guard.reset_intake_order_editor_state(target_case_id)
+                    order_save_guard.reset_intake_order_editor_state(case_id)
+                    for key in list(st.session_state):
+                        if key in {'editable_case_table_v2', 'order_case_id'} or key.endswith(f'_{case_id}'):
+                            st.session_state.pop(key, None)
+                    st.session_state['order_cancel_success_message'] = (
+                        f"{result['source_export_no']}의 주문 {result['order_count']}행과 "
+                        f"입고 상세 {result['shipment_count']}행을 {result['target_export_no']}에 병합하고 "
+                        '원본 주문을 취소했습니다.'
+                    )
+                    st.rerun()
+        else:
+            st.info('병합 대상으로 선택할 다른 수출 건이 없습니다.')
+
+    with action_right:
+        st.markdown('#### 주문 취소')
+        st.caption('취소한 건은 목록에서 제외되고 기존 데이터는 보관됩니다.')
+        cancel_confirm = st.checkbox(
+            f"{case['export_no']} 주문 취소 확인",
+            key=f'cancel_confirm_{case_id}',
+        )
+        cancel_order = st.button(
+            '주문 취소',
+            type='secondary',
+            disabled=not cancel_confirm,
+            use_container_width=True,
+            key=f'cancel_order_{case_id}',
+        )
+
+        if cancel_order:
+            export_service.cancel_case(case_id)
+            order_service.clear_editable_cases_cache()
+            history_service.add_history(case_id, '주문 취소', case['export_no'])
+            try:
+                folder_service.sync_case_folder(case_id)
+            except OSError:
+                pass
+            for key in list(st.session_state):
+                if key in {'editable_case_table_v2', 'order_case_id'} or key.endswith(f'_{case_id}'):
+                    st.session_state.pop(key, None)
+            st.session_state['order_cancel_success_message'] = f"{case['export_no']} 주문을 취소했습니다."
+            st.rerun()

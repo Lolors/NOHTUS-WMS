@@ -33,6 +33,17 @@ from nohtus.pages.customer_master_business import page_customer_master
 from nohtus.pages.mobile_stock_business import page_mobile_stock_finder
 from nohtus.pages.move import page_move
 from nohtus.pages.outbound_date_fix import page_outbound as _page_outbound
+from nohtus.pages.export_app_pages import (
+    page_export_dashboard,
+    page_export_domestic_delivery,
+    page_export_my_folder,
+    page_export_order_entry,
+    page_export_order_search,
+    page_export_packing,
+    page_export_shared_documents,
+    page_export_shipment_intake,
+    page_export_statistics,
+)
 from nohtus.pages.own_product_status import page_own_product_status
 from nohtus.pages.product_matching_business import page_product_matching
 from nohtus.pages.product_shortcuts import page_recent_products
@@ -297,3 +308,12 @@ def main():
     elif menu == "거래처 관리": page_customer_master()
     elif menu == "매입가 조회": page_purchase_history()
     elif menu == "이력 조회": page_history()
+    elif menu == "대시보드": page_export_dashboard()
+    elif menu == "주문 입력": page_export_order_entry()
+    elif menu == "주문 검색 및 수정": page_export_order_search()
+    elif menu == "수출대기 입고": page_export_shipment_intake()
+    elif menu == "박스 패킹": page_export_packing()
+    elif menu == "국내배송": page_export_domestic_delivery()
+    elif menu == "공유용 자료": page_export_shared_documents()
+    elif menu == "기간별 통계": page_export_statistics()
+    elif menu == "내 폴더": page_export_my_folder()

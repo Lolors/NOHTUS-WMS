@@ -151,289 +151,278 @@ def render_similar_price_lookup(*, key: str) -> None:
     )
 
 
-st.title('수출대기 입고')
-st.caption('국내배송 단계까지 진행된 건도 선택해 주문과 실제 입고제품을 수정할 수 있습니다.')
+def render() -> None:
+    st.title('수출대기 입고')
+    st.caption('국내배송 단계까지 진행된 건도 선택해 주문과 실제 입고제품을 수정할 수 있습니다.')
 
-if success_message := st.session_state.pop('shipment_intake_success_message', None):
-    st.success(success_message)
+    if success_message := st.session_state.pop('shipment_intake_success_message', None):
+        st.success(success_message)
 
-st.markdown(
-    '''
-    <style>
-    div[data-testid="stVerticalBlock"] div[data-testid="stVerticalBlock"]:has(.shipment-price-lookup-anchor) {
-        width: 60vw;
-        max-width: 60vw;
-    }
-    @media (max-width: 900px) {
+    st.markdown(
+        '''
+        <style>
         div[data-testid="stVerticalBlock"] div[data-testid="stVerticalBlock"]:has(.shipment-price-lookup-anchor) {
-            width: 100%;
-            max-width: 100%;
+            width: 60vw;
+            max-width: 60vw;
         }
-    }
-    .shipment-price-lookup-anchor {
-        height: 0;
-        margin: 0;
-        padding: 0;
-        overflow: hidden;
-    }
-    </style>
-    ''',
-    unsafe_allow_html=True,
-)
-
-cases = export_service.intake_editable_cases()
-if not cases:
-    st.info('수정할 수 있는 수출 건이 없습니다.')
-    st.stop()
-
-case_id = select_export_case(
-    cases,
-    key_prefix='shipment_export_selector',
-    saved_case_id=st.session_state.get('actual_packing_case_id'),
-)
-
-st.session_state['actual_packing_case_id'] = case_id
-
-shipment_service.cleanup_invalid_links(case_id)
-selected_case = next(case for case in cases if int(case['id']) == case_id)
-if (
-    str(selected_case['stage'] or '').strip() == '국내배송'
-    and str(selected_case['status'] or '').strip() == '완료'
-):
-    action_col, _ = st.columns([1, 3])
-    if action_col.button(
-        '수출대기로 되돌리기',
-        use_container_width=True,
-        key=f'reopen_export_waiting_{case_id}',
-    ):
-        reopen_export_waiting_dialog(
-            case_id=case_id,
-            export_no=str(selected_case['export_no'] or '').strip() or '선택한 수출 건',
-        )
-orders = order_service.list_for_case(case_id)
-all_linked_rows = shipment_service.list_case_items(case_id)
-linked_rows_by_order: dict[int, list] = {}
-for linked_row in all_linked_rows:
-    linked_order_id = int(linked_row['order_item_id'])
-    linked_rows_by_order.setdefault(linked_order_id, []).append(linked_row)
-
-unlinked_count = shipment_service.count_unlinked(case_id)
-if unlinked_count:
-    with st.expander(f'구형 미연결 입고 데이터 {unlinked_count}개 정리'):
-        legacy_rows = shipment_service.list_unlinked(case_id)
-        st.dataframe(
-            [
-                {
-                    '사업장': row['business_unit'],
-                    '실제 제품명': row['product_name'],
-                    '제조번호': row['lot_no'],
-                    '유통기한': row['expiry_date'],
-                    '입고수량': row['requested_qty'],
-                    '박스번호': row['box_no'],
-                }
-                for row in legacy_rows
-            ],
-            hide_index=True,
-            use_container_width=True,
-        )
-        delete_confirmed = st.checkbox(
-            '위 미연결 데이터를 삭제합니다.',
-            key=f'delete_legacy_confirm_{case_id}',
-        )
-        if st.button(
-            '구형 미연결 데이터 삭제',
-            disabled=not delete_confirmed,
-            key=f'delete_legacy_{case_id}',
-        ):
-            shipment_service.delete_unlinked(case_id)
-            folder_service.sync_case_folder(case_id)
-            history_service.add(case_id, '구형 미연결 입고 삭제', f'{unlinked_count}개 행')
-            st.success('구형 미연결 입고 데이터를 삭제했습니다.')
-            st.rerun()
-
-left, right = st.columns([1.05, 1.45], gap='large')
-
-with left:
-    st.markdown('### 주문목록')
-    st.caption('제품명·주문수량·단위·매입가를 수정한 뒤 저장할 수 있습니다.')
-
-    draft_key = f'shipment_order_draft_{case_id}'
-    version_key = f'shipment_order_editor_version_{case_id}'
-    merge_message_key = f'shipment_order_merge_message_{case_id}'
-
-    if merge_message := st.session_state.pop(merge_message_key, None):
-        st.success(merge_message)
-
-    if draft_key not in st.session_state:
-        order_source = order_service.get_order_items_dataframe(case_id)
-        if order_source.empty:
-            order_source = pd.DataFrame([
-                {'_id': None, '제품명': '', '수량': 0.0, '단위': 'EA', '매입가': 0.0}
-            ])
-        st.session_state[draft_key] = order_save_guard.with_row_numbers(order_source)
-
-    editor_version = int(st.session_state.get(version_key, 0))
-    edited_orders = order_editor(
-        st.session_state[draft_key],
-        key=f'shipment_orders_{case_id}_{editor_version}',
+        @media (max-width: 900px) {
+            div[data-testid="stVerticalBlock"] div[data-testid="stVerticalBlock"]:has(.shipment-price-lookup-anchor) {
+                width: 100%;
+                max-width: 100%;
+            }
+        }
+        .shipment-price-lookup-anchor {
+            height: 0;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        </style>
+        ''',
+        unsafe_allow_html=True,
     )
-    numbered_orders = order_save_guard.with_row_numbers(
-        edited_orders.drop(columns=['행번호'], errors='ignore')
+
+    cases = export_service.intake_editable_cases()
+    if not cases:
+        st.info('수정할 수 있는 수출 건이 없습니다.')
+        st.stop()
+
+    case_id = select_export_case(
+        cases,
+        key_prefix='shipment_export_selector',
+        saved_case_id=st.session_state.get('actual_packing_case_id'),
     )
-    duplicate_order_rows = order_save_guard.find_duplicate_rows(numbered_orders)
 
-    if duplicate_order_rows:
-        order_save_guard.render_duplicate_notice(duplicate_order_rows)
-        st.markdown('**중복된 행끼리 수량을 합칠까요?**')
-        st.caption('가장 먼저 생성된 행의 제품명·단위·매입가를 보존하고, 수량만 모두 더한 뒤 나중 행을 삭제합니다.')
-        if st.button(
-            '중복 행 수량 합치기',
-            type='secondary',
-            use_container_width=True,
-            key=f'merge_duplicate_orders_{case_id}_{editor_version}',
-        ):
-            merged_orders = order_save_guard.merge_duplicate_rows(numbered_orders)
-            st.session_state[draft_key] = merged_orders
-            st.session_state[version_key] = editor_version + 1
-            st.session_state[merge_message_key] = '중복 행을 합쳤습니다. 합산된 수량을 확인한 뒤 주문목록을 저장하세요.'
-            st.rerun()
+    st.session_state['actual_packing_case_id'] = case_id
 
-    st.caption('주문행을 삭제하고 저장하면 그 주문에 연결된 실제 출고제품도 함께 삭제됩니다.')
-
-    if st.button(
-        '주문목록 저장',
-        type='primary',
-        use_container_width=True,
-        disabled=bool(duplicate_order_rows),
-        key=f'save_shipment_orders_{case_id}',
+    shipment_service.cleanup_invalid_links(case_id)
+    selected_case = next(case for case in cases if int(case['id']) == case_id)
+    if (
+        str(selected_case['stage'] or '').strip() == '국내배송'
+        and str(selected_case['status'] or '').strip() == '완료'
     ):
-        try:
-            order_service.save_order_items(case_id, numbered_orders)
-        except ValueError as exc:
-            st.error(str(exc))
-        else:
-            st.session_state.pop(draft_key, None)
-            st.session_state[version_key] = editor_version + 1
-            folder_service.sync_case_folder(case_id)
-            history_service.add(case_id, '출고 단계 주문목록 수정', f'{len(numbered_orders)}개 행')
-            st.success('주문목록을 저장했습니다.')
-            st.rerun()
-
-with right:
-    st.markdown('### 실제 수출대기 입고제품')
-
-    if not orders:
-        st.info('왼쪽에서 주문목록을 입력하고 저장하세요.')
-    else:
-        sorted_orders = sort_orders_for_intake(orders, linked_rows_by_order)
-        order_options: dict[str, int] = {}
-        for order in sorted_orders:
-            order_id = int(order['id'])
-            order_qty = safe_number(order['quantity'])
-            unit = str(order['unit'] or 'EA')
-            current_rows = linked_rows_by_order.get(order_id, [])
-            linked_qty = sum(safe_number(row['requested_qty']) for row in current_rows)
-            icon, _ = order_state(order_qty, linked_qty)
-            label = (
-                f"{icon} {order['product_name']} · "
-                f'{fmt_number(linked_qty)} / {fmt_number(order_qty)} {unit}'
+        action_col, _ = st.columns([1, 3])
+        if action_col.button(
+            '수출대기로 되돌리기',
+            use_container_width=True,
+            key=f'reopen_export_waiting_{case_id}',
+        ):
+            reopen_export_waiting_dialog(
+                case_id=case_id,
+                export_no=str(selected_case['export_no'] or '').strip() or '선택한 수출 건',
             )
-            order_options[label] = order_id
+    orders = order_service.list_for_case(case_id)
+    all_linked_rows = shipment_service.list_case_items(case_id)
+    linked_rows_by_order: dict[int, list] = {}
+    for linked_row in all_linked_rows:
+        linked_order_id = int(linked_row['order_item_id'])
+        linked_rows_by_order.setdefault(linked_order_id, []).append(linked_row)
 
-        selected_label = st.selectbox(
-            '출고제품을 입력할 주문',
-            list(order_options),
-            key=f'linked_selected_order_{case_id}',
-        )
-        selected_order_id = order_options[selected_label]
-        selected_order = next(
-            order for order in sorted_orders
-            if int(order['id']) == selected_order_id
-        )
-        selected_order_name = str(selected_order['product_name'] or '').strip()
-        order_qty = safe_number(selected_order['quantity'])
-        unit = str(selected_order['unit'] or 'EA')
-        current = linked_rows_by_order.get(selected_order_id, [])
-
-        st.markdown(f'**선택 주문:** {selected_order_name}')
-
-        if current:
-            source = pd.DataFrame([
-                {
-                    '_id': int(row['id']),
-                    '사업장': row['business_unit'] or '',
-                    '실제 제품명': row['product_name'] or '',
-                    '제조번호': row['lot_no'] or '',
-                    '유통기한': row['expiry_date'] or '',
-                    '출고수량': safe_number(row['requested_qty']),
-                }
-                for row in current
-            ])
-        else:
-            source = pd.DataFrame([{
-                '_id': None,
-                '사업장': '',
-                '실제 제품명': '',
-                '제조번호': '',
-                '유통기한': '',
-                '출고수량': 0.0,
-            }])
-
-        edited = shipment_editor(source, key=f'linked_order_editor_v2_{case_id}_{selected_order_id}')
-        preview_qty = sum(safe_number(value) for value in edited.get('출고수량', []))
-        preview_icon, preview_state = order_state(order_qty, preview_qty)
-        st.info(
-            f'{preview_icon} 입력 합계 {fmt_number(preview_qty)} / '
-            f'주문 {fmt_number(order_qty)} {unit} · {preview_state}'
-        )
-        packing_impact = shipment_service.packing_impact_for_order(case_id, selected_order_id)
-        if packing_impact['packed_row_count']:
-            st.caption(
-                f"패킹된 {packing_impact['packed_row_count']}개 행의 기존 CTN 번호는 "
-                '제품명·사업장·제조번호·유통기한을 수정해도 그대로 유지됩니다. '
-                '새로 추가한 행만 미패킹 상태로 생성됩니다.'
+    unlinked_count = shipment_service.count_unlinked(case_id)
+    if unlinked_count:
+        with st.expander(f'구형 미연결 입고 데이터 {unlinked_count}개 정리'):
+            legacy_rows = shipment_service.list_unlinked(case_id)
+            st.dataframe(
+                [
+                    {
+                        '사업장': row['business_unit'],
+                        '실제 제품명': row['product_name'],
+                        '제조번호': row['lot_no'],
+                        '유통기한': row['expiry_date'],
+                        '입고수량': row['requested_qty'],
+                        '박스번호': row['box_no'],
+                    }
+                    for row in legacy_rows
+                ],
+                hide_index=True,
+                use_container_width=True,
             )
+            delete_confirmed = st.checkbox(
+                '위 미연결 데이터를 삭제합니다.',
+                key=f'delete_legacy_confirm_{case_id}',
+            )
+            if st.button(
+                '구형 미연결 데이터 삭제',
+                disabled=not delete_confirmed,
+                key=f'delete_legacy_{case_id}',
+            ):
+                shipment_service.delete_unlinked(case_id)
+                folder_service.sync_case_folder(case_id)
+                history_service.add(case_id, '구형 미연결 입고 삭제', f'{unlinked_count}개 행')
+                st.success('구형 미연결 입고 데이터를 삭제했습니다.')
+                st.rerun()
+
+    left, right = st.columns([1.05, 1.45], gap='large')
+
+    with left:
+        st.markdown('### 주문목록')
+        st.caption('제품명·주문수량·단위·매입가를 수정한 뒤 저장할 수 있습니다.')
+
+        draft_key = f'shipment_order_draft_{case_id}'
+        version_key = f'shipment_order_editor_version_{case_id}'
+        merge_message_key = f'shipment_order_merge_message_{case_id}'
+
+        if merge_message := st.session_state.pop(merge_message_key, None):
+            st.success(merge_message)
+
+        if draft_key not in st.session_state:
+            order_source = order_service.get_order_items_dataframe(case_id)
+            if order_source.empty:
+                order_source = pd.DataFrame([
+                    {'_id': None, '제품명': '', '수량': 0.0, '단위': 'EA', '매입가': 0.0}
+                ])
+            st.session_state[draft_key] = order_save_guard.with_row_numbers(order_source)
+
+        editor_version = int(st.session_state.get(version_key, 0))
+        edited_orders = order_editor(
+            st.session_state[draft_key],
+            key=f'shipment_orders_{case_id}_{editor_version}',
+        )
+        numbered_orders = order_save_guard.with_row_numbers(
+            edited_orders.drop(columns=['행번호'], errors='ignore')
+        )
+        duplicate_order_rows = order_save_guard.find_duplicate_rows(numbered_orders)
+
+        if duplicate_order_rows:
+            order_save_guard.render_duplicate_notice(duplicate_order_rows)
+            st.markdown('**중복된 행끼리 수량을 합칠까요?**')
+            st.caption('가장 먼저 생성된 행의 제품명·단위·매입가를 보존하고, 수량만 모두 더한 뒤 나중 행을 삭제합니다.')
+            if st.button(
+                '중복 행 수량 합치기',
+                type='secondary',
+                use_container_width=True,
+                key=f'merge_duplicate_orders_{case_id}_{editor_version}',
+            ):
+                merged_orders = order_save_guard.merge_duplicate_rows(numbered_orders)
+                st.session_state[draft_key] = merged_orders
+                st.session_state[version_key] = editor_version + 1
+                st.session_state[merge_message_key] = '중복 행을 합쳤습니다. 합산된 수량을 확인한 뒤 주문목록을 저장하세요.'
+                st.rerun()
+
+        st.caption('주문행을 삭제하고 저장하면 그 주문에 연결된 실제 출고제품도 함께 삭제됩니다.')
 
         if st.button(
-            '선택 주문품목 입고 저장',
+            '주문목록 저장',
             type='primary',
             use_container_width=True,
-            key=f'save_linked_order_{case_id}_{selected_order_id}',
+            disabled=bool(duplicate_order_rows),
+            key=f'save_shipment_orders_{case_id}',
         ):
-            values: list[dict] = []
-            for _, row in edited.iterrows():
-                actual_name = str(row.get('실제 제품명', '') or '').strip()
-                quantity = safe_number(row.get('출고수량', 0))
-                has_any_value = any(
-                    str(row.get(column, '') or '').strip()
-                    for column in ['사업장', '실제 제품명', '제조번호', '유통기한']
-                ) or quantity > 0
-                if not has_any_value:
-                    continue
-                values.append({
-                    '_id': row.get('_id'),
-                    'business_unit': row.get('사업장', ''),
-                    'product_name': actual_name,
-                    'lot_no': row.get('제조번호', ''),
-                    'expiry_date': row.get('유통기한', ''),
-                    'requested_qty': quantity,
-                })
-
-            mismatches = find_product_name_mismatches(selected_order_name, values)
-            if mismatches:
-                product_name_warning_dialog(
-                    case_id=case_id,
-                    selected_order_id=selected_order_id,
-                    selected_order_name=selected_order_name,
-                    preview_qty=preview_qty,
-                    order_qty=order_qty,
-                    unit=unit,
-                    values=values,
-                    mismatches=mismatches,
-                )
+            try:
+                order_service.save_order_items(case_id, numbered_orders)
+            except ValueError as exc:
+                st.error(str(exc))
             else:
-                try:
-                    save_linked_order(
+                st.session_state.pop(draft_key, None)
+                st.session_state[version_key] = editor_version + 1
+                folder_service.sync_case_folder(case_id)
+                history_service.add(case_id, '출고 단계 주문목록 수정', f'{len(numbered_orders)}개 행')
+                st.success('주문목록을 저장했습니다.')
+                st.rerun()
+
+    with right:
+        st.markdown('### 실제 수출대기 입고제품')
+
+        if not orders:
+            st.info('왼쪽에서 주문목록을 입력하고 저장하세요.')
+        else:
+            sorted_orders = sort_orders_for_intake(orders, linked_rows_by_order)
+            order_options: dict[str, int] = {}
+            for order in sorted_orders:
+                order_id = int(order['id'])
+                order_qty = safe_number(order['quantity'])
+                unit = str(order['unit'] or 'EA')
+                current_rows = linked_rows_by_order.get(order_id, [])
+                linked_qty = sum(safe_number(row['requested_qty']) for row in current_rows)
+                icon, _ = order_state(order_qty, linked_qty)
+                label = (
+                    f"{icon} {order['product_name']} · "
+                    f'{fmt_number(linked_qty)} / {fmt_number(order_qty)} {unit}'
+                )
+                order_options[label] = order_id
+
+            selected_label = st.selectbox(
+                '출고제품을 입력할 주문',
+                list(order_options),
+                key=f'linked_selected_order_{case_id}',
+            )
+            selected_order_id = order_options[selected_label]
+            selected_order = next(
+                order for order in sorted_orders
+                if int(order['id']) == selected_order_id
+            )
+            selected_order_name = str(selected_order['product_name'] or '').strip()
+            order_qty = safe_number(selected_order['quantity'])
+            unit = str(selected_order['unit'] or 'EA')
+            current = linked_rows_by_order.get(selected_order_id, [])
+
+            st.markdown(f'**선택 주문:** {selected_order_name}')
+
+            if current:
+                source = pd.DataFrame([
+                    {
+                        '_id': int(row['id']),
+                        '사업장': row['business_unit'] or '',
+                        '실제 제품명': row['product_name'] or '',
+                        '제조번호': row['lot_no'] or '',
+                        '유통기한': row['expiry_date'] or '',
+                        '출고수량': safe_number(row['requested_qty']),
+                    }
+                    for row in current
+                ])
+            else:
+                source = pd.DataFrame([{
+                    '_id': None,
+                    '사업장': '',
+                    '실제 제품명': '',
+                    '제조번호': '',
+                    '유통기한': '',
+                    '출고수량': 0.0,
+                }])
+
+            edited = shipment_editor(source, key=f'linked_order_editor_v2_{case_id}_{selected_order_id}')
+            preview_qty = sum(safe_number(value) for value in edited.get('출고수량', []))
+            preview_icon, preview_state = order_state(order_qty, preview_qty)
+            st.info(
+                f'{preview_icon} 입력 합계 {fmt_number(preview_qty)} / '
+                f'주문 {fmt_number(order_qty)} {unit} · {preview_state}'
+            )
+            packing_impact = shipment_service.packing_impact_for_order(case_id, selected_order_id)
+            if packing_impact['packed_row_count']:
+                st.caption(
+                    f"패킹된 {packing_impact['packed_row_count']}개 행의 기존 CTN 번호는 "
+                    '제품명·사업장·제조번호·유통기한을 수정해도 그대로 유지됩니다. '
+                    '새로 추가한 행만 미패킹 상태로 생성됩니다.'
+                )
+
+            if st.button(
+                '선택 주문품목 입고 저장',
+                type='primary',
+                use_container_width=True,
+                key=f'save_linked_order_{case_id}_{selected_order_id}',
+            ):
+                values: list[dict] = []
+                for _, row in edited.iterrows():
+                    actual_name = str(row.get('실제 제품명', '') or '').strip()
+                    quantity = safe_number(row.get('출고수량', 0))
+                    has_any_value = any(
+                        str(row.get(column, '') or '').strip()
+                        for column in ['사업장', '실제 제품명', '제조번호', '유통기한']
+                    ) or quantity > 0
+                    if not has_any_value:
+                        continue
+                    values.append({
+                        '_id': row.get('_id'),
+                        'business_unit': row.get('사업장', ''),
+                        'product_name': actual_name,
+                        'lot_no': row.get('제조번호', ''),
+                        'expiry_date': row.get('유통기한', ''),
+                        'requested_qty': quantity,
+                    })
+
+                mismatches = find_product_name_mismatches(selected_order_name, values)
+                if mismatches:
+                    product_name_warning_dialog(
                         case_id=case_id,
                         selected_order_id=selected_order_id,
                         selected_order_name=selected_order_name,
@@ -441,32 +430,44 @@ with right:
                         order_qty=order_qty,
                         unit=unit,
                         values=values,
+                        mismatches=mismatches,
                     )
-                except ValueError as exc:
-                    st.error(str(exc))
                 else:
-                    st.rerun()
+                    try:
+                        save_linked_order(
+                            case_id=case_id,
+                            selected_order_id=selected_order_id,
+                            selected_order_name=selected_order_name,
+                            preview_qty=preview_qty,
+                            order_qty=order_qty,
+                            unit=unit,
+                            values=values,
+                        )
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    else:
+                        st.rerun()
 
-    progress = intake_progress(orders, linked_rows_by_order)
-    progress_ratio = progress['ratio']
-    completed_item_count = progress['completed_count']
-    order_item_count = progress['item_count']
-    all_items_received = progress['all_received']
+        progress = intake_progress(orders, linked_rows_by_order)
+        progress_ratio = progress['ratio']
+        completed_item_count = progress['completed_count']
+        order_item_count = progress['item_count']
+        all_items_received = progress['all_received']
+
+        st.divider()
+        st.markdown('#### 전체 입고 진행률')
+        st.progress(
+            progress_ratio,
+            text=(
+                f'완료 품목 {completed_item_count} / {order_item_count}개 '
+                f'({progress_ratio * 100:.1f}%)'
+            ),
+        )
+        st.caption('각 주문품목의 입고율을 최대 100%로 계산한 뒤 품목별 입고율의 평균을 표시합니다.')
+        if all_items_received:
+            st.success('🎉 모든 주문품목이 각각 100% 입고되었습니다!')
 
     st.divider()
-    st.markdown('#### 전체 입고 진행률')
-    st.progress(
-        progress_ratio,
-        text=(
-            f'완료 품목 {completed_item_count} / {order_item_count}개 '
-            f'({progress_ratio * 100:.1f}%)'
-        ),
-    )
-    st.caption('각 주문품목의 입고율을 최대 100%로 계산한 뒤 품목별 입고율의 평균을 표시합니다.')
-    if all_items_received:
-        st.success('🎉 모든 주문품목이 각각 100% 입고되었습니다!')
-
-st.divider()
-with st.container():
-    st.markdown('<div class="shipment-price-lookup-anchor"></div>', unsafe_allow_html=True)
-    render_similar_price_lookup(key=f'shipment_price_lookup_query_{case_id}')
+    with st.container():
+        st.markdown('<div class="shipment-price-lookup-anchor"></div>', unsafe_allow_html=True)
+        render_similar_price_lookup(key=f'shipment_price_lookup_query_{case_id}')

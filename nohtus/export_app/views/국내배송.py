@@ -70,68 +70,69 @@ def render_packed_details(case_id: int) -> None:
     )
 
 
-st.title('국내배송')
-st.caption('국내배송 방식, 수하인 정보와 송장 또는 배송기사 정보를 입력합니다.')
+def render() -> None:
+    st.title('국내배송')
+    st.caption('국내배송 방식, 수하인 정보와 송장 또는 배송기사 정보를 입력합니다.')
 
-cases = [
-    case for case in export_service.active_cases()
-    if str(case['stage'] or '').strip() == '패킹 완료'
-]
-if not cases:
-    st.info('패킹 완료된 수출 건이 없습니다.')
-    st.stop()
+    cases = [
+        case for case in export_service.active_cases()
+        if str(case['stage'] or '').strip() == '패킹 완료'
+    ]
+    if not cases:
+        st.info('패킹 완료된 수출 건이 없습니다.')
+        st.stop()
 
-case_id = select_export_case(
-    cases,
-    key_prefix='delivery_export_selector',
-    saved_case_id=st.session_state.get('actual_packing_case_id'),
-    show_stage=False,
-)
-case = export_service.get_case(case_id)
-
-render_packed_details(case_id)
-st.divider()
-
-saved_method = str(case['domestic_method'] or '').strip()
-method = delivery_method_input(
-    saved_method=saved_method,
-    key_prefix=f'delivery_method_{case_id}',
-)
-with st.form(f'delivery_{case_id}_{method}'):
-    actual_date = st.date_input('국내배송 일자', value=date_value(case['actual_ship_date']))
-
-    if method == '핸드캐리':
-        consignee_name = ''
-        consignee_address = ''
-        tracking = ''
-        driver = ''
-        phone = ''
-    else:
-        receiver_cols = st.columns([1, 2])
-        consignee_name = receiver_cols[0].text_input('수하인명', value=case['consignee_name'] or '')
-        consignee_address = receiver_cols[1].text_input('수하인주소', value=case['consignee_address'] or '')
-        tracking = st.text_input('송장번호', value=case['tracking_no'] or '') if is_courier_delivery(method) else ''
-        if method == '퀵배송':
-            c1, c2 = st.columns(2)
-            driver = c1.text_input('배송기사 이름', value=case['driver_name'] or '')
-            phone = c2.text_input('연락처', value=case['driver_phone'] or '')
-        else:
-            driver = phone = ''
-
-    submitted = st.form_submit_button('배송정보 저장 및 완료 처리', type='primary')
-
-if submitted:
-    delivery_service.save_delivery(
-        case_id,
-        method=method,
-        actual_ship_date=str(actual_date),
-        tracking_no=tracking,
-        driver_name=driver,
-        driver_phone=phone,
-        consignee_name=consignee_name,
-        consignee_address=consignee_address,
+    case_id = select_export_case(
+        cases,
+        key_prefix='delivery_export_selector',
+        saved_case_id=st.session_state.get('actual_packing_case_id'),
+        show_stage=False,
     )
-    folder = folder_service.sync_case_folder(case_id)
-    history_service.add(case_id, '국내배송 완료', f'{method} / {consignee_name} / {folder}')
-    st.success('저장했습니다.')
-    st.rerun()
+    case = export_service.get_case(case_id)
+
+    render_packed_details(case_id)
+    st.divider()
+
+    saved_method = str(case['domestic_method'] or '').strip()
+    method = delivery_method_input(
+        saved_method=saved_method,
+        key_prefix=f'delivery_method_{case_id}',
+    )
+    with st.form(f'delivery_{case_id}_{method}'):
+        actual_date = st.date_input('국내배송 일자', value=date_value(case['actual_ship_date']))
+
+        if method == '핸드캐리':
+            consignee_name = ''
+            consignee_address = ''
+            tracking = ''
+            driver = ''
+            phone = ''
+        else:
+            receiver_cols = st.columns([1, 2])
+            consignee_name = receiver_cols[0].text_input('수하인명', value=case['consignee_name'] or '')
+            consignee_address = receiver_cols[1].text_input('수하인주소', value=case['consignee_address'] or '')
+            tracking = st.text_input('송장번호', value=case['tracking_no'] or '') if is_courier_delivery(method) else ''
+            if method == '퀵배송':
+                c1, c2 = st.columns(2)
+                driver = c1.text_input('배송기사 이름', value=case['driver_name'] or '')
+                phone = c2.text_input('연락처', value=case['driver_phone'] or '')
+            else:
+                driver = phone = ''
+
+        submitted = st.form_submit_button('배송정보 저장 및 완료 처리', type='primary')
+
+    if submitted:
+        delivery_service.save_delivery(
+            case_id,
+            method=method,
+            actual_ship_date=str(actual_date),
+            tracking_no=tracking,
+            driver_name=driver,
+            driver_phone=phone,
+            consignee_name=consignee_name,
+            consignee_address=consignee_address,
+        )
+        folder = folder_service.sync_case_folder(case_id)
+        history_service.add(case_id, '국내배송 완료', f'{method} / {consignee_name} / {folder}')
+        st.success('저장했습니다.')
+        st.rerun()
