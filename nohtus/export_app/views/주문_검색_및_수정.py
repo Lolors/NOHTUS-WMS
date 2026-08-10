@@ -33,18 +33,6 @@ def _company_selection_editor(source: pd.DataFrame, *, key_prefix: str) -> pd.Da
     version_key = f'{key_prefix}_version'
     selected_ids = set(map(int, st.session_state.get(selected_key, [])))
     companies = [str(value) for value in source['출고사업장'].dropna().unique() if str(value).strip()]
-    controls = st.columns(len(companies) + 1)
-    for column, company in zip(controls, companies):
-        company_ids = source.loc[source['출고사업장'].astype(str) == company, 'id'].astype(int).tolist()
-        if column.button(f'{company} 전체 선택', use_container_width=True, key=f'{key_prefix}_select_{company}'):
-            selected_ids.update(company_ids)
-            st.session_state[selected_key] = sorted(selected_ids)
-            st.session_state[version_key] = int(st.session_state.get(version_key, 0)) + 1
-    if controls[-1].button('선택 해제', use_container_width=True, key=f'{key_prefix}_clear'):
-        selected_ids.clear()
-        st.session_state[selected_key] = []
-        st.session_state[version_key] = int(st.session_state.get(version_key, 0)) + 1
-
     editor_source = source.copy()
     editor_source.insert(0, '선택', editor_source['id'].astype(int).isin(selected_ids))
     edited = st.data_editor(
@@ -56,6 +44,17 @@ def _company_selection_editor(source: pd.DataFrame, *, key_prefix: str) -> pd.Da
         column_config={'선택': st.column_config.CheckboxColumn('선택'), 'id': None},
     )
     st.session_state[selected_key] = edited.loc[edited['선택'] == True, 'id'].astype(int).tolist()  # noqa: E712
+    controls = st.columns(len(companies) + 1)
+    for column, company in zip(controls, companies):
+        company_ids = source.loc[source['출고사업장'].astype(str) == company, 'id'].astype(int).tolist()
+        if column.button(f'{company} 전체 선택', use_container_width=True, key=f'{key_prefix}_select_{company}'):
+            st.session_state[selected_key] = sorted(company_ids)
+            st.session_state[version_key] = int(st.session_state.get(version_key, 0)) + 1
+            st.rerun()
+    if controls[-1].button('선택 해제', use_container_width=True, key=f'{key_prefix}_clear'):
+        st.session_state[selected_key] = []
+        st.session_state[version_key] = int(st.session_state.get(version_key, 0)) + 1
+        st.rerun()
     return edited
 
 
