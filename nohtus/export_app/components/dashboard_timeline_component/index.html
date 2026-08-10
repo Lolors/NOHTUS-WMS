@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><title>주문 타임라인</title></head>
+<body style="margin:0">
+<div id="root"></div>
+<script>
+const root = document.getElementById('root');
+
+function send(type, extra = {}) {
+  window.parent.postMessage({isStreamlitMessage: true, type, ...extra}, '*');
+}
+
+function render(event) {
+  if (!event.data || event.data.type !== 'streamlit:render') return;
+  const args = event.data.args || {};
+  document.open();
+  document.write(args.document || '');
+  document.close();
+  send('streamlit:setFrameHeight', {height: Number(args.height) || document.body.scrollHeight});
+}
+
+window.addEventListener('message', render);
+send('streamlit:componentReady', {apiVersion: 1});
+</script>
+</body>
+</html>
