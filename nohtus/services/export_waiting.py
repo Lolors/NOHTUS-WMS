@@ -249,6 +249,12 @@ def _resolve_source_row(cur, inventory_id, fallback=None, required_qty=0):
 def _take_source(cur, inventory_id, qty, now, fallback=None):
     s = _resolve_source_row(cur, inventory_id, fallback, required_qty=qty)
     if not s:
+        existing = _resolve_source_row(cur, inventory_id, fallback, required_qty=0)
+        if existing:
+            available = int(existing.get("qty") or 0)
+            raise ValueError(
+                f"{existing.get('product_name','제품')} 재고 부족: 요청 {qty}EA / 현재 {available}EA"
+            )
         hint = fallback or {}
         label = " / ".join(x for x in [
             str(hint.get("company") or "").strip(),
@@ -391,25 +397,35 @@ def _apply_confirmed_export_item_changes(
     now,
     title,
     export_no,
-    *,
-    erp_company,
-    customer_code,
-    customer_name,
-    order_date,
 ):
-    """확정 출고를 원복한 뒤 수정 목록을 같은 트랜잭션에서 다시 출고한다."""
+    """기존 확정분은 유지하고 목록의 증감분만 재고에 반영한다.
+
+    같은 원본 재고의 기존 확정 수량까지는 확정 행과 ERP 매출 정보를 그대로
+    둔다. 줄어든 수량만 출고 취소로 원복하고, 늘어난 수량과 새 품목은 P에
+    적재한 미확정 행으로 추가한다.
+    """
     current_items = _items(cur, order_id, confirmed=True)
-    target_qty = {int(k): int(v) for k, v in dict(grouped).items() if int(v) > 0}
+    remaining_target = {int(k): int(v) for k, v in dict(grouped).items() if int(v) > 0}
     if not current_items:
         raise ValueError("수정할 수출확정 품목을 찾을 수 없습니다.")
 
-    restored_source_rows = {}
     for item in current_items:
         source_id = int(item.get("source_inventory_id") or 0)
-        restored_id = _add(cur, item, item["source_location"], int(item["qty"]), now, 1)
+        old_qty = int(item.get("qty") or 0)
+        kept_qty = min(old_qty, int(remaining_target.get(source_id, 0)))
+        removed_qty = old_qty - kept_qty
+        remaining_target[source_id] = int(remaining_target.get(source_id, 0)) - kept_qty
+
+        if kept_qty:
+            cur.execute("UPDATE export_waiting_items SET qty=? WHERE id=?", (kept_qty, int(item["id"])))
+        else:
+            cur.execute("DELETE FROM export_waiting_items WHERE id=?", (int(item["id"]),))
+
+        if not removed_qty:
+            continue
+        restored_id = _add(cur, item, item["source_location"], removed_qty, now, 1)
         restored = _dict_row(cur, "SELECT * FROM inventory WHERE id=?", (restored_id,))
         if restored:
-            restored_source_rows[source_id] = restored
             source_hints[source_id] = restored
         insert_transaction_log(
             cur,
@@ -419,33 +435,30 @@ def _apply_confirmed_export_item_changes(
             warehouse_name=item.get("warehouse_name", ""),
             lot=item.get("lot", "-"),
             exp_date=item.get("exp_date", "-"),
-            from_company=erp_company,
+            from_company=str(item.get("confirmed_company") or ""),
             from_location="",
             to_company=item["company"],
             to_location=item["source_location"],
-            qty=item["qty"],
-            memo=f"수출확정 수정 / 기존 출고 원복 / {title} / 수출번호: {export_no}",
+            qty=removed_qty,
+            memo=(
+                f"수출확정 수정 / 감소분 원복 / {title} / "
+                f"{str(item.get('confirmed_customer_name') or '')} / 수출번호: {export_no}"
+            ),
         )
 
-    cur.execute("DELETE FROM export_waiting_items WHERE order_id=?", (int(order_id),))
-
-    for source_id, qty in target_qty.items():
-        hint = source_hints.get(source_id) or restored_source_rows.get(source_id)
+    for source_id, qty in remaining_target.items():
+        if qty <= 0:
+            continue
+        hint = source_hints.get(source_id)
         source = _take_source(cur, source_id, qty, now, hint)
         resolved_inventory_id = int(source.get("_resolved_inventory_id") or source.get("id") or source_id)
         waiting_inventory_id = _add(cur, source, P, qty, now, 0)
-        waiting_item = {
-            **source,
-            "waiting_inventory_id": waiting_inventory_id,
-            "qty": qty,
-        }
-        _take_p(cur, waiting_item, now)
         cur.execute(
             """INSERT INTO export_waiting_items(
                    order_id,source_inventory_id,waiting_inventory_id,company,product_name,
                    warehouse_name,lot,exp_date,source_location,waiting_location,qty,moved_at,
-                   confirmed,confirmed_company,confirmed_customer_code,confirmed_customer_name,confirmed_at
-               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)""",
+                   confirmed
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)""",
             (
                 order_id,
                 resolved_inventory_id,
@@ -459,30 +472,33 @@ def _apply_confirmed_export_item_changes(
                 P,
                 qty,
                 now,
-                erp_company,
-                customer_code,
-                customer_name,
-                now,
             ),
         )
         insert_transaction_log(
             cur,
             created_at=now,
-            tx_type="출고",
+            tx_type="위치이동",
             product_name=source.get("product_name", ""),
             warehouse_name=source.get("warehouse_name", "") or "",
             lot=source.get("lot", "-"),
             exp_date=source.get("exp_date", "-"),
             from_company=source.get("company", ""),
-            from_location=P,
-            to_company=erp_company,
-            to_location="",
+            from_location=source.get("location", ""),
+            to_company=source.get("company", ""),
+            to_location=P,
             qty=qty,
-            memo=(
-                f"수출확정 수정 / 새 출고 목록 / {title} / {customer_name} / "
-                f"출고일자: {order_date} / 수출번호: {export_no}"
-            ),
+            memo=f"수출확정 수정 / 추가 품목 수출대기 / {title} / 수출번호: {export_no}",
         )
+
+    remaining = cur.execute(
+        "SELECT COUNT(*) FROM export_waiting_items WHERE order_id=? AND COALESCE(confirmed,0)=0",
+        (int(order_id),),
+    ).fetchone()[0]
+    status = "partial" if int(remaining or 0) else "confirmed"
+    cur.execute(
+        "UPDATE export_waiting_orders SET status=?,updated_at=? WHERE id=?",
+        (status, now, int(order_id)),
+    )
 
 def save_export_waiting_order(cart, *, country, buyer="", transport_method="미지정", export_no, editing_order_id=None):
     country = str(country or "").strip()
@@ -554,10 +570,6 @@ def save_export_waiting_order(cart, *, country, buyer="", transport_method="미�
                     now,
                     title,
                     export_no,
-                    erp_company=str(row.get("erp_company") or ""),
-                    customer_code=str(row.get("erp_customer_code") or ""),
-                    customer_name=str(row.get("erp_customer_name") or ""),
-                    order_date=str(row.get("order_date") or ""),
                 )
             else:
                 _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now, title, export_no)
