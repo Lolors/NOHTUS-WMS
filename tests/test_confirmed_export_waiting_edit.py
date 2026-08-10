@@ -77,9 +77,14 @@ class ConfirmedExportWaitingEditTests(unittest.TestCase):
             con.execute(
                 """INSERT INTO export_waiting_items(
                        order_id,source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
-                       source_location,waiting_location,qty,moved_at,confirmed
-                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,1)""",
-                (order_id, 10, "NOH", "제품", "ERP-A", "LOT-1", "2027-01-01", "A1", "P", 3, "2026-01-01"),
+                       source_location,waiting_location,qty,moved_at,confirmed,confirmed_company,
+                       confirmed_customer_code,confirmed_customer_name,confirmed_at
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)""",
+                (
+                    order_id, 10, "NOH", "제품", "ERP-A", "LOT-1", "2027-01-01",
+                    "A1", "P", 3, "2026-01-01", "ERP-NOH", "C001", "수출매출처",
+                    "2026-01-15 09:00:00",
+                ),
             )
         return order_id
 
@@ -132,7 +137,7 @@ class ConfirmedExportWaitingEditTests(unittest.TestCase):
                 export_no="NEW-1",
             )
 
-    def test_replaces_confirmed_items_and_rebalances_inventory(self):
+    def test_preserves_existing_confirmation_and_leaves_added_items_waiting(self):
         order_id = self._add_order()
 
         result = save_export_waiting_order(
@@ -161,7 +166,7 @@ class ConfirmedExportWaitingEditTests(unittest.TestCase):
                 (order_id,),
             ).fetchone()
             items = con.execute(
-                """SELECT source_inventory_id,product_name,qty,confirmed,confirmed_company,
+                """SELECT id,source_inventory_id,product_name,qty,confirmed,confirmed_company,
                           confirmed_customer_code,confirmed_customer_name
                    FROM export_waiting_items WHERE order_id=? ORDER BY source_inventory_id""",
                 (order_id,),
@@ -179,25 +184,68 @@ class ConfirmedExportWaitingEditTests(unittest.TestCase):
         self.assertEqual(result["total_qty"], 3)
         self.assertEqual(
             order,
-            ("confirmed", "JP", "New Buyer", "해상", "NEW-9", "ERP-NOH", "C001", "수출매출처", "2026-01-15"),
+            ("partial", "JP", "New Buyer", "해상", "NEW-9", "ERP-NOH", "C001", "수출매출처", "2026-01-15"),
         )
         self.assertEqual(
             items,
             [
-                (10, "제품", 1, 1, "ERP-NOH", "C001", "수출매출처"),
-                (11, "새제품", 2, 1, "ERP-NOH", "C001", "수출매출처"),
+                (1, 10, "제품", 1, 1, "ERP-NOH", "C001", "수출매출처"),
+                (2, 11, "새제품", 2, 0, None, None, None),
             ],
         )
         self.assertEqual(stocks, [(10, 2), (11, 3)])
-        self.assertEqual(p_stock, 0)
+        self.assertEqual(p_stock, 2)
         self.assertEqual(
             history,
             [
-                ("출고지시취소", "제품", 3, 3),
-                ("출고", "제품", 1, 2),
-                ("출고", "새제품", 2, 3),
+                ("출고지시취소", "제품", 2, 2),
+                ("위치이동", "새제품", 2, 5),
             ],
         )
+
+    def test_keeps_unchanged_confirmed_item_and_adds_only_increase_as_waiting(self):
+        order_id = self._add_order()
+        with sqlite3.connect(self.db_path, factory=self.connection_factory) as con:
+            con.execute(
+                """UPDATE export_waiting_items
+                   SET confirmed_company='ERP-NOH',confirmed_customer_code='C001',
+                       confirmed_customer_name='수출매출처',confirmed_at='2026-01-15 09:00:00'
+                   WHERE order_id=?""",
+                (order_id,),
+            )
+            con.execute("UPDATE inventory SET qty=2 WHERE id=10")
+
+        save_export_waiting_order(
+            [{
+                "id": 10, "사업장": "NOH", "제품명": "제품", "warehouse_name": "ERP-A",
+                "LOT": "LOT-1", "유통기한": "2027-01-01", "로케이션": "A1", "요청수량": 5,
+            }],
+            country="KR", buyer="Old Buyer", transport_method="항공", export_no="OLD-1",
+            editing_order_id=order_id,
+        )
+
+        with sqlite3.connect(self.db_path, factory=self.connection_factory) as con:
+            items = con.execute(
+                """SELECT qty,confirmed,confirmed_company,confirmed_customer_code,confirmed_customer_name
+                   FROM export_waiting_items WHERE order_id=? ORDER BY id""",
+                (order_id,),
+            ).fetchall()
+            status = con.execute(
+                "SELECT status FROM export_waiting_orders WHERE id=?", (order_id,)
+            ).fetchone()[0]
+            source_qty = con.execute("SELECT qty FROM inventory WHERE id=10").fetchone()[0]
+            p_qty = con.execute("SELECT COALESCE(SUM(qty),0) FROM inventory WHERE location='P'").fetchone()[0]
+
+        self.assertEqual(
+            items,
+            [
+                (3, 1, "ERP-NOH", "C001", "수출매출처"),
+                (2, 0, None, None, None),
+            ],
+        )
+        self.assertEqual(status, "partial")
+        self.assertEqual(source_qty, 0)
+        self.assertEqual(p_qty, 2)
 
     def test_rolls_back_confirmed_edit_when_new_quantity_is_too_large(self):
         order_id = self._add_order()
