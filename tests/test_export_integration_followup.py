@@ -50,13 +50,36 @@ class ExportIntegrationFollowupTests(TestCase):
 
         view = Path('nohtus/export_app/views/수출확정_매출_등록.py').read_text(encoding='utf-8')
         self.assertIn("'주문 요약': orders['order_summary']", view)
-        self.assertIn("f'{int(value)}곳'", view)
+        self.assertIn("str(label) if int(count) == 1 else f'{int(count)}곳'", view)
+        self.assertLess(view.index("'상태':"), view.index("'수출번호':"))
 
     def test_confirmation_items_offer_source_company_bulk_selection(self):
         source = Path('nohtus/export_app/views/주문_검색_및_수정.py').read_text(encoding='utf-8')
         self.assertIn("f'{company} 전체 선택'", source)
         self.assertIn("source['출고사업장']", source)
+        self.assertIn("st.session_state[selected_key] = sorted(company_ids)", source)
+        self.assertNotIn("selected_ids.update(company_ids)", source)
+        self.assertLess(source.index("edited = st.data_editor("), source.index("f'{company} 전체 선택'"))
         self.assertGreaterEqual(source.count('_company_selection_editor('), 3)
+
+    def test_single_confirmation_uses_its_name_and_dashboard_is_sixty_viewport_width(self):
+        orders = pd.DataFrame([{
+            'id': 1, 'export_no': 'EXP-1', 'country': 'KR', 'buyer': 'B',
+            'transport_method': 'AIR', 'title': 'old', 'status': 'confirmed',
+            'order_date': '', 'created_at': '',
+        }])
+        items = pd.DataFrame([{
+            'order_id': 1, 'product_name': '제품', 'qty': 1, 'confirmed': 1,
+            'confirmed_company': '노투스', 'confirmed_customer_name': '수출처 A',
+        }])
+        with patch.object(export_confirm_service, 'wms_q', side_effect=[orders, items]):
+            result = export_confirm_service.list_active_orders()
+        self.assertEqual(result.loc[0, 'confirmed_company_label'], '노투스')
+        self.assertEqual(result.loc[0, 'confirmed_customer_label'], '수출처 A')
+
+        dashboard = Path('nohtus/export_app/views/오버뷰.py').read_text(encoding='utf-8')
+        self.assertIn('export_dashboard_active_orders', dashboard)
+        self.assertIn('width: 60vw !important', dashboard)
 
     def test_duplicate_open_export_numbers_require_merge_or_new_number(self):
         rows = pd.DataFrame([{"id": 11}, {"id": 12}])
