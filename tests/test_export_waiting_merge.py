@@ -26,6 +26,14 @@ class ExportWaitingMergeTests(unittest.TestCase):
 
         self.connect_patcher = patch("nohtus.services.export_waiting.connect", connect_test_db)
         self.connect_patcher.start()
+        with sqlite3.connect(self.db_path, factory=self.connection_factory) as con:
+            con.execute(
+                """CREATE TABLE inventory(
+                       id INTEGER PRIMARY KEY,location TEXT,company TEXT,product_name TEXT,
+                       warehouse_name TEXT,lot TEXT,exp_date TEXT,qty INTEGER,
+                       updated_at TEXT,is_shippable INTEGER
+                   )"""
+            )
         ensure_export_waiting_tables()
 
     def tearDown(self):
