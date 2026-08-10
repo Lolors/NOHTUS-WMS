@@ -1,5 +1,16 @@
 import streamlit as st
 
+# 수출대기 화면은 출고지시 렌더러를 재사용하면서 Streamlit 위젯을 임시로
+# 바꾼다. 일반 출고지시 진입점에서는 반드시 앱 시작 시점의 원본 위젯을
+# 사용하도록 보관한다.
+_OUTBOUND_NATIVE_WIDGETS = {
+    "text_input": st.text_input,
+    "checkbox": st.checkbox,
+    "data_editor": st.data_editor,
+    "markdown": st.markdown,
+    "caption": st.caption,
+}
+
 from styles import apply_style
 from nohtus.auth import allowed_pages_for_current_user, can_access_page, is_admin, render_user_box, require_login
 from nohtus.config import APP_TITLE, VERSION
@@ -20,7 +31,7 @@ from nohtus.pages.location_map_business import page_map
 from nohtus.pages.customer_master_business import page_customer_master
 from nohtus.pages.mobile_stock_business import page_mobile_stock_finder
 from nohtus.pages.move import page_move
-from nohtus.pages.outbound_date_fix import page_outbound
+from nohtus.pages.outbound_date_fix import page_outbound as _page_outbound
 from nohtus.pages.own_product_status import page_own_product_status
 from nohtus.pages.product_matching_business import page_product_matching
 from nohtus.pages.product_shortcuts import page_recent_products
@@ -28,6 +39,19 @@ from nohtus.pages.purchase_history_single import page_purchase_history
 from nohtus.pages.saved_outbound_date_fix import page_saved_outbound as page_saved_outbound_refactored
 from nohtus.pages.shippable_inventory import page_shippable_inventory
 from nohtus.pages.stocktake_business import page_stocktake
+
+
+def page_outbound():
+    """일반 출고지시에서는 수출대기용 위젯 패치가 절대 새지 않게 한다."""
+    previous_widgets = {name: getattr(st, name) for name in _OUTBOUND_NATIVE_WIDGETS}
+    st.session_state.pop("_outbound_screen_mode", None)
+    try:
+        for name, widget in _OUTBOUND_NATIVE_WIDGETS.items():
+            setattr(st, name, widget)
+        return _page_outbound()
+    finally:
+        for name, widget in previous_widgets.items():
+            setattr(st, name, widget)
 
 
 def _inject_mobile_login_css():
