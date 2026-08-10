@@ -8,6 +8,17 @@ from nohtus.export_app.services import dashboard_view_service
 
 def render() -> None:
     st.title('수출 현황')
+    st.markdown(
+        """
+        <style>
+        [class*="st-key-export_dashboard_active_orders"] {
+            width: 60vw !important;
+            max-width: 60vw !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     st.caption('진행 중인 수출 건 현황과 확인이 필요한 내용을 관리합니다.')
 
     st.markdown('### 진행 중인 수출 건')
@@ -34,4 +45,9 @@ def render() -> None:
             lambda row: [dashboard_view_service.stage_style(row['단계'])] * len(row),
             axis=1,
         )
-        st.dataframe(styled_status, hide_index=True, use_container_width=True)
+        st.dataframe(
+            styled_status,
+            hide_index=True,
+            use_container_width=True,
+            key='export_dashboard_active_orders',
+        )
