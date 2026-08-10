@@ -113,6 +113,30 @@ def add_ignored_problems(problem_rows, reason=""):
     return len(rows)
 
 
+def update_ignored_problem_reasons(reason_updates):
+    """무시 목록의 식별자와 사유만 받아 기존 사유를 수정한다."""
+    updates = []
+    for ignore_id, reason in dict(reason_updates or {}).items():
+        cleaned_reason = str(reason or "").strip()
+        if not cleaned_reason:
+            raise ValueError("차이 원인을 입력하세요.")
+        updates.append((cleaned_reason, int(ignore_id)))
+
+    if not updates:
+        return 0
+
+    _ensure_ignored_problem_table()
+    with connect() as con:
+        before = con.total_changes
+        con.executemany(
+            "UPDATE stock_compare_ignored_problems SET reason=? WHERE id=?",
+            updates,
+        )
+        updated = con.total_changes - before
+        con.commit()
+    return int(updated)
+
+
 def remove_ignored_problems(ignore_ids):
     ids = sorted({int(value) for value in ignore_ids})
     if not ids:
