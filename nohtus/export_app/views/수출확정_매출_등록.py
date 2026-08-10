@@ -38,20 +38,27 @@ def render() -> None:
             + '. 주문을 병합하거나 새 수출번호를 사용하세요.'
         )
 
+    def confirmation_label(count: int, label: str) -> str:
+        return str(label) if int(count) == 1 else f'{int(count)}곳'
+
     table = pd.DataFrame({
         '_id': orders['id'].astype(int),
-        '수출번호': orders['export_no'],
-        '국가': orders['country'],
-        '바이어': orders['buyer'].fillna(''),
-        '운송방식': orders['transport_method'].fillna(''),
-        '주문 요약': orders['order_summary'],
-        '확정사업장': orders['confirmed_company_count'].map(lambda value: f'{int(value)}곳'),
-        '확정매출처': orders['confirmed_customer_count'].map(lambda value: f'{int(value)}곳'),
         '상태': orders['status'].map({
             'waiting': '수출대기',
             'partial': '일부 확정',
             'confirmed': '수출확정',
         }).fillna(orders['status']),
+        '수출번호': orders['export_no'],
+        '국가': orders['country'],
+        '바이어': orders['buyer'].fillna(''),
+        '운송방식': orders['transport_method'].fillna(''),
+        '주문 요약': orders['order_summary'],
+        '확정사업장': [confirmation_label(count, label) for count, label in zip(
+            orders['confirmed_company_count'], orders['confirmed_company_label']
+        )],
+        '확정매출처': [confirmation_label(count, label) for count, label in zip(
+            orders['confirmed_customer_count'], orders['confirmed_customer_label']
+        )],
     })
     event = st.dataframe(
         table,
