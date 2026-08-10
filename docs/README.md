@@ -4,9 +4,9 @@
 
 처음 작업하는 사람 또는 ChatGPT는 다음 순서로 읽습니다.
 
-1. `MASTER_MEMORY.md`
-2. `PRODUCT_SPEC.md`
-3. `CORE_FREEZE.md`
-4. `DEVELOPMENT_RULE.md`
-5. `TEST_CHECKLIST.md`
+1. `DEVELOPER_HANDOFF.md`
+2. `MASTER_MEMORY.md`
+3. `PRODUCT_SPEC.md`
+4. `DB_SCHEMA.md`
+5. `development_rules.md`
 6. 현재 브랜치와 관련된 문서
