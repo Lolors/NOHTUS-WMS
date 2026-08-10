@@ -25,6 +25,38 @@ from nohtus.services.export_waiting import (
 )
 
 
+def _company_selection_editor(source: pd.DataFrame, *, key_prefix: str) -> pd.DataFrame:
+    """사업장 단위 빠른 선택을 지원하는 품목 체크 편집기."""
+    selected_key = f'{key_prefix}_selected_ids'
+    version_key = f'{key_prefix}_version'
+    selected_ids = set(map(int, st.session_state.get(selected_key, [])))
+    companies = [str(value) for value in source['출고사업장'].dropna().unique() if str(value).strip()]
+    controls = st.columns(len(companies) + 1)
+    for column, company in zip(controls, companies):
+        company_ids = source.loc[source['출고사업장'].astype(str) == company, 'id'].astype(int).tolist()
+        if column.button(f'{company} 전체 선택', use_container_width=True, key=f'{key_prefix}_select_{company}'):
+            selected_ids.update(company_ids)
+            st.session_state[selected_key] = sorted(selected_ids)
+            st.session_state[version_key] = int(st.session_state.get(version_key, 0)) + 1
+    if controls[-1].button('선택 해제', use_container_width=True, key=f'{key_prefix}_clear'):
+        selected_ids.clear()
+        st.session_state[selected_key] = []
+        st.session_state[version_key] = int(st.session_state.get(version_key, 0)) + 1
+
+    editor_source = source.copy()
+    editor_source.insert(0, '선택', editor_source['id'].astype(int).isin(selected_ids))
+    edited = st.data_editor(
+        editor_source,
+        hide_index=True,
+        use_container_width=True,
+        key=f'{key_prefix}_editor_{st.session_state.get(version_key, 0)}',
+        disabled=[column for column in editor_source.columns if column != '선택'],
+        column_config={'선택': st.column_config.CheckboxColumn('선택'), 'id': None},
+    )
+    st.session_state[selected_key] = edited.loc[edited['선택'] == True, 'id'].astype(int).tolist()  # noqa: E712
+    return edited
+
+
 def render_wms_confirmation_section(export_no: str) -> None:
     wms_orders = export_confirm_service.list_orders_for_export_no(export_no)
     if wms_orders.empty:
@@ -65,7 +97,7 @@ def render_wms_confirmation_section(export_no: str) -> None:
 
     confirmed_items = items[items['confirmed'] == 1].copy() if not items.empty else pd.DataFrame()
     if not confirmed_items.empty:
-        st.markdown('#### 확정 품목 매출·출고 이력 수정')
+        st.markdown('#### 확정 품목 매출·출고 등록 및 수정')
         st.caption(
             '확정 품목을 선택해 ERP 사업장·수출처·출고일자를 다시 저장할 수 있습니다. '
             '제품 교체나 수량 변경은 수출대기 입고에서 수정하면 기존 출고가 원복되고 새 품목이 수출대기로 전환됩니다.'
@@ -73,14 +105,9 @@ def render_wms_confirmation_section(export_no: str) -> None:
         confirmed_source = confirmed_items[
             ['id', '출고사업장', '표준제품명', '출고사업장ERP명', 'LOT', '유통기한', '수량', '확정사업장', '확정매출처']
         ].copy()
-        confirmed_source.insert(0, '선택', False)
-        confirmed_edited = st.data_editor(
+        confirmed_edited = _company_selection_editor(
             confirmed_source,
-            hide_index=True,
-            use_container_width=True,
-            key=f'export_link_edit_confirmed_items_{order_id}_{confirmed_count}',
-            disabled=[c for c in confirmed_source.columns if c != '선택'],
-            column_config={'선택': st.column_config.CheckboxColumn('선택'), 'id': None},
+            key_prefix=f'export_link_edit_confirmed_items_{order_id}_{confirmed_count}',
         )
         selected_confirmed = confirmed_edited[confirmed_edited['선택'] == True]  # noqa: E712
         selected_confirmed_ids = selected_confirmed['id'].astype(int).tolist()
@@ -163,14 +190,9 @@ def render_wms_confirmation_section(export_no: str) -> None:
     st.markdown('#### 선택 품목 수출확정')
     st.caption('아직 확정되지 않은 품목을 체크하고, ERP 매출 정보와 출고일자를 설정하세요.')
     selection_source = remaining_items[['id', '출고사업장', '표준제품명', '출고사업장ERP명', 'LOT', '유통기한', '수량', '원래로케이션']].copy()
-    selection_source.insert(0, '선택', False)
-    edited = st.data_editor(
+    edited = _company_selection_editor(
         selection_source,
-        hide_index=True,
-        use_container_width=True,
-        key=f'export_link_confirm_items_{order_id}_{confirmed_count}',
-        disabled=['id', '출고사업장', '표준제품명', '출고사업장ERP명', 'LOT', '유통기한', '수량', '원래로케이션'],
-        column_config={'선택': st.column_config.CheckboxColumn('선택', help='이번에 같은 ERP 사업장으로 확정할 품목'), 'id': None},
+        key_prefix=f'export_link_confirm_items_{order_id}_{confirmed_count}',
     )
     selected_rows = edited[edited['선택'] == True] if not edited.empty else pd.DataFrame()  # noqa: E712
     selected_ids = selected_rows['id'].astype(int).tolist() if not selected_rows.empty else []
