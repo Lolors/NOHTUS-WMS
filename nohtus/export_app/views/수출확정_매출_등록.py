@@ -21,13 +21,13 @@ def render() -> None:
         unsafe_allow_html=True,
     )
     st.caption(
-        '수출대기 입고가 끝난 품목의 ERP 매출 사업장과 수출처를 선택해 확정합니다. '
+        '수출대기 저장이 끝난 품목의 ERP 매출 사업장과 수출처를 선택해 확정합니다. '
         '표준제품명 옆의 출고사업장 ERP명을 참고해 ERP에서 제품을 검색하세요.'
     )
 
     orders = export_confirm_service.list_active_orders()
     if orders.empty:
-        st.info('조회할 수출대기 입고 건이 없습니다.')
+        st.info('조회할 수출대기 저장 건이 없습니다.')
         return
 
     duplicate_export_nos = orders['export_no'][orders['export_no'].duplicated(keep=False)].dropna().unique()
