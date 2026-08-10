@@ -6,7 +6,12 @@ import streamlit as st
 import nohtus.pages.outbound as outbound_page
 from nohtus.db import connect, q
 from nohtus.pages.outbound_business import page_outbound as _page_outbound
-from nohtus.services.export_waiting import TRANSPORT_METHODS, ensure_export_waiting_tables, save_export_waiting_order
+from nohtus.services.export_waiting import (
+    TRANSPORT_METHODS,
+    ensure_export_waiting_tables,
+    repair_p_inventory_links,
+    save_export_waiting_order,
+)
 
 _ALL_COMPANY_SELECTION_KEYS = ("out_all_company_manual_pick", "out_ignore_company", "out_manual_pick")
 _P_MATCH_REQUEST_KEY = "_export_p_match_request"
@@ -52,6 +57,7 @@ def _load_editing_order():
 def _find_unmatched_p_item(order_id):
     if not order_id:
         return None
+    repair_p_inventory_links(order_id)
     df = q(
         """SELECT i.id,i.waiting_inventory_id,i.company,i.product_name,i.warehouse_name,
                   i.lot,i.exp_date,i.qty,i.source_location,
@@ -152,10 +158,16 @@ def _render_p_match_dialog():
 
     def body():
         old_name = str(request.get("product_name") or "")
-        st.warning(
-            f"P 로케이션에서 기존 제품명 ‘{old_name}’과 정확히 일치하는 재고를 찾지 못했습니다. "
-            "제품 이름이 변경된 경우 아래에서 현재 제품명을 검색해 연결하세요."
-        )
+        if request.get("linked_p_id") and int(request.get("p_qty") or 0) < int(request.get("qty") or 0):
+            st.warning(
+                f"P 로케이션의 ‘{old_name}’ 재고가 부족합니다. "
+                "필요한 수량이 있는 다른 P 재고를 아래에서 검색해 연결하세요."
+            )
+        else:
+            st.warning(
+                f"P 로케이션에서 기존 제품 ‘{old_name}’과 자동으로 연결할 재고를 찾지 못했습니다. "
+                "제품 정보가 변경된 경우 아래에서 현재 제품을 검색해 연결하세요."
+            )
         st.caption(
             f"기존 정보: {request.get('company','-')} / LOT {request.get('lot','-')} / "
             f"유통기한 {request.get('exp_date','-')} / 필요 {int(request.get('qty') or 0)}EA"
