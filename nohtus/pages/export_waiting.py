@@ -257,6 +257,7 @@ def page_export_waiting():
     original_q = outbound_page.q
     original_inventory_query = outbound_page._inventory_query_for_outbound
     original_renderer = outbound_page._render_last_sale_importer
+    original_save_customer = outbound_page._save_outbound_customer
     original_title, original_caption, original_markdown = st.title, st.caption, st.markdown
     original_button, original_success, original_rerun = st.button, st.success, st.rerun
     original_text_input, original_checkbox, original_info = st.text_input, st.checkbox, st.info
@@ -319,7 +320,7 @@ def page_export_waiting():
             )
         else:
             completed["message"] = f"수출대기 등록 완료: {result['title']} / 총 {result['total_qty']}EA → 로케이션 P"
-        return 0
+        return int(result["order_id"])
 
     def patched_q(sql, params=()):
         normalized = " ".join(str(sql or "").lower().split())
@@ -416,6 +417,10 @@ def page_export_waiting():
     outbound_page.q = patched_q
     outbound_page._inventory_query_for_outbound = patched_inventory_query
     outbound_page._render_last_sale_importer = lambda: None
+    # 수출대기 저장은 export_waiting_orders.id를 반환하므로, outbound_orders를
+    # 대상으로 하는 매출처 저장을 절대 실행하지 않는다(id 충돌 시 다른 출고지시서를
+    # 덮어쓸 수 있다).
+    outbound_page._save_outbound_customer = lambda *args, **kwargs: None
     st.title, st.caption, st.markdown = patched_title, patched_caption, patched_markdown
     st.text_input, st.checkbox, st.info = patched_text_input, patched_checkbox, patched_info
     st.button, st.success, st.rerun = patched_button, lambda body, *a, **k: original_success(str(body).replace("출고지시", "수출대기"), *a, **k), patched_rerun
@@ -427,6 +432,7 @@ def page_export_waiting():
         outbound_page.save_outbound_order, outbound_page.update_outbound_order, outbound_page.q = original_save, original_update, original_q
         outbound_page._inventory_query_for_outbound = original_inventory_query
         outbound_page._render_last_sale_importer = original_renderer
+        outbound_page._save_outbound_customer = original_save_customer
         st.title, st.caption, st.markdown = original_title, original_caption, original_markdown
         st.text_input, st.checkbox, st.info = original_text_input, original_checkbox, original_info
         st.button, st.success, st.rerun = original_button, original_success, original_rerun
