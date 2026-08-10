@@ -20,9 +20,9 @@ MENU_SECTIONS = [
     ("기초", ["제품 매칭 관리", "거래처 관리"]),
 ]
 
-# render_sidebar renders this section as a collapsible "세부 관리메뉴" instead of
-# a plain button list: a toggle button shows/hides it, and hovering the section
-# also reveals it (via CSS) regardless of the toggle state.
+# The export section is collapsed by default and rendered only when explicitly
+# expanded.  Keeping this in Python state avoids brittle CSS selectors that can
+# change between Streamlit releases.
 _COLLAPSIBLE_SECTION = "수출"
 _EXPORT_SUBMENU_EXPANDED_KEY = "export_submenu_expanded"
 
@@ -107,35 +107,21 @@ def render_sidebar(app_title, version, allowed_pages=None):
 
     def render_collapsible_section(section, labels):
         expanded = bool(st.session_state.get(_EXPORT_SUBMENU_EXPANDED_KEY, False))
-        with st.sidebar.container(key="export_menu_hover_zone"):
+        with st.sidebar.container():
             header_col, toggle_col = st.columns([2, 1])
             header_col.markdown(f"### {section}")
-            if toggle_col.button(
-                "접기" if expanded else "펼치기",
-                key="export_submenu_toggle",
-                use_container_width=True,
+            if not expanded and toggle_col.button(
+                "펼치기", key="export_submenu_expand", use_container_width=True
             ):
-                st.session_state[_EXPORT_SUBMENU_EXPANDED_KEY] = not expanded
+                st.session_state[_EXPORT_SUBMENU_EXPANDED_KEY] = True
                 st.rerun()
+            if not expanded:
+                return
             for label in labels:
                 submenu_button(label)
-
-        # 펼치기 버튼으로 켠 상태는 항상 보이고, 그렇지 않을 때도 마우스를 올리면
-        # 하위 메뉴가 나타났다가 벗어나면 다시 접힌다(순수 CSS, 리런 불필요).
-        default_display = "block" if expanded else "none"
-        st.sidebar.markdown(
-            f'''
-            <style>
-            div[class*="st-key-export_menu_hover_zone"] div[class*="st-key-export_submenu_btn_"] {{
-                display: {default_display};
-            }}
-            div[class*="st-key-export_menu_hover_zone"]:hover div[class*="st-key-export_submenu_btn_"] {{
-                display: block !important;
-            }}
-            </style>
-            ''',
-            unsafe_allow_html=True,
-        )
+            if st.button("수출 메뉴 접기", key="export_submenu_collapse", use_container_width=True):
+                st.session_state[_EXPORT_SUBMENU_EXPANDED_KEY] = False
+                st.rerun()
 
     for section, labels in MENU_SECTIONS:
         visible_labels = [label for label in labels if label not in HIDDEN_PAGES and is_allowed(label)]

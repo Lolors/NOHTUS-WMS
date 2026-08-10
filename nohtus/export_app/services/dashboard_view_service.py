@@ -35,6 +35,20 @@ STAGE_BAR_COLORS = {
     '완료': ('#22c55e', '#073b1b', '#16a34a'),
 }
 
+STAGE_ORDER = {
+    '주문 접수': 0,
+    '제품 준비': 1,
+    '출고 대기': 2,
+    '입고 진행': 3,
+    '패킹 대기': 4,
+    '패킹 진행': 5,
+    '패킹 완료': 6,
+    '국내배송': 7,
+    '선적 준비': 8,
+    '선적 완료': 9,
+    '완료': 10,
+}
+
 
 
 def _recent_month_prefixes(reference: datetime, month_count: int) -> list[str]:
@@ -221,7 +235,14 @@ def active_and_recent_cases(*, reference: date | None = None, recent_days: int =
             continue
         if _parse_case_date(case['actual_ship_date']) >= cutoff:
             cases.append(case)
-    return cases
+    return sorted(
+        cases,
+        key=lambda case: (
+            STAGE_ORDER.get(str(case['stage'] or '').strip(), len(STAGE_ORDER)),
+            str(case['created_at'] or ''),
+            int(case['id']),
+        ),
+    )
 
 
 def intake_progress_percentages(case_ids: list[int]) -> dict[int, float]:

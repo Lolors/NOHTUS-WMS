@@ -247,6 +247,40 @@ class ConfirmedExportWaitingEditTests(unittest.TestCase):
         self.assertEqual(source_qty, 0)
         self.assertEqual(p_qty, 2)
 
+    def test_partial_order_can_be_edited_again_without_losing_confirmation(self):
+        order_id = self._add_order()
+        with sqlite3.connect(self.db_path, factory=self.connection_factory) as con:
+            con.execute("UPDATE inventory SET qty=2 WHERE id=10")
+        save_export_waiting_order(
+            [{
+                "id": 10, "사업장": "NOH", "제품명": "제품", "warehouse_name": "ERP-A",
+                "LOT": "LOT-1", "유통기한": "2027-01-01", "로케이션": "A1", "요청수량": 4,
+            }],
+            country="KR", buyer="Old Buyer", transport_method="항공", export_no="OLD-1",
+            editing_order_id=order_id,
+        )
+
+        save_export_waiting_order(
+            [{
+                "id": 10, "사업장": "NOH", "제품명": "제품", "warehouse_name": "ERP-A",
+                "LOT": "LOT-1", "유통기한": "2027-01-01", "로케이션": "A1", "요청수량": 5,
+            }],
+            country="KR", buyer="Old Buyer", transport_method="항공", export_no="OLD-1",
+            editing_order_id=order_id,
+        )
+
+        with sqlite3.connect(self.db_path, factory=self.connection_factory) as con:
+            rows = con.execute(
+                "SELECT qty,confirmed,confirmed_customer_name FROM export_waiting_items "
+                "WHERE order_id=? ORDER BY confirmed DESC,id",
+                (order_id,),
+            ).fetchall()
+            status = con.execute(
+                "SELECT status FROM export_waiting_orders WHERE id=?", (order_id,)
+            ).fetchone()[0]
+        self.assertEqual(rows, [(3, 1, "수출매출처"), (2, 0, None)])
+        self.assertEqual(status, "partial")
+
     def test_rolls_back_confirmed_edit_when_new_quantity_is_too_large(self):
         order_id = self._add_order()
 

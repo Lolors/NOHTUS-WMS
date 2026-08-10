@@ -1,0 +1,80 @@
+from datetime import date
+from pathlib import Path
+from unittest import TestCase
+from unittest.mock import patch
+
+import pandas as pd
+
+from nohtus.export_app.services import dashboard_view_service, wms_link_service
+
+
+class ExportIntegrationFollowupTests(TestCase):
+    def test_duplicate_open_export_numbers_require_merge_or_new_number(self):
+        rows = pd.DataFrame([{"id": 11}, {"id": 12}])
+        with patch.object(wms_link_service, "wms_q", return_value=rows):
+            with self.assertRaisesRegex(ValueError, "병합하거나 새 수출번호"):
+                wms_link_service._find_open_order_id("EXP-2026-001")
+
+    def test_wms_failure_restores_original_export_rows(self):
+        case = {"export_no": "EXP-1", "country": "KR", "buyer": "Buyer", "transport_mode": "AIR"}
+        original = [{
+            "id": 21, "order_item_id": 7, "business_unit": "NOH",
+            "source_location": "A1-01-01", "source_inventory_id": 101,
+            "product_name": "제품", "lot_no": "LOT", "expiry_date": "2027-01-01",
+            "requested_qty": 2,
+        }]
+        replacement = [{**original[0], "requested_qty": 1}]
+        with (
+            patch.object(wms_link_service.export_service, "get_case", return_value=case),
+            patch.object(wms_link_service.shipment_service, "list_case_items", return_value=original),
+            patch.object(wms_link_service, "_find_open_order_id", return_value=5),
+            patch.object(wms_link_service.shipment_service, "save_for_order", return_value=1) as save_export,
+            patch.object(wms_link_service, "save_export_waiting_order", side_effect=RuntimeError("WMS failure")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "WMS failure"):
+                wms_link_service.save_picked_inventory(
+                    case_id=1, order_item_id=7, kept_rows=replacement, picked_rows=[]
+                )
+        self.assertEqual(save_export.call_count, 2)
+        restored_rows = save_export.call_args_list[1].args[2]
+        self.assertEqual(restored_rows[0]["requested_qty"], 2.0)
+
+    def test_dashboard_orders_early_stages_before_domestic_delivery(self):
+        cases = [
+            {
+                "id": 3, "case_type": "current", "stage": "국내배송",
+                "actual_ship_date": "2026-08-10", "created_at": "2026-08-01",
+            },
+            {
+                "id": 1, "case_type": "current", "stage": "주문 접수",
+                "actual_ship_date": "", "created_at": "2026-08-11",
+            },
+            {
+                "id": 2, "case_type": "current", "stage": "입고 진행",
+                "actual_ship_date": "", "created_at": "2026-08-09",
+            },
+        ]
+        with patch.object(dashboard_view_service.order_service, "list_editable_cases", return_value=cases):
+            result = dashboard_view_service.active_and_recent_cases(reference=date(2026, 8, 11))
+        self.assertEqual([row["id"] for row in result], [1, 2, 3])
+
+    def test_export_menu_is_conditionally_rendered_and_has_bottom_collapse(self):
+        source = Path("nohtus/navigation.py").read_text(encoding="utf-8")
+        self.assertIn('if not expanded:', source)
+        self.assertIn('"수출 메뉴 접기"', source)
+        self.assertNotIn('export_menu_hover_zone', source)
+
+    def test_overview_column_order_and_todo_removal(self):
+        source = Path("nohtus/export_app/views/오버뷰.py").read_text(encoding="utf-8")
+        positions = [source.index(f"'{label}'") for label in (
+            "국가", "바이어", "운송방식", "단계", "입고 진행률", "주문목록"
+        )]
+        self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("내가 체크할 일", source)
+
+    def test_duplicate_active_links_are_not_silently_reduced_to_first_row(self):
+        source = Path("nohtus/export_app/views/주문_검색_및_수정.py").read_text(encoding="utf-8")
+        duplicate_guard = source.index("if len(active_rows.index) > 1:")
+        first_row_use = source.index("active_rows.iloc[0]")
+        self.assertLess(duplicate_guard, first_row_use)
+        self.assertIn("주문 병합으로 하나로 합치거나", source)

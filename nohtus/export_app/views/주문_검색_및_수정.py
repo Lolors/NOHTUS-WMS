@@ -41,6 +41,12 @@ def _render_wms_link_section(case_id: int, export_no: str) -> None:
     if active_rows.empty:
         st.info('진행 중인 실재고 연결 건이 없습니다. 수출대기 입고에서 실재고를 먼저 연결하세요.')
         return
+    if len(active_rows.index) > 1:
+        st.error(
+            '같은 수출번호에 진행 중인 실재고 연결 건이 여러 개입니다. '
+            '주문 병합으로 하나로 합치거나, 별도 건에는 새 수출번호를 사용하세요.'
+        )
+        return
 
     order_id = int(active_rows.iloc[0]['id'])
     order_title = str(active_rows.iloc[0]['title'] or export_no)

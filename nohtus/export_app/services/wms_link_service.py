@@ -24,11 +24,16 @@ def _find_open_order_id(export_no: str) -> int | None:
     df = wms_q(
         """SELECT id FROM export_waiting_orders
            WHERE TRIM(export_no)=TRIM(?) AND status IN ('waiting','partial')
-           ORDER BY id LIMIT 1""",
+           ORDER BY id""",
         (export_no,),
     )
     if df.empty:
         return None
+    if len(df.index) > 1:
+        raise ValueError(
+            f"수출번호 {export_no}에 진행 중인 수출대기 건이 여러 개입니다. "
+            "기존 건을 하나로 병합하거나 새 수출번호를 사용하세요."
+        )
     return int(df.iloc[0]["id"])
 
 
@@ -92,15 +97,6 @@ def save_picked_inventory(
     cart += [_cart_row_from_pick(pick) for pick in picked_rows]
 
     editing_order_id = _find_open_order_id(export_no)
-    result = save_export_waiting_order(
-        cart,
-        country=country,
-        buyer=str(case.get("buyer") or ""),
-        transport_method=transport_method,
-        export_no=export_no,
-        editing_order_id=editing_order_id,
-    )
-
     mirror_rows = [
         {
             "_id": row["id"],
@@ -127,6 +123,34 @@ def save_picked_inventory(
         }
         for pick in picked_rows
     ]
+    # EXPORT를 먼저 저장하면 EXPORT 저장 실패 시 WMS 재고는 전혀 움직이지 않는다.
+    # 이후 WMS 저장이 실패하면 원래 shipment_items를 보상 복구한다.
+    original_mirror_rows = [
+        {
+            "_id": row["id"],
+            "business_unit": row.get("business_unit") or "",
+            "location": row.get("source_location") or row.get("location") or "",
+            "source_inventory_id": row.get("source_inventory_id"),
+            "product_name": row.get("product_name") or "",
+            "lot_no": row.get("lot_no") or "",
+            "expiry_date": row.get("expiry_date") or "",
+            "requested_qty": float(row["requested_qty"] or 0),
+        }
+        for row in shipment_service.list_case_items(case_id)
+        if int(row["order_item_id"] or 0) == int(order_item_id)
+    ]
     total_qty = shipment_service.save_for_order(case_id, order_item_id, mirror_rows)
+    try:
+        result = save_export_waiting_order(
+            cart,
+            country=country,
+            buyer=str(case.get("buyer") or ""),
+            transport_method=transport_method,
+            export_no=export_no,
+            editing_order_id=editing_order_id,
+        )
+    except Exception:
+        shipment_service.save_for_order(case_id, order_item_id, original_mirror_rows)
+        raise
 
     return {"order_id": result["order_id"], "total_qty": total_qty, "row_count": len(mirror_rows)}
