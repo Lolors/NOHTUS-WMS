@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from nohtus.export_app.services import dashboard_view_service, export_confirm_service, wms_link_service
+from nohtus.export_app.views.실출고_입력 import recommended_inventory_search_term
 
 
 class ExportIntegrationFollowupTests(TestCase):
@@ -18,11 +19,41 @@ class ExportIntegrationFollowupTests(TestCase):
         self.assertLess(sql.index("WHEN 'waiting' THEN 0"), sql.index("WHEN 'partial' THEN 1"))
         self.assertLess(sql.index("WHEN 'partial' THEN 1"), sql.index("WHEN 'confirmed' THEN 2"))
 
-    def test_sales_registration_order_table_is_sixty_viewport_width(self):
+    def test_sales_registration_order_table_is_seventy_viewport_width_and_colors_status(self):
         source = Path("nohtus/export_app/views/수출확정_매출_등록.py").read_text(encoding="utf-8")
         self.assertIn('[class*="st-key-export_sales_registration_orders"]', source)
-        self.assertIn("width: 60vw !important", source)
+        self.assertIn("width: 70vw !important", source)
         self.assertIn("'confirmed': '수출확정'", source)
+        self.assertIn("'수출확정': 'background-color: #dcfce7", source)
+        self.assertIn("'수출대기': 'background-color: #dff3ff", source)
+
+    def test_ctn_packing_filters_and_export_waiting_labels(self):
+        packing = Path('nohtus/export_app/views/박스_패킹_edit.py').read_text(encoding='utf-8')
+        selector = Path('nohtus/export_app/components/case_selector.py').read_text(encoding='utf-8')
+        intake = Path('nohtus/export_app/views/실출고_입력.py').read_text(encoding='utf-8')
+        self.assertIn("show_stage=False", packing)
+        self.assertIn("show_transport=True", packing)
+        self.assertIn("case_label='product_summary'", packing)
+        self.assertIn("'수출번호 및 주문 요약'", selector)
+        self.assertIn("st.markdown('### 수출대기 저장제품')", intake)
+        self.assertNotIn("st.markdown('### 실제 수출대기 저장제품')", intake)
+        self.assertIn("format='%g'", intake)
+        self.assertNotIn("format='%g EA'", intake)
+
+    def test_inventory_recommendation_stops_before_first_parenthesis(self):
+        self.assertEqual(recommended_inventory_search_term('제품 A (10 EA)'), '제품 A')
+        self.assertEqual(recommended_inventory_search_term('  제품 B(5EA)  '), '제품 B')
+        self.assertEqual(recommended_inventory_search_term('괄호 없는 제품'), '괄호 없는 제품')
+
+    def test_confirmation_edit_fields_are_clean_four_column_layout(self):
+        source = Path('nohtus/export_app/views/주문_검색_및_수정.py').read_text(encoding='utf-8')
+        self.assertIn("st.markdown('### 수출확정')", source)
+        self.assertIn('company_col, search_col, customer_col, date_col = st.columns(4)', source)
+        for old_label in (
+            '수정할 ERP 매출 사업장', '수정할 ERP 수출 매출처 검색',
+            '수정할 ERP 수출 매출처', '수정할 출고일자',
+        ):
+            self.assertNotIn(old_label, source)
 
     def test_confirmed_sales_registration_remains_editable(self):
         source = Path("nohtus/export_app/views/주문_검색_및_수정.py").read_text(encoding="utf-8")

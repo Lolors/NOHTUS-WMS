@@ -13,8 +13,8 @@ def render() -> None:
         """
         <style>
         [class*="st-key-export_sales_registration_orders"] {
-            width: 60vw !important;
-            max-width: 60vw !important;
+            width: 70vw !important;
+            max-width: 70vw !important;
         }
         </style>
         """,
@@ -60,8 +60,15 @@ def render() -> None:
             orders['confirmed_customer_count'], orders['confirmed_customer_label']
         )],
     })
+    def status_cell_color(value: object) -> str:
+        return {
+            '수출확정': 'background-color: #dcfce7; color: #166534; font-weight: 700;',
+            '수출대기': 'background-color: #dff3ff; color: #075f85; font-weight: 700;',
+        }.get(str(value), '')
+
+    styled_table = table.style.map(status_cell_color, subset=['상태'])
     event = st.dataframe(
-        table,
+        styled_table,
         hide_index=True,
         use_container_width=True,
         on_select='rerun',

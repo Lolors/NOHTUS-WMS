@@ -67,6 +67,11 @@ def inventory_selection_source(current_rows: list[dict], stock_rows: pd.DataFram
     ])
 
 
+def recommended_inventory_search_term(product_name: object) -> str:
+    """주문 제품명의 첫 괄호 앞부분만 재고 추천 검색어로 사용한다."""
+    return str(product_name or '').split('(', 1)[0].strip()
+
+
 @dialog('수출대기로 되돌리기')
 def reopen_export_waiting_dialog(*, case_id: int, export_no: str) -> None:
     st.warning(f'{export_no}의 수출확정을 취소하고 수출대기 상태로 되돌립니다.')
@@ -303,7 +308,7 @@ def render() -> None:
                 st.rerun()
 
     with right:
-        st.markdown('### 실제 수출대기 저장제품')
+        st.markdown('### 수출대기 저장제품')
 
         if not orders:
             st.info('왼쪽에서 주문목록을 입력하고 저장하세요.')
@@ -344,9 +349,10 @@ def render() -> None:
 
             st.markdown('##### 재고 선택')
             search_key = f'wms_pick_search_{case_id}_{selected_order_id}'
+            recommended_search_term = recommended_inventory_search_term(selected_order_name)
             search_term = st.text_input(
                 '제품 검색',
-                value=st.session_state.get(search_key, selected_order_name),
+                value=st.session_state.get(search_key, recommended_search_term),
                 key=search_key,
             ).strip()
             products_df = wms_inventory_picker_service.search_products(search_term)
@@ -375,8 +381,8 @@ def render() -> None:
                     '_location': None,
                     '_product_name': None,
                     '선택': st.column_config.CheckboxColumn('선택'),
-                    '보유수량': st.column_config.NumberColumn('보유수량', format='%g EA'),
-                    '선택수량': st.column_config.NumberColumn('선택수량', min_value=0, step=1, format='%g EA'),
+                    '보유수량': st.column_config.NumberColumn('보유수량', format='%g'),
+                    '선택수량': st.column_config.NumberColumn('선택수량', min_value=0, step=1, format='%g'),
                 },
                 key=f'wms_pick_editor_{case_id}_{selected_order_id}_{editor_product}',
             )

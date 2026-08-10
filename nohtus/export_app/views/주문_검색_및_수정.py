@@ -64,7 +64,7 @@ def render_wms_confirmation_section(export_no: str) -> None:
         return
 
     st.divider()
-    st.markdown('### 실재고 수출확정')
+    st.markdown('### 수출확정')
 
     active_rows = wms_orders[wms_orders['status'].isin(['waiting', 'partial', 'confirmed'])]
     done_rows = wms_orders[~wms_orders['status'].isin(['waiting', 'partial', 'confirmed'])]
@@ -114,27 +114,32 @@ def render_wms_confirmation_section(export_no: str) -> None:
         selected_confirmed_ids = selected_confirmed['id'].astype(int).tolist()
         default_confirmed_company = str(confirmed_items.iloc[0]['확정사업장'] or '').replace('-', '')
         company_index = COMPANIES.index(default_confirmed_company) if default_confirmed_company in COMPANIES else 0
-        edit_company = st.selectbox(
-            '수정할 ERP 매출 사업장', COMPANIES, index=company_index,
-            key=f'export_link_edit_company_{order_id}_{confirmed_count}',
-        )
-        edit_term = st.text_input(
-            '수정할 ERP 수출 매출처 검색',
-            placeholder='매출처명 일부를 입력하세요',
-            key=f'export_link_edit_customer_term_{order_id}_{confirmed_count}',
-        )
+        company_col, search_col, customer_col, date_col = st.columns(4)
+        with company_col:
+            edit_company = st.selectbox(
+                'ERP 매출 사업장', COMPANIES, index=company_index,
+                key=f'export_link_edit_company_{order_id}_{confirmed_count}',
+            )
+        with search_col:
+            edit_term = st.text_input(
+                'ERP 수출 매출처 검색',
+                placeholder='매출처명 일부를 입력하세요',
+                key=f'export_link_edit_customer_term_{order_id}_{confirmed_count}',
+            )
         edit_customers = export_confirm_service.customer_options(edit_company, edit_term)
         if not edit_customers.empty:
             edit_labels = [f"{str(row.customer_code or '').strip() or '-'} | {row.customer_name}" for row in edit_customers.itertuples()]
-            edit_customer = edit_customers.iloc[edit_labels.index(st.selectbox(
-                '수정할 ERP 수출 매출처', edit_labels,
-                key=f'export_link_edit_customer_select_{order_id}_{confirmed_count}',
-            ))]
-            edit_ship_date = st.date_input(
-                '수정할 출고일자',
-                value=dval(active_rows.iloc[0]['order_date']),
-                key=f'export_link_edit_order_date_{order_id}_{confirmed_count}',
-            )
+            with customer_col:
+                edit_customer = edit_customers.iloc[edit_labels.index(st.selectbox(
+                    'ERP 수출 매출처', edit_labels,
+                    key=f'export_link_edit_customer_select_{order_id}_{confirmed_count}',
+                ))]
+            with date_col:
+                edit_ship_date = st.date_input(
+                    '출고일자',
+                    value=dval(active_rows.iloc[0]['order_date']),
+                    key=f'export_link_edit_order_date_{order_id}_{confirmed_count}',
+                )
             if st.button(
                 '선택 확정 품목 매출·출고 이력 수정',
                 type='primary',

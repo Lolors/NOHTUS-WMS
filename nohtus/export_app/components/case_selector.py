@@ -140,7 +140,7 @@ def select_export_case(
         )
 
     selected_case_id = case_col.selectbox(
-        '주문목록 요약' if case_label == 'product_summary' else '수출 건',
+        '수출번호 및 주문 요약' if case_label == 'product_summary' else '수출 건',
         case_ids,
         key=case_key,
         format_func=_format_case,

@@ -169,7 +169,9 @@ def render() -> None:
         cases,
         key_prefix='packing_export_selector',
         saved_case_id=st.session_state.get('actual_packing_case_id'),
-        show_stage=True,
+        show_stage=False,
+        show_transport=True,
+        case_label='product_summary',
     )
     st.session_state['actual_packing_case_id'] = case_id
 
@@ -764,5 +766,4 @@ def render() -> None:
                     st.rerun()
 
             partial_assign_dialog()
-
 
