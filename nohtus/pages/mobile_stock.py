@@ -8,7 +8,7 @@ try:
 except ImportError:
     st_keyup = None
 
-from nohtus.config_runtime import COMPANIES
+from nohtus.config import COMPANIES
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only, expiry_status
 
