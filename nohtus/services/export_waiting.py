@@ -93,6 +93,46 @@ def _actor():
         return ""
 
 
+def repair_p_inventory_links(order_id):
+    """끊어진 P 재고 ID를 저장 당시의 전체 재고키로 안전하게 복구한다."""
+    if not order_id:
+        return 0
+    repaired = 0
+    with connect() as con:
+        broken = con.execute(
+            """SELECT i.id,i.company,i.product_name,IFNULL(i.warehouse_name,''),
+                      IFNULL(i.lot,'-'),IFNULL(i.exp_date,'-'),i.qty
+               FROM export_waiting_items i
+               LEFT JOIN inventory p
+                 ON p.id=i.waiting_inventory_id AND p.location='P'
+               WHERE i.order_id=? AND COALESCE(i.confirmed,0)=0
+                 AND (p.id IS NULL OR COALESCE(p.qty,0) < i.qty)
+               ORDER BY i.id""",
+            (int(order_id),),
+        ).fetchall()
+        for item_id, company, product_name, warehouse_name, lot, exp_date, qty in broken:
+            candidates = con.execute(
+                """SELECT id FROM inventory
+                   WHERE location='P' AND company=? AND product_name=?
+                     AND IFNULL(warehouse_name,'')=?
+                     AND IFNULL(lot,'-')=? AND IFNULL(exp_date,'-')=?
+                     AND COALESCE(qty,0)>=?
+                   ORDER BY id""",
+                (company, product_name, warehouse_name, lot, exp_date, int(qty or 0)),
+            ).fetchall()
+            # 전체 재고키와 필요 수량을 모두 만족하는 행이 하나일 때만 자동 연결한다.
+            if len(candidates) != 1:
+                continue
+            con.execute(
+                "UPDATE export_waiting_items SET waiting_inventory_id=? WHERE id=?",
+                (int(candidates[0][0]), int(item_id)),
+            )
+            repaired += 1
+        if repaired:
+            con.commit()
+    return repaired
+
+
 def _dict_row(cur, sql, params):
     raw = cur.execute(sql, params).fetchone()
     return dict(zip([d[0] for d in cur.description], raw)) if raw else None
