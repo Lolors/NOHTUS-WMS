@@ -27,6 +27,46 @@ from nohtus.export_app.services.shipment_intake_view_service import (
 )
 
 
+def inventory_selection_source(current_rows: list[dict], stock_rows: pd.DataFrame) -> pd.DataFrame:
+    """기존 연결과 검색 재고를 한 편집표로 합친다."""
+    rows: dict[int, dict] = {}
+    for current in current_rows:
+        inventory_id = int(current['source_inventory_id'])
+        qty = safe_number(current['requested_qty'])
+        rows[inventory_id] = {
+            '_inventory_id': inventory_id,
+            '_location': current.get('source_location') or current.get('location') or '',
+            '_product_name': current.get('product_name') or '',
+            '선택': True,
+            '사업장': current.get('business_unit') or '',
+            '제조번호': current.get('lot_no') or '',
+            '유통기한': current.get('expiry_date') or '',
+            '보유수량': qty,
+            '선택수량': qty,
+        }
+    for _, stock in stock_rows.iterrows():
+        inventory_id = int(stock['id'])
+        available = safe_number(stock['qty'])
+        if inventory_id in rows:
+            rows[inventory_id]['보유수량'] += available
+            continue
+        rows[inventory_id] = {
+            '_inventory_id': inventory_id,
+            '_location': stock['location'] or '',
+            '_product_name': stock['product_name'] or '',
+            '선택': False,
+            '사업장': stock['company'] or '',
+            '제조번호': stock['lot'] or '',
+            '유통기한': stock['exp_date'] or '',
+            '보유수량': available,
+            '선택수량': 0.0,
+        }
+    return pd.DataFrame(rows.values(), columns=[
+        '_inventory_id', '_location', '_product_name', '선택', '사업장',
+        '제조번호', '유통기한', '보유수량', '선택수량',
+    ])
+
+
 @dialog('수출대기로 되돌리기')
 def reopen_export_waiting_dialog(*, case_id: int, export_no: str) -> None:
     st.warning(f'{export_no}의 수출확정을 취소하고 수출대기 상태로 되돌립니다.')
@@ -91,8 +131,8 @@ def render_similar_price_lookup(*, key: str) -> None:
 
 
 def render() -> None:
-    st.title('수출대기 입고')
-    st.caption('국내배송 단계까지 진행된 건도 선택해 주문과 실제 입고제품을 수정할 수 있습니다.')
+    st.title('수출대기 저장')
+    st.caption('국내배송 단계까지 진행된 건도 선택해 주문과 실제 출고제품을 수정·저장할 수 있습니다.')
 
     if success_message := st.session_state.pop('shipment_intake_success_message', None):
         st.success(success_message)
@@ -162,7 +202,7 @@ def render() -> None:
 
     unlinked_count = shipment_service.count_unlinked(case_id)
     if unlinked_count:
-        with st.expander(f'구형 미연결 입고 데이터 {unlinked_count}개 정리'):
+        with st.expander(f'구형 미연결 저장 데이터 {unlinked_count}개 정리'):
             legacy_rows = shipment_service.list_unlinked(case_id)
             st.dataframe(
                 [
@@ -171,7 +211,7 @@ def render() -> None:
                         '실제 제품명': row['product_name'],
                         '제조번호': row['lot_no'],
                         '유통기한': row['expiry_date'],
-                        '입고수량': row['requested_qty'],
+                        '출고수량': row['requested_qty'],
                         '박스번호': row['box_no'],
                     }
                     for row in legacy_rows
@@ -191,7 +231,7 @@ def render() -> None:
                 shipment_service.delete_unlinked(case_id)
                 folder_service.sync_case_folder(case_id)
                 history_service.add(case_id, '구형 미연결 입고 삭제', f'{unlinked_count}개 행')
-                st.success('구형 미연결 입고 데이터를 삭제했습니다.')
+                st.success('구형 미연결 저장 데이터를 삭제했습니다.')
                 st.rerun()
 
     left, right = st.columns([1.05, 1.45], gap='large')
@@ -263,7 +303,7 @@ def render() -> None:
                 st.rerun()
 
     with right:
-        st.markdown('### 실제 수출대기 입고제품')
+        st.markdown('### 실제 수출대기 저장제품')
 
         if not orders:
             st.info('왼쪽에서 주문목록을 입력하고 저장하세요.')
@@ -302,81 +342,49 @@ def render() -> None:
 
             st.markdown(f'**선택 주문:** {selected_order_name}')
 
-            pending_key = f'wms_pick_pending_{case_id}_{selected_order_id}'
-            removed_key = f'wms_pick_removed_{case_id}_{selected_order_id}'
-            pending: list[dict] = st.session_state.setdefault(pending_key, [])
-            removed_ids: set[int] = st.session_state.setdefault(removed_key, set())
-
-            st.markdown('##### 이미 연결된 실재고')
-            kept_rows = [row for row in real_linked_current if int(row['id']) not in removed_ids]
-            if not kept_rows:
-                st.caption('아직 연결된 실재고가 없습니다.')
+            st.markdown('##### 재고 선택')
+            search_key = f'wms_pick_search_{case_id}_{selected_order_id}'
+            search_term = st.text_input(
+                '제품 검색',
+                value=st.session_state.get(search_key, selected_order_name),
+                key=search_key,
+            ).strip()
+            products_df = wms_inventory_picker_service.search_products(search_term)
+            stock_rows = pd.DataFrame()
+            editor_product = '기존선택'
+            if products_df.empty:
+                st.info('일치하는 WMS 제품이 없습니다. 검색어를 바꿔 보세요.')
             else:
-                row_labels = {
-                    (
-                        f"{row['business_unit'] or '-'} · {row['product_name']} · "
-                        f"{row['lot_no'] or '-'} · {row['expiry_date'] or '-'} · "
-                        f"{fmt_number(safe_number(row['requested_qty']))}{unit}"
-                    ): int(row['id'])
-                    for row in kept_rows
-                }
-                st.dataframe(
-                    pd.DataFrame([
-                        {
-                            '사업장': row['business_unit'] or '',
-                            '실제 제품명': row['product_name'] or '',
-                            '제조번호': row['lot_no'] or '',
-                            '유통기한': row['expiry_date'] or '',
-                            '출고수량': safe_number(row['requested_qty']),
-                            '단위': unit,
-                        }
-                        for row in kept_rows
-                    ]),
-                    hide_index=True,
-                    use_container_width=True,
+                picked_product = st.selectbox(
+                    '추천 제품',
+                    products_df['standard_name'].tolist(),
+                    key=f'wms_pick_product_{case_id}_{selected_order_id}',
                 )
-                rows_to_remove = st.multiselect(
-                    '연결을 해제할 항목 선택',
-                    list(row_labels),
-                    key=f'wms_pick_remove_select_{case_id}_{selected_order_id}',
-                )
-                if st.button(
-                    '선택한 연결 해제',
-                    disabled=not rows_to_remove,
-                    key=f'wms_pick_remove_apply_{case_id}_{selected_order_id}',
-                ):
-                    for label in rows_to_remove:
-                        removed_ids.add(row_labels[label])
-                    st.rerun()
+                editor_product = picked_product
+                stock_rows = wms_inventory_picker_service.product_stock_rows(picked_product)
 
-            if legacy_current:
-                st.caption(
-                    f"실재고 연동 이전에 직접 입력된 값이 {len(legacy_current)}건 있습니다: "
-                    + ', '.join(
-                        f"{row['product_name']} {fmt_number(safe_number(row['requested_qty']))}{unit}"
-                        for row in legacy_current
-                    )
-                    + '. 아래에서 실재고 연결을 저장하면 이 값은 새 연결로 대체됩니다.'
-                )
-
-            if pending:
-                st.markdown('##### 새로 담은 실재고 (저장 전)')
-                for index, item in enumerate(pending):
-                    row_col, delete_col = st.columns([5, 1])
-                    row_col.write(
-                        f"{item['company']} · {item['product_name']} · LOT {item['lot']} · "
-                        f"유통기한 {item['exp_date']} · {fmt_number(item['qty'])}{unit}"
-                    )
-                    if delete_col.button('삭제', key=f'wms_pick_remove_pending_{case_id}_{selected_order_id}_{index}'):
-                        pending.pop(index)
-                        st.rerun()
-
-            preview_qty = sum(safe_number(row['requested_qty']) for row in kept_rows) + sum(
-                item['qty'] for item in pending
+            selection_source = inventory_selection_source(real_linked_current, stock_rows)
+            edited_stock = st.data_editor(
+                selection_source,
+                hide_index=True,
+                use_container_width=True,
+                disabled=['사업장', '제조번호', '유통기한', '보유수량'],
+                column_order=['선택', '사업장', '제조번호', '유통기한', '보유수량', '선택수량'],
+                column_config={
+                    '_inventory_id': None,
+                    '_location': None,
+                    '_product_name': None,
+                    '선택': st.column_config.CheckboxColumn('선택'),
+                    '보유수량': st.column_config.NumberColumn('보유수량', format='%g EA'),
+                    '선택수량': st.column_config.NumberColumn('선택수량', min_value=0, step=1, format='%g EA'),
+                },
+                key=f'wms_pick_editor_{case_id}_{selected_order_id}_{editor_product}',
             )
+            selected_stock = edited_stock[edited_stock['선택']].copy()
+            preview_qty = float(selected_stock['선택수량'].sum()) if not selected_stock.empty else 0.0
             preview_icon, preview_state = order_state(order_qty, preview_qty)
             st.info(
-                f'{preview_icon} 담을 합계 {fmt_number(preview_qty)} / '
+                f'{preview_icon} 선택 합계 {fmt_number(preview_qty)} / '
                 f'주문 {fmt_number(order_qty)} {unit} · {preview_state}'
             )
             packing_impact = shipment_service.packing_impact_for_order(case_id, selected_order_id)
@@ -386,118 +394,49 @@ def render() -> None:
                     '실재고 연결을 바꿔도 그대로 유지됩니다. 새로 담은 행만 미패킹 상태로 생성됩니다.'
                 )
 
-            if not kept_rows:
-                st.markdown('##### WMS 실재고에서 담기')
-                search_key = f'wms_pick_search_{case_id}_{selected_order_id}'
-                search_term = st.text_input(
-                    '제품 검색',
-                    value=st.session_state.get(search_key, selected_order_name),
-                    key=search_key,
-                ).strip()
-                products_df = wms_inventory_picker_service.search_products(search_term)
-                if products_df.empty:
-                    st.info('일치하는 WMS 제품이 없습니다. 검색어를 바꿔 보세요.')
-                else:
-                    product_choices = products_df['standard_name'].tolist()
-                    picked_product = st.selectbox(
-                        '추천 제품',
-                        product_choices,
-                        key=f'wms_pick_product_{case_id}_{selected_order_id}',
-                    )
-                    expiry_choices = wms_inventory_picker_service.expiry_options(picked_product)
-                    if not expiry_choices:
-                        st.info(f'{picked_product}의 재고가 없습니다.')
-                    else:
-                        picked_expiry = st.selectbox(
-                            '유통기한',
-                            expiry_choices,
-                            key=f'wms_pick_exp_{case_id}_{selected_order_id}_{picked_product}',
-                        )
-                        lot_choices = wms_inventory_picker_service.lot_options(picked_product, picked_expiry)
-                        picked_lot = st.selectbox(
-                            'LOT/제조번호',
-                            lot_choices,
-                            key=f'wms_pick_lot_{case_id}_{selected_order_id}_{picked_product}_{picked_expiry}',
-                        )
-                        stock_rows = wms_inventory_picker_service.resolve_stock_rows(
-                            picked_product, picked_lot, picked_expiry
-                        )
-                        if stock_rows.empty:
-                            st.info('선택한 조건의 재고가 없습니다.')
-                        else:
-                            if len(stock_rows) == 1:
-                                stock_row = stock_rows.iloc[0]
-                                st.caption(
-                                    f"{stock_row['company']} / {stock_row['location']} / "
-                                    f"현재고 {int(stock_row['qty'])}EA"
-                                )
-                            else:
-                                stock_labels = [
-                                    f"{r['company']} / {r['location']} / {int(r['qty'])}EA"
-                                    for _, r in stock_rows.iterrows()
-                                ]
-                                stock_choice = st.selectbox(
-                                    '사업장/위치',
-                                    stock_labels,
-                                    key=f'wms_pick_stock_{case_id}_{selected_order_id}',
-                                )
-                                stock_row = stock_rows.iloc[stock_labels.index(stock_choice)]
-    
-                            max_qty = int(stock_row['qty'])
-                            pick_qty = st.number_input(
-                                '담을 수량',
-                                min_value=0,
-                                max_value=max_qty,
-                                step=1,
-                                key=f'wms_pick_qty_{case_id}_{selected_order_id}',
-                            )
-                            if st.button(
-                                '이 항목에 담기',
-                                use_container_width=True,
-                                disabled=pick_qty <= 0,
-                                key=f'wms_pick_add_{case_id}_{selected_order_id}',
-                            ):
-                                pending.append({
-                                    'inventory_id': int(stock_row['id']),
-                                    'company': stock_row['company'],
-                                    'product_name': picked_product,
-                                    'lot': picked_lot,
-                                    'exp_date': picked_expiry,
-                                    'location': stock_row['location'],
-                                    'qty': float(pick_qty),
-                                })
-                                st.rerun()
-
             if st.button(
-                '실재고 연결 저장',
+                '출고 저장',
                 type='primary',
                 use_container_width=True,
-                disabled=not pending and not removed_ids,
                 key=f'save_wms_link_{case_id}_{selected_order_id}',
             ):
-                try:
-                    wms_link_service.save_picked_inventory(
-                        case_id=case_id,
-                        order_item_id=selected_order_id,
-                        kept_rows=kept_rows,
-                        picked_rows=pending,
-                    )
-                except ValueError as exc:
-                    st.error(str(exc))
+                invalid_rows = selected_stock[
+                    (selected_stock['선택수량'] <= 0)
+                    | (selected_stock['선택수량'] > selected_stock['보유수량'])
+                ]
+                if not selected_stock.empty and not invalid_rows.empty:
+                    st.error('선택수량은 1 이상, 보유수량 이하여야 합니다.')
                 else:
-                    folder_service.sync_case_folder(case_id)
-                    history_service.add(
-                        case_id,
-                        '주문품목별 실재고 연결',
-                        f'{selected_order_name} · {fmt_number(preview_qty)} / {fmt_number(order_qty)} {unit}',
-                    )
-                    st.session_state.pop(pending_key, None)
-                    st.session_state.pop(removed_key, None)
-                    st.session_state['actual_packing_case_id'] = case_id
-                    st.session_state['shipment_intake_success_message'] = (
-                        '실재고 연결을 저장했습니다. 박스 패킹에 바로 반영됩니다.'
-                    )
-                    st.rerun()
+                    picked_rows = [{
+                        'inventory_id': int(row['_inventory_id']),
+                        'company': row['사업장'],
+                        'product_name': row['_product_name'],
+                        'lot': row['제조번호'],
+                        'exp_date': row['유통기한'],
+                        'location': row['_location'],
+                        'qty': float(row['선택수량']),
+                    } for _, row in selected_stock.iterrows()]
+                    try:
+                        wms_link_service.save_picked_inventory(
+                            case_id=case_id,
+                            order_item_id=selected_order_id,
+                            kept_rows=[],
+                            picked_rows=picked_rows,
+                        )
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    else:
+                        folder_service.sync_case_folder(case_id)
+                        history_service.add(
+                            case_id,
+                            '주문품목별 출고 저장',
+                            f'{selected_order_name} · {fmt_number(preview_qty)} / {fmt_number(order_qty)} {unit}',
+                        )
+                        st.session_state['actual_packing_case_id'] = case_id
+                        st.session_state['shipment_intake_success_message'] = (
+                            '출고를 저장했습니다. 박스 패킹에 바로 반영됩니다.'
+                        )
+                        st.rerun()
 
         progress = intake_progress(orders, linked_rows_by_order)
         progress_ratio = progress['ratio']
@@ -506,7 +445,7 @@ def render() -> None:
         all_items_received = progress['all_received']
 
         st.divider()
-        st.markdown('#### 전체 입고 진행률')
+        st.markdown('#### 전체 저장 진행률')
         st.progress(
             progress_ratio,
             text=(
@@ -514,9 +453,9 @@ def render() -> None:
                 f'({progress_ratio * 100:.1f}%)'
             ),
         )
-        st.caption('각 주문품목의 입고율을 최대 100%로 계산한 뒤 품목별 입고율의 평균을 표시합니다.')
+        st.caption('각 주문품목의 저장률을 최대 100%로 계산한 뒤 품목별 저장률의 평균을 표시합니다.')
         if all_items_received:
-            st.success('🎉 모든 주문품목이 각각 100% 입고되었습니다!')
+            st.success('🎉 모든 주문품목이 각각 100% 저장되었습니다!')
 
     st.divider()
     with st.container():
