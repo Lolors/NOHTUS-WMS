@@ -7,8 +7,8 @@ UI 폭 있는 항목(Phase 2)은 코드만으로 완료 여부를 판단할 수 
 ## Phase 1: 안정화
 
 - [x] `__입고도면적용` 노출 문제 해결 — `styles.py`의 `apply_inbound_bridge_style()`이 버튼/입력을 완전히 숨김 처리한다.
-- [ ] 도면 클릭 → 입고 위치 연동 회귀 테스트 강화 — `tests/`에 관련 테스트 없음.
-- [ ] 로케이션맵 제품명 클릭 회귀 테스트 강화 — `tests/`에 관련 테스트 없음.
+- [x] 도면 클릭 → 입고 위치 연동 회귀 테스트 강화 — `tests/test_inbound_map_location_bridge.py`가 `_inbound_js_loc_changed`/`_apply_inbound_location_pending`(Core Freeze 함수 자체는 변경하지 않음)을 검증.
+- [x] 로케이션맵 제품명 클릭 회귀 테스트 강화 — `tests/test_location_map_product_click_filters.py`(필터/집계 로직), `tests/test_location_map_patch_restore.py`(전역 위젯 patch 복원)로 커버.
 
 ## Phase 2: UI 마감
 
