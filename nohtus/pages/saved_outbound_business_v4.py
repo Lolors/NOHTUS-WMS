@@ -119,6 +119,40 @@ def _load_orders():
     )
 
 
+def _load_order_summaries(order_ids) -> dict[int, dict[str, str]]:
+    """Load company/product summaries for the visible page in two queries."""
+    ids = tuple(dict.fromkeys(int(order_id) for order_id in order_ids))
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    companies = saved_v2.q(
+        f"""SELECT order_id, company FROM (
+                SELECT order_id, COALESCE(company,'') AS company, MIN(id) AS first_id
+                FROM outbound_order_items
+                WHERE order_id IN ({placeholders})
+                GROUP BY order_id, COALESCE(company,'')
+            ) ORDER BY order_id, first_id""",
+        ids,
+    )
+    products = saved_v2.q(
+        f"""SELECT order_id, product_name, qty FROM (
+                SELECT order_id, product_name, SUM(qty) AS qty, MIN(id) AS first_id
+                FROM outbound_order_items
+                WHERE order_id IN ({placeholders})
+                GROUP BY order_id, product_name
+            ) ORDER BY order_id, first_id""",
+        ids,
+    )
+    result = {order_id: {"companies": "-", "products": "-"} for order_id in ids}
+    for order_id, group in companies.groupby("order_id", sort=False):
+        values = [str(value or "-").strip() or "-" for value in group["company"].tolist()]
+        result[int(order_id)]["companies"] = ", ".join(values[:2]) + (f" 외 {len(values)-2}" if len(values) > 2 else "")
+    for order_id, group in products.groupby("order_id", sort=False):
+        values = [f"{row.product_name or '-'} * {int(row.qty or 0)}" for row in group.itertuples(index=False)]
+        result[int(order_id)]["products"] = ", ".join(values[:3]) + (f" 외 {len(values)-3}품목" if len(values) > 3 else "")
+    return result
+
+
 def _attach_daily_sequence(df):
     if df.empty:
         return df
@@ -158,7 +192,8 @@ def _filter_orders(all_orders, start_date, end_date, customer_term, search_term)
     return filtered
 
 
-def _render_saved_orders(orders_df, selected_order_id):
+def _render_saved_orders(orders_df, selected_order_id, summaries=None):
+    summaries = summaries or {}
     st.markdown(
         f"""
         <style>
@@ -175,9 +210,10 @@ def _render_saved_orders(orders_df, selected_order_id):
     for r in orders_df.itertuples(index=False):
         oid = int(getattr(r, "id"))
         created = str(getattr(r, "order_date", "") or getattr(r, "created_at", ""))[:10]
-        company_text = _order_company_summary(oid)
+        summary = summaries.get(oid, {})
+        company_text = summary.get("companies") or _order_company_summary(oid)
         display_no = str(getattr(r, "display_no", "") or getattr(r, "daily_no", "") or oid)
-        order_title = str(getattr(r, "title", "") or "").strip() or _order_items_summary(oid)
+        order_title = str(getattr(r, "title", "") or "").strip() or summary.get("products") or _order_items_summary(oid)
         selected = int(selected_order_id or 0) == oid
         cols = st.columns([0.45, 0.85, 1.35, 3.4], gap="small")
         with cols[0]:
@@ -297,6 +333,7 @@ def page_saved_outbound():
     page_no = max(1, min(int(st.session_state.get("saved_order_page", 1) or 1), total_pages))
     st.session_state["saved_order_page"] = page_no
     orders = filtered.iloc[(page_no - 1) * PER_PAGE: page_no * PER_PAGE].copy()
+    page_summaries = _load_order_summaries(orders["id"].astype(int).tolist())
 
     valid_ids = set(filtered["id"].astype(int).tolist())
     order_id = st.session_state.get("selected_saved_order_id")
@@ -334,7 +371,7 @@ def page_saved_outbound():
     list_col, sep_col, detail_col = st.columns([5.1, 0.15, 4.75], gap="medium")
     with list_col:
         st.markdown(f"#### 출고지시서 목록 {total}건")
-        _render_saved_orders(orders, order_id)
+        _render_saved_orders(orders, order_id, page_summaries)
         selected_page = _render_page_input(page_no, total_pages)
         if selected_page != page_no:
             st.session_state["saved_order_page"] = selected_page

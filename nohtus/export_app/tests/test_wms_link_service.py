@@ -207,6 +207,37 @@ class WmsLinkServiceTests(unittest.TestCase):
         self.assertEqual(len(export_items), 2)
         self.assertEqual({item["product_name"] for item in export_items}, {"제품A", "제품B"})
 
+    def test_restores_preintegration_p_stock_links_without_moving_inventory_again(self) -> None:
+        case_id, order_a, _ = self._create_case("EXP-LEGACY-001")
+        result = wms_link_service.save_picked_inventory(
+            case_id=case_id,
+            order_item_id=order_a,
+            kept_rows=[],
+            picked_rows=[{
+                "inventory_id": 1,
+                "company": "NOH",
+                "product_name": "제품A",
+                "lot": "LOT-1",
+                "exp_date": "2027-01-01",
+                "location": "A1-01",
+                "qty": 5.0,
+            }],
+        )
+        self.assertEqual(result["row_count"], 1)
+        db.execute("DELETE FROM shipment_items WHERE case_id=?", (case_id,))
+
+        restored = wms_link_service.restore_legacy_waiting_links(case_id)
+        self.assertEqual(restored, 1)
+        linked = shipment_service.list_case_items(case_id)
+        self.assertEqual(len(linked), 1)
+        self.assertEqual(int(linked[0]["order_item_id"]), order_a)
+        self.assertEqual(float(linked[0]["requested_qty"]), 5.0)
+        self.assertEqual(self._wms_p_qty("제품A"), 5)
+        self.assertEqual(self._wms_inventory_row("제품A")["qty"], 15)
+
+        self.assertEqual(wms_link_service.restore_legacy_waiting_links(case_id), 0)
+        self.assertEqual(len(shipment_service.list_case_items(case_id)), 1)
+
     def test_removing_a_kept_row_restores_wms_inventory(self) -> None:
         # save_export_waiting_order()는 건 전체의 품목이 0개가 되는 저장은 거부하므로
         # (수출대기 자체를 취소하는 것과는 다른 조작), 다른 주문품목에 실재고가 하나

@@ -107,6 +107,10 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_purchase_history_standard ON purchase_history(standard_product_name)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_purchase_history_erp_name ON purchase_history(erp_product_name)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_purchase_history_date ON purchase_history(purchase_date)")
+    # High-frequency outbound screens filter these tables on every Streamlit
+    # rerun.  Existing installations receive the indexes during normal startup.
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_inventory_product_company_qty ON inventory(product_name, company, qty)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(tx_type)")
     cur.execute("""
     CREATE TABLE IF NOT EXISTS erp_ambiguous_candidates(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,6 +171,8 @@ def init_db():
         FOREIGN KEY(order_id) REFERENCES outbound_orders(id)
     )
     """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_outbound_items_order ON outbound_order_items(order_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_outbound_items_product_order ON outbound_order_items(product_name, order_id)")
     cur.execute("""
     CREATE TABLE IF NOT EXISTS product_match_conflict_approvals(
         company TEXT NOT NULL,

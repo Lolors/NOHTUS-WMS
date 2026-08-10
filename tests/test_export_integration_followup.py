@@ -93,7 +93,7 @@ class ExportIntegrationFollowupTests(TestCase):
         self.assertLess(source.index("edited = st.data_editor("), source.index("f'{company} 전체 선택'"))
         self.assertGreaterEqual(source.count('_company_selection_editor('), 3)
 
-    def test_single_confirmation_uses_its_name_and_dashboard_is_sixty_viewport_width(self):
+    def test_single_confirmation_uses_its_name_and_dashboard_is_seventy_viewport_width(self):
         orders = pd.DataFrame([{
             'id': 1, 'export_no': 'EXP-1', 'country': 'KR', 'buyer': 'B',
             'transport_method': 'AIR', 'title': 'old', 'status': 'confirmed',
@@ -110,7 +110,7 @@ class ExportIntegrationFollowupTests(TestCase):
 
         dashboard = Path('nohtus/export_app/views/오버뷰.py').read_text(encoding='utf-8')
         self.assertIn('export_dashboard_active_orders', dashboard)
-        self.assertIn('width: 60vw !important', dashboard)
+        self.assertIn('width: 70vw !important', dashboard)
 
     def test_duplicate_open_export_numbers_require_merge_or_new_number(self):
         rows = pd.DataFrame([{"id": 11}, {"id": 12}])

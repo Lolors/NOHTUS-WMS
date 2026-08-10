@@ -9,7 +9,9 @@ nohtus.services.export_waiting.save_export_waiting_order()는 editing_order_id�
 from __future__ import annotations
 
 from nohtus.db import q as wms_q
+from nohtus.export_app import db as export_db
 from nohtus.export_app.services import export_service, shipment_service
+from nohtus.export_app.utils.dates import now_text
 from nohtus.services.export_waiting import save_export_waiting_order
 
 TRANSPORT_MODE_TO_METHOD = {
@@ -35,6 +37,93 @@ def _find_open_order_id(export_no: str) -> int | None:
             "기존 건을 하나로 병합하거나 새 수출번호를 사용하세요."
         )
     return int(df.iloc[0]["id"])
+
+
+def _match_text(value: object) -> str:
+    """Normalize order labels such as ``제품명 (70 EA)`` for legacy matching."""
+    return "".join(str(value or "").split("(", 1)[0].split()).casefold()
+
+
+def restore_legacy_waiting_links(case_id: int) -> int:
+    """Mirror pre-integration WMS export-waiting rows into EXPORT shipment rows.
+
+    The WMS rows already represent stock moved to P, so this function deliberately
+    performs no WMS inventory/transaction write.  It only restores the missing
+    cross-app link, and is idempotent by WMS source inventory id.
+    """
+    case = export_service.get_case(case_id)
+    if case is None:
+        return 0
+    export_no = str(case.get("export_no") or "").strip()
+    if not export_no:
+        return 0
+    order_id = _find_open_order_id(export_no)
+    if order_id is None:
+        return 0
+
+    waiting = wms_q(
+        """SELECT i.source_inventory_id, i.waiting_inventory_id, i.company,
+                  i.product_name, i.lot, i.exp_date, i.source_location, i.qty
+           FROM export_waiting_items i
+           JOIN inventory p ON p.id=i.waiting_inventory_id AND p.location='P'
+           WHERE i.order_id=? AND COALESCE(i.confirmed,0)=0 AND i.qty>0
+           ORDER BY i.id""",
+        (order_id,),
+    )
+    if waiting.empty:
+        return 0
+
+    orders = [dict(row) for row in export_service.get_order_items(case_id)]
+    if not orders:
+        return 0
+    existing = export_db.rows(
+        """SELECT source_inventory_id FROM shipment_items
+           WHERE case_id=? AND source_inventory_id IS NOT NULL""",
+        (case_id,),
+    )
+    existing_ids = {int(row["source_inventory_id"]) for row in existing}
+    now = now_text()
+    inserts = []
+    for row in waiting.to_dict("records"):
+        source_id = int(row.get("source_inventory_id") or 0)
+        if not source_id or source_id in existing_ids:
+            continue
+        product_key = _match_text(row.get("product_name"))
+        candidates = [
+            order for order in orders
+            if product_key and (
+                _match_text(order.get("product_name")) == product_key
+                or _match_text(order.get("product_name")) in product_key
+                or product_key in _match_text(order.get("product_name"))
+            )
+        ]
+        if len(candidates) != 1:
+            # A single remaining order is safe to restore even when the old WMS
+            # standard name differs from the sales-order label.
+            candidates = orders if len(orders) == 1 else []
+        if len(candidates) != 1:
+            continue
+        order_item_id = int(candidates[0]["id"])
+        inserts.append((
+            case_id, order_item_id, str(row.get("company") or ""),
+            str(row.get("source_location") or ""), source_id,
+            str(row.get("product_name") or ""), str(row.get("lot") or ""),
+            str(row.get("exp_date") or ""), float(row.get("qty") or 0),
+            None, now, now,
+        ))
+        existing_ids.add(source_id)
+
+    if not inserts:
+        return 0
+    export_db.executemany(
+        """INSERT INTO shipment_items(
+               case_id,order_item_id,business_unit,location,source_inventory_id,
+               product_name,lot_no,expiry_date,requested_qty,box_no,created_at,updated_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        inserts,
+    )
+    shipment_service.sync_case_stage(case_id, now)
+    return len(inserts)
 
 
 def _cart_row_from_shipment_row(row: dict) -> dict:
