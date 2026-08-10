@@ -225,6 +225,12 @@ class WmsLinkServiceTests(unittest.TestCase):
         )
         self.assertEqual(result["row_count"], 1)
         db.execute("DELETE FROM shipment_items WHERE case_id=?", (case_id,))
+        # 통합 전/DB 정리 과정에서 P 재고 id 연결이 끊어진 상태도 자동 복구한다.
+        with sqlite3.connect(self.wms_db_path) as con:
+            con.execute(
+                "UPDATE export_waiting_items SET waiting_inventory_id=999 WHERE order_id=?",
+                (int(result["order_id"]),),
+            )
 
         restored = wms_link_service.restore_legacy_waiting_links(case_id)
         self.assertEqual(restored, 1)

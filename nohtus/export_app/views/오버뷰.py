@@ -11,7 +11,7 @@ def render() -> None:
     st.markdown(
         """
         <style>
-        [class*="st-key-export_dashboard_active_orders"] {
+        [class*="st-key-export_dashboard_active_orders_panel"] {
             width: 70vw !important;
             max-width: 70vw !important;
         }
@@ -45,9 +45,10 @@ def render() -> None:
             lambda row: [dashboard_view_service.stage_style(row['단계'])] * len(row),
             axis=1,
         )
-        st.dataframe(
-            styled_status,
-            hide_index=True,
-            use_container_width=True,
-            key='export_dashboard_active_orders',
-        )
+        with st.container(key='export_dashboard_active_orders_panel'):
+            st.dataframe(
+                styled_status,
+                hide_index=True,
+                use_container_width=True,
+                key='export_dashboard_active_orders',
+            )

@@ -65,3 +65,23 @@ def test_does_not_guess_when_multiple_exact_p_rows_exist(tmp_path, monkeypatch):
         assert con.execute(
             "SELECT waiting_inventory_id FROM export_waiting_items WHERE id=1"
         ).fetchone()[0] == 999
+
+
+def test_repairs_p_location_with_legacy_whitespace_and_case(tmp_path, monkeypatch):
+    database = tmp_path / "test.db"
+    with sqlite3.connect(database) as con:
+        _create_tables(con)
+        con.execute(
+            "INSERT INTO inventory VALUES(20,'휴온스','제품A','ERP명','LOT1','2027-01-01',' p ',50)"
+        )
+        con.execute(
+            "INSERT INTO export_waiting_items VALUES(1,7,NULL,'휴온스','제품A','ERP명','LOT1','2027-01-01',10,0)"
+        )
+    monkeypatch.setattr(export_waiting, "connect", _connect_to(database))
+
+    assert export_waiting.repair_p_inventory_links(7) == 1
+
+    with sqlite3.connect(database) as con:
+        assert con.execute(
+            "SELECT waiting_inventory_id FROM export_waiting_items WHERE id=1"
+        ).fetchone()[0] == 20

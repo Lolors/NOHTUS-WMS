@@ -104,7 +104,8 @@ def repair_p_inventory_links(order_id):
                       IFNULL(i.lot,'-'),IFNULL(i.exp_date,'-'),i.qty
                FROM export_waiting_items i
                LEFT JOIN inventory p
-                 ON p.id=i.waiting_inventory_id AND p.location='P'
+                 ON p.id=i.waiting_inventory_id
+                AND UPPER(TRIM(COALESCE(p.location,'')))='P'
                WHERE i.order_id=? AND COALESCE(i.confirmed,0)=0
                  AND (p.id IS NULL OR COALESCE(p.qty,0) < i.qty)
                ORDER BY i.id""",
@@ -113,7 +114,8 @@ def repair_p_inventory_links(order_id):
         for item_id, company, product_name, warehouse_name, lot, exp_date, qty in broken:
             candidates = con.execute(
                 """SELECT id FROM inventory
-                   WHERE location='P' AND company=? AND product_name=?
+                   WHERE UPPER(TRIM(COALESCE(location,'')))='P'
+                     AND company=? AND product_name=?
                      AND IFNULL(warehouse_name,'')=?
                      AND IFNULL(lot,'-')=? AND IFNULL(exp_date,'-')=?
                      AND COALESCE(qty,0)>=?

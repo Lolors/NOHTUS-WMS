@@ -12,7 +12,7 @@ from nohtus.db import q as wms_q
 from nohtus.export_app import db as export_db
 from nohtus.export_app.services import export_service, shipment_service
 from nohtus.export_app.utils.dates import now_text
-from nohtus.services.export_waiting import save_export_waiting_order
+from nohtus.services.export_waiting import repair_p_inventory_links, save_export_waiting_order
 
 TRANSPORT_MODE_TO_METHOD = {
     "AIR": "항공",
@@ -61,11 +61,17 @@ def restore_legacy_waiting_links(case_id: int) -> int:
     if order_id is None:
         return 0
 
+    # 통합 전 자료는 P 재고가 실제로 남아 있어도 waiting_inventory_id가 비어
+    # 있거나 예전 inventory id를 가리킬 수 있다. 먼저 전체 재고키로 안전하게
+    # 복구해야 아래 조회에서 기존 수출대기 행이 탈락하지 않는다.
+    repair_p_inventory_links(order_id)
+
     waiting = wms_q(
         """SELECT i.source_inventory_id, i.waiting_inventory_id, i.company,
                   i.product_name, i.lot, i.exp_date, i.source_location, i.qty
            FROM export_waiting_items i
-           JOIN inventory p ON p.id=i.waiting_inventory_id AND p.location='P'
+           JOIN inventory p ON p.id=i.waiting_inventory_id
+                           AND UPPER(TRIM(COALESCE(p.location,'')))='P'
            WHERE i.order_id=? AND COALESCE(i.confirmed,0)=0 AND i.qty>0
            ORDER BY i.id""",
         (order_id,),

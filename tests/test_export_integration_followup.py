@@ -109,7 +109,8 @@ class ExportIntegrationFollowupTests(TestCase):
         self.assertEqual(result.loc[0, 'confirmed_customer_label'], '수출처 A')
 
         dashboard = Path('nohtus/export_app/views/오버뷰.py').read_text(encoding='utf-8')
-        self.assertIn('export_dashboard_active_orders', dashboard)
+        self.assertIn("st.container(key='export_dashboard_active_orders_panel')", dashboard)
+        self.assertIn('st-key-export_dashboard_active_orders_panel', dashboard)
         self.assertIn('width: 70vw !important', dashboard)
 
     def test_duplicate_open_export_numbers_require_merge_or_new_number(self):
