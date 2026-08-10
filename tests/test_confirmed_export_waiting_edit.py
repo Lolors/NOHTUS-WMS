@@ -7,6 +7,7 @@ from unittest.mock import patch
 from nohtus.services.export_waiting import (
     ensure_export_waiting_tables,
     save_export_waiting_order,
+    update_confirmed_export_waiting_items,
     update_confirmed_export_waiting_metadata,
 )
 
@@ -314,6 +315,60 @@ class ConfirmedExportWaitingEditTests(unittest.TestCase):
         self.assertEqual(source_qty, 0)
         self.assertEqual(history_count, 0)
         self.assertEqual(export_no, "OLD-1")
+
+    def test_updates_confirmed_item_sales_company_customer_and_ship_date(self):
+        order_id = self._add_order()
+
+        result = update_confirmed_export_waiting_items(
+            order_id,
+            [1],
+            erp_company="노투스팜",
+            customer_code="NP-9",
+            customer_name="새 수출처",
+            shipment_date="2026-02-20",
+        )
+
+        with sqlite3.connect(self.db_path, factory=self.connection_factory) as con:
+            item = con.execute(
+                """SELECT confirmed,confirmed_company,confirmed_customer_code,
+                          confirmed_customer_name,confirmed_at
+                   FROM export_waiting_items WHERE id=1"""
+            ).fetchone()
+            order = con.execute(
+                """SELECT status,erp_company,erp_customer_code,erp_customer_name,
+                          order_date,confirmed_at
+                   FROM export_waiting_orders WHERE id=?""",
+                (order_id,),
+            ).fetchone()
+            stock = con.execute("SELECT qty FROM inventory WHERE id=10").fetchone()[0]
+            tx_count = con.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+
+        self.assertEqual(result["updated_count"], 1)
+        self.assertEqual(result["order_date"], "2026-02-20")
+        self.assertEqual(item[:4], (1, "노투스팜", "NP-9", "새 수출처"))
+        self.assertTrue(item[4].startswith("2026-02-20 "))
+        self.assertEqual(order[:5], ("confirmed", "노투스팜", "NP-9", "새 수출처", "2026-02-20"))
+        self.assertTrue(order[5].startswith("2026-02-20 "))
+        self.assertEqual(stock, 0)
+        self.assertEqual(tx_count, 0)
+
+    def test_rejects_waiting_item_sales_history_edit(self):
+        order_id = self._add_order(status="waiting")
+        with sqlite3.connect(self.db_path, factory=self.connection_factory) as con:
+            con.execute(
+                "UPDATE export_waiting_items SET confirmed=0 WHERE order_id=?",
+                (order_id,),
+            )
+
+        with self.assertRaisesRegex(ValueError, "수정할 수출확정 건"):
+            update_confirmed_export_waiting_items(
+                order_id,
+                [1],
+                erp_company="NOH",
+                customer_code="C001",
+                customer_name="수출매출처",
+                shipment_date="2026-02-20",
+            )
 
 
 if __name__ == "__main__":

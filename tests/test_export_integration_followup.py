@@ -9,6 +9,27 @@ from nohtus.export_app.services import dashboard_view_service, export_confirm_se
 
 
 class ExportIntegrationFollowupTests(TestCase):
+    def test_sales_registration_lists_confirmed_orders_after_waiting_orders(self):
+        with patch.object(export_confirm_service, "wms_q", return_value=pd.DataFrame()) as query:
+            export_confirm_service.list_active_orders()
+
+        sql = query.call_args.args[0]
+        self.assertIn("status IN ('waiting','partial','confirmed')", sql)
+        self.assertLess(sql.index("WHEN 'waiting' THEN 0"), sql.index("WHEN 'partial' THEN 1"))
+        self.assertLess(sql.index("WHEN 'partial' THEN 1"), sql.index("WHEN 'confirmed' THEN 2"))
+
+    def test_sales_registration_order_table_is_sixty_viewport_width(self):
+        source = Path("nohtus/export_app/views/수출확정_매출_등록.py").read_text(encoding="utf-8")
+        self.assertIn('[class*="st-key-export_sales_registration_orders"]', source)
+        self.assertIn("width: 60vw !important", source)
+        self.assertIn("'confirmed': '수출확정'", source)
+
+    def test_confirmed_sales_registration_remains_editable(self):
+        source = Path("nohtus/export_app/views/주문_검색_및_수정.py").read_text(encoding="utf-8")
+        self.assertIn("['waiting', 'partial', 'confirmed']", source)
+        self.assertIn("확정 품목 매출·출고 이력 수정", source)
+        self.assertIn("update_confirmed_export_waiting_items", source)
+
     def test_duplicate_open_export_numbers_require_merge_or_new_number(self):
         rows = pd.DataFrame([{"id": 11}, {"id": 12}])
         with patch.object(wms_link_service, "wms_q", return_value=rows):

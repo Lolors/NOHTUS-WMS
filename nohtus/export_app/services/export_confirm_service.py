@@ -23,13 +23,23 @@ def list_orders_for_export_no(export_no: str) -> pd.DataFrame:
 
 
 def list_active_orders() -> pd.DataFrame:
-    """수출확정 매출 등록 화면에서 처리할 진행 중 WMS 연결 건."""
+    """수출확정 매출 등록 화면에서 조회·수정할 WMS 연결 건.
+
+    완전 확정 건도 이후 출고 목록 수정으로 다시 처리할 수 있으므로 목록에서
+    유지한다. 당장 매출 등록이 필요한 수출대기 건을 가장 먼저 보여준다.
+    """
     return wms_q(
         """SELECT id, export_no, country, buyer, transport_method, title, status,
                   order_date, created_at
            FROM export_waiting_orders
-           WHERE status IN ('waiting','partial')
-           ORDER BY created_at, id"""
+           WHERE status IN ('waiting','partial','confirmed')
+           ORDER BY CASE status
+                        WHEN 'waiting' THEN 0
+                        WHEN 'partial' THEN 1
+                        WHEN 'confirmed' THEN 2
+                        ELSE 3
+                    END,
+                    created_at, id"""
     )
 
 

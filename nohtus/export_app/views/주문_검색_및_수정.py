@@ -18,7 +18,11 @@ from nohtus.export_app.services.order_edit_service import (
     save_historical,
     text_value as txt,
 )
-from nohtus.services.export_waiting import cancel_export_waiting_order, confirm_export_waiting_items
+from nohtus.services.export_waiting import (
+    cancel_export_waiting_order,
+    confirm_export_waiting_items,
+    update_confirmed_export_waiting_items,
+)
 
 
 def render_wms_confirmation_section(export_no: str) -> None:
@@ -29,8 +33,8 @@ def render_wms_confirmation_section(export_no: str) -> None:
     st.divider()
     st.markdown('### 실재고 수출확정')
 
-    active_rows = wms_orders[wms_orders['status'].isin(['waiting', 'partial'])]
-    done_rows = wms_orders[~wms_orders['status'].isin(['waiting', 'partial'])]
+    active_rows = wms_orders[wms_orders['status'].isin(['waiting', 'partial', 'confirmed'])]
+    done_rows = wms_orders[~wms_orders['status'].isin(['waiting', 'partial', 'confirmed'])]
 
     if not done_rows.empty:
         st.caption(
@@ -58,6 +62,73 @@ def render_wms_confirmation_section(export_no: str) -> None:
 
     display_cols = ['출고사업장', '표준제품명', '출고사업장ERP명', 'LOT', '유통기한', '수량', '원래로케이션', '확정사업장', '확정매출처', '확정일시']
     st.dataframe(items[display_cols], hide_index=True, use_container_width=True)
+
+    confirmed_items = items[items['confirmed'] == 1].copy() if not items.empty else pd.DataFrame()
+    if not confirmed_items.empty:
+        st.markdown('#### 확정 품목 매출·출고 이력 수정')
+        st.caption(
+            '확정 품목을 선택해 ERP 사업장·수출처·출고일자를 다시 저장할 수 있습니다. '
+            '제품 교체나 수량 변경은 수출대기 입고에서 수정하면 기존 출고가 원복되고 새 품목이 수출대기로 전환됩니다.'
+        )
+        confirmed_source = confirmed_items[
+            ['id', '출고사업장', '표준제품명', '출고사업장ERP명', 'LOT', '유통기한', '수량', '확정사업장', '확정매출처']
+        ].copy()
+        confirmed_source.insert(0, '선택', False)
+        confirmed_edited = st.data_editor(
+            confirmed_source,
+            hide_index=True,
+            use_container_width=True,
+            key=f'export_link_edit_confirmed_items_{order_id}_{confirmed_count}',
+            disabled=[c for c in confirmed_source.columns if c != '선택'],
+            column_config={'선택': st.column_config.CheckboxColumn('선택'), 'id': None},
+        )
+        selected_confirmed = confirmed_edited[confirmed_edited['선택'] == True]  # noqa: E712
+        selected_confirmed_ids = selected_confirmed['id'].astype(int).tolist()
+        default_confirmed_company = str(confirmed_items.iloc[0]['확정사업장'] or '').replace('-', '')
+        company_index = COMPANIES.index(default_confirmed_company) if default_confirmed_company in COMPANIES else 0
+        edit_company = st.selectbox(
+            '수정할 ERP 매출 사업장', COMPANIES, index=company_index,
+            key=f'export_link_edit_company_{order_id}_{confirmed_count}',
+        )
+        edit_term = st.text_input(
+            '수정할 ERP 수출 매출처 검색',
+            placeholder='매출처명 일부를 입력하세요',
+            key=f'export_link_edit_customer_term_{order_id}_{confirmed_count}',
+        )
+        edit_customers = export_confirm_service.customer_options(edit_company, edit_term)
+        if not edit_customers.empty:
+            edit_labels = [f"{str(row.customer_code or '').strip() or '-'} | {row.customer_name}" for row in edit_customers.itertuples()]
+            edit_customer = edit_customers.iloc[edit_labels.index(st.selectbox(
+                '수정할 ERP 수출 매출처', edit_labels,
+                key=f'export_link_edit_customer_select_{order_id}_{confirmed_count}',
+            ))]
+            edit_ship_date = st.date_input(
+                '수정할 출고일자',
+                value=dval(active_rows.iloc[0]['order_date']),
+                key=f'export_link_edit_order_date_{order_id}_{confirmed_count}',
+            )
+            if st.button(
+                '선택 확정 품목 매출·출고 이력 수정',
+                type='primary',
+                disabled=not selected_confirmed_ids,
+                key=f'export_link_edit_confirmed_{order_id}_{confirmed_count}',
+            ):
+                try:
+                    update_confirmed_export_waiting_items(
+                        order_id,
+                        selected_confirmed_ids,
+                        erp_company=edit_company,
+                        customer_code=edit_customer['customer_code'],
+                        customer_name=edit_customer['customer_name'],
+                        shipment_date=edit_ship_date,
+                    )
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.success(f'{len(selected_confirmed_ids)}개 확정 품목의 매출·출고 이력을 수정했습니다.')
+                    st.rerun()
+        else:
+            st.warning('해당 사업장의 ERP 매출처가 없습니다.')
 
     cancel_key = f'confirm_wms_link_cancel_{order_id}'
     if st.session_state.get(cancel_key):

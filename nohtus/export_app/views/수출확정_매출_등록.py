@@ -9,6 +9,17 @@ from nohtus.export_app.views.주문_검색_및_수정 import render_wms_confirma
 
 def render() -> None:
     st.title('수출확정 매출 등록')
+    st.markdown(
+        """
+        <style>
+        [class*="st-key-export_sales_registration_orders"] {
+            width: 60vw !important;
+            max-width: 60vw !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     st.caption(
         '수출대기 입고가 끝난 품목의 ERP 매출 사업장과 수출처를 선택해 확정합니다. '
         '표준제품명 옆의 출고사업장 ERP명을 참고해 ERP에서 제품을 검색하세요.'
@@ -16,7 +27,7 @@ def render() -> None:
 
     orders = export_confirm_service.list_active_orders()
     if orders.empty:
-        st.info('수출확정할 수출대기 입고 건이 없습니다.')
+        st.info('조회할 수출대기 입고 건이 없습니다.')
         return
 
     duplicate_export_nos = orders['export_no'][orders['export_no'].duplicated(keep=False)].dropna().unique()
@@ -34,7 +45,11 @@ def render() -> None:
         '바이어': orders['buyer'].fillna(''),
         '운송방식': orders['transport_method'].fillna(''),
         '입고 건': orders['title'],
-        '상태': orders['status'].map({'waiting': '수출대기', 'partial': '일부 확정'}).fillna(orders['status']),
+        '상태': orders['status'].map({
+            'waiting': '수출대기',
+            'partial': '일부 확정',
+            'confirmed': '수출확정',
+        }).fillna(orders['status']),
     })
     event = st.dataframe(
         table,

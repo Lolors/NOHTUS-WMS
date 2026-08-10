@@ -849,3 +849,73 @@ def confirm_export_waiting_items(
         "total_count": int(total_count or 0),
         "order_date": order_date,
     }
+
+
+def update_confirmed_export_waiting_items(
+    order_id,
+    item_ids,
+    *,
+    erp_company,
+    customer_code,
+    customer_name,
+    shipment_date,
+):
+    """이미 확정된 품목의 ERP 매출 정보와 출고일자를 다시 저장한다.
+
+    재고 출고 자체는 다시 발생시키지 않는다. 품목 교체/수량 변경은 수출대기
+    입고 수정에서 기존 확정 감소분을 원복하고 신규분을 P로 이동시킨 뒤, 이
+    화면에서 신규분을 다시 확정하는 기존 흐름을 사용한다.
+    """
+    erp_company = str(erp_company or "").strip()
+    customer_code = str(customer_code or "").strip()
+    customer_name = str(customer_name or "").strip()
+    order_date = _normalize_shipment_date(shipment_date)
+    selected_ids = sorted({int(x) for x in (item_ids or [])})
+    if not selected_ids:
+        raise ValueError("수정할 확정 품목을 선택하세요.")
+    if not erp_company or not customer_name:
+        raise ValueError("ERP 사업장과 수출 매출처를 선택하세요.")
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    confirmed_at = f"{order_date} {now[11:]}"
+    with connect() as con:
+        cur = con.cursor(); ensure_export_waiting_tables(cur)
+        order = cur.execute(
+            "SELECT title,status FROM export_waiting_orders WHERE id=?",
+            (int(order_id),),
+        ).fetchone()
+        if not order or order[1] not in {"partial", "confirmed"}:
+            raise ValueError("수정할 수출확정 건이 없습니다.")
+
+        placeholders = ",".join("?" for _ in selected_ids)
+        rows = cur.execute(
+            f"""SELECT id FROM export_waiting_items
+                WHERE order_id=? AND id IN ({placeholders})
+                  AND COALESCE(confirmed,0)=1""",
+            (int(order_id), *selected_ids),
+        ).fetchall()
+        if len(rows) != len(selected_ids):
+            raise ValueError("선택 품목 중 확정되지 않았거나 찾을 수 없는 항목이 있습니다.")
+
+        cur.execute(
+            f"""UPDATE export_waiting_items
+                SET confirmed_company=?,confirmed_customer_code=?,
+                    confirmed_customer_name=?,confirmed_at=?
+                WHERE order_id=? AND id IN ({placeholders})
+                  AND COALESCE(confirmed,0)=1""",
+            (erp_company, customer_code, customer_name, confirmed_at, int(order_id), *selected_ids),
+        )
+        cur.execute(
+            """UPDATE export_waiting_orders
+               SET erp_company=?,erp_customer_code=?,erp_customer_name=?,
+                   order_date=?,confirmed_at=?,updated_at=?
+               WHERE id=?""",
+            (erp_company, customer_code, customer_name, order_date, confirmed_at, now, int(order_id)),
+        )
+        con.commit()
+
+    return {
+        "updated_count": len(selected_ids),
+        "order_date": order_date,
+        "confirmed_at": confirmed_at,
+    }
