@@ -39,6 +39,23 @@ def _find_open_order_id(export_no: str) -> int | None:
     return int(df.iloc[0]["id"])
 
 
+def _linkable_order_ids(export_no: str) -> list[int]:
+    """Return every non-cancelled WMS order recorded for an export number.
+
+    A confirmed order no longer has stock in P, but its item rows are still the
+    authoritative record that those products were received before confirmation.
+    Legacy integration restoration therefore cannot be limited to open orders.
+    """
+    df = wms_q(
+        """SELECT id FROM export_waiting_orders
+           WHERE TRIM(export_no)=TRIM(?)
+             AND status IN ('waiting','partial','confirmed')
+           ORDER BY id""",
+        (export_no,),
+    )
+    return [int(value) for value in df["id"].tolist()] if not df.empty else []
+
+
 def _match_text(value: object) -> str:
     """Normalize order labels such as ``제품명 (70 EA)`` for legacy matching."""
     return "".join(str(value or "").split("(", 1)[0].split()).casefold()
@@ -57,24 +74,38 @@ def restore_legacy_waiting_links(case_id: int) -> int:
     export_no = str(case.get("export_no") or "").strip()
     if not export_no:
         return 0
-    order_id = _find_open_order_id(export_no)
-    if order_id is None:
+    order_ids = _linkable_order_ids(export_no)
+    if not order_ids:
         return 0
 
-    # 통합 전 자료는 P 재고가 실제로 남아 있어도 waiting_inventory_id가 비어
-    # 있거나 예전 inventory id를 가리킬 수 있다. 먼저 전체 재고키로 안전하게
-    # 복구해야 아래 조회에서 기존 수출대기 행이 탈락하지 않는다.
-    repair_p_inventory_links(order_id)
+    # 통합 전 미확정 자료는 P 재고가 실제로 남아 있어도 waiting_inventory_id가
+    # 비어 있거나 예전 inventory id를 가리킬 수 있다. 확정 자료는 이미 P에서
+    # 출고됐으므로 재고 ID 복구 대상이 아니지만, 입고 이력 자체는 복원해야 한다.
+    open_orders = wms_q(
+        """SELECT id FROM export_waiting_orders
+           WHERE id IN ({}) AND status IN ('waiting','partial')""".format(
+            ",".join("?" for _ in order_ids)
+        ),
+        tuple(order_ids),
+    )
+    for order_id in open_orders["id"].tolist() if not open_orders.empty else []:
+        repair_p_inventory_links(order_id)
 
+    placeholders = ",".join("?" for _ in order_ids)
     waiting = wms_q(
-        """SELECT i.source_inventory_id, i.waiting_inventory_id, i.company,
-                  i.product_name, i.lot, i.exp_date, i.source_location, i.qty
+        f"""SELECT i.source_inventory_id, i.waiting_inventory_id, i.company,
+                   i.product_name, i.lot, i.exp_date, i.source_location, i.qty,
+                   COALESCE(i.confirmed,0) AS confirmed
            FROM export_waiting_items i
-           JOIN inventory p ON p.id=i.waiting_inventory_id
-                           AND UPPER(TRIM(COALESCE(p.location,'')))='P'
-           WHERE i.order_id=? AND COALESCE(i.confirmed,0)=0 AND i.qty>0
-           ORDER BY i.id""",
-        (order_id,),
+           LEFT JOIN inventory p ON p.id=i.waiting_inventory_id
+           WHERE i.order_id IN ({placeholders})
+             AND i.qty>0
+             AND (
+                   COALESCE(i.confirmed,0)=1
+                   OR UPPER(TRIM(COALESCE(p.location,'')))='P'
+                 )
+           ORDER BY i.order_id, i.id""",
+        tuple(order_ids),
     )
     if waiting.empty:
         return 0

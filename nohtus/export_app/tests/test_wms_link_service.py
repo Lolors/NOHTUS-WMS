@@ -244,6 +244,47 @@ class WmsLinkServiceTests(unittest.TestCase):
         self.assertEqual(wms_link_service.restore_legacy_waiting_links(case_id), 0)
         self.assertEqual(len(shipment_service.list_case_items(case_id)), 1)
 
+    def test_restores_confirmed_wms_items_as_received_without_p_stock(self) -> None:
+        case_id, order_a, _ = self._create_case("EXP-CONFIRMED-LEGACY")
+        result = wms_link_service.save_picked_inventory(
+            case_id=case_id,
+            order_item_id=order_a,
+            kept_rows=[],
+            picked_rows=[{
+                "inventory_id": 1,
+                "company": "NOH",
+                "product_name": "제품A",
+                "lot": "LOT-1",
+                "exp_date": "2027-01-01",
+                "location": "A1-01",
+                "qty": 5.0,
+            }],
+        )
+        db.execute("DELETE FROM shipment_items WHERE case_id=?", (case_id,))
+        with sqlite3.connect(self.wms_db_path) as con:
+            waiting_inventory_id = con.execute(
+                "SELECT waiting_inventory_id FROM export_waiting_items WHERE order_id=?",
+                (int(result["order_id"]),),
+            ).fetchone()[0]
+            con.execute("DELETE FROM inventory WHERE id=?", (waiting_inventory_id,))
+            con.execute(
+                "UPDATE export_waiting_items SET confirmed=1 WHERE order_id=?",
+                (int(result["order_id"]),),
+            )
+            con.execute(
+                "UPDATE export_waiting_orders SET status='confirmed' WHERE id=?",
+                (int(result["order_id"]),),
+            )
+
+        restored = wms_link_service.restore_legacy_waiting_links(case_id)
+
+        self.assertEqual(restored, 1)
+        linked = shipment_service.list_case_items(case_id)
+        self.assertEqual(len(linked), 1)
+        self.assertEqual(int(linked[0]["order_item_id"]), order_a)
+        self.assertEqual(float(linked[0]["requested_qty"]), 5.0)
+        self.assertEqual(wms_link_service.restore_legacy_waiting_links(case_id), 0)
+
     def test_removing_a_kept_row_restores_wms_inventory(self) -> None:
         # save_export_waiting_order()는 건 전체의 품목이 0개가 되는 저장은 거부하므로
         # (수출대기 자체를 취소하는 것과는 다른 조작), 다른 주문품목에 실재고가 하나
