@@ -143,7 +143,8 @@ def _apply_p_inventory_match(waiting_item_id, inventory_id):
 def _finish_export_save(result):
     if st.session_state.get("_export_editing_order_status") == "confirmed":
         st.session_state["_outbound_last_success"] = (
-            f"수출확정 출고 리스트 수정 완료: {result['title']} / 총 {result['total_qty']}EA"
+            f"수출확정 출고 리스트 수정 완료: {result['title']} / 총 {result['total_qty']}EA · "
+            "기존 확정 품목은 유지되고 추가 품목은 수출대기로 저장되었습니다."
         )
     else:
         st.session_state["_outbound_last_success"] = (
@@ -312,7 +313,10 @@ def page_export_waiting():
         )
         completed["done"] = True
         if st.session_state.get("_export_editing_order_status") == "confirmed":
-            completed["message"] = f"수출확정 출고 리스트 수정 완료: {result['title']} / 총 {result['total_qty']}EA"
+            completed["message"] = (
+                f"수출확정 출고 리스트 수정 완료: {result['title']} / 총 {result['total_qty']}EA · "
+                "기존 확정 품목은 유지되고 추가 품목은 수출대기로 저장되었습니다."
+            )
         else:
             completed["message"] = f"수출대기 등록 완료: {result['title']} / 총 {result['total_qty']}EA → 로케이션 P"
         return 0
@@ -332,7 +336,7 @@ def page_export_waiting():
         if isinstance(body, str):
             if "출고지시 저장 시" in body:
                 if st.session_state.get("_export_editing_order_status") == "confirmed":
-                    body = "수정 저장 시 기존 출고를 원복한 뒤 새 출고 리스트를 다시 반영합니다. 저장에 실패하면 기존 재고와 출고 리스트가 그대로 유지됩니다."
+                    body = "기존 확정 품목의 사업장·매출처는 그대로 유지됩니다. 추가한 품목만 수출대기로 저장되며, 저장된 수출대기 화면에서 사업장·매출처를 선택해 확정합니다."
                 else:
                     body = "등록 완료 시 선택 재고는 같은 사업장의 P로 이동합니다. 국가는 필수이고 바이어와 운송방식은 미지정으로 둘 수 있습니다."
             else:
