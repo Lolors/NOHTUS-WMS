@@ -27,8 +27,36 @@ class ExportIntegrationFollowupTests(TestCase):
     def test_confirmed_sales_registration_remains_editable(self):
         source = Path("nohtus/export_app/views/주문_검색_및_수정.py").read_text(encoding="utf-8")
         self.assertIn("['waiting', 'partial', 'confirmed']", source)
-        self.assertIn("확정 품목 매출·출고 이력 수정", source)
+        self.assertIn("확정 품목 매출·출고 등록 및 수정", source)
         self.assertIn("update_confirmed_export_waiting_items", source)
+
+    def test_sales_registration_uses_quantity_ranked_order_summary_and_confirmation_counts(self):
+        orders = pd.DataFrame([{
+            'id': 1, 'export_no': 'EXP-1', 'country': 'KR', 'buyer': 'B',
+            'transport_method': 'AIR', 'title': 'old', 'status': 'waiting',
+            'order_date': '', 'created_at': '',
+        }])
+        items = pd.DataFrame([
+            {'order_id': 1, 'product_name': '소량', 'qty': 2, 'confirmed': 1, 'confirmed_company': 'NOH', 'confirmed_customer_name': 'A'},
+            {'order_id': 1, 'product_name': '최다', 'qty': 6, 'confirmed': 1, 'confirmed_company': '노투스', 'confirmed_customer_name': 'B'},
+            {'order_id': 1, 'product_name': '최다', 'qty': 4, 'confirmed': 1, 'confirmed_company': 'NOH', 'confirmed_customer_name': 'C'},
+            {'order_id': 1, 'product_name': '차순위', 'qty': 5, 'confirmed': 0, 'confirmed_company': None, 'confirmed_customer_name': None},
+        ])
+        with patch.object(export_confirm_service, 'wms_q', side_effect=[orders, items]):
+            result = export_confirm_service.list_active_orders()
+        self.assertEqual(result.loc[0, 'order_summary'], '최다 10EA, 차순위 5EA + 그 외 1품목')
+        self.assertEqual(result.loc[0, 'confirmed_company_count'], 2)
+        self.assertEqual(result.loc[0, 'confirmed_customer_count'], 3)
+
+        view = Path('nohtus/export_app/views/수출확정_매출_등록.py').read_text(encoding='utf-8')
+        self.assertIn("'주문 요약': orders['order_summary']", view)
+        self.assertIn("f'{int(value)}곳'", view)
+
+    def test_confirmation_items_offer_source_company_bulk_selection(self):
+        source = Path('nohtus/export_app/views/주문_검색_및_수정.py').read_text(encoding='utf-8')
+        self.assertIn("f'{company} 전체 선택'", source)
+        self.assertIn("source['출고사업장']", source)
+        self.assertGreaterEqual(source.count('_company_selection_editor('), 3)
 
     def test_duplicate_open_export_numbers_require_merge_or_new_number(self):
         rows = pd.DataFrame([{"id": 11}, {"id": 12}])
