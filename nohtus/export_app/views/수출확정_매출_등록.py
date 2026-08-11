@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import pandas as pd
 import streamlit as st
 
 from nohtus.export_app.services import export_confirm_service
 from nohtus.export_app.views.주문_검색_및_수정 import render_wms_confirmation_section
+
+RECENT_DAYS = 30
 
 
 def render() -> None:
@@ -29,6 +33,22 @@ def render() -> None:
     if orders.empty:
         st.info('조회할 수출대기 저장 건이 없습니다.')
         return
+
+    # 확정 건은 시간이 지날수록 계속 쌓이므로 기본은 최근 1개월만 보여준다.
+    # 아직 매출 등록이 필요한 수출대기/일부 확정 건은 오래됐어도 항상 보여준다.
+    show_recent_only = st.checkbox(
+        f'최근 {RECENT_DAYS}일 확정 건만 보기',
+        value=True,
+        key='export_sales_registration_recent_only',
+    )
+    if show_recent_only:
+        cutoff = (date.today() - timedelta(days=RECENT_DAYS)).isoformat()
+        needs_action = orders['status'].isin(['waiting', 'partial'])
+        is_recent = orders['order_date'].fillna('').astype(str).str[:10] >= cutoff
+        orders = orders[needs_action | is_recent]
+        if orders.empty:
+            st.info(f'최근 {RECENT_DAYS}일 내 확정 건이 없습니다. 체크박스를 해제하면 전체를 볼 수 있습니다.')
+            return
 
     duplicate_export_nos = orders['export_no'][orders['export_no'].duplicated(keep=False)].dropna().unique()
     if len(duplicate_export_nos):
