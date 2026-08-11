@@ -31,6 +31,18 @@ def render_document(case, packed, actual_rows=None) -> None:
         f'<div class="value">{html.escape(case["note"] or "-")}</div></div>'
     )
 
+    unit_by_shipment_id: dict[int, str] = {}
+    for actual in actual_rows or []:
+        try:
+            shipment_id = int(actual['id'])
+        except (KeyError, TypeError, ValueError):
+            continue
+        try:
+            unit = str(actual['unit'] or '').strip()
+        except (KeyError, IndexError, TypeError):
+            unit = ''
+        unit_by_shipment_id[shipment_id] = unit or '-'
+
     rows_html: list[str] = []
     grouped: dict[int, list] = {}
     for row in packed:
@@ -47,6 +59,12 @@ def render_document(case, packed, actual_rows=None) -> None:
                 class_attr = f' class="{css_class}"' if css_class else ''
                 rows_html.append(f'<td{class_attr}>{html.escape(str(value or ""))}</td>')
             rows_html.append(f'<td class="right">{fmt_number(row["requested_qty"])}</td>')
+            try:
+                shipment_id = int(row['id'])
+            except (KeyError, TypeError, ValueError):
+                shipment_id = 0
+            unit = unit_by_shipment_id.get(shipment_id, '-')
+            rows_html.append(f'<td class="center">{html.escape(unit)}</td>')
             if index == 0:
                 weight = f'{fmt_number(row["weight_kg"])} kg' if row['weight_kg'] else '-'
                 size_values = [row['length_cm'], row['width_cm'], row['height_cm']]
@@ -79,11 +97,11 @@ def render_document(case, packed, actual_rows=None) -> None:
     )
     rows_html.append(
         '<tr class="total-row"><td colspan="5" class="right"><b>합계</b></td>'
-        f'<td class="right"><b>{fmt_number(total_qty)}</b></td>'
+        f'<td class="right"><b>{fmt_number(total_qty)}</b></td><td></td>'
         f'<td class="center"><b>{fmt_number(total_weight)} kg</b></td><td></td></tr>'
     )
-    table_columns = '<colgroup><col style="width:10%"><col style="width:9%"><col style="width:24%"><col style="width:14%"><col style="width:12%"><col style="width:7%"><col style="width:9%"><col style="width:15%"></colgroup>'
-    table_header = '<tr><th>CTN No.</th><th>출고처</th><th>제품명</th><th>제조번호</th><th>유통기한</th><th>수량</th><th>GW (kg)</th><th>CTN 사이즈</th></tr>'
+    table_columns = '<colgroup><col style="width:9%"><col style="width:8%"><col style="width:22%"><col style="width:13%"><col style="width:11%"><col style="width:6%"><col style="width:6%"><col style="width:9%"><col style="width:16%"></colgroup>'
+    table_header = '<tr><th>CTN No.</th><th>출고처</th><th>제품명</th><th>제조번호</th><th>유통기한</th><th>수량</th><th>단위</th><th>GW (kg)</th><th>CTN 사이즈</th></tr>'
     first_summary = f'{len({row["box_no"] for row in packed})} CTN'
     display_rows = packed
     item_count = len({str(row['product_name']).strip() for row in display_rows if str(row['product_name']).strip()})
@@ -257,5 +275,3 @@ th{{background:#294f71;color:white;padding:6px 4px;text-align:center;font-weight
 <div class="content"><table><colgroup><col class="destination"><col class="product"><col class="lot"><col class="expiry"><col class="qty"><col class="unit"></colgroup><thead><tr><th>출고처</th><th>제품명</th><th>제조번호</th><th>유통기한</th><th>출고수량</th><th>단위</th></tr></thead><tbody>{''.join(rows_html)}</tbody></table></div>
 <div class="notice">본 문서는 패킹 완료 전 작성된 출고 예정 제품 목록이며, 최종 수량 및 패킹 정보는 변경될 수 있습니다.</div></div></body></html>'''
     components.html(document, height=min(1800, max(700, 500 + len(sorted_rows) * 38)), scrolling=True)
-
-
