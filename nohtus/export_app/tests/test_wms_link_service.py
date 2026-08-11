@@ -244,6 +244,124 @@ class WmsLinkServiceTests(unittest.TestCase):
         self.assertEqual(wms_link_service.restore_legacy_waiting_links(case_id), 0)
         self.assertEqual(len(shipment_service.list_case_items(case_id)), 1)
 
+    def test_reuses_matching_legacy_export_row_instead_of_doubling_received_qty(self) -> None:
+        case_id, order_a, _ = self._create_case("EXP-LEGACY-EXISTING")
+        result = wms_link_service.save_picked_inventory(
+            case_id=case_id,
+            order_item_id=order_a,
+            kept_rows=[],
+            picked_rows=[{
+                "inventory_id": 1,
+                "company": "NOH",
+                "product_name": "제품A",
+                "lot": "LOT-1",
+                "exp_date": "2027-01-01",
+                "location": "A1-01",
+                "qty": 5.0,
+            }],
+        )
+        db.execute("DELETE FROM shipment_items WHERE case_id=?", (case_id,))
+        now = now_text()
+        legacy_id = db.execute(
+            """INSERT INTO shipment_items(
+                   case_id,order_item_id,business_unit,location,source_inventory_id,
+                   product_name,lot_no,expiry_date,requested_qty,box_no,created_at,updated_at
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (case_id, order_a, "NOH", "", None, "제품A (5 EA)", "LOT-1",
+             "2027-1-1", 5, 7, now, now),
+        )
+
+        restored = wms_link_service.restore_legacy_waiting_links(case_id)
+
+        self.assertEqual(restored, 1)
+        linked = shipment_service.list_case_items(case_id)
+        self.assertEqual(len(linked), 1)
+        self.assertEqual(int(linked[0]["id"]), legacy_id)
+        self.assertEqual(int(linked[0]["source_inventory_id"]), 1)
+        self.assertEqual(linked[0]["source_location"], "A1-01")
+        self.assertEqual(linked[0]["product_name"], "제품A")
+        self.assertEqual(linked[0]["lot_no"], "LOT-1")
+        self.assertEqual(linked[0]["expiry_date"], "2027-01-01")
+        self.assertEqual(float(linked[0]["requested_qty"]), 5.0)
+        self.assertEqual(int(linked[0]["box_no"]), 7)
+        self.assertEqual(wms_link_service.restore_legacy_waiting_links(case_id), 0)
+
+    def test_removes_duplicate_restore_row_and_preserves_packed_legacy_row(self) -> None:
+        case_id, order_a, _ = self._create_case("EXP-LEGACY-DOUBLED")
+        wms_link_service.save_picked_inventory(
+            case_id=case_id,
+            order_item_id=order_a,
+            kept_rows=[],
+            picked_rows=[{
+                "inventory_id": 1,
+                "company": "NOH",
+                "product_name": "제품A",
+                "lot": "LOT-1",
+                "exp_date": "2027-01-01",
+                "location": "A1-01",
+                "qty": 5.0,
+            }],
+        )
+        now = now_text()
+        legacy_id = db.execute(
+            """INSERT INTO shipment_items(
+                   case_id,order_item_id,business_unit,location,source_inventory_id,
+                   product_name,lot_no,expiry_date,requested_qty,box_no,created_at,updated_at
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (case_id, order_a, "NOH", "", None, "제품A", "LOT-1",
+             "2027-01-01", 5, 3, now, now),
+        )
+        self.assertEqual(shipment_service.total_linked_quantity(case_id), 10.0)
+
+        restored = wms_link_service.restore_legacy_waiting_links(case_id)
+
+        self.assertEqual(restored, 1)
+        linked = shipment_service.list_case_items(case_id)
+        self.assertEqual(len(linked), 1)
+        self.assertEqual(int(linked[0]["id"]), legacy_id)
+        self.assertEqual(int(linked[0]["source_inventory_id"]), 1)
+        self.assertEqual(float(linked[0]["requested_qty"]), 5.0)
+        self.assertEqual(int(linked[0]["box_no"]), 3)
+        self.assertEqual(shipment_service.total_linked_quantity(case_id), 5.0)
+        self.assertEqual(wms_link_service.restore_legacy_waiting_links(case_id), 0)
+
+    def test_links_split_ctn_rows_when_their_group_total_matches_p_inventory(self) -> None:
+        case_id, order_a, _ = self._create_case("EXP-LEGACY-SPLIT")
+        wms_link_service.save_picked_inventory(
+            case_id=case_id,
+            order_item_id=order_a,
+            kept_rows=[],
+            picked_rows=[{
+                "inventory_id": 1,
+                "company": "NOH",
+                "product_name": "제품A",
+                "lot": "LOT-1",
+                "exp_date": "2027-01-01",
+                "location": "A1-01",
+                "qty": 5.0,
+            }],
+        )
+        db.execute("DELETE FROM shipment_items WHERE case_id=?", (case_id,))
+        now = now_text()
+        for quantity, box_no in ((2, 1), (3, 2)):
+            db.execute(
+                """INSERT INTO shipment_items(
+                       case_id,order_item_id,business_unit,location,source_inventory_id,
+                       product_name,lot_no,expiry_date,requested_qty,box_no,created_at,updated_at
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (case_id, order_a, "NOH", "", None, "제품A", "LOT-1",
+                 "2027-01-01", quantity, box_no, now, now),
+            )
+
+        self.assertEqual(wms_link_service.restore_legacy_waiting_links(case_id), 1)
+
+        linked = shipment_service.list_case_items(case_id)
+        self.assertEqual(len(linked), 2)
+        self.assertEqual({int(row["source_inventory_id"]) for row in linked}, {1})
+        self.assertEqual({int(row["box_no"]) for row in linked}, {1, 2})
+        self.assertEqual(sum(float(row["requested_qty"]) for row in linked), 5.0)
+        self.assertEqual(wms_link_service.restore_legacy_waiting_links(case_id), 0)
+
     def test_restores_confirmed_wms_items_as_received_without_p_stock(self) -> None:
         case_id, order_a, _ = self._create_case("EXP-CONFIRMED-LEGACY")
         result = wms_link_service.save_picked_inventory(

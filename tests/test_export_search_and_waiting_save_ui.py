@@ -53,6 +53,34 @@ class ExportSearchAndWaitingSaveUiTests(TestCase):
         self.assertEqual(existing['보유수량'], 10)
         self.assertEqual(existing['선택수량'], 3)
 
+    def test_split_p_inventory_rows_are_shown_once_with_their_total_quantity(self):
+        current = [
+            {
+                'source_inventory_id': 1,
+                'source_location': 'A1',
+                'product_name': '제품A',
+                'business_unit': 'NOH',
+                'lot_no': 'LOT-1',
+                'expiry_date': '2027-01-01',
+                'requested_qty': 2,
+            },
+            {
+                'source_inventory_id': 1,
+                'source_location': 'A1',
+                'product_name': '제품A',
+                'business_unit': 'NOH',
+                'lot_no': 'LOT-1',
+                'expiry_date': '2027-01-01',
+                'requested_qty': 3,
+            },
+        ]
+
+        result = inventory_selection_source(current, pd.DataFrame())
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]['보유수량'], 5)
+        self.assertEqual(result.iloc[0]['선택수량'], 5)
+
     def test_product_stock_rows_returns_all_lots_for_one_recommended_product(self):
         with patch.object(wms_inventory_picker_service, 'wms_q', return_value=pd.DataFrame()) as query:
             wms_inventory_picker_service.product_stock_rows('제품A')

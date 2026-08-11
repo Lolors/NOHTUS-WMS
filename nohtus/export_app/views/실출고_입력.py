@@ -33,6 +33,10 @@ def inventory_selection_source(current_rows: list[dict], stock_rows: pd.DataFram
     for current in current_rows:
         inventory_id = int(current['source_inventory_id'])
         qty = safe_number(current['requested_qty'])
+        if inventory_id in rows:
+            rows[inventory_id]['보유수량'] += qty
+            rows[inventory_id]['선택수량'] += qty
+            continue
         rows[inventory_id] = {
             '_inventory_id': inventory_id,
             '_location': current.get('source_location') or current.get('location') or '',

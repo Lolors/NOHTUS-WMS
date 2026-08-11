@@ -8,6 +8,8 @@ nohtus.services.export_waiting.save_export_waiting_order()는 editing_order_id�
 """
 from __future__ import annotations
 
+import re
+
 from nohtus.db import q as wms_q
 from nohtus.export_app import db as export_db
 from nohtus.export_app.services import export_service, shipment_service
@@ -59,6 +61,81 @@ def _linkable_order_ids(export_no: str) -> list[int]:
 def _match_text(value: object) -> str:
     """Normalize order labels such as ``제품명 (70 EA)`` for legacy matching."""
     return "".join(str(value or "").split("(", 1)[0].split()).casefold()
+
+
+def _match_value(value: object) -> str:
+    return "".join(str(value or "").split()).casefold()
+
+
+def _match_date(value: object) -> str:
+    parts = re.findall(r"\d+", str(value or ""))
+    if len(parts) == 3:
+        return f"{int(parts[0]):04d}{int(parts[1]):02d}{int(parts[2]):02d}"
+    return "".join(parts)
+
+
+def _same_quantity(left: object, right: object) -> bool:
+    return abs(float(left or 0) - float(right or 0)) <= 0.000001
+
+
+def _matching_legacy_rows(rows: list[dict], waiting_row: dict, order_item_id: int) -> list[dict]:
+    """Find the old EXPORT rows that already represent one WMS waiting item.
+
+    Old EXPORT databases have the real product/LOT/expiry/quantity but no
+    source_inventory_id.  One WMS row can be split across several CTN rows, so
+    identity is matched first and the quantity is validated as a group.
+    """
+    product_key = _match_text(waiting_row.get("product_name"))
+    company_key = _match_value(waiting_row.get("company"))
+    lot_key = _match_value(waiting_row.get("lot"))
+    expiry_key = _match_date(waiting_row.get("exp_date"))
+    candidates = []
+    for row in rows:
+        if row.get("source_inventory_id"):
+            continue
+        if int(row.get("order_item_id") or 0) != int(order_item_id):
+            continue
+        row_product_key = _match_text(row.get("product_name"))
+        if not product_key or not row_product_key or not (
+            row_product_key == product_key
+            or row_product_key in product_key
+            or product_key in row_product_key
+        ):
+            continue
+        row_company_key = _match_value(row.get("business_unit"))
+        if row_company_key and company_key and row_company_key != company_key:
+            continue
+        if _match_value(row.get("lot_no")) != lot_key:
+            continue
+        if _match_date(row.get("expiry_date")) != expiry_key:
+            continue
+        candidates.append(row)
+    if not candidates:
+        return []
+    total = sum(float(row.get("requested_qty") or 0) for row in candidates)
+    return candidates if _same_quantity(total, waiting_row.get("qty")) else []
+
+
+def _update_legacy_rows(rows: list[dict], waiting_row: dict, source_id: int, now: str) -> None:
+    export_db.executemany(
+        """UPDATE shipment_items
+           SET business_unit=?, location=?, source_inventory_id=?, product_name=?,
+               lot_no=?, expiry_date=?, updated_at=?
+           WHERE id=?""",
+        [
+            (
+                str(waiting_row.get("company") or ""),
+                str(waiting_row.get("source_location") or ""),
+                source_id,
+                str(waiting_row.get("product_name") or ""),
+                str(waiting_row.get("lot") or ""),
+                str(waiting_row.get("exp_date") or ""),
+                now,
+                int(row["id"]),
+            )
+            for row in rows
+        ],
+    )
 
 
 def restore_legacy_waiting_links(case_id: int) -> int:
@@ -113,17 +190,18 @@ def restore_legacy_waiting_links(case_id: int) -> int:
     orders = [dict(row) for row in export_service.get_order_items(case_id)]
     if not orders:
         return 0
-    existing = export_db.rows(
-        """SELECT source_inventory_id FROM shipment_items
-           WHERE case_id=? AND source_inventory_id IS NOT NULL""",
+    existing = [dict(row) for row in export_db.rows(
+        """SELECT id,order_item_id,business_unit,location,source_inventory_id,
+                  product_name,lot_no,expiry_date,requested_qty,box_no
+           FROM shipment_items WHERE case_id=? ORDER BY id""",
         (case_id,),
-    )
-    existing_ids = {int(row["source_inventory_id"]) for row in existing}
+    )]
     now = now_text()
     inserts = []
+    changed = 0
     for row in waiting.to_dict("records"):
         source_id = int(row.get("source_inventory_id") or 0)
-        if not source_id or source_id in existing_ids:
+        if not source_id:
             continue
         product_key = _match_text(row.get("product_name"))
         candidates = [
@@ -141,6 +219,66 @@ def restore_legacy_waiting_links(case_id: int) -> int:
         if len(candidates) != 1:
             continue
         order_item_id = int(candidates[0]["id"])
+
+        linked_rows_elsewhere = [
+            item for item in existing
+            if int(item.get("source_inventory_id") or 0) == source_id
+            and int(item.get("order_item_id") or 0) != order_item_id
+        ]
+        if linked_rows_elsewhere:
+            continue
+        linked_rows = [
+            item for item in existing
+            if int(item.get("source_inventory_id") or 0) == source_id
+            and int(item.get("order_item_id") or 0) == order_item_id
+        ]
+        legacy_rows = _matching_legacy_rows(existing, row, order_item_id)
+        if linked_rows and legacy_rows:
+            linked_total = sum(float(item.get("requested_qty") or 0) for item in linked_rows)
+            if _same_quantity(linked_total, row.get("qty")):
+                legacy_is_packed = any(item.get("box_no") is not None for item in legacy_rows)
+                linked_is_packed = any(item.get("box_no") is not None for item in linked_rows)
+                if legacy_is_packed or not linked_is_packed:
+                    export_db.executemany(
+                        "DELETE FROM shipment_items WHERE id=?",
+                        [(int(item["id"]),) for item in linked_rows],
+                    )
+                    _update_legacy_rows(legacy_rows, row, source_id, now)
+                    deleted_ids = {int(item["id"]) for item in linked_rows}
+                    existing = [item for item in existing if int(item["id"]) not in deleted_ids]
+                    for item in legacy_rows:
+                        item.update({
+                            "business_unit": str(row.get("company") or ""),
+                            "location": str(row.get("source_location") or ""),
+                            "source_inventory_id": source_id,
+                            "product_name": str(row.get("product_name") or ""),
+                            "lot_no": str(row.get("lot") or ""),
+                            "expiry_date": str(row.get("exp_date") or ""),
+                        })
+                else:
+                    export_db.executemany(
+                        "DELETE FROM shipment_items WHERE id=?",
+                        [(int(item["id"]),) for item in legacy_rows],
+                    )
+                    deleted_ids = {int(item["id"]) for item in legacy_rows}
+                    existing = [item for item in existing if int(item["id"]) not in deleted_ids]
+                changed += 1
+                continue
+        if linked_rows:
+            continue
+        if legacy_rows:
+            _update_legacy_rows(legacy_rows, row, source_id, now)
+            for item in legacy_rows:
+                item.update({
+                    "business_unit": str(row.get("company") or ""),
+                    "location": str(row.get("source_location") or ""),
+                    "source_inventory_id": source_id,
+                    "product_name": str(row.get("product_name") or ""),
+                    "lot_no": str(row.get("lot") or ""),
+                    "expiry_date": str(row.get("exp_date") or ""),
+                })
+            changed += 1
+            continue
         inserts.append((
             case_id, order_item_id, str(row.get("company") or ""),
             str(row.get("source_location") or ""), source_id,
@@ -148,19 +286,26 @@ def restore_legacy_waiting_links(case_id: int) -> int:
             str(row.get("exp_date") or ""), float(row.get("qty") or 0),
             None, now, now,
         ))
-        existing_ids.add(source_id)
+        existing.append({
+            "id": 0,
+            "order_item_id": order_item_id,
+            "source_inventory_id": source_id,
+            "requested_qty": float(row.get("qty") or 0),
+            "box_no": None,
+        })
 
-    if not inserts:
+    if not inserts and not changed:
         return 0
-    export_db.executemany(
-        """INSERT INTO shipment_items(
-               case_id,order_item_id,business_unit,location,source_inventory_id,
-               product_name,lot_no,expiry_date,requested_qty,box_no,created_at,updated_at
-           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-        inserts,
-    )
+    if inserts:
+        export_db.executemany(
+            """INSERT INTO shipment_items(
+                   case_id,order_item_id,business_unit,location,source_inventory_id,
+                   product_name,lot_no,expiry_date,requested_qty,box_no,created_at,updated_at
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            inserts,
+        )
     shipment_service.sync_case_stage(case_id, now)
-    return len(inserts)
+    return len(inserts) + changed
 
 
 def _cart_row_from_shipment_row(row: dict) -> dict:
