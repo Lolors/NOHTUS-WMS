@@ -38,6 +38,8 @@ def page_export_shipment_intake():
     """저장 재고는 Streamlit 표의 기본 행 삭제 기능으로 편집한다."""
     original_data_editor = st.data_editor
     original_button = st.button
+    original_markdown = st.markdown
+    original_caption = st.caption
 
     def patched_data_editor(data, *args, **kwargs):
         key = str(kwargs.get("key") or "")
@@ -56,14 +58,29 @@ def page_export_shipment_intake():
             return False
         return original_button(label, *args, **kwargs)
 
+    def patched_markdown(body, *args, **kwargs):
+        if isinstance(body, str):
+            body = body.replace("### 수출대기 저장제품", "### 수출대기 제품")
+        return original_markdown(body, *args, **kwargs)
+
+    def patched_caption(body, *args, **kwargs):
+        text = str(body or "")
+        if "삭제할 행은 선택한 뒤 아래의 선택 행 삭제" in text:
+            body = "수량은 선택수량에서 수정하고, 삭제할 행은 표 왼쪽의 행 삭제 기능으로 제거한 뒤 출고 저장을 누르세요."
+        return original_caption(body, *args, **kwargs)
+
     st.data_editor = patched_data_editor
     st.button = patched_button
+    st.markdown = patched_markdown
+    st.caption = patched_caption
     try:
         with export_db.connection_session():
             실출고_입력.render()
     finally:
         st.data_editor = original_data_editor
         st.button = original_button
+        st.markdown = original_markdown
+        st.caption = original_caption
 
 
 def page_export_sales_registration():
