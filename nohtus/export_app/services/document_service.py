@@ -101,7 +101,7 @@ def get_shipment_product_list_data(case_id: int) -> list[dict]:
 
 
 def _aggregate_packed(rows, boxes_by_no: dict[int, object]) -> list[dict]:
-    grouped: dict[tuple[int, str, str, str, str], dict] = {}
+    grouped: dict[tuple[int, str, str, str, str, str], dict] = {}
     for row in rows:
         if row['box_no'] is None:
             continue
@@ -111,7 +111,8 @@ def _aggregate_packed(rows, boxes_by_no: dict[int, object]) -> list[dict]:
         product = _text(row['product_name'])
         lot = _text(row['lot_no'])
         expiry = _text(row['expiry_date'])
-        key = (box_no, business, product, lot, expiry)
+        unit = _text(row['unit'])
+        key = (box_no, business, product, lot, expiry, unit)
         box = boxes_by_no.get(box_no)
 
         if key not in grouped:
@@ -121,6 +122,7 @@ def _aggregate_packed(rows, boxes_by_no: dict[int, object]) -> list[dict]:
                 'product_name': product,
                 'lot_no': lot,
                 'expiry_date': expiry,
+                'unit': unit,
                 'requested_qty': 0.0,
                 'weight_kg': box['weight_kg'] if box else 0,
                 'length_cm': box['length_cm'] if box else 0,
@@ -137,12 +139,25 @@ def _aggregate_packed(rows, boxes_by_no: dict[int, object]) -> list[dict]:
             _text(row['product_name']).casefold(),
             _text(row['lot_no']).casefold(),
             _text(row['expiry_date']),
+            _text(row['unit']).casefold(),
         ),
     )
 
 
 def get_packed_document_data(case_id: int) -> list[dict]:
-    packed_rows = packing_service.list_packed_rows(case_id)
+    packed_rows = db.rows(
+        '''SELECT s.id, s.box_no,
+                  COALESCE(NULLIF(TRIM(s.business_unit),''), NULLIF(TRIM(s.location),''), '') AS business_unit,
+                  s.product_name, s.lot_no, s.expiry_date, s.requested_qty,
+                  o.unit
+           FROM shipment_items s
+           JOIN order_items o
+             ON o.id=s.order_item_id
+            AND o.case_id=s.case_id
+           WHERE s.case_id=? AND s.box_no IS NOT NULL
+           ORDER BY s.box_no, s.id''',
+        (case_id,),
+    )
     boxes_by_no = {
         int(box['box_no']): box
         for box in packing_service.list_boxes(case_id)
