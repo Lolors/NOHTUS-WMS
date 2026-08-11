@@ -79,6 +79,7 @@ def saved_inventory_source(current_rows: list[dict]) -> pd.DataFrame:
             '_inventory_id': int(row['source_inventory_id']),
             '_location': row.get('source_location') or row.get('location') or '',
             '_product_name': row.get('product_name') or '',
+            '삭제': False,
             '사업장': row.get('business_unit') or '',
             '제품명': row.get('product_name') or '',
             '제조번호': row.get('lot_no') or '',
@@ -373,18 +374,19 @@ def render() -> None:
                 if not legacy_current:
                     st.info('아직 출고 저장된 재고가 없습니다.')
             else:
+                st.caption('선택수량을 직접 수정하거나, 삭제할 행에 체크한 뒤 아래의 출고 저장을 누르세요.')
                 edited_saved = st.data_editor(
                     saved_source,
                     hide_index=True,
                     use_container_width=True,
-                    num_rows='dynamic',
                     disabled=['사업장', '제품명', '제조번호', '유통기한'],
-                    column_order=['사업장', '제품명', '제조번호', '유통기한', '선택수량'],
+                    column_order=['삭제', '사업장', '제품명', '제조번호', '유통기한', '선택수량'],
                     column_config={
                         '_shipment_id': None,
                         '_inventory_id': None,
                         '_location': None,
                         '_product_name': None,
+                        '삭제': st.column_config.CheckboxColumn('삭제', help='체크 후 출고 저장을 누르면 이 저장 재고가 삭제됩니다.'),
                         '선택수량': st.column_config.NumberColumn('선택수량', min_value=0, step=1, format='%g'),
                     },
                     key=f'saved_wms_editor_{case_id}_{selected_order_id}',
@@ -404,9 +406,13 @@ def render() -> None:
                 st.dataframe(legacy_view, hide_index=True, use_container_width=True)
                 st.caption('위 행은 기존 저장 데이터입니다. WMS 재고 연결이 복원되면 수정 가능한 저장행으로 자동 전환됩니다.')
 
+            active_saved = (
+                edited_saved[~edited_saved['삭제'].fillna(False).astype(bool)].copy()
+                if not edited_saved.empty else edited_saved
+            )
             saved_qty = (
-                float(pd.to_numeric(edited_saved['선택수량'], errors='coerce').fillna(0).sum())
-                if not edited_saved.empty else 0.0
+                float(pd.to_numeric(active_saved['선택수량'], errors='coerce').fillna(0).sum())
+                if not active_saved.empty else 0.0
             )
             legacy_qty = sum(safe_number(row.get('requested_qty')) for row in legacy_current)
             summary_slot = st.empty()
@@ -471,15 +477,15 @@ def render() -> None:
                 use_container_width=True,
                 key=f'save_wms_link_{case_id}_{selected_order_id}',
             ):
-                invalid_saved = edited_saved[
-                    pd.to_numeric(edited_saved['선택수량'], errors='coerce').fillna(0) <= 0
-                ] if not edited_saved.empty else edited_saved
+                invalid_saved = active_saved[
+                    pd.to_numeric(active_saved['선택수량'], errors='coerce').fillna(0) <= 0
+                ] if not active_saved.empty else active_saved
                 invalid_rows = selected_stock[
                     (selected_stock['선택수량'] <= 0)
                     | (selected_stock['선택수량'] > selected_stock['보유수량'])
                 ] if not selected_stock.empty else selected_stock
                 if not invalid_saved.empty:
-                    st.error('저장된 재고의 선택수량은 1 이상이어야 합니다. 삭제하려는 행은 표에서 행 자체를 삭제하세요.')
+                    st.error('저장된 재고의 선택수량은 1 이상이어야 합니다. 삭제하려면 해당 행의 삭제 칸을 체크하세요.')
                 elif not selected_stock.empty and not invalid_rows.empty:
                     st.error('새로 선택한 재고의 선택수량은 1 이상, 보유수량 이하여야 합니다.')
                 elif legacy_current:
@@ -487,7 +493,7 @@ def render() -> None:
                 else:
                     current_by_shipment_id = {int(row['id']): dict(row) for row in real_linked_current}
                     kept_rows = []
-                    for _, row in edited_saved.iterrows():
+                    for _, row in active_saved.iterrows():
                         shipment_id = int(row['_shipment_id'])
                         original = current_by_shipment_id.get(shipment_id)
                         if not original:
