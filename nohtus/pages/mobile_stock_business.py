@@ -8,6 +8,7 @@ import streamlit as st
 import nohtus.pages.mobile_stock as mobile_stock
 import nohtus.pages.mobile_stock_layout_patch_v3 as mobile_layout
 from nohtus.pages.mobile_stock_layout_patch_v3 import page_mobile_stock_finder as _page_mobile_stock_finder
+from nohtus.services.location_map import product_thumbnail_uris_for
 
 
 _MATERIAL_OR_PROMO_PREFIXES = ("G1", "G2")
@@ -75,15 +76,25 @@ def _inject_export_waiting_badge_css():
 
 def _render_result_list_with_export_badge(candidates, meta_getter, state_key, key_prefix):
     """임박재고 카드의 사업장 재고 아래에 수출대기 배지를 표시한다."""
+    thumbnails = product_thumbnail_uris_for(candidates)
     for index, name in enumerate(candidates):
         rows, total_qty, summary = meta_getter(name)
         row_key = f"mobile_result_row_{key_prefix}_{index}_{mobile_layout.base.base._safe_key(name)}"
         with st.container(border=True, key=row_key):
-            info_col, action_col = st.columns(
-                [4.2, 1.8],
+            thumb_col, info_col, action_col = st.columns(
+                [0.9, 3.3, 1.8],
                 gap="small",
                 vertical_alignment="center",
             )
+            with thumb_col:
+                thumbnail_uri = thumbnails.get(str(name).strip())
+                thumbnail_html = (
+                    f'<img src="{thumbnail_uri}" alt="">' if thumbnail_uri else '📷'
+                )
+                st.markdown(
+                    f'<div class="mobile-result-thumb">{thumbnail_html}</div>',
+                    unsafe_allow_html=True,
+                )
             with info_col:
                 is_expiry_result = key_prefix.startswith("mobile_expiry")
                 expiry_html = mobile_layout._expiry_badge(rows) if is_expiry_result else ""

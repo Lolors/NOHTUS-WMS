@@ -32,7 +32,7 @@ def _inject_mobile_search_css():
             }
             div[class*="st-key-mobile_result_row_"] > div div[data-testid="stHorizontalBlock"]:first-of-type {
                 display: grid !important;
-                grid-template-columns: minmax(0, 1fr) 150px !important;
+                grid-template-columns: 52px minmax(0, 1fr) 150px !important;
                 column-gap: 8px !important;
                 align-items: center !important;
                 min-height: 68px !important;
@@ -43,6 +43,26 @@ def _inject_mobile_search_css():
                 min-width: 0 !important;
                 margin: 0 !important;
                 padding: 0 !important;
+            }
+            .mobile-result-thumb {
+                width: 48px;
+                height: 48px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                overflow: hidden;
+                border-radius: 8px;
+                background: #f8fafc;
+                color: #a7afbd;
+                font-size: 19px;
+            }
+            .mobile-result-thumb img {
+                width: 100%;
+                height: 100%;
+                display: block;
+                object-fit: contain;
+                object-position: center;
+                background: #ffffff;
             }
             .mobile-result-info {
                 display: flex !important;

@@ -25,18 +25,20 @@ def sync_mobile_flag():
     components.html(
         """
         <script>
-        try {
-          const url = new URL(window.parent.location.href);
-          if (url.searchParams.get("force_desktop") === "1") {
-            return;
-          }
-          const isMobile = window.parent.innerWidth <= 768 ? "1" : "0";
-          if (url.searchParams.get("wms_mobile") !== isMobile) {
-            url.searchParams.set("wms_mobile", isMobile);
-            window.parent.history.replaceState(null, "", url.toString());
-            window.parent.location.reload();
-          }
-        } catch(e) {}
+        (function() {
+          try {
+            const url = new URL(window.parent.location.href);
+            if (url.searchParams.get("force_desktop") === "1") {
+              return;
+            }
+            const isMobile = window.parent.innerWidth <= 768 ? "1" : "0";
+            if (url.searchParams.get("wms_mobile") !== isMobile) {
+              url.searchParams.set("wms_mobile", isMobile);
+              window.parent.history.replaceState(null, "", url.toString());
+              window.parent.location.reload();
+            }
+          } catch(e) {}
+        })();
         </script>
         """,
         height=0,

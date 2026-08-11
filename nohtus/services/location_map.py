@@ -7,7 +7,10 @@ import json
 import mimetypes
 from pathlib import Path
 
+import streamlit as st
+
 from nohtus.db import q
+from nohtus.db import read_cache_token as _wms_read_cache_token
 from nohtus.services.export_waiting import ensure_export_waiting_tables
 from . import location_map_legacy as _legacy
 
@@ -78,6 +81,55 @@ def _product_thumbnail_data_uris():
             encoded_by_path[cache_key] = data_uri
         images[name] = data_uri
     return images
+
+
+@st.cache_data(show_spinner=False, persist='disk', max_entries=1024)
+def _cached_image_data_uri(path_str: str, cache_token) -> str:
+    path = Path(path_str)
+    mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+    try:
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    except OSError:
+        return ""
+    return f"data:{mime};base64,{encoded}"
+
+
+def product_thumbnail_uris_for(product_names) -> dict:
+    """Bulk, cached thumbnail lookup scoped to the given product names
+    (e.g. one page of mobile search results) instead of the whole catalog.
+    One query total regardless of how many names are passed, and each
+    unique image file is base64-encoded once and cached until the WMS DB
+    changes."""
+    unique_names = list(dict.fromkeys(
+        str(name).strip() for name in product_names if str(name or "").strip()
+    ))
+    if not unique_names:
+        return {}
+    placeholders = ",".join("?" for _ in unique_names)
+    rows = q(
+        f"""SELECT standard_name, image_path FROM products
+            WHERE standard_name IN ({placeholders}) AND COALESCE(image_path,'')<>''""",
+        tuple(unique_names),
+    )
+    if rows.empty:
+        return {}
+
+    cache_token = _wms_read_cache_token()
+    result = {}
+    for row in rows.itertuples():
+        name = str(row.standard_name or "").strip()
+        raw_path = str(row.image_path or "").strip()
+        if not name or not raw_path:
+            continue
+        original = Path(raw_path)
+        if not original.is_absolute():
+            original = _PROJECT_ROOT / original
+        thumb = _THUMB_DIR / f"{original.stem}.jpg"
+        chosen = thumb if thumb.is_file() else (original if original.is_file() else None)
+        if chosen is None:
+            continue
+        result[name] = _cached_image_data_uri(str(chosen), cache_token)
+    return result
 
 
 def _export_waiting_groups():
