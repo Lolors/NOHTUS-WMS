@@ -117,6 +117,7 @@ def _aggregate_packed(rows, boxes_by_no: dict[int, object]) -> list[dict]:
 
         if key not in grouped:
             grouped[key] = {
+                'id': int(row['id']),
                 'box_no': box_no,
                 'business_unit': business,
                 'product_name': product,
