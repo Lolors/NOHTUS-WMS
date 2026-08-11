@@ -13,6 +13,7 @@ from nohtus.export_app.services import (
     order_save_guard,
     order_service,
     shipment_service,
+    stale_inventory_cleanup_service,
     wms_link_service,
     wms_inventory_picker_service,
 )
@@ -72,14 +73,14 @@ def inventory_selection_source(current_rows: list[dict], stock_rows: pd.DataFram
 
 
 def saved_inventory_source(current_rows: list[dict]) -> pd.DataFrame:
-    """모든 저장행을 한 표에서 수정/삭제할 수 있게 만든다."""
+    """모든 저장행을 한 표에서 수정하고 선택 삭제할 수 있게 만든다."""
     return pd.DataFrame([
         {
             '_shipment_id': int(row['id']),
             '_inventory_id': int(row['source_inventory_id']) if row.get('source_inventory_id') else None,
             '_location': row.get('source_location') or row.get('location') or '',
             '_product_name': row.get('product_name') or '',
-            '삭제': False,
+            '선택': False,
             '사업장': row.get('business_unit') or '',
             '제품명': row.get('product_name') or '',
             '제조번호': row.get('lot_no') or '',
@@ -368,30 +369,86 @@ def render() -> None:
             saved_source = saved_inventory_source(current)
             if saved_source.empty:
                 edited_saved = saved_source
+                selected_saved_ids = []
                 st.info('아직 출고 저장된 재고가 없습니다.')
             else:
-                st.caption('모든 저장 재고를 한 표에서 관리합니다. 선택수량을 수정하거나 삭제할 행을 체크한 뒤 출고 저장을 누르세요.')
+                st.caption('수량은 선택수량에서 수정하고, 삭제할 행은 선택한 뒤 아래의 선택 행 삭제를 누르세요.')
                 edited_saved = st.data_editor(
                     saved_source,
                     hide_index=True,
                     use_container_width=True,
                     disabled=['사업장', '제품명', '제조번호', '유통기한'],
-                    column_order=['삭제', '사업장', '제품명', '제조번호', '유통기한', '선택수량'],
+                    column_order=['선택', '사업장', '제품명', '제조번호', '유통기한', '선택수량'],
                     column_config={
                         '_shipment_id': None,
                         '_inventory_id': None,
                         '_location': None,
                         '_product_name': None,
-                        '삭제': st.column_config.CheckboxColumn('삭제', help='체크 후 출고 저장을 누르면 이 저장 재고가 삭제됩니다.'),
+                        '선택': st.column_config.CheckboxColumn('선택', help='삭제할 저장 재고 행을 선택하세요.'),
                         '선택수량': st.column_config.NumberColumn('선택수량', min_value=0, step=1, format='%g'),
                     },
                     key=f'saved_wms_editor_{case_id}_{selected_order_id}',
                 )
+                selected_saved_ids = edited_saved.loc[
+                    edited_saved['선택'].fillna(False).astype(bool), '_shipment_id'
+                ].astype(int).tolist()
 
-            active_saved = (
-                edited_saved[~edited_saved['삭제'].fillna(False).astype(bool)].copy()
-                if not edited_saved.empty else edited_saved
-            )
+                if st.button(
+                    '선택 행 삭제',
+                    type='secondary',
+                    use_container_width=True,
+                    disabled=not selected_saved_ids,
+                    key=f'delete_saved_rows_{case_id}_{selected_order_id}',
+                ):
+                    selected_set = set(selected_saved_ids)
+                    kept_original_rows = [
+                        dict(row) for row in current
+                        if int(row.get('id') or 0) not in selected_set
+                    ]
+                    try:
+                        wms_link_service.save_picked_inventory(
+                            case_id=case_id,
+                            order_item_id=selected_order_id,
+                            kept_rows=kept_original_rows,
+                            picked_rows=[],
+                        )
+                    except ValueError as exc:
+                        try:
+                            cleanup = stale_inventory_cleanup_service.force_delete_stale_rows(
+                                case_id=case_id,
+                                order_item_id=selected_order_id,
+                                shipment_ids=selected_saved_ids,
+                            )
+                        except ValueError as cleanup_exc:
+                            st.error(str(cleanup_exc))
+                        else:
+                            if cleanup['deleted']:
+                                folder_service.sync_case_folder(case_id)
+                                history_service.add(
+                                    case_id,
+                                    '고아 출고저장 행 강제 삭제',
+                                    f"{selected_order_name} · {cleanup['deleted']}개 행",
+                                )
+                                message = f"재고 연결이 끊어진 저장행 {cleanup['deleted']}개를 강제 삭제했습니다."
+                                if cleanup['skipped_valid']:
+                                    message += f" 정상 P 재고가 확인된 {cleanup['skipped_valid']}개 행은 안전을 위해 유지했습니다."
+                                st.session_state['shipment_intake_success_message'] = message
+                                st.rerun()
+                            else:
+                                st.error(str(exc))
+                    else:
+                        folder_service.sync_case_folder(case_id)
+                        history_service.add(
+                            case_id,
+                            '저장된 재고 선택 삭제',
+                            f'{selected_order_name} · {len(selected_saved_ids)}개 행',
+                        )
+                        st.session_state['shipment_intake_success_message'] = (
+                            f'선택한 저장 재고 {len(selected_saved_ids)}개 행을 삭제했습니다.'
+                        )
+                        st.rerun()
+
+            active_saved = edited_saved
             saved_qty = (
                 float(pd.to_numeric(active_saved['선택수량'], errors='coerce').fillna(0).sum())
                 if not active_saved.empty else 0.0
@@ -471,7 +528,7 @@ def render() -> None:
                     | (selected_stock['선택수량'] > selected_stock['보유수량'])
                 ] if not selected_stock.empty else selected_stock
                 if not invalid_saved.empty:
-                    st.error('저장된 재고의 선택수량은 1 이상이어야 합니다. 삭제하려면 해당 행의 삭제 칸을 체크하세요.')
+                    st.error('저장된 재고의 선택수량은 1 이상이어야 합니다.')
                 elif not selected_stock.empty and not invalid_rows.empty:
                     st.error('새로 선택한 재고의 선택수량은 1 이상, 보유수량 이하여야 합니다.')
                 else:
