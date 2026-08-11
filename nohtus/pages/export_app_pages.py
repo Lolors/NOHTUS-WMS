@@ -5,6 +5,8 @@ import streamlit as st
 from nohtus.export_app import db as export_db
 # views가 update_confirmed_export_waiting_items를 import하기 전에 수정 이력 패치를 적용한다.
 import nohtus.services.export_confirm_history_patch  # noqa: F401
+# 수출대기 저장의 추가/수량수정/행삭제를 WMS 수출대기 상태와 안전하게 동기화한다.
+import nohtus.export_app.services.wms_link_edit_patch  # noqa: F401
 from nohtus.export_app.views import (
     공유문서,
     국내배송,
