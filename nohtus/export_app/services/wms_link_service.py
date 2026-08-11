@@ -82,7 +82,7 @@ def _matching_legacy_rows(rows: list[dict], waiting_row: dict, order_item_id: in
     """Find the old EXPORT rows that already represent one WMS waiting item.
 
     Old EXPORT databases have the real product/LOT/expiry/quantity but no
-    source_inventory_id.  One WMS row can be split across several CTN rows, so
+    source_inventory_id. One WMS row can be split across several CTN rows, so
     identity is matched first and the quantity is validated as a group.
     """
     product_key = _match_text(waiting_row.get("product_name"))
@@ -139,12 +139,7 @@ def _update_legacy_rows(rows: list[dict], waiting_row: dict, source_id: int, now
 
 
 def restore_legacy_waiting_links(case_id: int) -> int:
-    """Mirror pre-integration WMS export-waiting rows into EXPORT shipment rows.
-
-    The WMS rows already represent stock moved to P, so this function deliberately
-    performs no WMS inventory/transaction write.  It only restores the missing
-    cross-app link, and is idempotent by WMS source inventory id.
-    """
+    """Mirror pre-integration WMS export-waiting rows into EXPORT shipment rows."""
     case = export_service.get_case(case_id)
     if case is None:
         return 0
@@ -155,9 +150,6 @@ def restore_legacy_waiting_links(case_id: int) -> int:
     if not order_ids:
         return 0
 
-    # 통합 전 미확정 자료는 P 재고가 실제로 남아 있어도 waiting_inventory_id가
-    # 비어 있거나 예전 inventory id를 가리킬 수 있다. 확정 자료는 이미 P에서
-    # 출고됐으므로 재고 ID 복구 대상이 아니지만, 입고 이력 자체는 복원해야 한다.
     open_orders = wms_q(
         """SELECT id FROM export_waiting_orders
            WHERE id IN ({}) AND status IN ('waiting','partial')""".format(
@@ -213,8 +205,6 @@ def restore_legacy_waiting_links(case_id: int) -> int:
             )
         ]
         if len(candidates) != 1:
-            # A single remaining order is safe to restore even when the old WMS
-            # standard name differs from the sales-order label.
             candidates = orders if len(orders) == 1 else []
         if len(candidates) != 1:
             continue
@@ -339,12 +329,12 @@ def save_picked_inventory(
     kept_rows: list[dict],
     picked_rows: list[dict],
 ) -> dict:
-    """kept_rows: 이번 주문품목에서 계속 유지할, 이미 저장된 shipment_items 행
-    (shipment_service.list_case_items()가 반환하는 형태 — id/business_unit/
-    source_location/source_inventory_id/product_name/lot_no/expiry_date/
-    requested_qty 키를 가짐). picked_rows: 새로 담은 실재고 행
-    (wms_inventory_picker_service 조회 결과를 기반으로 만든 dict,
-    inventory_id/company/product_name/lot/exp_date/location/qty 키를 가짐)."""
+    """저장된 행과 새로 고른 실재고를 함께 반영한다.
+
+    source_inventory_id가 없는 구형 행은 WMS cart에는 넣지 않지만 EXPORT의
+    shipment_items에는 그대로 보존한다. 따라서 같은 편집표에서 수량 수정/삭제가
+    가능하며, 삭제된 행은 kept_rows에서 빠지는 방식으로 제거된다.
+    """
     case = export_service.get_case(case_id)
     if case is None:
         raise ValueError("수출 건을 찾을 수 없습니다.")
@@ -356,15 +346,14 @@ def save_picked_inventory(
         raise ValueError("이 수출 건에는 국가가 입력되어 있지 않습니다. 먼저 국가를 입력하세요.")
     transport_method = TRANSPORT_MODE_TO_METHOD.get(str(case["transport_mode"] or "").strip(), "미지정")
 
+    all_kept_rows = list(kept_rows)
+    linked_kept_rows = [row for row in all_kept_rows if row.get("source_inventory_id")]
     other_rows = [
         row for row in shipment_service.list_case_items(case_id)
         if int(row["order_item_id"] or 0) != int(order_item_id) and row.get("source_inventory_id")
     ]
-    # source_inventory_id가 없는 행은 실재고 연결 이전(수동 입력/구형 불러오기)의
-    # 데이터라 WMS cart로 되돌릴 실제 재고가 없다 — cart에서는 제외한다.
-    kept_rows = [row for row in kept_rows if row.get("source_inventory_id")]
     cart = [_cart_row_from_shipment_row(row) for row in other_rows]
-    cart += [_cart_row_from_shipment_row(row) for row in kept_rows]
+    cart += [_cart_row_from_shipment_row(row) for row in linked_kept_rows]
     cart += [_cart_row_from_pick(pick) for pick in picked_rows]
 
     editing_order_id = _find_open_order_id(export_no)
@@ -372,14 +361,14 @@ def save_picked_inventory(
         {
             "_id": row["id"],
             "business_unit": row.get("business_unit") or "",
-            "location": row.get("source_location") or "",
+            "location": row.get("source_location") or row.get("location") or "",
             "source_inventory_id": row.get("source_inventory_id"),
             "product_name": row.get("product_name") or "",
             "lot_no": row.get("lot_no") or "",
             "expiry_date": row.get("expiry_date") or "",
             "requested_qty": float(row["requested_qty"] or 0),
         }
-        for row in kept_rows
+        for row in all_kept_rows
     ]
     mirror_rows += [
         {
@@ -394,8 +383,6 @@ def save_picked_inventory(
         }
         for pick in picked_rows
     ]
-    # EXPORT를 먼저 저장하면 EXPORT 저장 실패 시 WMS 재고는 전혀 움직이지 않는다.
-    # 이후 WMS 저장이 실패하면 원래 shipment_items를 보상 복구한다.
     original_mirror_rows = [
         {
             "_id": row["id"],
