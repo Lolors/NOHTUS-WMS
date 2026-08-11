@@ -10,6 +10,7 @@ import nohtus.pages.outbound_business as outbound_business
 
 
 _BLOCKED_OUTBOUND_LOCATIONS = {"N-홍보물랙", "G1", "G2"}
+_INVALID_RECENT_DATE_TEXTS = {"", "none", "nan", "nat", "null", "-"}
 
 
 def _normalized_location(value):
@@ -21,6 +22,16 @@ def _is_blocked_outbound_location(value):
     if location in _BLOCKED_OUTBOUND_LOCATIONS:
         return True
     return location.startswith("P") or location.startswith("G1-") or location.startswith("G2-")
+
+
+def _normalized_recent_date(value):
+    text = str(value or "").strip()
+    if text.casefold() in _INVALID_RECENT_DATE_TEXTS:
+        return ""
+    try:
+        return datetime.strptime(text[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
+    except Exception:
+        return ""
 
 
 def _days_ago_label(date_text):
@@ -37,10 +48,33 @@ def _days_ago_label(date_text):
     return f"{days}일 전"
 
 
-def _last_sale_text(customer_name, company, exact_map, name_map):
+def _actual_recent_outbound_date(customer_name, company):
+    """최근거래일 테이블이 비었거나 깨졌을 때 실제 출고지시 이력으로 보완한다."""
     customer = str(customer_name or "").strip()
     company = str(company or "").strip()
-    last_date = exact_map.get((customer, company)) or name_map.get(customer) or ""
+    if not customer or not company:
+        return ""
+    try:
+        history = outbound_page._recent_outbound_history(customer, company, limit=1)
+    except Exception:
+        return ""
+    if not history:
+        return ""
+    return _normalized_recent_date(history[0].get("order_date"))
+
+
+def _resolved_last_sale_date(customer_name, company, exact_map, name_map):
+    customer = str(customer_name or "").strip()
+    company = str(company or "").strip()
+    raw_date = exact_map.get((customer, company)) if company else name_map.get(customer)
+    last_date = _normalized_recent_date(raw_date)
+    if last_date:
+        return last_date
+    return _actual_recent_outbound_date(customer, company)
+
+
+def _last_sale_text(customer_name, company, exact_map, name_map):
+    last_date = _resolved_last_sale_date(customer_name, company, exact_map, name_map)
     if not last_date:
         return "최근거래 없음"
 
@@ -48,9 +82,22 @@ def _last_sale_text(customer_name, company, exact_map, name_map):
     return f"최근거래 {last_date} ({ago})" if ago else f"최근거래 {last_date}"
 
 
+def _customer_select_label(row, exact_map, name_map):
+    customer = str(getattr(row, "customer_name", "") or "").strip()
+    company = str(getattr(row, "company", "") or "").strip()
+    last_date = _resolved_last_sale_date(customer, company, exact_map, name_map)
+    if not last_date:
+        last_sale = "최근거래 없음"
+    else:
+        ago = _days_ago_label(last_date)
+        last_sale = f"최근거래 {last_date} ({ago})" if ago else f"최근거래 {last_date}"
+    return f"{customer} | {company or '-'} | {last_sale}"
+
+
 def page_outbound():
     """출고일자와 과거/현재 출고 화면 간 헬퍼 시그니처 차이를 보정한다."""
     original_last_sale_text = getattr(outbound_page, "_last_sale_text", None)
+    original_customer_select_label = getattr(outbound_page, "_customer_select_label", None)
     original_days_ago_label = getattr(outbound_page, "_days_ago_label", None)
     original_customer_payload = getattr(outbound_page, "_current_customer_payload", None)
     original_inventory_query = outbound_page._inventory_query_for_outbound
@@ -123,6 +170,7 @@ def page_outbound():
         return result
 
     outbound_page._last_sale_text = _last_sale_text
+    outbound_page._customer_select_label = _customer_select_label
     outbound_page._days_ago_label = _days_ago_label
     outbound_page._current_customer_payload = patched_customer_payload
     outbound_page._inventory_query_for_outbound = patched_inventory_query
@@ -148,6 +196,14 @@ def page_outbound():
                 pass
         else:
             outbound_page._last_sale_text = original_last_sale_text
+
+        if original_customer_select_label is None:
+            try:
+                delattr(outbound_page, "_customer_select_label")
+            except AttributeError:
+                pass
+        else:
+            outbound_page._customer_select_label = original_customer_select_label
 
         if original_days_ago_label is None:
             try:
