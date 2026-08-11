@@ -421,43 +421,48 @@ def render() -> None:
                 stock_rows = wms_inventory_picker_service.product_stock_rows(picked_product)
 
             selection_source = inventory_selection_source([], stock_rows)
-            edited_stock = st.data_editor(
-                selection_source,
-                hide_index=True,
-                use_container_width=True,
-                disabled=['사업장', '제조번호', '유통기한', '보유수량'],
-                column_order=['선택', '사업장', '제조번호', '유통기한', '보유수량', '선택수량'],
-                column_config={
-                    '_inventory_id': None,
-                    '_location': None,
-                    '_product_name': None,
-                    '선택': st.column_config.CheckboxColumn('선택'),
-                    '보유수량': st.column_config.NumberColumn('보유수량', format='%g'),
-                    '선택수량': st.column_config.NumberColumn('선택수량', min_value=0, step=1, format='%g'),
-                },
-                key=f'wms_pick_editor_{case_id}_{selected_order_id}_{editor_product}',
-            )
-            selected_stock = edited_stock[edited_stock['선택']].copy() if not edited_stock.empty else edited_stock
-            added_qty = float(selected_stock['선택수량'].sum()) if not selected_stock.empty else 0.0
-            preview_qty = saved_qty + added_qty
-            preview_icon, preview_state = order_state(order_qty, preview_qty)
-            summary_slot.info(
-                f'{preview_icon} 선택 합계 {fmt_number(preview_qty)} / '
-                f'주문 {fmt_number(order_qty)} {unit} · {preview_state}'
-            )
-            packing_impact = shipment_service.packing_impact_for_order(case_id, selected_order_id)
-            if packing_impact['packed_row_count']:
-                st.caption(
-                    f"패킹된 {packing_impact['packed_row_count']}개 행의 기존 CTN 번호는 "
-                    '실재고 연결을 바꿔도 그대로 유지됩니다. 새로 담은 행만 미패킹 상태로 생성됩니다.'
+            with st.form(
+                key=f'wms_pick_form_{case_id}_{selected_order_id}_{editor_product}',
+                clear_on_submit=False,
+            ):
+                edited_stock = st.data_editor(
+                    selection_source,
+                    hide_index=True,
+                    use_container_width=True,
+                    disabled=['사업장', '제조번호', '유통기한', '보유수량'],
+                    column_order=['선택', '사업장', '제조번호', '유통기한', '보유수량', '선택수량'],
+                    column_config={
+                        '_inventory_id': None,
+                        '_location': None,
+                        '_product_name': None,
+                        '선택': st.column_config.CheckboxColumn('선택'),
+                        '보유수량': st.column_config.NumberColumn('보유수량', format='%g'),
+                        '선택수량': st.column_config.NumberColumn('선택수량', min_value=0, step=1, format='%g'),
+                    },
+                    key=f'wms_pick_editor_{case_id}_{selected_order_id}_{editor_product}',
+                )
+                selected_stock = edited_stock[edited_stock['선택']].copy() if not edited_stock.empty else edited_stock
+                added_qty = float(selected_stock['선택수량'].sum()) if not selected_stock.empty else 0.0
+                preview_qty = saved_qty + added_qty
+                preview_icon, preview_state = order_state(order_qty, preview_qty)
+                summary_slot.info(
+                    f'{preview_icon} 선택 합계 {fmt_number(preview_qty)} / '
+                    f'주문 {fmt_number(order_qty)} {unit} · {preview_state}'
+                )
+                packing_impact = shipment_service.packing_impact_for_order(case_id, selected_order_id)
+                if packing_impact['packed_row_count']:
+                    st.caption(
+                        f"패킹된 {packing_impact['packed_row_count']}개 행의 기존 CTN 번호는 "
+                        '실재고 연결을 바꿔도 그대로 유지됩니다. 새로 담은 행만 미패킹 상태로 생성됩니다.'
+                    )
+
+                save_clicked = st.form_submit_button(
+                    '출고 저장',
+                    type='primary',
+                    use_container_width=True,
                 )
 
-            if st.button(
-                '출고 저장',
-                type='primary',
-                use_container_width=True,
-                key=f'save_wms_link_{case_id}_{selected_order_id}',
-            ):
+            if save_clicked:
                 invalid_saved = active_saved[
                     pd.to_numeric(active_saved['선택수량'], errors='coerce').fillna(0) <= 0
                 ] if not active_saved.empty else active_saved
