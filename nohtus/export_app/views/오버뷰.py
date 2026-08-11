@@ -12,8 +12,14 @@ def render() -> None:
         """
         <style>
         [class*="st-key-export_dashboard_active_orders_panel"] {
-            width: 70vw !important;
-            max-width: 70vw !important;
+            width: 60vw !important;
+            max-width: 60vw !important;
+        }
+        @media (max-width: 900px) {
+            [class*="st-key-export_dashboard_active_orders_panel"] {
+                width: 100% !important;
+                max-width: 100% !important;
+            }
         }
         </style>
         """,
