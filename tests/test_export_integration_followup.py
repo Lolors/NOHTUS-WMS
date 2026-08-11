@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from nohtus.export_app.services import dashboard_view_service, export_confirm_service, wms_link_service
+from nohtus.export_app.services import wms_link_edit_patch
 from nohtus.export_app.views.실출고_입력 import recommended_inventory_search_term
 
 
@@ -118,11 +119,16 @@ class ExportIntegrationFollowupTests(TestCase):
         dashboard = Path('nohtus/export_app/views/오버뷰.py').read_text(encoding='utf-8')
         self.assertIn("st.container(key='export_dashboard_active_orders_panel')", dashboard)
         self.assertIn('st-key-export_dashboard_active_orders_panel', dashboard)
-        self.assertIn('width: 70vw !important', dashboard)
+        # f32d5a8에서 대시보드 표 너비를 70vw에서 60vw로 의도적으로 조정했다.
+        self.assertIn('width: 60vw !important', dashboard)
 
     def test_duplicate_open_export_numbers_require_merge_or_new_number(self):
-        rows = pd.DataFrame([{"id": 11}, {"id": 12}])
-        with patch.object(wms_link_service, "wms_q", return_value=rows):
+        # wms_link_edit_patch가 모듈 임포트 시점에 wms_link_service._find_open_order_id
+        # 자체를 자신의 _editable_order_id로 영구히 바꿔치기하므로(export_app_pages.py
+        # 임포트만 되면 프로세스 전체에 적용됨), 실제로 호출되는 건 항상 이쪽이다.
+        # wms_link_service.wms_q를 모킹해도 이 함수는 그걸 안 보므로 효과가 없다.
+        rows = pd.DataFrame([{"id": 11, "status": "waiting"}, {"id": 12, "status": "partial"}])
+        with patch.object(wms_link_edit_patch, "wms_q", return_value=rows):
             with self.assertRaisesRegex(ValueError, "병합하거나 새 수출번호"):
                 wms_link_service._find_open_order_id("EXP-2026-001")
 
@@ -135,12 +141,22 @@ class ExportIntegrationFollowupTests(TestCase):
             "requested_qty": 2,
         }]
         replacement = [{**original[0], "requested_qty": 1}]
+        # save_picked_inventory 자체가 wms_link_edit_patch에 의해 통째로
+        # 바꿔치기되어 있으므로(주석 참고), _find_open_order_id/
+        # save_export_waiting_order는 wms_link_service가 아니라
+        # wms_link_edit_patch 쪽 이름을 모킹해야 실제로 적용된다.
+        # export_service/shipment_service는 두 모듈이 같은 객체를 가리키므로
+        # 어느 쪽을 패치해도 동일하다.
         with (
             patch.object(wms_link_service.export_service, "get_case", return_value=case),
             patch.object(wms_link_service.shipment_service, "list_case_items", return_value=original),
-            patch.object(wms_link_service, "_find_open_order_id", return_value=5),
+            patch.object(wms_link_edit_patch, "_editable_order_id", return_value=5),
             patch.object(wms_link_service.shipment_service, "save_for_order", return_value=1) as save_export,
-            patch.object(wms_link_service, "save_export_waiting_order", side_effect=RuntimeError("WMS failure")),
+            patch.object(
+                wms_link_edit_patch.export_waiting_service,
+                "save_export_waiting_order",
+                side_effect=RuntimeError("WMS failure"),
+            ),
         ):
             with self.assertRaisesRegex(RuntimeError, "WMS failure"):
                 wms_link_service.save_picked_inventory(
