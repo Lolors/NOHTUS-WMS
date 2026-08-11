@@ -7,8 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from nohtus.config import DB_PATH, PROJECT_ROOT
-
-EXPORT_DB_PATH = PROJECT_ROOT / "data" / "export.db"
+from nohtus.export_app.db import DB_PATH as EXPORT_DB_PATH
 
 BACKUP_INTERVAL = timedelta(hours=1)
 MAX_BACKUPS = 20
@@ -18,10 +17,11 @@ STATE_PATH = LOCAL_BACKUP_DIR / ".backup_state.json"
 _WORKER_LOCK = threading.Lock()
 _WORKER_STARTED = False
 
+# WMS DB와 수출관리 DB를 항상 같은 주기로 함께 백업한다.
 # (소스 DB 경로, 백업 파일명 접두사, 로컬 상태 키, Google Drive 상태 키)
 _BACKUP_TARGETS = (
-    (DB_PATH, "nohtus", "last_local", "last_google_drive"),
-    (EXPORT_DB_PATH, "export", "last_local_export", "last_google_drive_export"),
+    (Path(DB_PATH), "nohtus", "last_local", "last_google_drive"),
+    (Path(EXPORT_DB_PATH), "export", "last_local_export", "last_google_drive_export"),
 )
 
 
@@ -73,7 +73,9 @@ def set_google_drive_root(path_text: str) -> Path:
 
     state = _read_state()
     if state.get("google_drive_root") != str(root):
+        # 경로를 바꾼 직후 nohtus.db와 export.db가 모두 즉시 새 폴더에 백업되게 한다.
         state.pop("last_google_drive", None)
+        state.pop("last_google_drive_export", None)
     state["google_drive_root"] = str(root)
     _write_state(state)
     return backup_dir
@@ -82,11 +84,12 @@ def set_google_drive_root(path_text: str) -> Path:
 def run_due_backups() -> dict:
     now = datetime.now()
     state = _read_state()
-    result = {"local": None, "google_drive": None, "errors": []}
+    result = {"local": [], "google_drive": [], "errors": []}
     drive_dir = google_drive_backup_dir()
 
     for source_path, prefix, local_key, drive_key in _BACKUP_TARGETS:
         if not source_path.is_file():
+            result["errors"].append(f"백업 대상 DB를 찾을 수 없습니다({prefix}): {source_path}")
             continue
 
         try:
@@ -96,7 +99,7 @@ def run_due_backups() -> dict:
         if now - last_local >= BACKUP_INTERVAL:
             try:
                 path = str(_backup_to(source_path, LOCAL_BACKUP_DIR, now, prefix))
-                result["local"] = result["local"] or path
+                result["local"].append(path)
                 state[local_key] = now.isoformat(timespec="seconds")
             except (OSError, sqlite3.Error) as exc:
                 result["errors"].append(f"로컬 백업 실패({prefix}): {exc}")
@@ -109,7 +112,7 @@ def run_due_backups() -> dict:
             if now - last_drive >= BACKUP_INTERVAL:
                 try:
                     path = str(_backup_to(source_path, drive_dir, now, prefix))
-                    result["google_drive"] = result["google_drive"] or path
+                    result["google_drive"].append(path)
                     state[drive_key] = now.isoformat(timespec="seconds")
                 except (OSError, sqlite3.Error) as exc:
                     result["errors"].append(f"Google Drive 백업 실패({prefix}, {drive_dir}): {exc}")
@@ -126,12 +129,17 @@ def backup_to_google_drive_now() -> str:
     now = datetime.now()
     state = _read_state()
     paths = []
+    missing = []
     for source_path, prefix, _local_key, drive_key in _BACKUP_TARGETS:
         if not source_path.is_file():
+            missing.append(f"{prefix}: {source_path}")
             continue
         paths.append(str(_backup_to(source_path, directory, now, prefix)))
         state[drive_key] = now.isoformat(timespec="seconds")
     _write_state(state)
+
+    if missing:
+        raise ValueError("일부 백업 대상 DB를 찾을 수 없습니다: " + ", ".join(missing))
     return "\n".join(paths)
 
 
