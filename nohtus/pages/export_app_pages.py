@@ -46,11 +46,14 @@ def page_export_shipment_intake():
     original_caption = st.caption
     original_selectbox = st.selectbox
     original_form = st.form
-    original_form_submit_button = st.form_submit_button
+    original_progress = st.progress
+    original_success = st.success
 
     ui_state = {
         "order_fulfilled": False,
-        "picker_expander_active": False,
+        "picker_placeholder": None,
+        "picker_outer": None,
+        "suppress_progress": False,
     }
 
     original_markdown(
@@ -103,10 +106,35 @@ def page_export_shipment_intake():
         unsafe_allow_html=True,
     )
 
+    def _close_picker_outer():
+        outer = ui_state.get("picker_outer")
+        if outer is None:
+            return
+        ui_state["picker_outer"] = None
+        try:
+            outer.__exit__(None, None, None)
+        except Exception:
+            pass
+
+    class _FormContext:
+        def __init__(self, inner, close_picker=False):
+            self.inner = inner
+            self.close_picker = close_picker
+
+        def __enter__(self):
+            return self.inner.__enter__()
+
+        def __exit__(self, exc_type, exc, tb):
+            try:
+                return self.inner.__exit__(exc_type, exc, tb)
+            finally:
+                if self.close_picker:
+                    _close_picker_outer()
+
     def patched_data_editor(data, *args, **kwargs):
         key = str(kwargs.get("key") or "")
         if key.startswith("saved_wms_editor_"):
-            # 행 삭제 기능은 유지하되, 사용자가 요청한 선택 체크박스도 그대로 보인다.
+            # 행 삭제 기능은 유지하되 선택 체크박스도 그대로 보인다.
             kwargs["num_rows"] = "dynamic"
         return original_data_editor(data, *args, **kwargs)
 
@@ -122,6 +150,10 @@ def page_export_shipment_intake():
             if text == "### 수출대기 저장제품":
                 body = "### 수출대기 제품"
             elif text == "##### 저장된 재고":
+                # 수량이 부족하면 뒤에서 렌더링될 '추가할 재고 선택'을 이 자리보다
+                # 위쪽 placeholder에 넣어, 사용자가 먼저 부족분을 채우게 한다.
+                if not ui_state["order_fulfilled"] and ui_state["picker_placeholder"] is None:
+                    ui_state["picker_placeholder"] = st.empty()
                 return original_markdown(
                     """
                     <div class="export-saved-section">
@@ -137,6 +169,15 @@ def page_export_shipment_intake():
                     unsafe_allow_html=True,
                 )
             elif text == "##### 재고 선택":
+                # 주문 수량이 충족되면 검색창부터 추천 제품, 재고표, 저장 버튼까지
+                # 전부 하나의 접힌 영역 안에 넣는다. 부족하면 위 placeholder로 이동한다.
+                if ui_state["order_fulfilled"]:
+                    outer = st.expander("추가할 재고 선택 · 주문수량 충족", expanded=False)
+                else:
+                    placeholder = ui_state.get("picker_placeholder")
+                    outer = placeholder.container() if placeholder is not None else st.container()
+                ui_state["picker_outer"] = outer
+                outer.__enter__()
                 return original_markdown(
                     """
                     <div class="export-picker-section">
@@ -144,18 +185,22 @@ def page_export_shipment_intake():
                         <span class="export-section-title">추가할 재고 선택</span>
                       </div>
                       <div class="export-section-help">
-                        새로 추가할 재고를 검색하고 선택수량을 입력하세요. 주문 수량이 이미 충족된 경우 아래 선택 표는 기본으로 접혀 있습니다.
+                        새로 추가할 재고를 검색하고 선택수량을 입력하세요. 부족한 수량이 있으면 이 영역이 수출대기 제품보다 먼저 표시됩니다.
                       </div>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
+            elif text == "#### 전체 저장 진행률":
+                ui_state["suppress_progress"] = True
+                return None
         return original_markdown(body, *args, **kwargs)
 
     def patched_caption(body, *args, **kwargs):
         text = str(body or "")
-        # 위 섹션 설명은 제목 카드 안에서 더 직접적으로 보여준다.
         if "삭제할 행은 선택한 뒤 아래의 선택 행 삭제" in text:
+            return None
+        if ui_state["suppress_progress"] and "품목별 저장률의 평균" in text:
             return None
         return original_caption(body, *args, **kwargs)
 
@@ -176,18 +221,22 @@ def page_export_shipment_intake():
         return value
 
     def patched_form(key, *args, **kwargs):
+        inner = original_form(key, *args, **kwargs)
         key_text = str(key or "")
-        if key_text.startswith("wms_pick_form_") and ui_state["order_fulfilled"]:
-            ui_state["picker_expander_active"] = True
-            return st.expander("추가할 재고 선택 표 · 주문수량 충족", expanded=False)
-        ui_state["picker_expander_active"] = False
-        return original_form(key, *args, **kwargs)
+        return _FormContext(
+            inner,
+            close_picker=key_text.startswith("wms_pick_form_") and ui_state.get("picker_outer") is not None,
+        )
 
-    def patched_form_submit_button(label, *args, **kwargs):
-        if ui_state["picker_expander_active"]:
-            ui_state["picker_expander_active"] = False
-            return original_button(label, *args, **kwargs)
-        return original_form_submit_button(label, *args, **kwargs)
+    def patched_progress(*args, **kwargs):
+        if ui_state["suppress_progress"]:
+            return None
+        return original_progress(*args, **kwargs)
+
+    def patched_success(body, *args, **kwargs):
+        if ui_state["suppress_progress"] and "모든 주문품목" in str(body or ""):
+            return None
+        return original_success(body, *args, **kwargs)
 
     st.data_editor = patched_data_editor
     st.button = patched_button
@@ -195,18 +244,21 @@ def page_export_shipment_intake():
     st.caption = patched_caption
     st.selectbox = patched_selectbox
     st.form = patched_form
-    st.form_submit_button = patched_form_submit_button
+    st.progress = patched_progress
+    st.success = patched_success
     try:
         with export_db.connection_session():
             실출고_입력.render()
     finally:
+        _close_picker_outer()
         st.data_editor = original_data_editor
         st.button = original_button
         st.markdown = original_markdown
         st.caption = original_caption
         st.selectbox = original_selectbox
         st.form = original_form
-        st.form_submit_button = original_form_submit_button
+        st.progress = original_progress
+        st.success = original_success
 
 
 def page_export_sales_registration():
