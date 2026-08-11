@@ -207,16 +207,25 @@ def render() -> None:
     st.session_state['actual_packing_case_id'] = case_id
 
     shipment_service.cleanup_invalid_links(case_id)
-    try:
-        restored_legacy_count = wms_link_service.restore_legacy_waiting_links(case_id)
-    except ValueError as exc:
-        restored_legacy_count = 0
-        st.warning(str(exc))
-    if restored_legacy_count:
-        st.success(
-            f'기존 WMS 수출대기(P 로케이션) 재고 {restored_legacy_count}개 행을 '
-            '이 수출번호에 다시 연결했습니다.'
-        )
+
+    # restore_legacy_waiting_links는 여러 차례 DB 조회/복구 쓰기를 동반하는
+    # 무거운 작업이다. 렌더링마다(=위젯 하나만 건드려도 스크립트 전체가 다시
+    # 실행되는 Streamlit 특성상 검색창 타이핑 한 글자에도) 매번 다시 돌면
+    # 화면이 느려지므로, 같은 세션에서 이 케이스에 대해 한 번만 실행한다.
+    restored_case_ids: set[int] = st.session_state.setdefault('wms_link_restored_case_ids', set())
+    if case_id not in restored_case_ids:
+        try:
+            restored_legacy_count = wms_link_service.restore_legacy_waiting_links(case_id)
+        except ValueError as exc:
+            restored_legacy_count = 0
+            st.warning(str(exc))
+        finally:
+            restored_case_ids.add(case_id)
+        if restored_legacy_count:
+            st.success(
+                f'기존 WMS 수출대기(P 로케이션) 재고 {restored_legacy_count}개 행을 '
+                '이 수출번호에 다시 연결했습니다.'
+            )
     selected_case = next(case for case in cases if int(case['id']) == case_id)
     orders = order_service.list_for_case(case_id)
     all_linked_rows = shipment_service.list_case_items(case_id)
