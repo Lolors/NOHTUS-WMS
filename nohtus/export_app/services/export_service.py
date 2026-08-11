@@ -4,8 +4,10 @@ from typing import Any
 
 import streamlit as st
 
+from nohtus.db import q as wms_q
 from nohtus.export_app import db
 from nohtus.export_app.utils.dates import now_text
+from nohtus.services.export_waiting import cancel_export_waiting_order
 
 
 @st.cache_data(show_spinner=False, persist='disk', max_entries=128)
@@ -200,12 +202,45 @@ def update_actual_ship_date(case_id: int, actual_ship_date: str) -> None:
 
 
 def cancel_case(case_id: int) -> None:
+    """Cancel an export case after restoring any still-waiting WMS stock."""
+    case = db.row(
+        'SELECT export_no,status,stage,case_type FROM export_cases WHERE id=?',
+        (case_id,),
+    )
+    if case is None:
+        raise ValueError('수출 건을 찾을 수 없습니다.')
+    if str(case['status'] or '').strip() == '취소' or str(case['stage'] or '').strip() == '취소':
+        raise ValueError('이미 취소된 수출 건입니다.')
+
+    export_no = str(case['export_no'] or '').strip()
+    if str(case['case_type'] or '').strip() != 'historical' and export_no:
+        active_wms_orders = wms_q(
+            '''SELECT id,status FROM export_waiting_orders
+               WHERE TRIM(export_no)=TRIM(?)
+                 AND status IN ('waiting','partial')
+               ORDER BY id''',
+            (export_no,),
+        )
+        if len(active_wms_orders.index) > 1:
+            raise ValueError(
+                f'수출번호 {export_no}에 진행 중인 수출대기 건이 여러 개라 주문 취소를 중단했습니다. '
+                '먼저 수출대기 건을 하나로 정리하세요.'
+            )
+        if len(active_wms_orders.index) == 1:
+            # 실재고 연결 취소와 같은 로직을 사용한다. partial 건의 이미 확정된
+            # 품목은 유지되고, 미확정 품목만 각 source_location으로 복구된다.
+            cancel_export_waiting_order(int(active_wms_orders.iloc[0]['id']))
+
     db.execute(
         '''UPDATE export_cases
            SET stage='취소', status='취소', updated_at=?
            WHERE id=?''',
         (now_text(), case_id),
     )
+    _cached_case.clear()
+    _cached_case_list.clear()
+    _cached_active_cases.clear()
+    _cached_intake_editable_cases.clear()
 
 
 def create_case(*, export_no: str, buyer: str, country: str, transport: str,
