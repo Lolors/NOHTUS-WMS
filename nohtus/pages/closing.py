@@ -7,6 +7,7 @@ import streamlit as st
 
 from nohtus.db import q
 from nohtus.dates import display_date_only
+from nohtus.export_app import db as export_db
 from nohtus.services.closing import (
     _infer_customer_from_title,
     _extract_inbound_source_from_memo,
@@ -269,11 +270,8 @@ def _scheduled_outbound_business_log(ds, customers_df):
         company = _safe_text(getattr(r, "company", ""))
         product_name = _safe_text(getattr(r, "product_name", ""))
         qty = _safe_int(getattr(r, "qty", 0))
-
-        # 저장 중 생긴 완전히 빈 출고지시 품목 행은 업무일지에 노출하지 않는다.
         if not company and not product_name and qty == 0:
             continue
-
         title = _safe_text(getattr(r, "title", ""))
         partner, manager = _infer_customer_from_title(title, customers_df)
         created_at = _safe_text(getattr(r, "created_at", ""))
@@ -294,8 +292,23 @@ def _scheduled_outbound_business_log(ds, customers_df):
 
 
 def _confirmed_export_business_log(ds, customers_df):
+    eligible_cases = export_db.rows(
+        """SELECT export_no, actual_ship_date
+           FROM export_cases
+           WHERE case_type<>'historical'
+             AND status<>'취소'
+             AND stage='국내배송'
+             AND substr(COALESCE(actual_ship_date,''),1,10)=?
+           ORDER BY id""",
+        (ds,),
+    )
+    export_nos = [str(row['export_no'] or '').strip() for row in eligible_cases if str(row['export_no'] or '').strip()]
+    if not export_nos:
+        return []
+
+    placeholders = ",".join("?" for _ in export_nos)
     exported = q(
-        """
+        f"""
         SELECT COALESCE(i.confirmed_at, o.confirmed_at, '') AS confirmed_at,
                COALESCE(i.confirmed_company, o.erp_company, i.company, '') AS company,
                COALESCE(i.confirmed_customer_name, o.erp_customer_name, o.buyer, '') AS customer_name,
@@ -308,10 +321,10 @@ def _confirmed_export_business_log(ds, customers_df):
         FROM export_waiting_orders o
         JOIN export_waiting_items i ON o.id=i.order_id
         WHERE COALESCE(i.confirmed, 0)=1
-          AND substr(COALESCE(i.confirmed_at, o.confirmed_at, ''), 1, 10)=?
+          AND TRIM(COALESCE(o.export_no,'')) IN ({placeholders})
         ORDER BY COALESCE(i.confirmed_at, o.confirmed_at, ''), o.id, i.id
         """,
-        (ds,),
+        tuple(export_nos),
     )
     rows = []
     for r in exported.itertuples(index=False):
@@ -322,7 +335,7 @@ def _confirmed_export_business_log(ds, customers_df):
             matched = customers_df[customers_df["customer_name"].astype(str).str.strip() == customer_name]
             if not matched.empty:
                 manager = _safe_text(matched.iloc[0].get("manager"))
-        memo_parts = ["수출확정"]
+        memo_parts = ["수출", "국내배송 단계"]
         export_no = _safe_text(getattr(r, "export_no", ""))
         title = _safe_text(getattr(r, "title", ""))
         if export_no:
@@ -348,7 +361,6 @@ def page_closing():
     st.title("마감")
     st.caption("출고의 마지막 단계입니다. 오늘 출고 체크와 업무일지 작성 기능을 한 화면에서 전환합니다.")
     tab = st.radio("마감", ["오늘 출고 체크", "업무일지 작성"], horizontal=True, key="closing_sub")
-
     target_date = st.date_input("기준일", value=date.today(), key="closing_date")
     ds = str(target_date)
 
@@ -367,8 +379,7 @@ def page_closing():
                      WHERE o.order_date=?
                        AND IFNULL(o.status,'')<>'취소됨'
                        AND EXISTS (
-                           SELECT 1
-                           FROM transactions t
+                           SELECT 1 FROM transactions t
                            WHERE substr(t.created_at,1,10)=o.order_date
                              AND t.tx_type IN ('출고지시','출고지시수정','출고')
                              AND COALESCE(t.from_company,'')=COALESCE(i.company,'')
@@ -394,13 +405,7 @@ def page_closing():
             _render_today_outbound_html(items)
             btn_left, btn_mid, btn_right = st.columns([3, 2, 3])
             with btn_mid:
-                st.download_button(
-                    "마감 체크리스트 PDF 다운로드",
-                    data=_today_outbound_pdf_bytes(items, ds),
-                    file_name=f"NOHTUS_마감체크_{ds}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                )
+                st.download_button("마감 체크리스트 PDF 다운로드", data=_today_outbound_pdf_bytes(items, ds), file_name=f"NOHTUS_마감체크_{ds}.pdf", mime="application/pdf", use_container_width=True)
         return
 
     st.subheader("업무일지 작성")
@@ -417,7 +422,6 @@ def page_closing():
         """,
         (ds,),
     )
-
     try:
         customers_for_log = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
     except Exception:
@@ -449,10 +453,6 @@ def page_closing():
     if not rows:
         st.info("해당 날짜의 업무 이력이 없습니다.")
         return
-
-    log_df = pd.DataFrame(
-        rows,
-        columns=["시간", "유형", "사업장", "거래처(매출처/입고처)", "담당자", "제품명", "제조번호", "유통기한", "수량", "메모"],
-    )
+    log_df = pd.DataFrame(rows, columns=["시간", "유형", "사업장", "거래처(매출처/입고처)", "담당자", "제품명", "제조번호", "유통기한", "수량", "메모"])
     log_df = log_df.sort_values(["시간", "유형", "사업장", "제품명"], kind="stable").reset_index(drop=True)
     st.dataframe(log_df, hide_index=True, use_container_width=True)
