@@ -60,6 +60,7 @@ def render() -> None:
             orders['confirmed_customer_count'], orders['confirmed_customer_label']
         )],
     })
+
     def status_cell_color(value: object) -> str:
         return {
             '수출확정': 'background-color: #dcfce7; color: #166534; font-weight: 700;',
@@ -85,4 +86,18 @@ def render() -> None:
     if export_no in set(map(str, duplicate_export_nos)):
         st.warning('중복된 수출번호는 병합하거나 새 번호로 변경한 뒤 확정할 수 있습니다.')
         return
-    render_wms_confirmation_section(export_no)
+
+    original_date_input = st.date_input
+
+    def patched_date_input(label, *args, **kwargs):
+        key = str(kwargs.get('key') or '')
+        if key.startswith('export_link_confirm_order_date_'):
+            label = '등록일자'
+            kwargs['help'] = '이번에 선택한 품목에 적용할 등록일자를 선택하세요.'
+        return original_date_input(label, *args, **kwargs)
+
+    st.date_input = patched_date_input
+    try:
+        render_wms_confirmation_section(export_no)
+    finally:
+        st.date_input = original_date_input
