@@ -10,6 +10,13 @@ from nohtus.export_app.views.실출고_입력 import recommended_inventory_searc
 
 
 class ExportIntegrationFollowupTests(TestCase):
+    def setUp(self):
+        # list_active_orders()는 @st.cache_data로 캐싱되어 실제 WMS DB 파일이
+        # 바뀌어야 무효화된다. 아래 테스트들은 wms_q 자체를 목으로 바꿔치기해
+        # 실제 파일을 건드리지 않으므로, 캐시를 비워두지 않으면 한 테스트의
+        # 목 결과가 다음 테스트로 새어 들어간다.
+        export_confirm_service._cached_active_orders.clear()
+
     def test_sales_registration_lists_confirmed_orders_after_waiting_orders(self):
         with patch.object(export_confirm_service, "wms_q", return_value=pd.DataFrame()) as query:
             export_confirm_service.list_active_orders()
@@ -195,7 +202,7 @@ class ExportIntegrationFollowupTests(TestCase):
         order_edit = Path("nohtus/export_app/views/주문_검색_및_수정.py").read_text(encoding="utf-8")
         dedicated = Path("nohtus/export_app/views/수출확정_매출_등록.py").read_text(encoding="utf-8")
         self.assertNotIn("render_wms_confirmation_section(case['export_no'])", order_edit)
-        self.assertIn("render_wms_confirmation_section(export_no)", dedicated)
+        self.assertIn("render_wms_confirmation_section(\n        export_no,", dedicated)
         self.assertIn("주문을 병합하거나 새 수출번호를 사용하세요", dedicated)
 
     def test_confirmation_items_include_standard_and_source_erp_names(self):

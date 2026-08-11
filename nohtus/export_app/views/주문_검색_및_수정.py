@@ -58,7 +58,12 @@ def _company_selection_editor(source: pd.DataFrame, *, key_prefix: str) -> pd.Da
     return edited
 
 
-def render_wms_confirmation_section(export_no: str) -> None:
+def render_wms_confirmation_section(
+    export_no: str,
+    *,
+    shipment_date_label: str = '출고일자',
+    shipment_date_help: str = '이번에 선택한 품목에 적용할 출고일자를 선택하세요.',
+) -> None:
     wms_orders = export_confirm_service.list_orders_for_export_no(export_no)
     if wms_orders.empty:
         return
@@ -240,9 +245,9 @@ def render_wms_confirmation_section(export_no: str) -> None:
         ]
     with shipment_date_col:
         shipment_date = st.date_input(
-            '출고일자',
+            shipment_date_label,
             key=f'export_link_confirm_order_date_{order_id}_{confirmed_count}',
-            help='이번에 선택한 품목에 적용할 출고일자를 선택하세요.',
+            help=shipment_date_help,
         )
 
     action_col, cancel_link_col = st.columns([3, 1])

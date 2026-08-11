@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 import pandas as pd
+import streamlit as st
 
 from nohtus.dates import display_date_only
 from nohtus.db import connect, q as wms_q
+from nohtus.db import read_cache_token as wms_read_cache_token
 
 
 def list_orders_for_export_no(export_no: str) -> pd.DataFrame:
@@ -23,11 +25,18 @@ def list_orders_for_export_no(export_no: str) -> pd.DataFrame:
 
 
 def list_active_orders() -> pd.DataFrame:
-    """수출확정 매출 등록 화면에서 조회·수정할 WMS 연결 건.
+    """수출확정 매출 등록 화면에서 조회·수정할 WMS 연결 건."""
+    return _cached_active_orders(wms_read_cache_token())
 
-    완전 확정 건도 이후 출고 목록 수정으로 다시 처리할 수 있으므로 목록에서
+
+@st.cache_data(show_spinner=False, persist='disk', max_entries=8)
+def _cached_active_orders(cache_token: tuple[str, int, int]) -> pd.DataFrame:
+    """완전 확정 건도 이후 출고 목록 수정으로 다시 처리할 수 있으므로 목록에서
     유지한다. 당장 매출 등록이 필요한 수출대기 건을 가장 먼저 보여준다.
-    """
+
+    이 목록은 시간이 지날수록(확정 건이 쌓일수록) 계속 커지고, 화면에서 행을
+    선택하기만 해도(on_select='rerun') 다시 조회되므로 WMS DB가 실제로
+    바뀌었을 때만 다시 계산하도록 캐싱한다."""
     orders = wms_q(
         """SELECT id, export_no, country, buyer, transport_method, title, status,
                   order_date, created_at
