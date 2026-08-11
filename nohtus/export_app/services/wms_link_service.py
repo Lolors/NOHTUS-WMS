@@ -42,12 +42,6 @@ def _find_open_order_id(export_no: str) -> int | None:
 
 
 def _linkable_order_ids(export_no: str) -> list[int]:
-    """Return every non-cancelled WMS order recorded for an export number.
-
-    A confirmed order no longer has stock in P, but its item rows are still the
-    authoritative record that those products were received before confirmation.
-    Legacy integration restoration therefore cannot be limited to open orders.
-    """
     df = wms_q(
         """SELECT id FROM export_waiting_orders
            WHERE TRIM(export_no)=TRIM(?)
@@ -59,7 +53,6 @@ def _linkable_order_ids(export_no: str) -> list[int]:
 
 
 def _match_text(value: object) -> str:
-    """Normalize order labels such as ``제품명 (70 EA)`` for legacy matching."""
     return "".join(str(value or "").split("(", 1)[0].split()).casefold()
 
 
@@ -79,12 +72,6 @@ def _same_quantity(left: object, right: object) -> bool:
 
 
 def _matching_legacy_rows(rows: list[dict], waiting_row: dict, order_item_id: int) -> list[dict]:
-    """Find the old EXPORT rows that already represent one WMS waiting item.
-
-    Old EXPORT databases have the real product/LOT/expiry/quantity but no
-    source_inventory_id. One WMS row can be split across several CTN rows, so
-    identity is matched first and the quantity is validated as a group.
-    """
     product_key = _match_text(waiting_row.get("product_name"))
     company_key = _match_value(waiting_row.get("company"))
     lot_key = _match_value(waiting_row.get("lot"))
@@ -97,9 +84,7 @@ def _matching_legacy_rows(rows: list[dict], waiting_row: dict, order_item_id: in
             continue
         row_product_key = _match_text(row.get("product_name"))
         if not product_key or not row_product_key or not (
-            row_product_key == product_key
-            or row_product_key in product_key
-            or product_key in row_product_key
+            row_product_key == product_key or row_product_key in product_key or product_key in row_product_key
         ):
             continue
         row_company_key = _match_value(row.get("business_unit"))
@@ -122,24 +107,13 @@ def _update_legacy_rows(rows: list[dict], waiting_row: dict, source_id: int, now
            SET business_unit=?, location=?, source_inventory_id=?, product_name=?,
                lot_no=?, expiry_date=?, updated_at=?
            WHERE id=?""",
-        [
-            (
-                str(waiting_row.get("company") or ""),
-                str(waiting_row.get("source_location") or ""),
-                source_id,
-                str(waiting_row.get("product_name") or ""),
-                str(waiting_row.get("lot") or ""),
-                str(waiting_row.get("exp_date") or ""),
-                now,
-                int(row["id"]),
-            )
-            for row in rows
-        ],
+        [(str(waiting_row.get("company") or ""), str(waiting_row.get("source_location") or ""), source_id,
+          str(waiting_row.get("product_name") or ""), str(waiting_row.get("lot") or ""),
+          str(waiting_row.get("exp_date") or ""), now, int(row["id"])) for row in rows],
     )
 
 
 def restore_legacy_waiting_links(case_id: int) -> int:
-    """Mirror pre-integration WMS export-waiting rows into EXPORT shipment rows."""
     case = export_service.get_case(case_id)
     if case is None:
         return 0
@@ -149,266 +123,126 @@ def restore_legacy_waiting_links(case_id: int) -> int:
     order_ids = _linkable_order_ids(export_no)
     if not order_ids:
         return 0
-
     open_orders = wms_q(
-        """SELECT id FROM export_waiting_orders
-           WHERE id IN ({}) AND status IN ('waiting','partial')""".format(
-            ",".join("?" for _ in order_ids)
-        ),
-        tuple(order_ids),
-    )
+        """SELECT id FROM export_waiting_orders WHERE id IN ({}) AND status IN ('waiting','partial')""".format(
+            ",".join("?" for _ in order_ids)), tuple(order_ids))
     for order_id in open_orders["id"].tolist() if not open_orders.empty else []:
         repair_p_inventory_links(order_id)
-
     placeholders = ",".join("?" for _ in order_ids)
     waiting = wms_q(
-        f"""SELECT i.source_inventory_id, i.waiting_inventory_id, i.company,
-                   i.product_name, i.lot, i.exp_date, i.source_location, i.qty,
-                   COALESCE(i.confirmed,0) AS confirmed
-           FROM export_waiting_items i
-           LEFT JOIN inventory p ON p.id=i.waiting_inventory_id
-           WHERE i.order_id IN ({placeholders})
-             AND i.qty>0
-             AND (
-                   COALESCE(i.confirmed,0)=1
-                   OR UPPER(TRIM(COALESCE(p.location,'')))='P'
-                 )
-           ORDER BY i.order_id, i.id""",
-        tuple(order_ids),
-    )
+        f"""SELECT i.source_inventory_id, i.waiting_inventory_id, i.company, i.product_name, i.lot, i.exp_date,
+                   i.source_location, i.qty, COALESCE(i.confirmed,0) AS confirmed
+            FROM export_waiting_items i LEFT JOIN inventory p ON p.id=i.waiting_inventory_id
+            WHERE i.order_id IN ({placeholders}) AND i.qty>0
+              AND (COALESCE(i.confirmed,0)=1 OR UPPER(TRIM(COALESCE(p.location,'')))='P')
+            ORDER BY i.order_id, i.id""", tuple(order_ids))
     if waiting.empty:
         return 0
-
     orders = [dict(row) for row in export_service.get_order_items(case_id)]
     if not orders:
         return 0
     existing = [dict(row) for row in export_db.rows(
-        """SELECT id,order_item_id,business_unit,location,source_inventory_id,
-                  product_name,lot_no,expiry_date,requested_qty,box_no
-           FROM shipment_items WHERE case_id=? ORDER BY id""",
-        (case_id,),
-    )]
-    now = now_text()
-    inserts = []
-    changed = 0
+        """SELECT id,order_item_id,business_unit,location,source_inventory_id,product_name,lot_no,expiry_date,requested_qty,box_no
+           FROM shipment_items WHERE case_id=? ORDER BY id""", (case_id,))]
+    now = now_text(); inserts = []; changed = 0
     for row in waiting.to_dict("records"):
         source_id = int(row.get("source_inventory_id") or 0)
-        if not source_id:
-            continue
+        if not source_id: continue
         product_key = _match_text(row.get("product_name"))
-        candidates = [
-            order for order in orders
-            if product_key and (
-                _match_text(order.get("product_name")) == product_key
-                or _match_text(order.get("product_name")) in product_key
-                or product_key in _match_text(order.get("product_name"))
-            )
-        ]
-        if len(candidates) != 1:
-            candidates = orders if len(orders) == 1 else []
-        if len(candidates) != 1:
-            continue
+        candidates = [order for order in orders if product_key and (_match_text(order.get("product_name")) == product_key or _match_text(order.get("product_name")) in product_key or product_key in _match_text(order.get("product_name")))]
+        if len(candidates) != 1: candidates = orders if len(orders) == 1 else []
+        if len(candidates) != 1: continue
         order_item_id = int(candidates[0]["id"])
-
-        linked_rows_elsewhere = [
-            item for item in existing
-            if int(item.get("source_inventory_id") or 0) == source_id
-            and int(item.get("order_item_id") or 0) != order_item_id
-        ]
-        if linked_rows_elsewhere:
-            continue
-        linked_rows = [
-            item for item in existing
-            if int(item.get("source_inventory_id") or 0) == source_id
-            and int(item.get("order_item_id") or 0) == order_item_id
-        ]
+        linked_rows_elsewhere = [item for item in existing if int(item.get("source_inventory_id") or 0) == source_id and int(item.get("order_item_id") or 0) != order_item_id]
+        if linked_rows_elsewhere: continue
+        linked_rows = [item for item in existing if int(item.get("source_inventory_id") or 0) == source_id and int(item.get("order_item_id") or 0) == order_item_id]
         legacy_rows = _matching_legacy_rows(existing, row, order_item_id)
         if linked_rows and legacy_rows:
             linked_total = sum(float(item.get("requested_qty") or 0) for item in linked_rows)
             if _same_quantity(linked_total, row.get("qty")):
-                legacy_is_packed = any(item.get("box_no") is not None for item in legacy_rows)
-                linked_is_packed = any(item.get("box_no") is not None for item in linked_rows)
+                legacy_is_packed = any(item.get("box_no") is not None for item in legacy_rows); linked_is_packed = any(item.get("box_no") is not None for item in linked_rows)
                 if legacy_is_packed or not linked_is_packed:
-                    export_db.executemany(
-                        "DELETE FROM shipment_items WHERE id=?",
-                        [(int(item["id"]),) for item in linked_rows],
-                    )
-                    _update_legacy_rows(legacy_rows, row, source_id, now)
-                    deleted_ids = {int(item["id"]) for item in linked_rows}
-                    existing = [item for item in existing if int(item["id"]) not in deleted_ids]
-                    for item in legacy_rows:
-                        item.update({
-                            "business_unit": str(row.get("company") or ""),
-                            "location": str(row.get("source_location") or ""),
-                            "source_inventory_id": source_id,
-                            "product_name": str(row.get("product_name") or ""),
-                            "lot_no": str(row.get("lot") or ""),
-                            "expiry_date": str(row.get("exp_date") or ""),
-                        })
+                    export_db.executemany("DELETE FROM shipment_items WHERE id=?", [(int(item["id"]),) for item in linked_rows]); _update_legacy_rows(legacy_rows, row, source_id, now)
+                    deleted_ids = {int(item["id"]) for item in linked_rows}; existing = [item for item in existing if int(item["id"]) not in deleted_ids]
+                    for item in legacy_rows: item.update({"business_unit":str(row.get("company") or ""),"location":str(row.get("source_location") or ""),"source_inventory_id":source_id,"product_name":str(row.get("product_name") or ""),"lot_no":str(row.get("lot") or ""),"expiry_date":str(row.get("exp_date") or "")})
                 else:
-                    export_db.executemany(
-                        "DELETE FROM shipment_items WHERE id=?",
-                        [(int(item["id"]),) for item in legacy_rows],
-                    )
-                    deleted_ids = {int(item["id"]) for item in legacy_rows}
-                    existing = [item for item in existing if int(item["id"]) not in deleted_ids]
-                changed += 1
-                continue
-        if linked_rows:
-            continue
+                    export_db.executemany("DELETE FROM shipment_items WHERE id=?", [(int(item["id"]),) for item in legacy_rows]); deleted_ids={int(item["id"]) for item in legacy_rows}; existing=[item for item in existing if int(item["id"]) not in deleted_ids]
+                changed += 1; continue
+        if linked_rows: continue
         if legacy_rows:
-            _update_legacy_rows(legacy_rows, row, source_id, now)
-            for item in legacy_rows:
-                item.update({
-                    "business_unit": str(row.get("company") or ""),
-                    "location": str(row.get("source_location") or ""),
-                    "source_inventory_id": source_id,
-                    "product_name": str(row.get("product_name") or ""),
-                    "lot_no": str(row.get("lot") or ""),
-                    "expiry_date": str(row.get("exp_date") or ""),
-                })
-            changed += 1
-            continue
-        inserts.append((
-            case_id, order_item_id, str(row.get("company") or ""),
-            str(row.get("source_location") or ""), source_id,
-            str(row.get("product_name") or ""), str(row.get("lot") or ""),
-            str(row.get("exp_date") or ""), float(row.get("qty") or 0),
-            None, now, now,
-        ))
-        existing.append({
-            "id": 0,
-            "order_item_id": order_item_id,
-            "source_inventory_id": source_id,
-            "requested_qty": float(row.get("qty") or 0),
-            "box_no": None,
-        })
-
-    if not inserts and not changed:
-        return 0
+            _update_legacy_rows(legacy_rows,row,source_id,now)
+            for item in legacy_rows: item.update({"business_unit":str(row.get("company") or ""),"location":str(row.get("source_location") or ""),"source_inventory_id":source_id,"product_name":str(row.get("product_name") or ""),"lot_no":str(row.get("lot") or ""),"expiry_date":str(row.get("exp_date") or "")})
+            changed += 1; continue
+        inserts.append((case_id,order_item_id,str(row.get("company") or ""),str(row.get("source_location") or ""),source_id,str(row.get("product_name") or ""),str(row.get("lot") or ""),str(row.get("exp_date") or ""),float(row.get("qty") or 0),None,now,now))
+        existing.append({"id":0,"order_item_id":order_item_id,"source_inventory_id":source_id,"requested_qty":float(row.get("qty") or 0),"box_no":None})
+    if not inserts and not changed: return 0
     if inserts:
-        export_db.executemany(
-            """INSERT INTO shipment_items(
-                   case_id,order_item_id,business_unit,location,source_inventory_id,
-                   product_name,lot_no,expiry_date,requested_qty,box_no,created_at,updated_at
-               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            inserts,
-        )
+        export_db.executemany("""INSERT INTO shipment_items(case_id,order_item_id,business_unit,location,source_inventory_id,product_name,lot_no,expiry_date,requested_qty,box_no,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", inserts)
     shipment_service.sync_case_stage(case_id, now)
-    return len(inserts) + changed
+    return len(inserts)+changed
 
 
 def _cart_row_from_shipment_row(row: dict) -> dict:
-    return {
-        "id": int(row["source_inventory_id"] or 0),
-        "요청수량": float(row["requested_qty"] or 0),
-        "사업장": row.get("business_unit") or "",
-        "제품명": row.get("product_name") or "",
-        "LOT": row.get("lot_no") or "",
-        "유통기한": row.get("expiry_date") or "",
-        "로케이션": row.get("source_location") or "",
-    }
+    return {"id":int(row["source_inventory_id"] or 0),"요청수량":float(row["requested_qty"] or 0),"사업장":row.get("business_unit") or "","제품명":row.get("product_name") or "","LOT":row.get("lot_no") or "","유통기한":row.get("expiry_date") or "","로케이션":row.get("source_location") or row.get("location") or ""}
 
 
 def _cart_row_from_pick(pick: dict) -> dict:
-    return {
-        "id": int(pick["inventory_id"]),
-        "요청수량": float(pick["qty"]),
-        "사업장": pick.get("company") or "",
-        "제품명": pick.get("product_name") or "",
-        "LOT": pick.get("lot") or "",
-        "유통기한": pick.get("exp_date") or "",
-        "로케이션": pick.get("location") or "",
-    }
+    return {"id":int(pick["inventory_id"]),"요청수량":float(pick["qty"]),"사업장":pick.get("company") or "","제품명":pick.get("product_name") or "","LOT":pick.get("lot") or "","유통기한":pick.get("exp_date") or "","로케이션":pick.get("location") or ""}
 
 
-def save_picked_inventory(
-    *,
-    case_id: int,
-    order_item_id: int,
-    kept_rows: list[dict],
-    picked_rows: list[dict],
-) -> dict:
-    """저장된 행과 새로 고른 실재고를 함께 반영한다.
+def _waiting_rows_for_order(order_id: int) -> list[dict]:
+    df = wms_q("""SELECT source_inventory_id,company,product_name,warehouse_name,lot,exp_date,source_location,qty
+                    FROM export_waiting_items WHERE order_id=? AND COALESCE(confirmed,0)=0 ORDER BY id""", (int(order_id),))
+    return df.to_dict("records") if not df.empty else []
 
-    source_inventory_id가 없는 구형 행은 WMS cart에는 넣지 않지만 EXPORT의
-    shipment_items에는 그대로 보존한다. 따라서 같은 편집표에서 수량 수정/삭제가
-    가능하며, 삭제된 행은 kept_rows에서 빠지는 방식으로 제거된다.
-    """
-    case = export_service.get_case(case_id)
-    if case is None:
-        raise ValueError("수출 건을 찾을 수 없습니다.")
-    export_no = str(case["export_no"] or "").strip()
-    if not export_no:
-        raise ValueError("이 수출 건에는 수출번호가 없습니다.")
-    country = str(case["country"] or "").strip()
-    if not country:
-        raise ValueError("이 수출 건에는 국가가 입력되어 있지 않습니다. 먼저 국가를 입력하세요.")
-    transport_method = TRANSPORT_MODE_TO_METHOD.get(str(case["transport_mode"] or "").strip(), "미지정")
 
-    all_kept_rows = list(kept_rows)
-    linked_kept_rows = [row for row in all_kept_rows if row.get("source_inventory_id")]
-    other_rows = [
-        row for row in shipment_service.list_case_items(case_id)
-        if int(row["order_item_id"] or 0) != int(order_item_id) and row.get("source_inventory_id")
-    ]
-    cart = [_cart_row_from_shipment_row(row) for row in other_rows]
+def _fill_missing_source_links(rows: list[dict], waiting_rows: list[dict]) -> None:
+    """구형/편집표 행에서 source_inventory_id가 빠졌다면 현재 WMS 대기행으로 복구한다."""
+    used: set[int] = set()
+    for row in rows:
+        if row.get("source_inventory_id"):
+            used.add(int(row["source_inventory_id"])); continue
+        matches = [w for w in waiting_rows if int(w.get("source_inventory_id") or 0) not in used
+                   and _match_text(w.get("product_name")) == _match_text(row.get("product_name"))
+                   and (not _match_value(row.get("business_unit")) or _match_value(w.get("company")) == _match_value(row.get("business_unit")))
+                   and _match_value(w.get("lot")) == _match_value(row.get("lot_no"))
+                   and _match_date(w.get("exp_date")) == _match_date(row.get("expiry_date"))]
+        if len(matches) == 1:
+            match = matches[0]; source_id = int(match.get("source_inventory_id") or 0)
+            if source_id:
+                row["source_inventory_id"] = source_id
+                row["source_location"] = row.get("source_location") or row.get("location") or match.get("source_location") or ""
+                used.add(source_id)
+
+
+def save_picked_inventory(*, case_id:int, order_item_id:int, kept_rows:list[dict], picked_rows:list[dict]) -> dict:
+    case=export_service.get_case(case_id)
+    if case is None: raise ValueError("수출 건을 찾을 수 없습니다.")
+    export_no=str(case["export_no"] or "").strip()
+    if not export_no: raise ValueError("이 수출 건에는 수출번호가 없습니다.")
+    country=str(case["country"] or "").strip()
+    if not country: raise ValueError("이 수출 건에는 국가가 입력되어 있지 않습니다. 먼저 국가를 입력하세요.")
+    transport_method=TRANSPORT_MODE_TO_METHOD.get(str(case["transport_mode"] or "").strip(),"미지정")
+    editing_order_id=_find_open_order_id(export_no)
+
+    all_kept_rows=list(kept_rows)
+    other_rows=[row for row in shipment_service.list_case_items(case_id) if int(row["order_item_id"] or 0)!=int(order_item_id)]
+    if editing_order_id:
+        waiting_rows=_waiting_rows_for_order(editing_order_id)
+        _fill_missing_source_links(all_kept_rows, waiting_rows)
+        _fill_missing_source_links(other_rows, waiting_rows)
+    linked_kept_rows=[row for row in all_kept_rows if row.get("source_inventory_id")]
+    linked_other_rows=[row for row in other_rows if row.get("source_inventory_id")]
+    cart=[_cart_row_from_shipment_row(row) for row in linked_other_rows]
     cart += [_cart_row_from_shipment_row(row) for row in linked_kept_rows]
     cart += [_cart_row_from_pick(pick) for pick in picked_rows]
 
-    editing_order_id = _find_open_order_id(export_no)
-    mirror_rows = [
-        {
-            "_id": row["id"],
-            "business_unit": row.get("business_unit") or "",
-            "location": row.get("source_location") or row.get("location") or "",
-            "source_inventory_id": row.get("source_inventory_id"),
-            "product_name": row.get("product_name") or "",
-            "lot_no": row.get("lot_no") or "",
-            "expiry_date": row.get("expiry_date") or "",
-            "requested_qty": float(row["requested_qty"] or 0),
-        }
-        for row in all_kept_rows
-    ]
-    mirror_rows += [
-        {
-            "_id": None,
-            "business_unit": pick.get("company") or "",
-            "location": pick.get("location") or "",
-            "source_inventory_id": int(pick["inventory_id"]),
-            "product_name": pick.get("product_name") or "",
-            "lot_no": pick.get("lot") or "",
-            "expiry_date": pick.get("exp_date") or "",
-            "requested_qty": float(pick["qty"]),
-        }
-        for pick in picked_rows
-    ]
-    original_mirror_rows = [
-        {
-            "_id": row["id"],
-            "business_unit": row.get("business_unit") or "",
-            "location": row.get("source_location") or row.get("location") or "",
-            "source_inventory_id": row.get("source_inventory_id"),
-            "product_name": row.get("product_name") or "",
-            "lot_no": row.get("lot_no") or "",
-            "expiry_date": row.get("expiry_date") or "",
-            "requested_qty": float(row["requested_qty"] or 0),
-        }
-        for row in shipment_service.list_case_items(case_id)
-        if int(row["order_item_id"] or 0) == int(order_item_id)
-    ]
-    total_qty = shipment_service.save_for_order(case_id, order_item_id, mirror_rows)
+    mirror_rows=[{"_id":row["id"],"business_unit":row.get("business_unit") or "","location":row.get("source_location") or row.get("location") or "","source_inventory_id":row.get("source_inventory_id"),"product_name":row.get("product_name") or "","lot_no":row.get("lot_no") or "","expiry_date":row.get("expiry_date") or "","requested_qty":float(row["requested_qty"] or 0)} for row in all_kept_rows]
+    mirror_rows += [{"_id":None,"business_unit":pick.get("company") or "","location":pick.get("location") or "","source_inventory_id":int(pick["inventory_id"]),"product_name":pick.get("product_name") or "","lot_no":pick.get("lot") or "","expiry_date":pick.get("exp_date") or "","requested_qty":float(pick["qty"])} for pick in picked_rows]
+    original_mirror_rows=[{"_id":row["id"],"business_unit":row.get("business_unit") or "","location":row.get("source_location") or row.get("location") or "","source_inventory_id":row.get("source_inventory_id"),"product_name":row.get("product_name") or "","lot_no":row.get("lot_no") or "","expiry_date":row.get("expiry_date") or "","requested_qty":float(row["requested_qty"] or 0)} for row in shipment_service.list_case_items(case_id) if int(row["order_item_id"] or 0)==int(order_item_id)]
+    total_qty=shipment_service.save_for_order(case_id,order_item_id,mirror_rows)
     try:
-        result = save_export_waiting_order(
-            cart,
-            country=country,
-            buyer=str(case.get("buyer") or ""),
-            transport_method=transport_method,
-            export_no=export_no,
-            editing_order_id=editing_order_id,
-        )
+        result=save_export_waiting_order(cart,country=country,buyer=str(case.get("buyer") or ""),transport_method=transport_method,export_no=export_no,editing_order_id=editing_order_id)
     except Exception:
-        shipment_service.save_for_order(case_id, order_item_id, original_mirror_rows)
-        raise
-
-    return {"order_id": result["order_id"], "total_qty": total_qty, "row_count": len(mirror_rows)}
+        shipment_service.save_for_order(case_id,order_item_id,original_mirror_rows); raise
+    return {"order_id":result["order_id"],"total_qty":total_qty,"row_count":len(mirror_rows)}
