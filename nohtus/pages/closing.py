@@ -410,7 +410,7 @@ def page_closing():
                from_company, from_location, to_company, to_location, qty, memo
         FROM transactions
         WHERE substr(created_at, 1, 10)=?
-          AND tx_type NOT IN ('출고지시', '출고지시수정', '출고지시 재차감', '출고')
+          AND tx_type NOT IN ('출고지시', '출고지시수정', '출고지시 재차감', '출고', '출고지시취소')
           AND COALESCE(tx_type, '') NOT LIKE '%이동%'
           AND COALESCE(tx_type, '') <> '재고조사불러오기'
         ORDER BY created_at, id
