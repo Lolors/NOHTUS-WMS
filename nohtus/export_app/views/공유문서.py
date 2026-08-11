@@ -192,10 +192,11 @@ def render() -> None:
     selected_view = st.session_state.get('shared_document_view')
     if selected_view == 'final':
         from nohtus.export_app.components.shared_document_renderer import render_document
-        from nohtus.export_app.services import document_service
+        from nohtus.export_app.services import document_service, shipment_service
 
         packed = document_service.get_packed_document_data(case_id)
-        render_document(case, packed)
+        actual_rows = shipment_service.list_case_items(case_id)
+        render_document(case, packed, actual_rows)
     elif selected_view == 'shipment_products':
         from nohtus.export_app.components.shared_document_renderer import render_shipment_product_list
         from nohtus.export_app.services import document_service
