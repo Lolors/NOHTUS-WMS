@@ -71,6 +71,25 @@ def inventory_selection_source(current_rows: list[dict], stock_rows: pd.DataFram
     ])
 
 
+def saved_inventory_source(current_rows: list[dict]) -> pd.DataFrame:
+    """이미 출고 저장된 실재고를 보유수량 없이 수정/삭제 가능한 표로 만든다."""
+    return pd.DataFrame([
+        {
+            '_shipment_id': int(row['id']),
+            '_inventory_id': int(row['source_inventory_id']),
+            '_location': row.get('source_location') or row.get('location') or '',
+            '_product_name': row.get('product_name') or '',
+            '사업장': row.get('business_unit') or '',
+            '제품명': row.get('product_name') or '',
+            '제조번호': row.get('lot_no') or '',
+            '유통기한': row.get('expiry_date') or '',
+            '선택수량': safe_number(row.get('requested_qty')),
+        }
+        for row in current_rows
+        if row.get('source_inventory_id')
+    ])
+
+
 def recommended_inventory_search_term(product_name: object) -> str:
     """주문 제품명의 첫 괄호 앞부분만 재고 추천 검색어로 사용한다."""
     return str(product_name or '').split('(', 1)[0].strip()
@@ -198,20 +217,6 @@ def render() -> None:
             '이 수출번호에 다시 연결했습니다.'
         )
     selected_case = next(case for case in cases if int(case['id']) == case_id)
-    if (
-        str(selected_case['stage'] or '').strip() == '국내배송'
-        and str(selected_case['status'] or '').strip() == '완료'
-    ):
-        action_col, _ = st.columns([1, 3])
-        if action_col.button(
-            '수출대기로 되돌리기',
-            use_container_width=True,
-            key=f'reopen_export_waiting_{case_id}',
-        ):
-            reopen_export_waiting_dialog(
-                case_id=case_id,
-                export_no=str(selected_case['export_no'] or '').strip() or '선택한 수출 건',
-            )
     orders = order_service.list_for_case(case_id)
     all_linked_rows = shipment_service.list_case_items(case_id)
     linked_rows_by_order: dict[int, list] = {}
@@ -361,6 +366,51 @@ def render() -> None:
 
             st.markdown(f'**선택 주문:** {selected_order_name}')
 
+            st.markdown('##### 저장된 재고')
+            saved_source = saved_inventory_source(real_linked_current)
+            if saved_source.empty:
+                edited_saved = saved_source
+                if not legacy_current:
+                    st.info('아직 출고 저장된 재고가 없습니다.')
+            else:
+                edited_saved = st.data_editor(
+                    saved_source,
+                    hide_index=True,
+                    use_container_width=True,
+                    num_rows='dynamic',
+                    disabled=['사업장', '제품명', '제조번호', '유통기한'],
+                    column_order=['사업장', '제품명', '제조번호', '유통기한', '선택수량'],
+                    column_config={
+                        '_shipment_id': None,
+                        '_inventory_id': None,
+                        '_location': None,
+                        '_product_name': None,
+                        '선택수량': st.column_config.NumberColumn('선택수량', min_value=0, step=1, format='%g'),
+                    },
+                    key=f'saved_wms_editor_{case_id}_{selected_order_id}',
+                )
+
+            if legacy_current:
+                legacy_view = pd.DataFrame([
+                    {
+                        '사업장': row.get('business_unit') or '',
+                        '제품명': row.get('product_name') or '',
+                        '제조번호': row.get('lot_no') or '',
+                        '유통기한': row.get('expiry_date') or '',
+                        '선택수량': safe_number(row.get('requested_qty')),
+                    }
+                    for row in legacy_current
+                ])
+                st.dataframe(legacy_view, hide_index=True, use_container_width=True)
+                st.caption('위 행은 기존 저장 데이터입니다. WMS 재고 연결이 복원되면 수정 가능한 저장행으로 자동 전환됩니다.')
+
+            saved_qty = (
+                float(pd.to_numeric(edited_saved['선택수량'], errors='coerce').fillna(0).sum())
+                if not edited_saved.empty else 0.0
+            )
+            legacy_qty = sum(safe_number(row.get('requested_qty')) for row in legacy_current)
+            summary_slot = st.empty()
+
             st.markdown('##### 재고 선택')
             search_key = f'wms_pick_search_{case_id}_{selected_order_id}'
             recommended_search_term = recommended_inventory_search_term(selected_order_name)
@@ -371,7 +421,7 @@ def render() -> None:
             ).strip()
             products_df = wms_inventory_picker_service.search_products(search_term)
             stock_rows = pd.DataFrame()
-            editor_product = '기존선택'
+            editor_product = '새재고'
             if products_df.empty:
                 st.info('일치하는 WMS 제품이 없습니다. 검색어를 바꿔 보세요.')
             else:
@@ -383,7 +433,7 @@ def render() -> None:
                 editor_product = picked_product
                 stock_rows = wms_inventory_picker_service.product_stock_rows(picked_product)
 
-            selection_source = inventory_selection_source(real_linked_current, stock_rows)
+            selection_source = inventory_selection_source([], stock_rows)
             edited_stock = st.data_editor(
                 selection_source,
                 hide_index=True,
@@ -400,10 +450,11 @@ def render() -> None:
                 },
                 key=f'wms_pick_editor_{case_id}_{selected_order_id}_{editor_product}',
             )
-            selected_stock = edited_stock[edited_stock['선택']].copy()
-            preview_qty = float(selected_stock['선택수량'].sum()) if not selected_stock.empty else 0.0
+            selected_stock = edited_stock[edited_stock['선택']].copy() if not edited_stock.empty else edited_stock
+            added_qty = float(selected_stock['선택수량'].sum()) if not selected_stock.empty else 0.0
+            preview_qty = saved_qty + legacy_qty + added_qty
             preview_icon, preview_state = order_state(order_qty, preview_qty)
-            st.info(
+            summary_slot.info(
                 f'{preview_icon} 선택 합계 {fmt_number(preview_qty)} / '
                 f'주문 {fmt_number(order_qty)} {unit} · {preview_state}'
             )
@@ -420,13 +471,31 @@ def render() -> None:
                 use_container_width=True,
                 key=f'save_wms_link_{case_id}_{selected_order_id}',
             ):
+                invalid_saved = edited_saved[
+                    pd.to_numeric(edited_saved['선택수량'], errors='coerce').fillna(0) <= 0
+                ] if not edited_saved.empty else edited_saved
                 invalid_rows = selected_stock[
                     (selected_stock['선택수량'] <= 0)
                     | (selected_stock['선택수량'] > selected_stock['보유수량'])
-                ]
-                if not selected_stock.empty and not invalid_rows.empty:
-                    st.error('선택수량은 1 이상, 보유수량 이하여야 합니다.')
+                ] if not selected_stock.empty else selected_stock
+                if not invalid_saved.empty:
+                    st.error('저장된 재고의 선택수량은 1 이상이어야 합니다. 삭제하려는 행은 표에서 행 자체를 삭제하세요.')
+                elif not selected_stock.empty and not invalid_rows.empty:
+                    st.error('새로 선택한 재고의 선택수량은 1 이상, 보유수량 이하여야 합니다.')
+                elif legacy_current:
+                    st.error('WMS 재고 연결이 복원되지 않은 기존 저장행이 있어 안전하게 수정 저장할 수 없습니다. 표시된 기존 저장정보를 먼저 확인하세요.')
                 else:
+                    current_by_shipment_id = {int(row['id']): dict(row) for row in real_linked_current}
+                    kept_rows = []
+                    for _, row in edited_saved.iterrows():
+                        shipment_id = int(row['_shipment_id'])
+                        original = current_by_shipment_id.get(shipment_id)
+                        if not original:
+                            continue
+                        item = dict(original)
+                        item['requested_qty'] = float(row['선택수량'])
+                        kept_rows.append(item)
+
                     picked_rows = [{
                         'inventory_id': int(row['_inventory_id']),
                         'company': row['사업장'],
@@ -436,12 +505,26 @@ def render() -> None:
                         'location': row['_location'],
                         'qty': float(row['선택수량']),
                     } for _, row in selected_stock.iterrows()]
+
+                    # 같은 실재고를 다시 추가한 경우 새 행을 만들지 않고 기존 저장행 수량에 합산한다.
+                    merged_picks = []
+                    kept_by_inventory = {
+                        int(row.get('source_inventory_id')): row
+                        for row in kept_rows if row.get('source_inventory_id')
+                    }
+                    for pick in picked_rows:
+                        existing = kept_by_inventory.get(int(pick['inventory_id']))
+                        if existing is not None:
+                            existing['requested_qty'] = safe_number(existing.get('requested_qty')) + safe_number(pick.get('qty'))
+                        else:
+                            merged_picks.append(pick)
+
                     try:
                         wms_link_service.save_picked_inventory(
                             case_id=case_id,
                             order_item_id=selected_order_id,
-                            kept_rows=[],
-                            picked_rows=picked_rows,
+                            kept_rows=kept_rows,
+                            picked_rows=merged_picks,
                         )
                     except ValueError as exc:
                         st.error(str(exc))
