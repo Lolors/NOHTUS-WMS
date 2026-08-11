@@ -71,6 +71,35 @@ def inventory_selection_source(current_rows: list[dict], stock_rows: pd.DataFram
     ])
 
 
+def linked_inventory_details(linked_rows: list[dict], orders: list[dict]) -> pd.DataFrame:
+    """P 재고 연결 행을 CTN 단위의 읽기 전용 표시표로 만든다."""
+    order_names = {
+        int(order['id']): str(order.get('product_name') or '').strip()
+        for order in orders
+    }
+    details = []
+    for row in linked_rows:
+        if not row.get('source_inventory_id'):
+            continue
+        box_no = row.get('box_no')
+        details.append({
+            '주문제품': order_names.get(int(row['order_item_id']), ''),
+            '제품명': str(row.get('product_name') or '').strip(),
+            '사업장': str(row.get('business_unit') or '').strip(),
+            '원래 로케이션': str(
+                row.get('source_location') or row.get('location') or ''
+            ).strip(),
+            '제조번호': str(row.get('lot_no') or '').strip(),
+            '유통기한': str(row.get('expiry_date') or '').strip(),
+            '수량': safe_number(row.get('requested_qty')),
+            'CTN': None if box_no in (None, '') else int(box_no),
+        })
+    return pd.DataFrame(details, columns=[
+        '주문제품', '제품명', '사업장', '원래 로케이션',
+        '제조번호', '유통기한', '수량', 'CTN',
+    ])
+
+
 def recommended_inventory_search_term(product_name: object) -> str:
     """주문 제품명의 첫 괄호 앞부분만 재고 추천 검색어로 사용한다."""
     return str(product_name or '').split('(', 1)[0].strip()
@@ -323,6 +352,22 @@ def render() -> None:
 
     with right:
         st.markdown('### 수출대기 저장제품')
+
+        linked_details = linked_inventory_details(all_linked_rows, orders)
+        st.markdown('#### 기존 P 연결 재고')
+        if linked_details.empty:
+            st.info('이 수출번호에 연결된 P 재고가 없습니다.')
+        else:
+            st.caption('저장된 P 재고를 CTN별로 표시합니다. 아래에서 주문을 선택해 수정할 수 있습니다.')
+            st.dataframe(
+                linked_details,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    '수량': st.column_config.NumberColumn('수량', format='%g'),
+                    'CTN': st.column_config.NumberColumn('CTN', format='%d'),
+                },
+            )
 
         if not orders:
             st.info('왼쪽에서 주문목록을 입력하고 저장하세요.')

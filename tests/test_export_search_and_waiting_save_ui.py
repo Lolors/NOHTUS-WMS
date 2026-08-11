@@ -5,7 +5,10 @@ from unittest.mock import patch
 import pandas as pd
 
 from nohtus.export_app.services import wms_inventory_picker_service
-from nohtus.export_app.views.실출고_입력 import inventory_selection_source
+from nohtus.export_app.views.실출고_입력 import (
+    inventory_selection_source,
+    linked_inventory_details,
+)
 
 
 class ExportSearchAndWaitingSaveUiTests(TestCase):
@@ -80,6 +83,66 @@ class ExportSearchAndWaitingSaveUiTests(TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result.iloc[0]['보유수량'], 5)
         self.assertEqual(result.iloc[0]['선택수량'], 5)
+
+    def test_existing_p_links_are_listed_by_ctn_with_original_location(self):
+        orders = [{'id': 10, 'product_name': '주문 제품A'}]
+        linked = [
+            {
+                'order_item_id': 10,
+                'source_inventory_id': 7,
+                'source_location': 'A1-01',
+                'product_name': '실제 제품A',
+                'business_unit': 'NOH',
+                'lot_no': 'LOT-1',
+                'expiry_date': '2027-01-01',
+                'requested_qty': 2,
+                'box_no': 1,
+            },
+            {
+                'order_item_id': 10,
+                'source_inventory_id': 7,
+                'source_location': 'A1-01',
+                'product_name': '실제 제품A',
+                'business_unit': 'NOH',
+                'lot_no': 'LOT-1',
+                'expiry_date': '2027-01-01',
+                'requested_qty': 3,
+                'box_no': 2,
+            },
+            {
+                'order_item_id': 10,
+                'source_inventory_id': None,
+                'source_location': '',
+                'product_name': '구형 미연결 제품',
+                'business_unit': 'NOH',
+                'lot_no': '',
+                'expiry_date': '',
+                'requested_qty': 4,
+                'box_no': None,
+            },
+        ]
+
+        result = linked_inventory_details(linked, orders)
+
+        self.assertEqual(list(result.columns), [
+            '주문제품', '제품명', '사업장', '원래 로케이션',
+            '제조번호', '유통기한', '수량', 'CTN',
+        ])
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result['주문제품'].tolist(), ['주문 제품A', '주문 제품A'])
+        self.assertEqual(result['제품명'].tolist(), ['실제 제품A', '실제 제품A'])
+        self.assertEqual(result['원래 로케이션'].tolist(), ['A1-01', 'A1-01'])
+        self.assertEqual(result['수량'].tolist(), [2, 3])
+        self.assertEqual(result['CTN'].tolist(), [1, 2])
+
+    def test_waiting_save_renders_existing_p_link_details_before_order_editor(self):
+        source = Path('nohtus/export_app/views/실출고_입력.py').read_text(encoding='utf-8')
+        self.assertIn("st.markdown('#### 기존 P 연결 재고')", source)
+        self.assertIn("'원래 로케이션'", source)
+        self.assertLess(
+            source.index("st.markdown('#### 기존 P 연결 재고')"),
+            source.index("selected_label = st.selectbox("),
+        )
 
     def test_product_stock_rows_returns_all_lots_for_one_recommended_product(self):
         with patch.object(wms_inventory_picker_service, 'wms_q', return_value=pd.DataFrame()) as query:
