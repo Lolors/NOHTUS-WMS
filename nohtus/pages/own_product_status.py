@@ -21,7 +21,7 @@ OWN_PRODUCTS = [
 OWN_PRODUCTS_BY_COMPANY = {
     "노투스팜": OWN_PRODUCTS + ["바이리쥬 2ml"],
     "NOH": OWN_PRODUCTS,
-    "노투스": OWN_PRODUCTS + ["하이바이 (5EA)"],
+    "노투스": OWN_PRODUCTS,
 }
 ALL_OWN_PRODUCTS = list(dict.fromkeys(
     product
