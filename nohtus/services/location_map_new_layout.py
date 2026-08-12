@@ -40,10 +40,11 @@ _NEW_CSS = r"""
 
 .map-stage .nw-outline{position:absolute;border:1.5px solid #334155;background:transparent;pointer-events:none;}
 .map-stage .nw-note{position:absolute;padding:15px 18px;border:1.5px dashed #cbd5e1;border-radius:14px;color:#64748b;font-size:16px;line-height:1.7;background:rgba(255,255,255,.78);pointer-events:none;}
-.map-stage .nw-sub-label{position:absolute;color:#0f172a;font-size:15px;font-weight:900;text-align:center;pointer-events:none;}
 .map-stage .nw-rec-label{position:absolute;color:#0f172a;font-size:14px;font-weight:800;text-align:center;pointer-events:none;}
 .map-stage .nw-hatched{background:repeating-linear-gradient(135deg,#fff 0,#fff 8px,#d9efff 8px,#d9efff 10px)!important;border-color:#38a6e8!important;}
-.map-stage .special-menu{display:none!important}
+.map-stage .special-menu{left:995px!important;top:630px!important;width:180px!important;display:none;grid-template-columns:1fr!important;}
+.map-stage .special-menu.open{display:grid!important;gap:6px!important;}
+.map-stage .special-menu button{font-size:13px!important;padding:8px 10px!important;}
 
 @media(max-width:1500px){.map-stage{transform:scale(.62)!important}.map-scroll{height:590px!important}}
 @media(max-width:1250px){.map-stage{transform:scale(.54)!important}.map-scroll{height:520px!important}}
@@ -64,76 +65,64 @@ def _zone(loc: str, label: str, x: int, y: int, w: int, h: int, cls: str = "supp
 
 
 def _six(prefix: str) -> list[str]:
-    # Match the familiar WMS ordering used in the approved mock-up.
     return [_cell(f"{prefix}-03"), _cell(f"{prefix}-04"), _cell(f"{prefix}-02"), _cell(f"{prefix}-05"), _cell(f"{prefix}-01"), _cell(f"{prefix}-06")]
 
 
 def _map_markup() -> str:
     p: list[str] = []
-
-    # G package area.
     p.append(_zone("G2", "G2", 18, 18, 230, 300, "support"))
     p.append(_grid("nw-grid3h", [_cell("G1-01"), _cell("G1-02"), _cell("G1-03")], 18, 318, 230, 70, "support"))
 
-    # Top racks: detailed locations only; no extra A2/B2/etc title row.
     p.append(_grid("nw-grid6", _six("A2"), 275, 30, 165, 235, "farm"))
     p.append(_grid("nw-grid6", _six("B2"), 458, 30, 165, 235, "farm"))
     p.append(_grid("nw-grid6", _six("C2"), 642, 30, 165, 235, "notus"))
     p.append(_grid("nw-grid6", _six("D1"), 825, 30, 165, 235, "notus"))
     p.append(_grid("nw-grid6", _six("E1"), 1008, 30, 165, 235, "noh"))
-
-    # F1 cells use the same proportions/visual weight as other cells.
     p.append(_grid("nw-grid3h", [_cell("F1-01"), _cell("F1-02"), _cell("F1-03")], 1190, 30, 225, 78, "bidata"))
     p.append(_zone("X2", "X2", 1422, 30, 60, 78, "bidata"))
 
-    # Middle racks. C1 is intentionally ONLY 01~03.
     p.append(_grid("nw-grid6", _six("A1"), 275, 330, 165, 235, "farm"))
     p.append(_grid("nw-grid6", _six("B1"), 458, 330, 165, 235, "farm"))
     p.append(_grid("nw-grid3", [_cell("C1-03"), _cell("C1-02"), _cell("C1-01")], 650, 330, 110, 235, "farm"))
 
-    # X1 on the far-right wall.
     p.append(_grid("nw-grid3", [_cell("X1-01"), _cell("X1-02"), _cell("X1-03")], 1418, 190, 64, 240, "bidata"))
     p.append('<div class="nw-note" style="left:960px;top:380px;width:250px;">X1-01~03 : 폐기<br>X1-01-01 : 대표님 시술용</div>')
 
-    # Lower-left P/Q and T blocks: P faces T1, Q faces T2.
     p.append(_zone("P", "P", 18, 600, 160, 82, "export"))
     p.append(_zone("T1", "T1", 190, 600, 105, 82, "support"))
     p.append(_zone("Q", "Q", 18, 710, 160, 82, "expiry"))
     p.append(_zone("T2", "T2", 190, 710, 105, 82, "support"))
 
-    # Receiving.
     p.append(_zone("REC", '<span><span style="color:#ef2d22">REC</span><br>Receiving</span>', 490, 690, 130, 72, "support"))
     p.append('<div class="nw-rec-label" style="left:480px;top:770px;width:150px;">매입등록대기</div>')
 
-    # Right-hand stepped wall and cold storage in the corner.
     p.append('<div class="nw-outline" style="left:930px;top:590px;width:330px;height:185px;border-bottom:0;"></div>')
     p.append('<div class="nw-outline" style="left:1260px;top:590px;width:222px;height:110px;border-left:0;"></div>')
     p.append(_grid("nw-grid2h", [_cell("R2"), _cell("R1")], 1280, 615, 185, 72, "cold"))
 
-    # Misc location, inside the lower-right open area.
     p.append(_zone("N", "기타 위치", 1000, 740, 150, 92, "support", "nw-hatched"))
 
-    # Promotion racks at the very bottom-left.
     p.append(_zone("홍보물랙", "홍보물랙", 18, 830, 145, 62, "promo"))
     p.append(_zone("홍보물랙", "홍보물랙", 163, 830, 145, 62, "promo"))
 
-    # Stepped lower wall, visual only.
     p.append('<div class="nw-outline" style="left:410px;top:865px;width:520px;height:45px;border-right:0;border-bottom:0;"></div>')
     p.append('<div class="nw-outline" style="left:930px;top:775px;width:1px;height:90px;border-width:0 0 0 1.5px;"></div>')
 
-    # Legacy JS expects this node to exist, even though the menu is hidden here.
     p.append('<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="홍보물랙">홍보물랙</button><button type="button" data-special-loc="회색 카트">회색 카트</button><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button></div>')
-
     return '<div class="map-scroll"><div class="map-stage">' + ''.join(p) + '</div></div>'
 
 
 _DYNAMIC_DOTS_JS = r"""
 function refreshApprovedMapDots(){
   document.querySelectorAll('.map-stage .dynamic-stock-dot').forEach(el=>el.remove());
-  const hasStock = (loc) => Object.entries(inventory||{}).some(([key, rows]) => {
-    if(!(key===loc || key.startsWith(loc+'-'))) return false;
-    return (rows||[]).some(row => Number(row.qty||0) > 0);
-  });
+  const specialStockLocations=['홍보물랙','회색 카트','오른쪽 창고','사무실(4층)'];
+  const hasStock = (loc) => {
+    if(loc==='N') return specialStockLocations.some(special => (inventory[special]||[]).some(row => Number(row.qty||0)>0));
+    return Object.entries(inventory||{}).some(([key, rows]) => {
+      if(!(key===loc || key.startsWith(loc+'-'))) return false;
+      return (rows||[]).some(row => Number(row.qty||0) > 0);
+    });
+  };
   document.querySelectorAll('.map-stage [data-loc]').forEach(el=>{
     const loc=String(el.dataset.loc||'').trim();
     if(!loc || !hasStock(loc)) return;
@@ -149,7 +138,6 @@ refreshApprovedMapDots();
 def apply_new_layout(html: str) -> str:
     """Replace the legacy map canvas with the approved interactive floor plan."""
     html = html.replace("</head>", _NEW_CSS + "</head>", 1)
-
     replacement = _map_markup()
     pattern = re.compile(
         r'<div class="map-scroll"><div class="map-stage">.*?</div></div>\s*</div>\s*<div class="side-card"',
@@ -158,9 +146,6 @@ def apply_new_layout(html: str) -> str:
     html, count = pattern.subn(replacement + '\n  </div>\n  <div class="side-card"', html, count=1)
     if count != 1:
         return html
-
-    # The old map rendered stock dots server-side. The new layout is generated after
-    # that step, so recreate the same green dots from the already-available inventory JS.
     marker = "const inventory = DATA.inventory || {};"
     html = html.replace(marker, marker + "\n" + _DYNAMIC_DOTS_JS, 1)
     return html
