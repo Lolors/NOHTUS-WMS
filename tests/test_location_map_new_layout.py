@@ -24,7 +24,7 @@ class LocationMapNewLayoutTests(unittest.TestCase):
         self.assertIn("P<br>-수출대기-", markup)
         self.assertIn("Q<br>-유통기한임박-", markup)
         self.assertIn('left:650px;top:330px;width:83px;height:235px', markup)
-        self.assertIn('border-width:0 0 0 1.5px', markup)
+        self.assertIn('left:930px;top:590px;width:330px;height:185px;', markup)
         self.assertIn('border-width:0 0 1.5px 0', markup)
 
 

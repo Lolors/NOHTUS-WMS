@@ -97,8 +97,9 @@ def _map_markup() -> str:
     p.append(_zone("REC", '<span><span style="color:#ef2d22">REC</span><br>Receiving</span>', 490, 690, 130, 72, "support"))
     p.append('<div class="nw-rec-label" style="left:480px;top:770px;width:150px;">매입등록대기</div>')
 
-    # The refrigerator area is open on the top and right: retain only its left/bottom guide lines.
-    p.append('<div class="nw-outline" style="left:930px;top:590px;width:330px;height:185px;border-width:0 0 0 1.5px;"></div>')
+    # Keep the warehouse structure to the left of the refrigerators.  Only the
+    # extension around R1/R2 is open on its top/right, as in the reference plan.
+    p.append('<div class="nw-outline" style="left:930px;top:590px;width:330px;height:185px;"></div>')
     p.append('<div class="nw-outline" style="left:1260px;top:590px;width:222px;height:110px;border-width:0 0 1.5px 0;"></div>')
     p.append(_grid("nw-grid2h", [_cell("R2"), _cell("R1")], 1280, 615, 185, 72, "cold"))
 
