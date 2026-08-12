@@ -14,6 +14,13 @@ class LocationMapPatchRestoreTests(unittest.TestCase):
         self.assertIn('[data-testid="stMainBlockContainer"]', source)
         self.assertIn('padding-top: 1rem !important;', source)
 
+    def test_map_page_hides_stray_caret_but_keeps_input_caret(self):
+        source = Path(location_map_business.__file__).read_text(encoding="utf-8")
+        self.assertIn("#wms-top-anchor", source)
+        self.assertIn("caret-color: transparent !important;", source)
+        self.assertIn('[data-testid="stMain"] input', source)
+        self.assertIn("caret-color: auto !important;", source)
+
     """로케이션맵 화면은 st.text_input/st.button/st.markdown을 전역으로 임시
     교체한 뒤 _page_map() 실행 후 복원한다. 이 patch가 전역 위젯을 바꾸는
     만큼, 새면 로케이션맵 이후 화면 전체의 입력/버튼/마크다운이 깨진다."""

@@ -161,6 +161,17 @@ def page_map():
         [data-testid="stMainBlockContainer"] {
             padding-top: 1rem !important;
         }
+        /* Hide the stray page caret while preserving it in real form fields. */
+        [data-testid="stMain"],
+        [data-testid="stMainBlockContainer"],
+        #wms-top-anchor {
+            caret-color: transparent !important;
+        }
+        [data-testid="stMain"] input,
+        [data-testid="stMain"] textarea,
+        [data-testid="stMain"] [contenteditable="true"] {
+            caret-color: auto !important;
+        }
         .total-card-small { margin-bottom: 12px !important; }
         div[class*="st-key-map_fav_"] { display:none !important; }
         div[data-testid="stTextInput"]:has(input[aria-label="제품명 검색"]) {
