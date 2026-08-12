@@ -163,7 +163,7 @@ def page_saved_outbound():
             with number_col:
                 original_text_input(
                     "출고지시서 번호",
-                    placeholder="12345",
+                    placeholder="212",
                     key="saved_outbound_number_search",
                     help="이력조회 메모에 표시되는 출고지시서 번호입니다. 번호로 검색 시 전체 기간에서 검색합니다.",
                 )
