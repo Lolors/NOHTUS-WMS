@@ -8,7 +8,7 @@ DB_PATH = PROJECT_ROOT / "data" / "nohtus.db"
 
 COMPANIES = ["노투스팜", "노투스", "NOH", "비자료"]
 INBOUND_COMPANIES = COMPANIES + ["등록대기"]
-SPECIAL_LOCATIONS = ["홍보물랙", "회색 카트", "오른쪽 창고", "사무실(4층)", "지엠메딕"]
+SPECIAL_LOCATIONS = ["회색 카트", "오른쪽 창고", "사무실(4층)", "지엠메딕"]
 
 AREA_CONFIG = {
     "A1": {"lines": ["01", "02", "03", "04", "05", "06"], "levels": ["01", "02", "03"]},
@@ -32,6 +32,7 @@ AREA_CONFIG = {
     "R1": {"lines": [], "levels": []},
     "R2": {"lines": [], "levels": []},
     "N": {"lines": SPECIAL_LOCATIONS, "levels": []},
+    "홍보물랙": {"lines": [], "levels": []},
 }
 
 AREA_COLOR = {
@@ -39,5 +40,5 @@ AREA_COLOR = {
     "C2": "blue", "D1": "blue",
     "E1": "pink", "Q": "pink",
     "F1": "bidata", "G1": "gray", "G2": "gray", "X1": "gray", "X2": "gray", "N": "gray",
-    "REC": "white", "P": "white", "R1": "white", "R2": "white", "T1": "white", "T2": "white",
+    "REC": "white", "P": "white", "R1": "white", "R2": "white", "T1": "white", "T2": "white", "홍보물랙": "white",
 }

@@ -1,5 +1,31 @@
 from nohtus.db import connect
 
+
+_PROMO_LOCATION_NORMALIZED = "N홍보물랙"
+
+
+def _migrate_promo_rack_locations(cur):
+    """Move legacy N promo-rack references to the standalone promo rack.
+
+    Normalizing whitespace, hyphens and underscores covers values used by older
+    picker versions (for example ``N-홍보물랙`` and ``N - 홍보물랙``).  The UPDATEs
+    are safe to run on every startup and keep both live inventory and textual
+    history/order references aligned without changing inventory row ids.
+    """
+    predicate = (
+        "REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE({column},''))), ' ', ''), '-', ''), '_', '')=?"
+    )
+    for table, column in (
+        ("inventory", "location"),
+        ("transactions", "from_location"),
+        ("transactions", "to_location"),
+        ("outbound_order_items", "location"),
+    ):
+        cur.execute(
+            f"UPDATE {table} SET {column}='홍보물랙' WHERE " + predicate.format(column=column),
+            (_PROMO_LOCATION_NORMALIZED,),
+        )
+
 def init_db():
     con = connect(); cur = con.cursor()
     cur.execute("""
@@ -175,6 +201,7 @@ def init_db():
     """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_outbound_items_order ON outbound_order_items(order_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_outbound_items_product_order ON outbound_order_items(product_name, order_id)")
+    _migrate_promo_rack_locations(cur)
     cur.execute("""
     CREATE TABLE IF NOT EXISTS product_match_conflict_approvals(
         company TEXT NOT NULL,

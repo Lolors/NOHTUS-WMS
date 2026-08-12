@@ -9,7 +9,7 @@ import nohtus.pages.outbound as outbound_page
 import nohtus.pages.outbound_business as outbound_business
 
 
-_BLOCKED_OUTBOUND_LOCATIONS = {"N-홍보물랙", "G1", "G2"}
+_BLOCKED_OUTBOUND_LOCATIONS = {"홍보물랙", "G1", "G2"}
 _INVALID_RECENT_DATE_TEXTS = {"", "none", "nan", "nat", "null", "-"}
 
 
@@ -156,7 +156,7 @@ def page_outbound():
                 FROM inventory
                 WHERE product_name=? AND qty>0
                   AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT LIKE 'P%'
-                  AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') <> 'N-홍보물랙'
+                  AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') <> '홍보물랙'
                   AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT IN ('G1','G2')
                   AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT LIKE 'G1-%'
                   AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT LIKE 'G2-%'

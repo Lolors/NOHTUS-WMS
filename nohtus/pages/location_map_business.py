@@ -13,7 +13,7 @@ _ORIGINAL_MAP_SEARCH_RESULTS = location_map_page.page_map_search_results
 _AVAILABLE_ONLY_KEY = "map_search_available_only"
 _EXCLUDE_MATERIALS_KEY = "map_search_exclude_materials"
 _SPECIAL_SORT_PREFIX = "\uffff"
-_NON_COUNTED_LOCATION = "N-홍보물랙"
+_NON_COUNTED_LOCATION = "홍보물랙"
 
 
 def _normalized_location(value):

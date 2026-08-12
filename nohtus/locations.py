@@ -46,7 +46,7 @@ def location_picking_key(loc: str) -> tuple[int, int, int, int, str]:
     area, line, level = parse_location(loc)
     area_order = [
         "REC", "A1", "A2", "B1", "B2", "C1", "C2", "D1", "E1", "F1",
-        "G1", "G2", "X1", "X2", "Q", "N", "T1", "T2", "P", "R1", "R2",
+        "G1", "G2", "X1", "X2", "Q", "N", "홍보물랙", "T1", "T2", "P", "R1", "R2",
     ]
     try:
         area_idx = area_order.index(area)

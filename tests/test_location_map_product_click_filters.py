@@ -32,6 +32,7 @@ def _load_patched_product_groups(original_product_groups, session_state=None):
         "_is_material_or_promo_location": lmb._is_material_or_promo_location,
         "_is_non_counted_location": lmb._is_non_counted_location,
         "_SPECIAL_SORT_PREFIX": lmb._SPECIAL_SORT_PREFIX,
+        "material_products": set(),
         "original_product_groups": original_product_groups,
     }
     return _load_nested_function("patched_product_groups", namespace)
@@ -40,7 +41,7 @@ def _load_patched_product_groups(original_product_groups, session_state=None):
 class LocationMapProductClickFilterTests(unittest.TestCase):
     """제품명을 클릭했을 때 로케이션맵이 재고 분포를 만드는 patched_product_groups()의
     실제 필터링/집계 로직을 검증한다. 체크박스 상태에 따라 P 재고와 부자재/홍보물 재고를
-    빼고 재계산하고, N-홍보물랙처럼 집계 제외 로케이션은 별도로 처리해야 한다."""
+    빼고 재계산하고, 홍보물랙처럼 집계 제외 로케이션은 별도로 처리해야 한다."""
 
     def test_p_location_excluded_when_available_only_checked(self):
         captured = {}
@@ -93,7 +94,7 @@ class LocationMapProductClickFilterTests(unittest.TestCase):
             {"location": "A1-01", "qty": 5, "company": "NOH"},
             {"location": "G1-01", "qty": 2, "company": "NOH"},
             {"location": "G2-01", "qty": 1, "company": "NOH"},
-            {"location": "N-홍보물랙", "qty": 4, "company": "NOH"},
+            {"location": "홍보물랙", "qty": 4, "company": "NOH"},
         ])
         patched("제품", inv_df)
 
@@ -138,7 +139,7 @@ class LocationMapProductClickFilterTests(unittest.TestCase):
     def test_non_counted_location_zeroed_and_excluded_from_total_qty(self):
         fixed_rows = pd.DataFrame([
             {"location": "A1-01", "qty": 5, "company": "NOH"},
-            {"location": "N-홍보물랙", "qty": 100, "company": "NOH"},
+            {"location": "홍보물랙", "qty": 100, "company": "NOH"},
         ])
         patched = _load_patched_product_groups(
             lambda product_name, inv_df: [{"rows": fixed_rows, "total_qty": 105}],

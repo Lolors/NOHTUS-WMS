@@ -11,8 +11,8 @@ import re
 _NEW_CSS = r"""
 <style id="wms-approved-warehouse-layout">
 /* Keep the existing WMS look: large labels, rounded cards and soft shadows. */
-.map-scroll{overflow:auto!important;height:670px!important;padding:0!important;border-radius:16px;background:#fff;}
-.map-stage{position:relative!important;width:1500px!important;height:920px!important;min-width:1500px!important;background:#fff!important;border:1.5px solid #334155!important;border-radius:18px!important;transform:scale(.69)!important;transform-origin:top left!important;overflow:hidden!important;}
+.map-scroll{overflow:hidden!important;width:100%!important;height:628px!important;padding:0!important;background:#fff;}
+.map-stage{position:relative!important;width:1482px!important;height:910px!important;min-width:1482px!important;background:#fff!important;border:0!important;border-radius:0!important;transform:scale(.69)!important;transform-origin:top left!important;overflow:hidden!important;}
 
 .map-stage .nw-zone,.map-stage .nw-rack,.map-stage .map-cell{
   appearance:none;box-sizing:border-box;color:#0f172a;font-family:Inter,Segoe UI,Arial,'Noto Sans KR',sans-serif;
@@ -46,8 +46,8 @@ _NEW_CSS = r"""
 .map-stage .special-menu.open{display:grid!important;gap:6px!important;}
 .map-stage .special-menu button{font-size:13px!important;padding:8px 10px!important;}
 
-@media(max-width:1500px){.map-stage{transform:scale(.62)!important}.map-scroll{height:590px!important}}
-@media(max-width:1250px){.map-stage{transform:scale(.54)!important}.map-scroll{height:520px!important}}
+@media(max-width:1500px){.map-stage{transform:scale(.62)!important}.map-scroll{height:565px!important}}
+@media(max-width:1250px){.map-stage{transform:scale(.54)!important}.map-scroll{height:492px!important}}
 </style>
 """
 
@@ -83,39 +83,40 @@ def _map_markup() -> str:
 
     p.append(_grid("nw-grid6", _six("A1"), 275, 330, 165, 235, "farm"))
     p.append(_grid("nw-grid6", _six("B1"), 458, 330, 165, 235, "farm"))
-    p.append(_grid("nw-grid3", [_cell("C1-03"), _cell("C1-02"), _cell("C1-01")], 650, 330, 110, 235, "farm"))
+    # C1 has only three cells, but each cell matches one C2 cell (82.5 x 78.3px).
+    p.append(_grid("nw-grid3", [_cell("C1-03"), _cell("C1-02"), _cell("C1-01")], 650, 330, 83, 235, "farm"))
 
     p.append(_grid("nw-grid3", [_cell("X1-01"), _cell("X1-02"), _cell("X1-03")], 1418, 190, 64, 240, "bidata"))
     p.append('<div class="nw-note" style="left:960px;top:380px;width:250px;">X1-01~03 : 폐기<br>X1-01-01 : 대표님 시술용</div>')
 
-    p.append(_zone("P", "P", 18, 600, 160, 82, "export"))
+    p.append(_zone("P", "P<br>-수출대기-", 18, 600, 160, 82, "export"))
     p.append(_zone("T1", "T1", 190, 600, 105, 82, "support"))
-    p.append(_zone("Q", "Q", 18, 710, 160, 82, "expiry"))
+    p.append(_zone("Q", "Q<br>-유통기한임박-", 18, 710, 160, 82, "expiry"))
     p.append(_zone("T2", "T2", 190, 710, 105, 82, "support"))
 
     p.append(_zone("REC", '<span><span style="color:#ef2d22">REC</span><br>Receiving</span>', 490, 690, 130, 72, "support"))
     p.append('<div class="nw-rec-label" style="left:480px;top:770px;width:150px;">매입등록대기</div>')
 
-    p.append('<div class="nw-outline" style="left:930px;top:590px;width:330px;height:185px;border-bottom:0;"></div>')
-    p.append('<div class="nw-outline" style="left:1260px;top:590px;width:222px;height:110px;border-left:0;"></div>')
+    # The refrigerator area is open on the top and right: retain only its left/bottom guide lines.
+    p.append('<div class="nw-outline" style="left:930px;top:590px;width:330px;height:185px;border-width:0 0 0 1.5px;"></div>')
+    p.append('<div class="nw-outline" style="left:1260px;top:590px;width:222px;height:110px;border-width:0 0 1.5px 0;"></div>')
     p.append(_grid("nw-grid2h", [_cell("R2"), _cell("R1")], 1280, 615, 185, 72, "cold"))
 
     p.append(_zone("N", "기타 위치", 1000, 740, 150, 92, "support", "nw-hatched"))
 
-    p.append(_zone("홍보물랙", "홍보물랙", 18, 830, 145, 62, "promo"))
-    p.append(_zone("홍보물랙", "홍보물랙", 163, 830, 145, 62, "promo"))
+    p.append(_zone("홍보물랙", "홍보물랙", 18, 830, 290, 62, "promo"))
 
     p.append('<div class="nw-outline" style="left:410px;top:865px;width:520px;height:45px;border-right:0;border-bottom:0;"></div>')
     p.append('<div class="nw-outline" style="left:930px;top:775px;width:1px;height:90px;border-width:0 0 0 1.5px;"></div>')
 
-    p.append('<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="홍보물랙">홍보물랙</button><button type="button" data-special-loc="회색 카트">회색 카트</button><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button></div>')
+    p.append('<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="회색 카트">회색 카트</button><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button></div>')
     return '<div class="map-scroll"><div class="map-stage">' + ''.join(p) + '</div></div>'
 
 
 _DYNAMIC_DOTS_JS = r"""
 function refreshApprovedMapDots(){
   document.querySelectorAll('.map-stage .dynamic-stock-dot').forEach(el=>el.remove());
-  const specialStockLocations=['홍보물랙','회색 카트','오른쪽 창고','사무실(4층)'];
+  const specialStockLocations=['회색 카트','오른쪽 창고','사무실(4층)'];
   const hasStock = (loc) => {
     if(loc==='N') return specialStockLocations.some(special => (inventory[special]||[]).some(row => Number(row.qty||0)>0));
     return Object.entries(inventory||{}).some(([key, rows]) => {
