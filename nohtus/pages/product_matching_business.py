@@ -14,6 +14,11 @@ def _render_new_product_form():
         with c1:
             n_std = st.text_input("표준제품명", key="pm_new_std")
             n_alias = st.text_input("별칭", key="pm_new_alias")
+            n_material = st.checkbox(
+                "부자재",
+                key="pm_new_material",
+                help="체크하면 로케이션과 관계없이 부자재로 분류됩니다.",
+            )
         with c2:
             n_np = st.text_input("노투스팜 ERP명", key="pm_new_np")
             n_code = st.text_input("노투스팜 ERP 제품코드", key="pm_new_code")
@@ -49,8 +54,9 @@ def _render_new_product_form():
                     erp_noh_name,
                     erp_noh_code,
                     erp_nohtus_name,
-                    bidata_name
-                ) VALUES(?,?,?,?,?,?,?,?,?)
+                    bidata_name,
+                    is_material
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     standard_name,
@@ -62,6 +68,7 @@ def _render_new_product_form():
                     str(n_noh_code or "").strip(),
                     str(n_nt or "").strip(),
                     str(n_bidata or "").strip(),
+                    1 if n_material else 0,
                 ),
             )
             for key in [
@@ -73,6 +80,7 @@ def _render_new_product_form():
                 "pm_new_noh_code",
                 "pm_new_nt",
                 "pm_new_bidata",
+                "pm_new_material",
             ]:
                 st.session_state.pop(key, None)
             st.success("새 제품 매칭 정보를 추가했습니다.")
@@ -111,7 +119,7 @@ def page_product_matching():
     _render_new_product_form()
 
     st.markdown("### 제품 매칭표 수정")
-    df = q("""SELECT id, standard_name AS 표준제품명, erp_nohtuspharm_name AS '노투스팜 ERP명', product_code AS '노투스팜 ERP 제품코드', erp_noh_name AS 'NOH ERP명', erp_noh_code AS 'NOH ERP 제품코드', erp_nohtus_name AS '노투스 ERP명', bidata_name AS '비자료명', aliases AS 별칭
+    df = q("""SELECT id, standard_name AS 표준제품명, erp_nohtuspharm_name AS '노투스팜 ERP명', product_code AS '노투스팜 ERP 제품코드', erp_noh_name AS 'NOH ERP명', erp_noh_code AS 'NOH ERP 제품코드', erp_nohtus_name AS '노투스 ERP명', bidata_name AS '비자료명', aliases AS 별칭, COALESCE(is_material, 0) AS 부자재
               FROM products ORDER BY standard_name""")
     if df.empty:
         st.info("등록된 제품이 없습니다. 위의 '새 제품 매칭 추가'에서 첫 제품을 등록할 수 있습니다.")
@@ -140,6 +148,12 @@ def page_product_matching():
     with ec1:
         e_std = st.text_input("표준제품명", value=str(row["표준제품명"] or ""), key=f"{edit_key}_std")
         e_alias = st.text_input("별칭", value=str(row["별칭"] or ""), key=f"{edit_key}_alias")
+        e_material = st.checkbox(
+            "부자재",
+            value=bool(int(row["부자재"] or 0)),
+            key=f"{edit_key}_material",
+            help="체크하면 이 표준제품명은 G구역/홍보물랙이 아니어도 부자재로 분류됩니다.",
+        )
     with ec2:
         e_np = st.text_input("노투스팜 ERP명", value=str(row["노투스팜 ERP명"] or ""), key=f"{edit_key}_np")
         e_code = st.text_input("노투스팜 ERP 제품코드", value=str(row["노투스팜 ERP 제품코드"] or ""), key=f"{edit_key}_code")
@@ -158,8 +172,10 @@ def page_product_matching():
             if not new_std:
                 st.error("표준제품명은 비워둘 수 없습니다.")
             else:
-                exec_sql("""UPDATE products SET standard_name=?, warehouse_name=?, aliases=?, product_code=?, erp_nohtuspharm_name=?, erp_noh_name=?, erp_noh_code=?, erp_nohtus_name=?, bidata_name=? WHERE id=?""",
-                         (new_std, new_std, e_alias.strip(), str(e_code).strip(), e_np.strip(), e_noh.strip(), str(e_noh_code).strip(), e_nt.strip(), e_bidata.strip(), pid))
+                exec_sql("""UPDATE products SET standard_name=?, warehouse_name=?, aliases=?, product_code=?, erp_nohtuspharm_name=?, erp_noh_name=?, erp_noh_code=?, erp_nohtus_name=?, bidata_name=?, is_material=? WHERE id=?""",
+                         (new_std, new_std, e_alias.strip(), str(e_code).strip(), e_np.strip(), e_noh.strip(), str(e_noh_code).strip(), e_nt.strip(), e_bidata.strip(), 1 if e_material else 0, pid))
+                # 같은 표준제품명이 여러 ERP 매칭 행으로 존재해도 부자재 여부는 표준제품명 단위로 통일한다.
+                exec_sql("UPDATE products SET is_material=? WHERE standard_name=?", (1 if e_material else 0, new_std))
                 apply_standard_name_change(old_std, new_std)
                 st.success("수정했습니다. 이미 등록된 재고/이력 화면에도 변경된 표준제품명을 반영했습니다.")
                 st.rerun()
