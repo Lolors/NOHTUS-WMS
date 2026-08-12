@@ -266,20 +266,13 @@ def page_export_packing():
     original_selectbox = st.selectbox
     original_markdown = st.markdown
     original_expander = st.expander
+    original_form_submit_button = st.form_submit_button
+    original_toggle = st.toggle
 
-    ui_state = {"preset_save_slot": None}
-
-    original_markdown(
-        """
-        <style>
-        [class*="st-key-box_preset_save_slot"] {
-            width: 50vw !important;
-            max-width: 50vw !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    ui_state = {
+        "preset_save_slot": None,
+        "continuous_apply_slot": None,
+    }
 
     def preset_label(name: object, presets: dict, last_values: dict | None) -> str:
         text = str(name)
@@ -309,7 +302,7 @@ def page_export_packing():
             width = size_cols[1].number_input('세로(cm)', min_value=0.0, step=0.1)
             height = size_cols[2].number_input('높이(cm)', min_value=0.0, step=0.1)
             weight = st.number_input('무게(kg)', min_value=0.0, step=0.1)
-            save_preset = st.form_submit_button('프리셋 추가', type='primary', use_container_width=True)
+            save_preset = original_form_submit_button('프리셋 추가', type='primary', use_container_width=True)
 
         if save_preset:
             try:
@@ -329,7 +322,9 @@ def page_export_packing():
     def patched_markdown(body, *args, **kwargs):
         result = original_markdown(body, *args, **kwargs)
         if isinstance(body, str) and body.strip() == '#### 박스 프리셋':
-            ui_state['preset_save_slot'] = st.container(key='box_preset_save_slot')
+            left_spacer, save_col, right_spacer = st.columns([1.5, 7, 1.5])
+            with save_col:
+                ui_state['preset_save_slot'] = st.container()
         return result
 
     def patched_selectbox(label, options, *args, **kwargs):
@@ -364,9 +359,27 @@ def page_export_packing():
             return st.container()
         return original_expander(label, *args, **kwargs)
 
+    def patched_form_submit_button(label, *args, **kwargs):
+        result = original_form_submit_button(label, *args, **kwargs)
+        if str(label).strip() == 'CTN 저장 후 다음 CTN':
+            ui_state['continuous_apply_slot'] = st.empty()
+        return result
+
+    def patched_toggle(label, *args, **kwargs):
+        key = str(kwargs.get('key') or '')
+        if str(label).strip() == '다음 CTN에도 연속 적용' and key.startswith('continuous_box_preset_'):
+            slot = ui_state.get('continuous_apply_slot')
+            if slot is not None:
+                with slot:
+                    return original_toggle('이 규격을 다음 CTN에도 연속 적용', *args, **kwargs)
+            return original_toggle('이 규격을 다음 CTN에도 연속 적용', *args, **kwargs)
+        return original_toggle(label, *args, **kwargs)
+
     st.selectbox = patched_selectbox
     st.markdown = patched_markdown
     st.expander = patched_expander
+    st.form_submit_button = patched_form_submit_button
+    st.toggle = patched_toggle
     try:
         with export_db.connection_session():
             박스_패킹_edit.render()
@@ -374,6 +387,8 @@ def page_export_packing():
         st.selectbox = original_selectbox
         st.markdown = original_markdown
         st.expander = original_expander
+        st.form_submit_button = original_form_submit_button
+        st.toggle = original_toggle
 
 
 def page_export_domestic_delivery():
