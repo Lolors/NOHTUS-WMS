@@ -382,8 +382,13 @@ def render() -> None:
             folder_service.sync_case_folder(case_id)
             st.rerun()
         existing=order_service.get_order_items_dataframe(case_id)
-        if existing.empty: existing=pd.DataFrame([{'_id':None,'제품명':'','수량':0.0,'단위':'EA','매입가':0.0}])
-        edited=order_editor(existing,key=f'orders_{case_id}')
+        if existing.empty:
+            existing=pd.DataFrame([{'_id':None,'제품명':'','수량':0.0,'단위':'EA','매입가':0.0}])
+        else:
+            existing=existing.copy()
+            existing['제품명']=existing['제품명'].fillna('').astype(str)
+        existing.insert(1, '행번호', range(1, len(existing) + 1))
+        edited=order_editor(existing,key=f'orders_edit_v2_{case_id}')
         if st.button('주문 목록 저장',type='primary'):
             order_service.save_order_items(case_id,edited); folder_service.sync_case_folder(case_id); st.rerun()
 
@@ -438,9 +443,6 @@ def render() -> None:
                 except ValueError as exc:
                     st.error(str(exc))
                 else:
-                    # The target case may already have an intake-order editor draft in
-                    # session state.  Its shipment rows are read directly from the DB,
-                    # while that stale draft would hide the newly moved order rows.
                     order_save_guard.reset_intake_order_editor_state(target_case_id)
                     order_save_guard.reset_intake_order_editor_state(case_id)
                     for key in list(st.session_state):
