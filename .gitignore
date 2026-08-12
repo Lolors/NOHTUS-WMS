@@ -37,3 +37,6 @@ data/nohtus.db
 /data/product_images/
 data/export.db
 /data/export_uploads/
+data/export.db
+
+backups/
