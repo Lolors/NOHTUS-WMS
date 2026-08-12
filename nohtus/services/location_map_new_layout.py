@@ -100,9 +100,6 @@ def _map_markup() -> str:
     # Keep the warehouse structure to the left of the refrigerators.  Only the
     # extension around R1/R2 is open on its top/right, as in the reference plan.
     p.append('<div class="nw-outline" style="left:930px;top:590px;width:330px;height:185px;border-bottom:0;"></div>')
-    # Split the lower guide around N so no line is visible through the button.
-    p.append('<div class="nw-outline" style="left:930px;top:775px;width:70px;height:1px;border-width:1.5px 0 0 0;"></div>')
-    p.append('<div class="nw-outline" style="left:1150px;top:775px;width:110px;height:1px;border-width:1.5px 0 0 0;"></div>')
     p.append('<div class="nw-outline" style="left:1260px;top:590px;width:222px;height:110px;border-width:0 0 1.5px 0;"></div>')
     p.append(_grid("nw-grid2h", [_cell("R2"), _cell("R1")], 1280, 615, 185, 72, "cold"))
 
