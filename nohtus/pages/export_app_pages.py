@@ -288,20 +288,29 @@ def page_export_packing():
             return text
         return f'{text} ({length:g}x{width:g}x{height:g}) {weight:g}kg'
 
-    @dialog('프리셋 관리', width='large')
+    @dialog('프리셋 관리', width='small')
     def preset_manager_dialog() -> None:
-        st.caption('박스 규격과 무게를 직접 입력해 새 프리셋을 추가합니다.')
-        existing = packing_service.list_box_presets()
-        if existing:
-            st.caption('현재 프리셋: ' + ', '.join(sorted(existing)))
+        st.markdown(
+            """
+            <style>
+            div[role="dialog"] {
+                width: 600px !important;
+                max-width: calc(100vw - 32px) !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.caption('새 프리셋을 추가하거나 기존 프리셋의 이름·규격·무게를 수정하고 삭제할 수 있습니다.')
 
+        st.markdown('##### 새 프리셋 추가')
         with st.form('box_preset_manager_add_form'):
             preset_name = st.text_input('프리셋 이름', placeholder='예: 덱스레보')
-            size_cols = st.columns(3)
-            length = size_cols[0].number_input('가로(cm)', min_value=0.0, step=0.1)
-            width = size_cols[1].number_input('세로(cm)', min_value=0.0, step=0.1)
-            height = size_cols[2].number_input('높이(cm)', min_value=0.0, step=0.1)
-            weight = st.number_input('무게(kg)', min_value=0.0, step=0.1)
+            size_cols = st.columns(4)
+            length = size_cols[0].number_input('가로', min_value=0.0, step=0.1)
+            width = size_cols[1].number_input('세로', min_value=0.0, step=0.1)
+            height = size_cols[2].number_input('높이', min_value=0.0, step=0.1)
+            weight = size_cols[3].number_input('무게(kg)', min_value=0.0, step=0.1)
             save_preset = original_form_submit_button('프리셋 추가', type='primary', use_container_width=True)
 
         if save_preset:
@@ -319,10 +328,74 @@ def page_export_packing():
                 st.success(f'{preset_name.strip()} 프리셋을 추가했습니다.')
                 st.rerun()
 
+        st.divider()
+        st.markdown('##### 기존 프리셋')
+        existing = packing_service.list_box_presets()
+        if not existing:
+            st.info('등록된 프리셋이 없습니다.')
+            return
+
+        for index, (current_name, values) in enumerate(sorted(existing.items())):
+            with st.form(f'box_preset_manager_edit_{index}'):
+                st.caption(current_name)
+                name_value = st.text_input(
+                    '이름',
+                    value=current_name,
+                    key=f'preset_edit_name_{index}',
+                )
+                value_cols = st.columns(4)
+                edit_length = value_cols[0].number_input(
+                    '가로', min_value=0.0, step=0.1,
+                    value=float(values.get('length_cm', 0)),
+                    key=f'preset_edit_length_{index}',
+                )
+                edit_width = value_cols[1].number_input(
+                    '세로', min_value=0.0, step=0.1,
+                    value=float(values.get('width_cm', 0)),
+                    key=f'preset_edit_width_{index}',
+                )
+                edit_height = value_cols[2].number_input(
+                    '높이', min_value=0.0, step=0.1,
+                    value=float(values.get('height_cm', 0)),
+                    key=f'preset_edit_height_{index}',
+                )
+                edit_weight = value_cols[3].number_input(
+                    '무게(kg)', min_value=0.0, step=0.1,
+                    value=float(values.get('weight_kg', 0)),
+                    key=f'preset_edit_weight_{index}',
+                )
+                action_cols = st.columns([3, 2])
+                update_clicked = action_cols[0].form_submit_button('수정 저장', use_container_width=True)
+                delete_clicked = action_cols[1].form_submit_button('삭제', use_container_width=True)
+
+            if update_clicked:
+                clean_name = str(name_value or '').strip()
+                if not clean_name:
+                    st.error('프리셋 이름을 입력하세요.')
+                elif clean_name != current_name and clean_name in existing:
+                    st.error(f'{clean_name} 프리셋이 이미 있습니다.')
+                else:
+                    if clean_name != current_name:
+                        packing_service.delete_box_preset(current_name)
+                    packing_service.save_box_preset(
+                        clean_name,
+                        float(edit_length),
+                        float(edit_width),
+                        float(edit_height),
+                        float(edit_weight),
+                    )
+                    st.success(f'{clean_name} 프리셋을 수정했습니다.')
+                    st.rerun()
+
+            if delete_clicked:
+                packing_service.delete_box_preset(current_name)
+                st.success(f'{current_name} 프리셋을 삭제했습니다.')
+                st.rerun()
+
     def patched_markdown(body, *args, **kwargs):
         result = original_markdown(body, *args, **kwargs)
         if isinstance(body, str) and body.strip() == '#### 박스 프리셋':
-            left_spacer, save_col, right_spacer = st.columns([1.5, 7, 1.5])
+            save_col, _ = st.columns([4, 6])
             with save_col:
                 ui_state['preset_save_slot'] = st.container()
         return result
