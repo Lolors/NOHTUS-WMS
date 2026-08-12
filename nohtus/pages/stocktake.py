@@ -77,7 +77,9 @@ def _load_product_mapping_rows(product_name):
     )[["id", *PRODUCT_MAPPING_COLUMNS]]
 
 
-def _update_inventory_and_product_mappings(inv_id, product_name, lot, exp_date, edited_mappings):
+def _update_inventory_and_product_mappings(
+    inv_id, product_name, lot, exp_date, edited_mappings, is_material=None
+):
     product_name = str(product_name or "").strip()
     if not product_name:
         raise ValueError("제품명을 입력하세요.")
@@ -191,6 +193,14 @@ def _update_inventory_and_product_mappings(inv_id, product_name, lot, exp_date, 
                 placeholders = ",".join("?" for _ in delete_ids)
                 con.execute(f"DELETE FROM products WHERE id IN ({placeholders})", delete_ids)
 
+            # This flag classifies the standard product across every ERP
+            # mapping, independently of where its inventory is stored.
+            if is_material is not None:
+                con.execute(
+                    "UPDATE products SET is_material=? WHERE TRIM(standard_name)=?",
+                    (1 if is_material else 0, product_name),
+                )
+
             con.commit()
         except sqlite3.IntegrityError as exc:
             con.rollback()
@@ -220,6 +230,21 @@ def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
             key=f"stock_master_exp_{inv_id}",
         )
 
+    material_row = q(
+        "SELECT MAX(COALESCE(is_material,0)) AS is_material "
+        "FROM products WHERE TRIM(standard_name)=?",
+        (str(product_name or "").strip(),),
+    )
+    current_material = bool(
+        not material_row.empty and int(material_row.iloc[0].get("is_material") or 0)
+    )
+    is_material = st.checkbox(
+        "부자재",
+        value=current_material,
+        key=f"stock_master_is_material_{inv_id}",
+        help="체크하면 보관 위치와 관계없이 이 표준제품 전체를 부자재로 분류합니다.",
+    )
+
     st.markdown("#### 제품매칭표")
     st.caption("행을 추가하거나 삭제할 수 있습니다. 같은 표준제품명에 연결된 매칭 행 전체가 저장됩니다.")
     mapping_df = _load_product_mapping_rows(product_name)
@@ -245,7 +270,7 @@ def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
     ):
         try:
             saved_product, saved_lot, saved_exp, mapping_count = _update_inventory_and_product_mappings(
-                int(inv_id), new_product_name, new_lot, new_exp, edited_mappings
+                int(inv_id), new_product_name, new_lot, new_exp, edited_mappings, is_material
             )
             st.session_state["_stock_master_success_msg"] = (
                 f"제품마스터 수정 완료: {saved_product} / {saved_lot} / "

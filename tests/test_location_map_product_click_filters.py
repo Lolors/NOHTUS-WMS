@@ -22,7 +22,7 @@ def _load_nested_function(name, namespace):
     return namespace[name]
 
 
-def _load_patched_product_groups(original_product_groups, session_state=None):
+def _load_patched_product_groups(original_product_groups, session_state=None, material_products=None):
     namespace = {
         "pd": pd,
         "st": types.SimpleNamespace(session_state=dict(session_state or {})),
@@ -32,7 +32,7 @@ def _load_patched_product_groups(original_product_groups, session_state=None):
         "_is_material_or_promo_location": lmb._is_material_or_promo_location,
         "_is_non_counted_location": lmb._is_non_counted_location,
         "_SPECIAL_SORT_PREFIX": lmb._SPECIAL_SORT_PREFIX,
-        "material_products": set(),
+        "material_products": set(material_products or []),
         "original_product_groups": original_product_groups,
     }
     return _load_nested_function("patched_product_groups", namespace)
@@ -117,6 +117,26 @@ class LocationMapProductClickFilterTests(unittest.TestCase):
         patched("제품", inv_df)
 
         self.assertEqual(sorted(captured["inv_df"]["location"].tolist()), ["A1-01", "G1-01"])
+
+    def test_product_master_material_is_excluded_outside_material_locations(self):
+        captured = {}
+
+        def fake_original(product_name, inv_df):
+            captured["inv_df"] = inv_df
+            return []
+
+        patched = _load_patched_product_groups(
+            fake_original,
+            session_state={lmb._EXCLUDE_MATERIALS_KEY: True},
+            material_products={"체크된 부자재"},
+        )
+        inv_df = pd.DataFrame([
+            {"product_name": "체크된 부자재", "location": "A1-01", "qty": 5, "company": "NOH"},
+            {"product_name": "일반 제품", "location": "B1-01", "qty": 3, "company": "NOH"},
+        ])
+        patched("제품", inv_df)
+
+        self.assertEqual(captured["inv_df"]["product_name"].tolist(), ["일반 제품"])
 
     def test_empty_groups_are_dropped_when_materials_excluded(self):
         empty_rows = pd.DataFrame(columns=["location", "qty", "company"])
