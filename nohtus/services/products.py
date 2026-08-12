@@ -17,7 +17,8 @@ def product_master_excel_bytes(highlight_missing=False):
     """제품 마스터를 사용자가 수정하기 쉬운 엑셀 양식으로 내보낸다.
     v3.7부터 제품코드는 노투스팜 ERP 전용 코드로 취급하고, 전산상 명칭은 제품마스터에서 제외한다.
     """
-    df = q("SELECT standard_name, erp_nohtuspharm_name, product_code, erp_noh_name, erp_noh_code, erp_nohtus_name, bidata_name, aliases FROM products ORDER BY standard_name, id")
+    df = q("SELECT standard_name, erp_nohtuspharm_name, product_code, erp_noh_name, erp_noh_code, erp_nohtus_name, bidata_name, aliases, COALESCE(is_material, 0) AS is_material FROM products ORDER BY standard_name, id")
+    df["is_material"] = df["is_material"].apply(lambda value: "O" if int(value or 0) else "")
     out = df.rename(columns={
         "standard_name": "표준제품명",
         "erp_nohtuspharm_name": "노투스팜 ERP명",
@@ -27,6 +28,7 @@ def product_master_excel_bytes(highlight_missing=False):
         "erp_nohtus_name": "노투스 ERP명",
         "bidata_name": "비자료명",
         "aliases": "별칭",
+        "is_material": "부자재",
     })
     bio = BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
@@ -37,11 +39,11 @@ def product_master_excel_bytes(highlight_missing=False):
         border = Border(left=thin, right=thin, top=thin, bottom=thin)
         header_fill = PatternFill("solid", fgColor="E5E7EB")
         need_fill = PatternFill("solid", fgColor="FFF2CC")
-        widths = {"A":24,"B":34,"C":28,"D":34,"E":28,"F":34,"G":34,"H":34}
+        widths = {"A":24,"B":34,"C":28,"D":34,"E":28,"F":34,"G":34,"H":34,"I":12}
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
         ws.freeze_panes = "A2"
-        ws.auto_filter.ref = f"A1:H{max(1, len(out)+1)}"
+        ws.auto_filter.ref = f"A1:I{max(1, len(out)+1)}"
         for row in ws.iter_rows():
             for cell in row:
                 cell.border = border
@@ -70,6 +72,17 @@ def _clean_text(value):
     return text
 
 
+def _material_flag(value, default=0):
+    if value is None or pd.isna(value):
+        return int(default)
+    text = str(value).strip().casefold()
+    if text in {"1", "true", "yes", "y", "o", "v", "체크", "부자재"}:
+        return 1
+    if text in {"0", "false", "no", "n", "x", ""}:
+        return 0
+    return int(default)
+
+
 def import_product_master_excel(uploaded_file):
     """업로드된 제품매칭표 엑셀을 products 테이블에 반영한다.
 
@@ -77,7 +90,7 @@ def import_product_master_excel(uploaded_file):
     - 같은 표준제품명에 ERP명이 여러 개 존재할 수 있다.
     - 표준제품명만 기준으로 중복 제거하지 않는다.
     - 완전히 같은 행만 중복으로 보며, 서로 다른 ERP명/코드/비자료명은 별도 매칭으로 보존한다.
-    - 제품 사진은 표준제품명 기준으로 보존하며, 제품매칭표를 다시 올려도 삭제하지 않는다.
+    - 제품 사진과 부자재 분류는 표준제품명 기준으로 보존한다.
     """
     df = pd.read_excel(uploaded_file, dtype=str).fillna("")
     rename = {
@@ -91,13 +104,26 @@ def import_product_master_excel(uploaded_file):
         "NOH ERP 제품코드": "erp_noh_code",
         "노투스 ERP명": "erp_nohtus_name",
         "비자료명": "bidata_name",
+        "부자재": "is_material",
     }
     df = df.rename(columns={c: rename.get(c, c) for c in df.columns})
     if "standard_name" not in df.columns:
         raise ValueError("엑셀에 '표준제품명' 컬럼이 필요합니다.")
-    for c in ["product_code", "aliases", "erp_nohtuspharm_name", "erp_nohtus_name", "erp_noh_name", "erp_noh_code", "bidata_name"]:
+    has_material_column = "is_material" in df.columns
+    for c in ["product_code", "aliases", "erp_nohtuspharm_name", "erp_nohtus_name", "erp_noh_name", "erp_noh_code", "bidata_name", "is_material"]:
         if c not in df.columns:
             df[c] = ""
+
+    with connect() as con:
+        cur = con.cursor()
+        existing_material_flags = {}
+        for standard_name, flag in cur.execute(
+            "SELECT standard_name, MAX(COALESCE(is_material,0)) FROM products GROUP BY standard_name"
+        ).fetchall():
+            name = _clean_text(standard_name)
+            if name:
+                existing_material_flags[name] = int(flag or 0)
+
     inserted = 0
     skipped = 0
     seen = set()
@@ -114,6 +140,10 @@ def import_product_master_excel(uploaded_file):
         if not name:
             skipped += 1
             continue
+        material = _material_flag(
+            r.get("is_material"),
+            existing_material_flags.get(name, 0),
+        ) if has_material_column else existing_material_flags.get(name, 0)
         key = (
             name,
             erp_np,
@@ -123,12 +153,13 @@ def import_product_master_excel(uploaded_file):
             erp_nt,
             bidata_name,
             aliases,
+            material,
         )
         if key in seen:
             skipped += 1
             continue
         seen.add(key)
-        rows_to_insert.append((code, name, name, aliases, erp_np, erp_nt, erp_noh, erp_noh_code, bidata_name))
+        rows_to_insert.append((code, name, name, aliases, erp_np, erp_nt, erp_noh, erp_noh_code, bidata_name, material))
     with connect() as con:
         cur = con.cursor()
         cur.execute("SELECT standard_name, image_path FROM products WHERE COALESCE(image_path, '') <> ''")
@@ -145,8 +176,8 @@ def import_product_master_excel(uploaded_file):
                 """INSERT INTO products(
                        product_code,standard_name,warehouse_name,aliases,
                        erp_nohtuspharm_name,erp_nohtus_name,erp_noh_name,
-                       erp_noh_code,bidata_name,image_path
-                   ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                       erp_noh_code,bidata_name,is_material,image_path
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 (*row, image_path),
             )
             inserted += 1
