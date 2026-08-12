@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import streamlit as st
@@ -8,6 +9,11 @@ import nohtus.pages.location_map_business as location_map_business
 
 
 class LocationMapPatchRestoreTests(unittest.TestCase):
+    def test_map_page_reduces_main_content_top_padding(self):
+        source = Path(location_map_business.__file__).read_text(encoding="utf-8")
+        self.assertIn('[data-testid="stMainBlockContainer"]', source)
+        self.assertIn('padding-top: 1rem !important;', source)
+
     """로케이션맵 화면은 st.text_input/st.button/st.markdown을 전역으로 임시
     교체한 뒤 _page_map() 실행 후 복원한다. 이 patch가 전역 위젯을 바꾸는
     만큼, 새면 로케이션맵 이후 화면 전체의 입력/버튼/마크다운이 깨진다."""

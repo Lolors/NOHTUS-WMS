@@ -156,6 +156,11 @@ def page_map():
     st.markdown(
         """
         <style>
+        /* Give the map more first-screen height than the global 3.2rem layout. */
+        div[data-testid="stAppViewContainer"] .main .block-container,
+        [data-testid="stMainBlockContainer"] {
+            padding-top: 1rem !important;
+        }
         .total-card-small { margin-bottom: 12px !important; }
         div[class*="st-key-map_fav_"] { display:none !important; }
         div[data-testid="stTextInput"]:has(input[aria-label="제품명 검색"]) {
