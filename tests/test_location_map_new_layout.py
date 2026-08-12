@@ -29,7 +29,8 @@ class LocationMapNewLayoutTests(unittest.TestCase):
         self.assertIn('left:1150px;top:775px;width:110px;height:1px', markup)
         self.assertIn('border-width:0 0 1.5px 0', markup)
         self.assertIn('left:1418px;top:250px;width:64px;height:240px', markup)
-        self.assertIn('left:1145px;top:335px;width:250px', markup)
+        self.assertIn('left:1195px;top:335px;width:210px', markup)
+        self.assertIn('z-index:12!important;isolation:isolate', _NEW_CSS)
 
 
 if __name__ == "__main__":

@@ -41,7 +41,7 @@ _NEW_CSS = r"""
 .map-stage .nw-outline{position:absolute;border:1.5px solid #334155;background:transparent;pointer-events:none;}
 .map-stage .nw-note{position:absolute;padding:15px 18px;border:1.5px dashed #cbd5e1;border-radius:14px;color:#64748b;font-size:16px;line-height:1.7;background:rgba(255,255,255,.78);pointer-events:none;}
 .map-stage .nw-rec-label{position:absolute;color:#0f172a;font-size:14px;font-weight:800;text-align:center;pointer-events:none;}
-.map-stage .nw-hatched{background:repeating-linear-gradient(135deg,#fff 0,#fff 8px,#d9efff 8px,#d9efff 10px)!important;border-color:#38a6e8!important;}
+.map-stage .nw-hatched{background:repeating-linear-gradient(135deg,#fff 0,#fff 8px,#d9efff 8px,#d9efff 10px)!important;border-color:#38a6e8!important;z-index:12!important;isolation:isolate;}
 .map-stage .special-menu{left:995px!important;top:630px!important;width:180px!important;display:none;grid-template-columns:1fr!important;}
 .map-stage .special-menu.open{display:grid!important;gap:6px!important;}
 .map-stage .special-menu button{font-size:13px!important;padding:8px 10px!important;}
@@ -87,7 +87,7 @@ def _map_markup() -> str:
     p.append(_grid("nw-grid3", [_cell("C1-03"), _cell("C1-02"), _cell("C1-01")], 650, 330, 83, 235, "farm"))
 
     p.append(_grid("nw-grid3", [_cell("X1-01"), _cell("X1-02"), _cell("X1-03")], 1418, 250, 64, 240, "bidata"))
-    p.append('<div class="nw-note" style="left:1145px;top:335px;width:250px;">X1-01~03 : 폐기<br>X1-01-01 : 대표님 시술용</div>')
+    p.append('<div class="nw-note" style="left:1195px;top:335px;width:210px;">X1-01~03 : 폐기<br>X1-01-01 : 대표님 시술용</div>')
 
     p.append(_zone("P", "P<br>-수출대기-", 18, 600, 160, 82, "export"))
     p.append(_zone("T1", "T1", 190, 600, 105, 82, "support"))
