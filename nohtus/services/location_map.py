@@ -42,7 +42,6 @@ def get_product_image_path(product_name):
 
 
 def _product_thumbnail_data_uris():
-    """Load only compact product thumbnails for the map detail panel."""
     images = {}
     rows = q(
         """
@@ -54,14 +53,12 @@ def _product_thumbnail_data_uris():
     )
     if rows.empty:
         return images
-
     encoded_by_path = {}
     for row in rows.itertuples():
         name = str(row.standard_name or "").strip()
         raw_path = str(row.image_path or "").strip()
         if not name or not raw_path:
             continue
-
         original = Path(raw_path)
         if not original.is_absolute():
             original = _PROJECT_ROOT / original
@@ -69,7 +66,6 @@ def _product_thumbnail_data_uris():
         path = thumb if thumb.is_file() else None
         if path is None:
             continue
-
         cache_key = str(path.resolve())
         data_uri = encoded_by_path.get(cache_key)
         if data_uri is None:
@@ -96,14 +92,7 @@ def _cached_image_data_uri(path_str: str, cache_token) -> str:
 
 
 def product_thumbnail_uris_for(product_names) -> dict:
-    """Bulk, cached thumbnail lookup scoped to the given product names
-    (e.g. one page of mobile search results) instead of the whole catalog.
-    One query total regardless of how many names are passed, and each
-    unique image file is base64-encoded once and cached until the WMS DB
-    changes."""
-    unique_names = list(dict.fromkeys(
-        str(name).strip() for name in product_names if str(name or "").strip()
-    ))
+    unique_names = list(dict.fromkeys(str(name).strip() for name in product_names if str(name or "").strip()))
     if not unique_names:
         return {}
     placeholders = ",".join("?" for _ in unique_names)
@@ -114,7 +103,6 @@ def product_thumbnail_uris_for(product_names) -> dict:
     )
     if rows.empty:
         return {}
-
     cache_token = _wms_read_cache_token()
     result = {}
     for row in rows.itertuples():
@@ -198,20 +186,12 @@ def render_location_map():
     if(!orders[key]) orders[key]={country:item.country||'-',buyer:item.buyer||'미지정',transport_method:item.transport_method||'미지정',items:[]};
     orders[key].items.push(item);
   });
-  const entries=Object.values(orders).sort((a,b)=>
-    String(a.country||'').localeCompare(String(b.country||''),'ko') ||
-    String(a.buyer||'').localeCompare(String(b.buyer||''),'ko') ||
-    String(a.transport_method||'').localeCompare(String(b.transport_method||''),'ko')
-  );
+  const entries=Object.values(orders).sort((a,b)=>String(a.country||'').localeCompare(String(b.country||''),'ko')||String(a.buyer||'').localeCompare(String(b.buyer||''),'ko')||String(a.transport_method||'').localeCompare(String(b.transport_method||''),'ko'));
   if(!entries.length) return productCardsHtml(fallbackRows||[]);
   return entries.map(order=>{
     const total=order.items.reduce((sum,item)=>sum+(Number(item.qty)||0),0);
     const productGroups={};
-    order.items.forEach(item=>{
-      const name=item.product_name||'-';
-      if(!productGroups[name]) productGroups[name]=[];
-      productGroups[name].push(item);
-    });
+    order.items.forEach(item=>{const name=item.product_name||'-'; if(!productGroups[name]) productGroups[name]=[]; productGroups[name].push(item);});
     const products=Object.entries(productGroups).map(([name,items])=>{
       const qty=items.reduce((sum,item)=>sum+(Number(item.qty)||0),0);
       const lines=items.map(item=>`<div class="lot-exp">${esc(item.company||'-')} · ${Number(item.qty)||0}EA&nbsp;&nbsp;${esc(item.lot||'-')} | ${esc(cleanDate(item.exp_date||'-'))}</div>`).join('');
