@@ -20,7 +20,7 @@ _THUMB_DIR = _PROJECT_ROOT / "data" / "product_images" / "thumbs"
 
 
 def get_product_image_path(product_name):
-    df = q("""SELECT image_path FROM products WHERE standard_name=? AND COALESCE(image_path, '') <> '' LIMIT 1""", (product_name,))
+    df = q("SELECT image_path FROM products WHERE standard_name=? AND COALESCE(image_path, '') <> '' LIMIT 1", (product_name,))
     if df.empty:
         return ""
     value = str(df.iloc[0].get("image_path") or "").strip()
@@ -34,7 +34,7 @@ def get_product_image_path(product_name):
 
 def _product_thumbnail_data_uris():
     images = {}
-    rows = q("""SELECT standard_name, MAX(image_path) AS image_path FROM products WHERE COALESCE(image_path, '') <> '' GROUP BY standard_name""")
+    rows = q("SELECT standard_name, MAX(image_path) AS image_path FROM products WHERE COALESCE(image_path, '') <> '' GROUP BY standard_name")
     if rows.empty:
         return images
     encoded_by_path = {}
