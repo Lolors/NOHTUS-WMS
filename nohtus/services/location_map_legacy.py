@@ -194,7 +194,7 @@ def render_location_map():
       {zone('R1','R1',783,420,58,52,'white')}
       <div class="label" style="left:706px;top:482px;width:170px;">R2 비자료 / R1 자료</div>
       {zone('N','기타 위치',930,565,155,60,'white')}
-      <div class="special-menu" id="specialMenu" style="left:930px;top:428px;width:155px;"><button type="button" data-special-loc="회색 카트">회색 카트</button><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button></div>
+      <div class="special-menu" id="specialMenu" style="left:930px;top:428px;width:155px;"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button></div>
     </div></div>
   </div>
   <div class="side-card" id="detail"><div class="side-title">위치 상세 정보</div><div class="caption">맵에서 로케이션을 선택하면 상세 재고가 여기에 표시됩니다.</div></div>
@@ -203,7 +203,7 @@ def render_location_map():
 const DATA = {payload};
 const inventory = DATA.inventory || {{}};
 const txData = DATA.tx || [];
-const specialLocations = ["회색 카트", "오른쪽 창고", "사무실(4층)"];
+const specialLocations = ["오른쪽 창고", "사무실(4층)"];
 const initialSelectedLocation = DATA.selected_location || "";
 function zoneName(loc){{
   if((loc||'')==='홍보물랙') return '홍보물랙';

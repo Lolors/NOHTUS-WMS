@@ -19,6 +19,12 @@ class LocationMapNewLayoutTests(unittest.TestCase):
         self.assertIn("홍보물랙", AREA_CONFIG)
         self.assertNotIn("홍보물랙", AREA_CONFIG["N"]["lines"])
 
+    def test_gray_cart_is_not_an_n_location_or_map_menu_item(self):
+        markup = _map_markup()
+        self.assertNotIn("회색 카트", SPECIAL_LOCATIONS)
+        self.assertNotIn("회색 카트", AREA_CONFIG["N"]["lines"])
+        self.assertNotIn('data-special-loc="회색 카트"', markup)
+
     def test_labels_cell_size_and_open_refrigerator_lines(self):
         markup = _map_markup()
         self.assertIn("P<br>-수출대기-", markup)
