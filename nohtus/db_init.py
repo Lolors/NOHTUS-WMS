@@ -16,6 +16,8 @@ def init_db():
     for col in ["erp_nohtuspharm_name", "erp_nohtus_name", "erp_noh_name", "erp_noh_code", "bidata_name", "substitute_note", "image_path"]:
         if col not in product_cols:
             cur.execute(f"ALTER TABLE products ADD COLUMN {col} TEXT")
+    if "is_material" not in product_cols:
+        cur.execute("ALTER TABLE products ADD COLUMN is_material INTEGER NOT NULL DEFAULT 0")
     cur.execute("""
     CREATE TABLE IF NOT EXISTS inventory(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
