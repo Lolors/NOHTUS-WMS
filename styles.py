@@ -160,7 +160,13 @@ def apply_style():
     .muted {{color:#64748b;font-size:12px;line-height:1.6;}}
     .qty-text {{font-weight:900;color:#111827;white-space:nowrap;}}
     .photo-box{{width:250px;height:250px;margin-left:auto;margin-right:auto;border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:800;margin-bottom:10px;}}
-    div[data-testid="stMetric"] {{background:white;border:1px solid {BORDER};border-radius:16px;padding:16px;box-shadow:0 8px 20px rgba(15,23,42,.05)}}
+    div[data-testid="stMetric"] {{background:white;border:1px solid {BORDER};border-radius:16px;padding:16px;box-shadow:0 8px 20px rgba(15,23,42,.05);text-align:center!important;}}
+    div[data-testid="stMetric"] [data-testid="stMetricLabel"],
+    div[data-testid="stMetric"] [data-testid="stMetricValue"],
+    div[data-testid="stMetric"] [data-testid="stMetricDelta"] {{justify-content:center!important;text-align:center!important;width:100%!important;}}
+    div[data-testid="stMetric"] [data-testid="stMetricLabel"] > div,
+    div[data-testid="stMetric"] [data-testid="stMetricLabel"] p,
+    div[data-testid="stMetric"] [data-testid="stMetricValue"] > div {{text-align:center!important;justify-content:center!important;width:100%!important;}}
     .mini-cal {{background:#fff;border:1px solid {BORDER};border-radius:16px;padding:14px;margin:8px 0 16px 0;box-shadow:0 8px 20px rgba(15,23,42,.05)}}
     .mini-cal-head {{font-weight:900;margin-bottom:10px;color:#111827}}
     .mini-grid{{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}}
