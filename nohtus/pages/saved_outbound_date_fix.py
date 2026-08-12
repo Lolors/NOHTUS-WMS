@@ -125,6 +125,7 @@ def page_saved_outbound():
     original_cancel_order = saved_v4.saved_v2._cancel_order
     original_filter_orders = saved_v4._filter_orders
     original_text_input = st.text_input
+    original_columns = st.columns
     original_caption = st.caption
 
     def patched_cancel_order(order_id):
@@ -134,28 +135,29 @@ def page_saved_outbound():
         return result
 
     def patched_filter_orders(all_orders, start_date, end_date, customer_term, search_term):
-        filtered = original_filter_orders(all_orders, start_date, end_date, customer_term, search_term)
         number_term = _normalize_order_number_search(
             st.session_state.get("saved_outbound_number_search", "")
         )
-        if number_term and not filtered.empty:
+        if number_term:
+            # 출고지시서 번호는 날짜 범위와 무관하게 전체 저장 이력에서 찾는다.
+            filtered = original_filter_orders(all_orders, None, None, customer_term, search_term)
             if number_term.isdigit():
-                filtered = filtered[filtered["id"].astype(int) == int(number_term)]
-            else:
-                filtered = filtered.iloc[0:0]
-        return filtered
+                return filtered[filtered["id"].astype(int) == int(number_term)]
+            return filtered.iloc[0:0]
+        return original_filter_orders(all_orders, start_date, end_date, customer_term, search_term)
+
+    def patched_columns(spec, *args, **kwargs):
+        # 기본 필터 행의 매출처/제품명 검색 폭을 줄이고 남는 폭을 번호 검색에 자연스럽게 사용한다.
+        if isinstance(spec, (list, tuple)) and list(spec) == [1.5, 1.5, 3, 4]:
+            spec = [1.5, 1.5, 2.1, 4.9]
+        return original_columns(spec, *args, **kwargs)
 
     def patched_text_input(label, *args, **kwargs):
         label_text = str(label or "").strip()
         key = str(kwargs.get("key") or "")
 
-        if label_text == "매출처" and key == "saved_customer_search":
-            input_col, _spacer = st.columns([7, 3], gap="small")
-            with input_col:
-                return original_text_input(label, *args, **kwargs)
-
         if label_text == "검색" and key == "saved_outbound_search":
-            product_col, number_col = st.columns([7, 3], gap="small")
+            product_col, number_col = original_columns([4, 3], gap="small")
             with product_col:
                 product_term = original_text_input(label, *args, **kwargs)
             with number_col:
@@ -163,7 +165,7 @@ def page_saved_outbound():
                     "출고지시서 번호",
                     placeholder="예: 125",
                     key="saved_outbound_number_search",
-                    help="이력 메모의 '출고지시서 #번호'에 표시되는 실제 출고지시서 번호로 검색합니다.",
+                    help="이력 메모의 '출고지시서 #번호'에 표시되는 실제 출고지시서 번호입니다. 번호 검색 시 시작일·종료일은 적용하지 않습니다.",
                 )
             return product_term
 
@@ -171,12 +173,13 @@ def page_saved_outbound():
 
     def patched_caption(body, *args, **kwargs):
         if str(body or "").strip() == "날짜, 매출처, 제품 검색으로 출고지시서를 필터링합니다.":
-            body = "날짜, 매출처, 제품명, 출고지시서 번호로 출고지시서를 필터링합니다."
+            body = "날짜, 매출처, 제품명, 출고지시서 번호로 출고지시서를 필터링합니다. 번호 검색은 전체 기간을 대상으로 합니다."
         return original_caption(body, *args, **kwargs)
 
     saved_v4.saved_v2._cancel_order = patched_cancel_order
     saved_v4._filter_orders = patched_filter_orders
     st.text_input = patched_text_input
+    st.columns = patched_columns
     st.caption = patched_caption
     try:
         return saved_v4.page_saved_outbound()
@@ -184,4 +187,5 @@ def page_saved_outbound():
         saved_v4.saved_v2._cancel_order = original_cancel_order
         saved_v4._filter_orders = original_filter_orders
         st.text_input = original_text_input
+        st.columns = original_columns
         st.caption = original_caption
