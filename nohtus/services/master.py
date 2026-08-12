@@ -136,13 +136,26 @@ def approve_mapping_conflict(company, source_name):
     exec_sql('INSERT OR REPLACE INTO product_match_conflict_approvals(company, source_name, approved_at)\n                VALUES(?,?,?)', (company, source_name, now))
 
 def delete_product(product_id):
-    """제품 매칭표에서 제품을 삭제한다. 이미 재고/이력/출고지시에 사용된 제품이면 삭제하지 않는다."""
+    """제품 매칭 행을 삭제한다. 같은 표준제품명의 다른 매핑 행이 남으면 사용 중이어도 해당 행만 삭제한다."""
     with connect() as con:
         cur = con.cursor()
         row = cur.execute('SELECT standard_name FROM products WHERE id=?', (int(product_id),)).fetchone()
         if not row:
             raise ValueError('삭제할 제품을 찾을 수 없습니다.')
-        name = row[0]
+        name = str(row[0] or '').strip()
+
+        duplicate_count = cur.execute(
+            'SELECT COUNT(*) FROM products WHERE standard_name=? AND id<>?',
+            (name, int(product_id)),
+        ).fetchone()[0]
+
+        # inventory/transactions/outbound_order_items는 products.id가 아니라 표준제품명 문자열을 참조한다.
+        # 따라서 같은 표준제품명의 다른 매핑 행이 남아 있으면 선택한 중복 매핑 행만 안전하게 삭제할 수 있다.
+        if int(duplicate_count or 0) > 0:
+            cur.execute('DELETE FROM products WHERE id=?', (int(product_id),))
+            con.commit()
+            return
+
         used = 0
         for table, col in [('inventory', 'product_name'), ('transactions', 'product_name'), ('outbound_order_items', 'product_name')]:
             try:
@@ -151,7 +164,8 @@ def delete_product(product_id):
             except Exception:
                 pass
         if used > 0:
-            raise ValueError(f'이미 재고/이력/출고지시에 사용된 제품이라 삭제할 수 없습니다. 사용 건수: {used}건')
+            raise ValueError(f'이 표준제품명의 마지막 매핑 행이며 재고/이력/출고지시에 사용 중이라 삭제할 수 없습니다. 사용 건수: {used}건')
+
         cur.execute('DELETE FROM erp_ambiguous_candidates WHERE candidate_product=?', (name,))
         cur.execute('DELETE FROM products WHERE id=?', (int(product_id),))
         con.commit()
