@@ -6,6 +6,7 @@ import streamlit.components.v1 as components
 
 import nohtus.pages.location_map as location_map_page
 from nohtus.pages.location_map import page_map as _page_map
+from nohtus.db import q
 
 
 _ORIGINAL_MAP_SEARCH_RESULTS = location_map_page.page_map_search_results
@@ -28,9 +29,23 @@ def _is_material_or_promo_location(value):
     return location.startswith("G1") or location.startswith("G2") or "홍보물랙" in location
 
 
+def _material_product_names() -> set[str]:
+    try:
+        rows = q(
+            "SELECT DISTINCT standard_name FROM products "
+            "WHERE COALESCE(is_material, 0)=1 AND TRIM(COALESCE(standard_name,''))<>''"
+        )
+    except Exception:
+        return set()
+    if rows.empty or "standard_name" not in rows.columns:
+        return set()
+    return {str(value).strip() for value in rows["standard_name"].dropna().tolist() if str(value).strip()}
+
+
 def _page_map_search_results_with_available_filter(term, compact: bool = False):
     available_only = bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False))
     exclude_materials = bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True))
+    material_products = _material_product_names() if exclude_materials else set()
     original_q = location_map_page.q
 
     def filtered_q(sql, params=()):
@@ -59,6 +74,8 @@ def _page_map_search_results_with_available_filter(term, compact: bool = False):
                 keep &= ~locations.apply(lambda value: _normalized_location(value).startswith("P"))
             if exclude_materials:
                 keep &= ~locations.apply(_is_material_or_promo_location)
+                if material_products and "product_name" in result.columns:
+                    keep &= ~result["product_name"].fillna("").astype(str).str.strip().isin(material_products)
             result = result.loc[keep].copy()
         return result
 
@@ -134,6 +151,7 @@ def page_map():
     original_text_input = st.text_input
     original_button = st.button
     original_markdown = st.markdown
+    material_products = _material_product_names()
 
     st.markdown(
         """
@@ -160,9 +178,10 @@ def page_map():
                 ].copy()
                 locations = filtered_inv["location"].fillna("").astype(str)
             if bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)):
-                filtered_inv = filtered_inv.loc[
-                    ~locations.apply(_is_material_or_promo_location)
-                ].copy()
+                keep = ~locations.apply(_is_material_or_promo_location)
+                if material_products and "product_name" in filtered_inv.columns:
+                    keep &= ~filtered_inv["product_name"].fillna("").astype(str).str.strip().isin(material_products)
+                filtered_inv = filtered_inv.loc[keep].copy()
 
         groups = original_product_groups(product_name, filtered_inv)
         if bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)):
@@ -210,7 +229,7 @@ def page_map():
                     "부자재 및 홍보물 제외",
                     value=bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)),
                     key=_EXCLUDE_MATERIALS_KEY,
-                    help="G1 계열, G2 계열 및 홍보물랙 재고를 총재고와 재고 분포에서 제외합니다.",
+                    help="G1/G2 계열, 홍보물랙 및 제품마스터에서 '부자재'로 체크한 제품을 총재고와 재고 분포에서 제외합니다.",
                 )
             return value
         return original_text_input(label, *args, **kwargs)
