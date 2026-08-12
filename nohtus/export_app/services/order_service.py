@@ -306,6 +306,23 @@ def sync_historical_shipments(case_id: int) -> None:
             db.execute('DELETE FROM shipment_items WHERE id=?', (shipment['id'],))
 
 
+def _clean_optional_row_id(raw_id) -> int | None:
+    """Return a stable DB id for existing rows; new data-editor rows have NaN/NA ids."""
+    if raw_id is None or raw_id == '':
+        return None
+    try:
+        import pandas as pd
+        if pd.isna(raw_id):
+            return None
+    except (TypeError, ValueError):
+        return None
+    try:
+        numeric_id = int(raw_id)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return numeric_id if numeric_id > 0 else None
+
+
 def save_order_items(case_id: int, edited) -> None:
     now = now_text()
     with db.connect() as conn:
@@ -320,8 +337,7 @@ def save_order_items(case_id: int, edited) -> None:
         seen_ids: set[int] = set()
 
         for _, row in edited.iterrows():
-            raw_id = row.get('_id')
-            order_id = int(raw_id) if raw_id not in (None, '', 0) else None
+            order_id = _clean_optional_row_id(row.get('_id'))
             product_name = str(row.get('제품명', '') or '').strip()
             quantity = float(row.get('수량', 0) or 0)
             unit = str(row.get('단위', 'EA') or 'EA').strip() or 'EA'
