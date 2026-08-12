@@ -157,15 +157,15 @@ def page_saved_outbound():
         key = str(kwargs.get("key") or "")
 
         if label_text == "검색" and key == "saved_outbound_search":
-            product_col, number_col = original_columns([4, 3], gap="small")
+            product_col, number_col = original_columns([5.6, 1.4], gap="small")
             with product_col:
                 product_term = original_text_input(label, *args, **kwargs)
             with number_col:
                 original_text_input(
                     "출고지시서 번호",
-                    placeholder="예: 125",
+                    placeholder="12345",
                     key="saved_outbound_number_search",
-                    help="이력 메모의 '출고지시서 #번호'에 표시되는 실제 출고지시서 번호입니다. 번호 검색 시 시작일·종료일은 적용하지 않습니다.",
+                    help="이력조회 메모에 표시되는 출고지시서 번호입니다. 번호로 검색 시 전체 기간에서 검색합니다.",
                 )
             return product_term
 
