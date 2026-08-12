@@ -135,12 +135,10 @@ def page_export_shipment_intake():
     def patched_data_editor(data, *args, **kwargs):
         key = str(kwargs.get("key") or "")
         if key.startswith("saved_wms_editor_"):
-            # 행 삭제 기능은 유지하되 선택 체크박스도 그대로 보인다.
             kwargs["num_rows"] = "dynamic"
         return original_data_editor(data, *args, **kwargs)
 
     def patched_button(label, *args, **kwargs):
-        # 저장된 재고 삭제는 data_editor의 행 삭제 기능으로 처리한다.
         if str(label).strip() == "선택 행 삭제" and str(kwargs.get("key") or "").startswith("delete_saved_rows_"):
             return False
         return original_button(label, *args, **kwargs)
@@ -151,8 +149,6 @@ def page_export_shipment_intake():
             if text == "### 수출대기 저장제품":
                 body = "### 수출대기 제품"
             elif text == "##### 저장된 재고":
-                # 수량이 부족하면 뒤에서 렌더링될 '추가할 재고 선택'을 이 자리보다
-                # 위쪽 placeholder에 넣어, 사용자가 먼저 부족분을 채우게 한다.
                 if not ui_state["order_fulfilled"] and ui_state["picker_placeholder"] is None:
                     ui_state["picker_placeholder"] = st.empty()
                 return original_markdown(
@@ -170,8 +166,6 @@ def page_export_shipment_intake():
                     unsafe_allow_html=True,
                 )
             elif text == "##### 재고 선택":
-                # 주문 수량이 충족되면 검색창부터 추천 제품, 재고표, 저장 버튼까지
-                # 전부 하나의 접힌 영역 안에 넣는다. 부족하면 위 placeholder로 이동한다.
                 if ui_state["order_fulfilled"]:
                     outer = st.expander("추가할 재고 선택 · 주문수량 충족", expanded=False)
                 else:
@@ -208,7 +202,6 @@ def page_export_shipment_intake():
     def patched_selectbox(label, options, *args, **kwargs):
         value = original_selectbox(label, options, *args, **kwargs)
         if str(kwargs.get("key") or "").startswith("linked_selected_order_"):
-            # 표시 문자열: '🟢 제품명 · 10 / 10 EA'
             match = re.search(r"·\s*([\d,.]+)\s*/\s*([\d,.]+)", str(value or ""))
             if match:
                 try:
@@ -272,7 +265,21 @@ def page_export_packing():
 
     original_selectbox = st.selectbox
     original_markdown = st.markdown
-    original_button = st.button
+    original_expander = st.expander
+
+    ui_state = {"preset_save_slot": None}
+
+    original_markdown(
+        """
+        <style>
+        [class*="st-key-box_preset_save_slot"] {
+            width: 50vw !important;
+            max-width: 50vw !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     def preset_label(name: object, presets: dict, last_values: dict | None) -> str:
         text = str(name)
@@ -319,30 +326,54 @@ def page_export_packing():
                 st.success(f'{preset_name.strip()} 프리셋을 추가했습니다.')
                 st.rerun()
 
+    def patched_markdown(body, *args, **kwargs):
+        result = original_markdown(body, *args, **kwargs)
+        if isinstance(body, str) and body.strip() == '#### 박스 프리셋':
+            ui_state['preset_save_slot'] = st.container(key='box_preset_save_slot')
+        return result
+
     def patched_selectbox(label, options, *args, **kwargs):
         key = str(kwargs.get('key') or '')
         if str(label).strip() == '프리셋' and key.startswith('box_preset_select_'):
             presets = packing_service.list_box_presets()
             last_values = packing_service.get_last_box_values()
             kwargs['format_func'] = lambda value: preset_label(value, presets, last_values)
+            select_col, manage_col = st.columns([7, 3])
+            with select_col:
+                selected = original_selectbox(label, options, *args, **kwargs)
+            with manage_col:
+                st.markdown('<div style="height: 1.72rem"></div>', unsafe_allow_html=True)
+                if st.button(
+                    '프리셋 관리',
+                    use_container_width=True,
+                    key=f'open_box_preset_manager_{key}',
+                ):
+                    preset_manager_dialog()
+            return selected
         return original_selectbox(label, options, *args, **kwargs)
 
-    def patched_markdown(body, *args, **kwargs):
-        result = original_markdown(body, *args, **kwargs)
-        if isinstance(body, str) and body.strip() == '#### 박스 프리셋':
-            if original_button('프리셋 관리', key='open_box_preset_manager'):
-                preset_manager_dialog()
-        return result
+    def patched_expander(label, *args, **kwargs):
+        text = str(label).strip()
+        if text == '현재 규격을 새 프리셋으로 저장':
+            slot = ui_state.get('preset_save_slot')
+            if slot is not None:
+                with slot:
+                    return original_expander(label, *args, **kwargs)
+        if text == 'CTN 삭제':
+            original_markdown('#### CTN 삭제')
+            return st.container()
+        return original_expander(label, *args, **kwargs)
 
     st.selectbox = patched_selectbox
     st.markdown = patched_markdown
+    st.expander = patched_expander
     try:
         with export_db.connection_session():
             박스_패킹_edit.render()
     finally:
         st.selectbox = original_selectbox
         st.markdown = original_markdown
-        st.button = original_button
+        st.expander = original_expander
 
 
 def page_export_domestic_delivery():
