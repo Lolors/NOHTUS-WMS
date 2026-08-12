@@ -5,6 +5,7 @@ import re
 import streamlit as st
 
 from nohtus.export_app import db as export_db
+from nohtus.export_app.services import packing_service
 # views가 update_confirmed_export_waiting_items를 import하기 전에 수정 이력 패치를 적용한다.
 import nohtus.services.export_confirm_history_patch  # noqa: F401
 # 수출대기 저장의 추가/수량수정/행삭제를 WMS 수출대기 상태와 안전하게 동기화한다.
@@ -267,8 +268,36 @@ def page_export_sales_registration():
 
 
 def page_export_packing():
-    with export_db.connection_session():
-        박스_패킹_edit.render()
+    original_selectbox = st.selectbox
+
+    def preset_label(name: object, presets: dict, last_values: dict | None) -> str:
+        text = str(name)
+        values = last_values if text == '마지막 사용값' else presets.get(text)
+        if not values:
+            return text
+        try:
+            length = float(values.get('length_cm', 0))
+            width = float(values.get('width_cm', 0))
+            height = float(values.get('height_cm', 0))
+            weight = float(values.get('weight_kg', 0))
+        except (TypeError, ValueError, AttributeError):
+            return text
+        return f'{text} ({length:g}x{width:g}x{height:g}) {weight:g}kg'
+
+    def patched_selectbox(label, options, *args, **kwargs):
+        key = str(kwargs.get('key') or '')
+        if str(label).strip() == '프리셋' and key.startswith('box_preset_select_'):
+            presets = packing_service.list_box_presets()
+            last_values = packing_service.get_last_box_values()
+            kwargs['format_func'] = lambda value: preset_label(value, presets, last_values)
+        return original_selectbox(label, options, *args, **kwargs)
+
+    st.selectbox = patched_selectbox
+    try:
+        with export_db.connection_session():
+            박스_패킹_edit.render()
+    finally:
+        st.selectbox = original_selectbox
 
 
 def page_export_domestic_delivery():
