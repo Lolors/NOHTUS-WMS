@@ -268,7 +268,11 @@ def page_export_sales_registration():
 
 
 def page_export_packing():
+    from nohtus.export_app.components.streamlit_compat import dialog
+
     original_selectbox = st.selectbox
+    original_markdown = st.markdown
+    original_button = st.button
 
     def preset_label(name: object, presets: dict, last_values: dict | None) -> str:
         text = str(name)
@@ -284,6 +288,37 @@ def page_export_packing():
             return text
         return f'{text} ({length:g}x{width:g}x{height:g}) {weight:g}kg'
 
+    @dialog('프리셋 관리', width='large')
+    def preset_manager_dialog() -> None:
+        st.caption('박스 규격과 무게를 직접 입력해 새 프리셋을 추가합니다.')
+        existing = packing_service.list_box_presets()
+        if existing:
+            st.caption('현재 프리셋: ' + ', '.join(sorted(existing)))
+
+        with st.form('box_preset_manager_add_form'):
+            preset_name = st.text_input('프리셋 이름', placeholder='예: 덱스레보')
+            size_cols = st.columns(3)
+            length = size_cols[0].number_input('가로(cm)', min_value=0.0, step=0.1)
+            width = size_cols[1].number_input('세로(cm)', min_value=0.0, step=0.1)
+            height = size_cols[2].number_input('높이(cm)', min_value=0.0, step=0.1)
+            weight = st.number_input('무게(kg)', min_value=0.0, step=0.1)
+            save_preset = st.form_submit_button('프리셋 추가', type='primary', use_container_width=True)
+
+        if save_preset:
+            try:
+                packing_service.save_box_preset(
+                    preset_name,
+                    float(length),
+                    float(width),
+                    float(height),
+                    float(weight),
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.success(f'{preset_name.strip()} 프리셋을 추가했습니다.')
+                st.rerun()
+
     def patched_selectbox(label, options, *args, **kwargs):
         key = str(kwargs.get('key') or '')
         if str(label).strip() == '프리셋' and key.startswith('box_preset_select_'):
@@ -292,12 +327,22 @@ def page_export_packing():
             kwargs['format_func'] = lambda value: preset_label(value, presets, last_values)
         return original_selectbox(label, options, *args, **kwargs)
 
+    def patched_markdown(body, *args, **kwargs):
+        result = original_markdown(body, *args, **kwargs)
+        if isinstance(body, str) and body.strip() == '#### 박스 프리셋':
+            if original_button('프리셋 관리', key='open_box_preset_manager'):
+                preset_manager_dialog()
+        return result
+
     st.selectbox = patched_selectbox
+    st.markdown = patched_markdown
     try:
         with export_db.connection_session():
             박스_패킹_edit.render()
     finally:
         st.selectbox = original_selectbox
+        st.markdown = original_markdown
+        st.button = original_button
 
 
 def page_export_domestic_delivery():
