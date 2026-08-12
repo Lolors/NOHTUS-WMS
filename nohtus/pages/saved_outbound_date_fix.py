@@ -113,10 +113,19 @@ def _refresh_customer_last_sale(customer_name, company, cancelled_date):
         con.commit()
 
 
+def _normalize_order_number_search(value):
+    text = str(value or "").strip()
+    text = text.replace("출고지시서", "").replace("번호", "").replace("#", "").strip()
+    return text
+
+
 def page_saved_outbound():
     _extend_default_range_to_scheduled_orders()
 
     original_cancel_order = saved_v4.saved_v2._cancel_order
+    original_filter_orders = saved_v4._filter_orders
+    original_text_input = st.text_input
+    original_caption = st.caption
 
     def patched_cancel_order(order_id):
         customer_name, company, cancelled_date = _cancelled_order_customer(order_id)
@@ -124,8 +133,55 @@ def page_saved_outbound():
         _refresh_customer_last_sale(customer_name, company, cancelled_date)
         return result
 
+    def patched_filter_orders(all_orders, start_date, end_date, customer_term, search_term):
+        filtered = original_filter_orders(all_orders, start_date, end_date, customer_term, search_term)
+        number_term = _normalize_order_number_search(
+            st.session_state.get("saved_outbound_number_search", "")
+        )
+        if number_term and not filtered.empty:
+            if number_term.isdigit():
+                filtered = filtered[filtered["id"].astype(int) == int(number_term)]
+            else:
+                filtered = filtered.iloc[0:0]
+        return filtered
+
+    def patched_text_input(label, *args, **kwargs):
+        label_text = str(label or "").strip()
+        key = str(kwargs.get("key") or "")
+
+        if label_text == "매출처" and key == "saved_customer_search":
+            input_col, _spacer = st.columns([7, 3], gap="small")
+            with input_col:
+                return original_text_input(label, *args, **kwargs)
+
+        if label_text == "검색" and key == "saved_outbound_search":
+            product_col, number_col = st.columns([7, 3], gap="small")
+            with product_col:
+                product_term = original_text_input(label, *args, **kwargs)
+            with number_col:
+                original_text_input(
+                    "출고지시서 번호",
+                    placeholder="예: 125",
+                    key="saved_outbound_number_search",
+                    help="이력 메모의 '출고지시서 #번호'에 표시되는 실제 출고지시서 번호로 검색합니다.",
+                )
+            return product_term
+
+        return original_text_input(label, *args, **kwargs)
+
+    def patched_caption(body, *args, **kwargs):
+        if str(body or "").strip() == "날짜, 매출처, 제품 검색으로 출고지시서를 필터링합니다.":
+            body = "날짜, 매출처, 제품명, 출고지시서 번호로 출고지시서를 필터링합니다."
+        return original_caption(body, *args, **kwargs)
+
     saved_v4.saved_v2._cancel_order = patched_cancel_order
+    saved_v4._filter_orders = patched_filter_orders
+    st.text_input = patched_text_input
+    st.caption = patched_caption
     try:
         return saved_v4.page_saved_outbound()
     finally:
         saved_v4.saved_v2._cancel_order = original_cancel_order
+        saved_v4._filter_orders = original_filter_orders
+        st.text_input = original_text_input
+        st.caption = original_caption
