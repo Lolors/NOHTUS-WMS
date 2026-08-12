@@ -13,7 +13,7 @@ from nohtus.db import q
 from nohtus.db import read_cache_token as _wms_read_cache_token
 from nohtus.services.export_waiting import ensure_export_waiting_tables
 from . import location_map_legacy as _legacy
-from .location_map_reality_patch import apply_reality_layout
+from .location_map_new_layout import apply_new_layout
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _THUMB_DIR = _PROJECT_ROOT / "data" / "product_images" / "thumbs"
@@ -233,7 +233,7 @@ function productCardsHtml(rows){""",
             ".export-order-card{border:1.5px solid #c7d2fe;background:#f8faff;padding:14px;margin-bottom:14px}.export-order-title{font-size:18px;font-weight:800;color:#1e3a8a;margin-bottom:5px}.export-product-row{border-top:1px solid #dbeafe;margin-top:12px;padding-top:12px}.export-product-row:first-of-type{border-top:0;margin-top:8px;padding-top:0}</style>",
             1,
         )
-        html = apply_reality_layout(html)
+        html = apply_new_layout(html)
         return original_html(html, *args, **kwargs)
 
     _legacy.components.html = enhanced_html
