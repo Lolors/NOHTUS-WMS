@@ -159,7 +159,8 @@ def render() -> None:
 
     cases = [
         case for case in export_service.active_cases()
-        if str(case['stage'] or '').strip() in {'패킹 대기', '패킹 완료'}
+        if str(case['stage'] or '').strip() != '국내배송'
+        and str(case['stage'] or '').strip() in {'패킹 대기', '패킹 완료'}
     ]
     if not cases:
         st.info('패킹 대기 또는 패킹 완료 단계인 수출 건이 없습니다.')

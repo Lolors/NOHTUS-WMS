@@ -161,7 +161,7 @@ def render_similar_price_lookup(*, key: str) -> None:
 
 def render() -> None:
     st.title('수출대기 저장')
-    st.caption('국내배송 단계까지 진행된 건도 선택해 주문과 실제 출고제품을 수정·저장할 수 있습니다.')
+    st.caption('국내배송 전 단계의 주문과 실제 출고제품을 수정·저장합니다.')
 
     if success_message := st.session_state.pop('shipment_intake_success_message', None):
         st.success(success_message)

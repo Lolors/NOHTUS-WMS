@@ -64,7 +64,7 @@ def _cached_intake_editable_cases(
              AND status<>'취소'
              AND stage IN (
                  '주문 접수','출고 대기','입고 진행',
-                 '패킹 대기','패킹 진행','패킹 완료','국내배송'
+                 '패킹 대기','패킹 진행','패킹 완료'
              )
            ORDER BY COALESCE(NULLIF(actual_ship_date,''),created_at) DESC'''
     )
@@ -72,8 +72,32 @@ def _cached_intake_editable_cases(
 
 
 def intake_editable_cases():
-    """Current export cases whose intake may still need correction."""
+    """Current non-domestic-delivery cases whose intake may still be edited."""
     return _cached_intake_editable_cases(db.read_cache_token())
+
+
+@db.backup_batch
+def return_domestic_to_packing_complete(case_id: int) -> None:
+    """Move a domestic-delivery case back to packing complete without data loss."""
+    case = db.row(
+        'SELECT case_type,status,stage FROM export_cases WHERE id=?',
+        (case_id,),
+    )
+    if case is None:
+        raise ValueError('수출 건을 찾을 수 없습니다.')
+    if str(case['case_type'] or '').strip() == 'historical':
+        raise ValueError('과거 수출 건의 단계는 되돌릴 수 없습니다.')
+    if str(case['stage'] or '').strip() != '국내배송':
+        raise ValueError('국내배송 단계인 주문만 패킹완료로 되돌릴 수 있습니다.')
+
+    db.execute(
+        "UPDATE export_cases SET stage='패킹 완료',status='진행중',updated_at=? WHERE id=?",
+        (now_text(), case_id),
+    )
+    _cached_case.clear()
+    _cached_case_list.clear()
+    _cached_active_cases.clear()
+    _cached_intake_editable_cases.clear()
 
 
 @db.backup_batch

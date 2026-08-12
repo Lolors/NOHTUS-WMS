@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import os
 import subprocess
-from datetime import date
 from pathlib import Path
 
 import streamlit as st
-from nohtus.export_app.services import export_service, folder_service, order_service
+from nohtus.export_app.services import export_service, folder_service, history_service, order_service
 from nohtus.export_app.services.shared_document_view_service import (
     default_document_period,
     filter_and_sort_cases,
@@ -118,30 +117,23 @@ def render() -> None:
         st.session_state.pop('shared_document_view', None)
     case = export_service.get_case(case_id)
 
-    raw_ship_date = str(case['actual_ship_date'] or '').strip()
-    try:
-        current_ship_date = date.fromisoformat(raw_ship_date[:10])
-    except ValueError:
-        current_ship_date = date.today()
-
-    ship_date_cols = st.columns([3, 1, 6])
-    edited_ship_date = ship_date_cols[0].date_input(
-        '출고일',
-        value=current_ship_date,
-        key=f'shared_document_ship_date_{case_id}',
+    is_domestic_delivery = (
+        str(case['case_type'] or '').strip() != 'historical'
+        and str(case['stage'] or '').strip() == '국내배송'
     )
-    if ship_date_cols[1].button(
-        '출고일 저장',
-        key=f'save_shared_document_ship_date_{case_id}',
-        use_container_width=True,
+    if is_domestic_delivery and st.button(
+        '패킹완료 단계로 되돌리기',
+        key=f'return_shared_document_to_packing_{case_id}',
+        type='secondary',
     ):
         try:
-            export_service.update_actual_ship_date(case_id, edited_ship_date.isoformat())
+            export_service.return_domestic_to_packing_complete(case_id)
             folder_service.sync_case_folder(case_id)
-        except Exception as exc:
-            st.error(f'출고일을 저장하지 못했습니다: {exc}')
+            history_service.add(case_id, '단계 되돌리기', '국내배송 → 패킹 완료')
+        except ValueError as exc:
+            st.error(str(exc))
         else:
-            st.success(f'출고일을 {edited_ship_date.isoformat()}로 저장했습니다.')
+            st.success('패킹완료 단계로 되돌렸습니다. 수출대기 저장과 박스 패킹에서 다시 선택할 수 있습니다.')
             st.rerun()
 
     is_final_document_available = str(case['stage'] or '').strip() in {
