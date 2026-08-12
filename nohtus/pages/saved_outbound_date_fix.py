@@ -157,9 +157,9 @@ def page_saved_outbound():
         key = str(kwargs.get("key") or "")
 
         if label_text == "검색" and key == "saved_outbound_search":
-            product_col, number_col = original_columns([2.8, 4.2], gap="small")
+            product_col, number_col = original_columns([1, 1], gap="small")
             with product_col:
-                product_term = original_text_input(label, *args, **kwargs)
+                product_term = original_text_input("제품명", *args, **kwargs)
             with number_col:
                 original_text_input(
                     "출고지시서 번호",
