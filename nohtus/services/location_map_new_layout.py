@@ -86,8 +86,8 @@ def _map_markup() -> str:
     # C1 has only three cells, but each cell matches one C2 cell (82.5 x 78.3px).
     p.append(_grid("nw-grid3", [_cell("C1-03"), _cell("C1-02"), _cell("C1-01")], 650, 330, 83, 235, "farm"))
 
-    p.append(_grid("nw-grid3", [_cell("X1-01"), _cell("X1-02"), _cell("X1-03")], 1418, 190, 64, 240, "bidata"))
-    p.append('<div class="nw-note" style="left:960px;top:380px;width:250px;">X1-01~03 : 폐기<br>X1-01-01 : 대표님 시술용</div>')
+    p.append(_grid("nw-grid3", [_cell("X1-01"), _cell("X1-02"), _cell("X1-03")], 1418, 250, 64, 240, "bidata"))
+    p.append('<div class="nw-note" style="left:1145px;top:335px;width:250px;">X1-01~03 : 폐기<br>X1-01-01 : 대표님 시술용</div>')
 
     p.append(_zone("P", "P<br>-수출대기-", 18, 600, 160, 82, "export"))
     p.append(_zone("T1", "T1", 190, 600, 105, 82, "support"))
@@ -99,7 +99,10 @@ def _map_markup() -> str:
 
     # Keep the warehouse structure to the left of the refrigerators.  Only the
     # extension around R1/R2 is open on its top/right, as in the reference plan.
-    p.append('<div class="nw-outline" style="left:930px;top:590px;width:330px;height:185px;"></div>')
+    p.append('<div class="nw-outline" style="left:930px;top:590px;width:330px;height:185px;border-bottom:0;"></div>')
+    # Split the lower guide around N so no line is visible through the button.
+    p.append('<div class="nw-outline" style="left:930px;top:775px;width:70px;height:1px;border-width:1.5px 0 0 0;"></div>')
+    p.append('<div class="nw-outline" style="left:1150px;top:775px;width:110px;height:1px;border-width:1.5px 0 0 0;"></div>')
     p.append('<div class="nw-outline" style="left:1260px;top:590px;width:222px;height:110px;border-width:0 0 1.5px 0;"></div>')
     p.append(_grid("nw-grid2h", [_cell("R2"), _cell("R1")], 1280, 615, 185, 72, "cold"))
 
