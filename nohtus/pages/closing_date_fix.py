@@ -103,14 +103,27 @@ def _sort_checklist_items(items):
 
 
 def _deduplicate_outbound_details(items):
-    """조인 결과가 늘어나도 일반 출고 상세는 체크리스트에 한 번만 남긴다."""
-    if items is None or items.empty or "출고상세ID" not in items.columns:
+    """일반 출고의 동일 상세가 여러 ID로 저장돼도 체크리스트에는 한 번만 남긴다."""
+    if items is None or items.empty:
         return items
 
     result = items.copy()
-    detail_ids = result["출고상세ID"]
-    duplicated = detail_ids.notna() & detail_ids.duplicated(keep="first")
-    return result.loc[~duplicated].reset_index(drop=True)
+    if "출고상세ID" in result.columns:
+        detail_ids = result["출고상세ID"]
+        duplicated_ids = detail_ids.notna() & detail_ids.duplicated(keep="first")
+        result = result.loc[~duplicated_ids].copy()
+
+    signature_columns = [
+        "출고지시서ID", "재고ID", "사업장", "로케이션", "표준제품명",
+        "제조번호", "유통기한", "출고수량",
+    ]
+    if not all(column in result.columns for column in signature_columns):
+        return result.reset_index(drop=True)
+
+    order_ids = pd.to_numeric(result["출고지시서ID"], errors="coerce")
+    regular_outbound = order_ids.gt(0)
+    duplicated_signatures = result.duplicated(subset=signature_columns, keep="first")
+    return result.loc[~(regular_outbound & duplicated_signatures)].reset_index(drop=True)
 
 
 def _location_final_stock_map(items, query_func):
