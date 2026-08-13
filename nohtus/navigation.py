@@ -6,7 +6,7 @@ from nohtus.auth import is_admin
 MENU_SECTIONS = [
     (None, ["로케이션 맵", "유통기한 임박", "매입가 조회", "자사제품 조회", "전체 조회", "수출 현황"]),
     ("출고", ["출고지시", "저장된 출고지시", "마감"]),
-    ("재고", ["입고 등록", "이동 등록", "이력 조회", "재고 실사", "출고가능 관리"]),
+    ("재고", ["입고 등록", "이동 등록", "이력 조회", "재고 실사"]),
     ("수출", [
         "주문 입력",
         "주문 검색 및 수정",
@@ -18,7 +18,7 @@ MENU_SECTIONS = [
         "기간별 통계",
         "내 폴더",
     ]),
-    ("기초", ["제품 매칭 관리", "거래처 관리"]),
+    ("기초", ["제품 매칭 관리", "부자재 관리", "거래처 관리"]),
 ]
 
 # The export section is collapsed by default and rendered only when explicitly
@@ -31,7 +31,7 @@ HIDDEN_PAGES = {
     "재고 찾기": "RC3.3: 모바일용 재고 찾기 메뉴는 임시 숨김. 기능 함수는 유지한다.",
 }
 
-ADMIN_ONLY_PAGES = {"출고가능 관리"}
+ADMIN_ONLY_PAGES = set()
 DEFAULT_PAGE = "로케이션 맵"
 _OUTBOUND_WORK_PAGES = {"출고지시"}
 _OUTBOUND_STATE_KEYS = [

@@ -17,8 +17,7 @@ def product_master_excel_bytes(highlight_missing=False):
     """제품 마스터를 사용자가 수정하기 쉬운 엑셀 양식으로 내보낸다.
     v3.7부터 제품코드는 노투스팜 ERP 전용 코드로 취급하고, 전산상 명칭은 제품마스터에서 제외한다.
     """
-    df = q("SELECT standard_name, erp_nohtuspharm_name, product_code, erp_noh_name, erp_noh_code, erp_nohtus_name, bidata_name, aliases, COALESCE(is_material, 0) AS is_material FROM products ORDER BY standard_name, id")
-    df["is_material"] = df["is_material"].apply(lambda value: "O" if int(value or 0) else "")
+    df = q("SELECT standard_name, erp_nohtuspharm_name, product_code, erp_noh_name, erp_noh_code, erp_nohtus_name, bidata_name, aliases FROM products ORDER BY standard_name, id")
     out = df.rename(columns={
         "standard_name": "표준제품명",
         "erp_nohtuspharm_name": "노투스팜 ERP명",
@@ -28,7 +27,6 @@ def product_master_excel_bytes(highlight_missing=False):
         "erp_nohtus_name": "노투스 ERP명",
         "bidata_name": "비자료명",
         "aliases": "별칭",
-        "is_material": "부자재",
     })
     bio = BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
@@ -39,7 +37,7 @@ def product_master_excel_bytes(highlight_missing=False):
         border = Border(left=thin, right=thin, top=thin, bottom=thin)
         header_fill = PatternFill("solid", fgColor="E5E7EB")
         need_fill = PatternFill("solid", fgColor="FFF2CC")
-        widths = {"A":24,"B":34,"C":28,"D":34,"E":28,"F":34,"G":34,"H":34,"I":12}
+        widths = {"A":24,"B":34,"C":28,"D":34,"E":28,"F":34,"G":34,"H":34}
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
         ws.freeze_panes = "A2"
@@ -104,12 +102,13 @@ def import_product_master_excel(uploaded_file):
         "NOH ERP 제품코드": "erp_noh_code",
         "노투스 ERP명": "erp_nohtus_name",
         "비자료명": "bidata_name",
-        "부자재": "is_material",
     }
     df = df.rename(columns={c: rename.get(c, c) for c in df.columns})
     if "standard_name" not in df.columns:
         raise ValueError("엑셀에 '표준제품명' 컬럼이 필요합니다.")
-    has_material_column = "is_material" in df.columns
+    # 부자재 분류는 전용 '부자재 관리' 화면에서만 변경한다. 예전 양식에
+    # 부자재 열이 남아 있어도 가져오기에서 무시하고 기존 분류를 보존한다.
+    df = df.drop(columns=["부자재", "is_material"], errors="ignore")
     for c in ["product_code", "aliases", "erp_nohtuspharm_name", "erp_nohtus_name", "erp_noh_name", "erp_noh_code", "bidata_name", "is_material"]:
         if c not in df.columns:
             df[c] = ""
@@ -140,10 +139,7 @@ def import_product_master_excel(uploaded_file):
         if not name:
             skipped += 1
             continue
-        material = _material_flag(
-            r.get("is_material"),
-            existing_material_flags.get(name, 0),
-        ) if has_material_column else existing_material_flags.get(name, 0)
+        material = existing_material_flags.get(name, 0)
         key = (
             name,
             erp_np,
@@ -185,11 +181,25 @@ def import_product_master_excel(uploaded_file):
     return 0, inserted, skipped
 
 
-def product_options(term=""):
+def product_options(term="", *, exclude_materials=False):
     term = (term or "").strip().lower()
     df = q("""SELECT standard_name, warehouse_name, aliases,
                     erp_nohtuspharm_name, erp_nohtus_name, erp_noh_name, bidata_name
-             FROM products ORDER BY standard_name, id""")
+             FROM products
+             WHERE NOT ? OR (
+                 LOWER(TRIM(CAST(COALESCE(is_material, 0) AS TEXT)))
+                     NOT IN ('1','true','yes','y','o','v','체크','부자재')
+                 AND NOT EXISTS (
+                     SELECT 1 FROM inventory i
+                     WHERE TRIM(COALESCE(i.product_name,''))=TRIM(COALESCE(products.standard_name,''))
+                       AND (
+                           REPLACE(UPPER(TRIM(COALESCE(i.location,''))), ' ', '') LIKE 'G1%'
+                           OR REPLACE(UPPER(TRIM(COALESCE(i.location,''))), ' ', '') LIKE 'G2%'
+                           OR REPLACE(UPPER(TRIM(COALESCE(i.location,''))), ' ', '') LIKE '%홍보물랙%'
+                       )
+                 )
+             )
+             ORDER BY standard_name, id""", (1 if exclude_materials else 0,))
     if term:
         search_cols = ["standard_name", "warehouse_name", "aliases", "erp_nohtuspharm_name", "erp_nohtus_name", "erp_noh_name", "bidata_name"]
         mask = df.apply(lambda r: any(term in str(r.get(c, "")).lower() for c in search_cols), axis=1)

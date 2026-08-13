@@ -46,6 +46,17 @@ def _build_where(companies, product_term, erp_term, exclude_p=False, exclude_mat
         where.append(f"{normalized} NOT LIKE 'G1%'")
         where.append(f"{normalized} NOT LIKE 'G2%'")
         where.append(f"{normalized} NOT LIKE '%홍보물랙%'")
+        # 제품마스터의 부자재 플래그도 로케이션과 무관하게 같은 옵션으로 제외한다.
+        # SQLite의 느슨한 타입 특성상 기존 DB/수입 데이터에 숫자, 문자열, boolean
+        # 표현이 섞여 있어도 참으로 저장된 값은 모두 동일하게 처리한다.
+        where.append(
+            "NOT EXISTS ("
+            "SELECT 1 FROM products p "
+            "WHERE TRIM(COALESCE(p.standard_name,'')) = TRIM(COALESCE(inventory.product_name,'')) "
+            "AND LOWER(TRIM(CAST(COALESCE(p.is_material, 0) AS TEXT))) "
+            "IN ('1','true','yes','y','o','v','체크','부자재')"
+            ")"
+        )
     return " AND ".join(where), params
 
 

@@ -627,7 +627,7 @@ def page_outbound():
     with top_right:
         st.markdown("### 제품 선택")
         term = st.text_input("제품 검색", placeholder="제품명/전산상 명칭/별칭을 입력하세요", key="out_product_term")
-        opts = product_options(term)
+        opts = product_options(term, exclude_materials=True)
         if opts.empty:
             st.info("제품을 검색하세요.")
         else:

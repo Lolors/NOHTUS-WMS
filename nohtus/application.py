@@ -28,6 +28,7 @@ from nohtus.pages.export_waiting import page_export_waiting as _page_export_wait
 from nohtus.pages.history_business import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.location_map_business import page_map
+from nohtus.pages.material_management import page_material_management
 from nohtus.pages.customer_master_business import page_customer_master
 from nohtus.pages.mobile_stock_business import page_mobile_stock_finder
 from nohtus.pages.move import page_move
@@ -303,6 +304,7 @@ def main():
             return
         page_shippable_inventory()
     elif menu == "제품 매칭 관리": page_product_matching()
+    elif menu == "부자재 관리": page_material_management()
     elif menu == "거래처 관리": page_customer_master()
     elif menu == "매입가 조회": page_purchase_history()
     elif menu == "이력 조회": page_history()
