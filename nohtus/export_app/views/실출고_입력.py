@@ -44,6 +44,7 @@ def inventory_selection_source(current_rows: list[dict], stock_rows: pd.DataFram
             '_product_name': current.get('product_name') or '',
             '선택': True,
             '사업장': current.get('business_unit') or '',
+            '로케이션': current.get('source_location') or current.get('location') or '',
             '제조번호': current.get('lot_no') or '',
             '유통기한': current.get('expiry_date') or '',
             '보유수량': qty,
@@ -61,15 +62,26 @@ def inventory_selection_source(current_rows: list[dict], stock_rows: pd.DataFram
             '_product_name': stock['product_name'] or '',
             '선택': False,
             '사업장': stock['company'] or '',
+            '로케이션': stock['location'] or '',
             '제조번호': stock['lot'] or '',
             '유통기한': stock['exp_date'] or '',
             '보유수량': available,
             '선택수량': 0.0,
         }
     return pd.DataFrame(rows.values(), columns=[
-        '_inventory_id', '_location', '_product_name', '선택', '사업장',
+        '_inventory_id', '_location', '_product_name', '선택', '사업장', '로케이션',
         '제조번호', '유통기한', '보유수량', '선택수량',
     ])
+
+
+def _sync_folder_without_aborting_inventory(case_id: int) -> None:
+    """재고 저장/삭제 성공은 잘못된 공유폴더 설정과 독립적으로 유지한다."""
+    _, error = folder_service.try_sync_case_folder(case_id)
+    if error:
+        st.warning(
+            '재고 작업은 저장됐지만 수출 폴더를 갱신하지 못했습니다. '
+            f'공유폴더 설정을 확인하세요: {error}'
+        )
 
 
 def saved_inventory_source(current_rows: list[dict]) -> pd.DataFrame:
@@ -454,7 +466,7 @@ def render() -> None:
                     hide_index=True,
                     use_container_width=True,
                     disabled=['사업장', '제조번호', '유통기한', '보유수량'],
-                    column_order=['선택', '사업장', '제조번호', '유통기한', '보유수량', '선택수량'],
+                        column_order=['선택', '사업장', '로케이션', '제조번호', '유통기한', '보유수량', '선택수량'],
                     column_config={
                         '_inventory_id': None,
                         '_location': None,
@@ -513,7 +525,7 @@ def render() -> None:
                             st.error(str(cleanup_exc))
                         else:
                             if cleanup['deleted']:
-                                folder_service.sync_case_folder(case_id)
+                                _sync_folder_without_aborting_inventory(case_id)
                                 history_service.add(
                                     case_id,
                                     '고아 출고저장 행 강제 삭제',
@@ -527,7 +539,7 @@ def render() -> None:
                             else:
                                 st.error(str(exc))
                     else:
-                        folder_service.sync_case_folder(case_id)
+                        _sync_folder_without_aborting_inventory(case_id)
                         history_service.add(
                             case_id,
                             '저장된 재고 선택 삭제',
@@ -593,7 +605,7 @@ def render() -> None:
                     except ValueError as exc:
                         st.error(str(exc))
                     else:
-                        folder_service.sync_case_folder(case_id)
+                        _sync_folder_without_aborting_inventory(case_id)
                         history_service.add(
                             case_id,
                             '주문품목별 출고 저장',

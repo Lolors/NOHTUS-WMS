@@ -511,6 +511,14 @@ def sync_case_folder(case_id: int, *, force_workbook: bool = False) -> Path:
     return target
 
 
+def try_sync_case_folder(case_id: int, *, force_workbook: bool = False) -> tuple[Path | None, str]:
+    """업무 데이터 저장 후 폴더 경로 오류가 화면 전체를 중단시키지 않게 한다."""
+    try:
+        return sync_case_folder(case_id, force_workbook=force_workbook), ''
+    except OSError as exc:
+        return None, str(exc)
+
+
 def sync_case_folder_if_changed(case_id: int) -> tuple[Path, bool]:
     """Synchronize one case only when its content or required files changed.
 
