@@ -42,12 +42,15 @@ def _safe_text(value, default=""):
 def _closing_customer_name(row, customers_df=None):
     """수출대기는 공백을 포함한 전체 제목을, 일반 출고는 추정 거래처를 표시한다."""
     title = _safe_text(row.get("출고지시서제목", ""))
+    stored_customer = _safe_text(row.get("저장매출처", ""))
     try:
         order_id = int(row.get("출고지시서ID", 0) or 0)
     except (TypeError, ValueError):
         order_id = 0
     if order_id < 0:
         return title
+    if stored_customer:
+        return stored_customer
     return _infer_customer_from_title(title, customers_df)[0]
 
 
@@ -379,6 +382,7 @@ def page_closing():
     if tab == "오늘 출고 체크":
         items = q("""SELECT COALESCE(o.title, '') AS 출고지시서제목,
                             o.id AS 출고지시서ID,
+                            COALESCE(NULLIF(TRIM(o.customer_name), ''), '') AS 저장매출처,
                             i.id AS 출고상세ID,
                             i.inventory_id AS 재고ID,
                             i.company AS 사업장,

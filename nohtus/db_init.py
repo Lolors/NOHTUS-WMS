@@ -203,6 +203,13 @@ def init_db():
     """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_outbound_items_order ON outbound_order_items(order_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_outbound_items_product_order ON outbound_order_items(product_name, order_id)")
+    outbound_order_cols = {
+        r[1] for r in cur.execute("PRAGMA table_info(outbound_orders)").fetchall()
+    }
+    if "customer_name" not in outbound_order_cols:
+        cur.execute("ALTER TABLE outbound_orders ADD COLUMN customer_name TEXT")
+    if "customer_company" not in outbound_order_cols:
+        cur.execute("ALTER TABLE outbound_orders ADD COLUMN customer_company TEXT")
     cur.execute("""
     CREATE TABLE IF NOT EXISTS product_bom_items(
         id INTEGER PRIMARY KEY AUTOINCREMENT,

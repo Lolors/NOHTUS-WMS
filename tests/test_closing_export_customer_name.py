@@ -31,6 +31,18 @@ class ClosingExportCustomerNameTests(unittest.TestCase):
             '글로우필 메디앤톡',
         )
 
+    def test_regular_outbound_uses_full_stored_customer_before_title_guess(self):
+        row = pd.Series({
+            '출고지시서ID': 8,
+            '출고지시서제목': '미국-글로우필 메디앤톡 제품A 외 2품목',
+            '저장매출처': '미국-글로우필 메디앤톡',
+        })
+
+        self.assertEqual(
+            _closing_customer_name(row, pd.DataFrame()),
+            '미국-글로우필 메디앤톡',
+        )
+
 
 if __name__ == '__main__':
     unittest.main()
