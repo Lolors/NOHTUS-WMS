@@ -39,6 +39,18 @@ def _safe_text(value, default=""):
     return text if text and text.lower() != "nan" else default
 
 
+def _closing_customer_name(row, customers_df=None):
+    """수출대기는 공백을 포함한 전체 제목을, 일반 출고는 추정 거래처를 표시한다."""
+    title = _safe_text(row.get("출고지시서제목", ""))
+    try:
+        order_id = int(row.get("출고지시서ID", 0) or 0)
+    except (TypeError, ValueError):
+        order_id = 0
+    if order_id < 0:
+        return title
+    return _infer_customer_from_title(title, customers_df)[0]
+
+
 def _today_outbound_final_stock_map(items):
     if items.empty:
         return {}
@@ -400,7 +412,10 @@ def page_closing():
             items["출고수량"] = pd.to_numeric(items["출고수량"], errors="coerce").fillna(0).astype(int)
             try:
                 customers_for_close = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
-                items["매출처"] = items["출고지시서제목"].apply(lambda x: _infer_customer_from_title(x, customers_for_close)[0])
+                items["매출처"] = items.apply(
+                    lambda row: _closing_customer_name(row, customers_for_close),
+                    axis=1,
+                )
             except Exception:
                 items["매출처"] = ""
             _render_today_outbound_html(items)
