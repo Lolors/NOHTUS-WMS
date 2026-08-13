@@ -4,7 +4,11 @@ from unittest.mock import patch
 import pandas as pd
 
 from nohtus.export_app.services import folder_service
-from nohtus.export_app.views.실출고_입력 import inventory_selection_source
+from nohtus.export_app.views.실출고_입력 import (
+    inventory_selection_source,
+    remaining_shipment_ids,
+    selected_shipment_ids,
+)
 
 
 class ShipmentIntakeInventorySafetyTests(unittest.TestCase):
@@ -33,6 +37,24 @@ class ShipmentIntakeInventorySafetyTests(unittest.TestCase):
 
         self.assertIsNone(folder)
         self.assertIn('denied', error)
+
+    def test_selected_shipment_ids_returns_only_checked_valid_ids(self):
+        edited = pd.DataFrame([
+            {'선택': True, '_shipment_id': 11},
+            {'선택': False, '_shipment_id': 12},
+            {'선택': True, '_shipment_id': None},
+        ])
+
+        self.assertEqual(selected_shipment_ids(edited), [11])
+
+    def test_remaining_shipment_ids_checks_delete_result(self):
+        rows = [{'id': 12}]
+        export_db = remaining_shipment_ids.__globals__['export_db']
+        with patch.object(export_db, 'rows', return_value=rows) as query:
+            result = remaining_shipment_ids(3, 4, [11, 12])
+
+        self.assertEqual(result, [12])
+        self.assertEqual(query.call_args.args[1], (3, 4, 11, 12))
 
 
 if __name__ == '__main__':

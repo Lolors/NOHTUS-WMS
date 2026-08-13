@@ -84,6 +84,32 @@ def _sync_folder_without_aborting_inventory(case_id: int) -> None:
         )
 
 
+def selected_shipment_ids(edited_saved: pd.DataFrame) -> list[int]:
+    """저장행 편집기의 체크 상태에서 유효한 shipment ID만 안정적으로 꺼낸다."""
+    if edited_saved is None or edited_saved.empty:
+        return []
+    if '선택' not in edited_saved.columns or '_shipment_id' not in edited_saved.columns:
+        return []
+    selected = edited_saved.loc[
+        edited_saved['선택'].fillna(False).astype(bool), '_shipment_id'
+    ]
+    return pd.to_numeric(selected, errors='coerce').dropna().astype(int).tolist()
+
+
+def remaining_shipment_ids(case_id: int, order_item_id: int, shipment_ids: list[int]) -> list[int]:
+    """삭제 요청 뒤 EXPORT 미러 DB에 실제로 남은 선택행을 확인한다."""
+    ids = sorted({int(value) for value in shipment_ids if int(value) > 0})
+    if not ids:
+        return []
+    placeholders = ','.join('?' for _ in ids)
+    rows = export_db.rows(
+        f'''SELECT id FROM shipment_items
+            WHERE case_id=? AND order_item_id=? AND id IN ({placeholders})''',
+        tuple([case_id, order_item_id, *ids]),
+    )
+    return [int(row['id']) for row in rows]
+
+
 def saved_inventory_source(current_rows: list[dict]) -> pd.DataFrame:
     """모든 저장행을 한 표에서 수정하고 선택 삭제할 수 있게 만든다."""
     return pd.DataFrame([
@@ -446,13 +472,12 @@ def render() -> None:
                         },
                         key=f'saved_wms_editor_{case_id}_{selected_order_id}',
                     )
-                    selected_saved_ids = edited_saved.loc[
-                        edited_saved['선택'].fillna(False).astype(bool), '_shipment_id'
-                    ].astype(int).tolist()
+                    selected_saved_ids = selected_shipment_ids(edited_saved)
                     delete_clicked = st.form_submit_button(
                         '선택 행 삭제',
                         type='secondary',
                         use_container_width=True,
+                        key=f'delete_saved_rows_{case_id}_{selected_order_id}',
                     )
 
                 active_saved = edited_saved
@@ -514,7 +539,16 @@ def render() -> None:
                             kept_rows=kept_original_rows,
                             picked_rows=[],
                         )
-                    except ValueError as exc:
+                        leftovers = remaining_shipment_ids(
+                            case_id, selected_order_id, selected_saved_ids
+                        )
+                        if leftovers:
+                            stale_inventory_cleanup_service.force_delete_stale_rows(
+                                case_id=case_id,
+                                order_item_id=selected_order_id,
+                                shipment_ids=leftovers,
+                            )
+                    except Exception as exc:
                         try:
                             cleanup = stale_inventory_cleanup_service.force_delete_stale_rows(
                                 case_id=case_id,
