@@ -34,6 +34,8 @@ _NEW_CSS = r"""
 /* Approved palette. The '비자료' legend is intentionally the same as F1. */
 .map-stage .farm{background:#fff0b8;border-color:#e6a700}.map-stage .notus{background:#c9edf7;border-color:#3b9fc1}.map-stage .noh{background:#f7b3df;border-color:#dc5daf}
 .map-stage .bidata{background:#c5eceb;border-color:#4aa6a5}.map-stage .cold{background:#d9f2a6;border-color:#86b64a}.map-stage .export{background:#ffe3c7;border-color:#f08a37}.map-stage .expiry{background:#e7d4f1;border-color:#a779c0}.map-stage .support{background:#fff}.map-stage .promo{background:#fff}
+.map-stage .export{color:#c2410c!important}.map-stage .expiry{color:#dc2626!important}
+.map-stage .export.selected,.map-stage .expiry.selected{color:#fff!important}
 .swatch.g{background:#c5eceb!important;border-color:#4aa6a5!important;}
 
 .map-stage .stock-dot,.map-stage .dynamic-stock-dot{position:absolute!important;right:9px!important;top:9px!important;width:10px!important;height:10px!important;background:#62dc58!important;border:1.5px solid #15803d!important;border-radius:999px!important;box-shadow:0 0 0 2px rgba(255,255,255,.85)!important;pointer-events:none!important;z-index:7!important;}
@@ -42,9 +44,10 @@ _NEW_CSS = r"""
 .map-stage .nw-note{position:absolute;padding:15px 18px;border:1.5px dashed #cbd5e1;border-radius:14px;color:#64748b;font-size:16px;line-height:1.7;background:rgba(255,255,255,.78);pointer-events:none;}
 .map-stage .nw-rec-label{position:absolute;color:#0f172a;font-size:14px;font-weight:800;text-align:center;pointer-events:none;}
 .map-stage .nw-hatched{background:repeating-linear-gradient(135deg,#fff 0,#fff 8px,#d9efff 8px,#d9efff 10px)!important;border-color:#38a6e8!important;z-index:12!important;isolation:isolate;}
-.map-stage .special-menu{left:995px!important;top:630px!important;width:180px!important;display:none;grid-template-columns:1fr!important;}
+.map-stage .special-menu{position:absolute!important;left:995px!important;top:630px!important;width:180px!important;display:none;grid-template-columns:1fr!important;z-index:30!important;background:#fff!important;border:1px solid #cbd5e1!important;border-radius:12px!important;box-shadow:0 12px 28px rgba(15,23,42,.18)!important;padding:6px!important;}
 .map-stage .special-menu.open{display:grid!important;gap:6px!important;}
-.map-stage .special-menu button{font-size:13px!important;padding:8px 10px!important;}
+.map-stage .special-menu button{appearance:none!important;border:1px solid #e2e8f0!important;background:#f8fafc!important;border-radius:9px!important;font-size:13px!important;font-weight:900!important;color:#0f172a!important;padding:8px 10px!important;cursor:pointer!important;}
+.map-stage .special-menu button:hover,.map-stage .special-menu button.selected{background:#22c55e!important;color:#fff!important;border-color:#16a34a!important;}
 
 @media(max-width:1500px){.map-stage{transform:scale(.62)!important}.map-scroll{height:565px!important}}
 @media(max-width:1250px){.map-stage{transform:scale(.54)!important}.map-scroll{height:492px!important}}
@@ -89,9 +92,9 @@ def _map_markup() -> str:
     p.append(_grid("nw-grid3", [_cell("X1-01"), _cell("X1-02"), _cell("X1-03")], 1418, 250, 64, 240, "bidata"))
     p.append('<div class="nw-note" style="left:1195px;top:335px;width:210px;">X1-01~03 : 폐기<br>X1-01-01 : 대표님 시술용</div>')
 
-    p.append(_zone("P", "P<br>-수출대기-", 18, 600, 160, 82, "export"))
+    p.append(_zone("P", "P<br>수출대기", 18, 600, 160, 82, "export"))
     p.append(_zone("T1", "T1", 190, 600, 105, 82, "support"))
-    p.append(_zone("Q", "Q<br>-유통기한임박-", 18, 710, 160, 82, "expiry"))
+    p.append(_zone("Q", "Q<br>유통기한임박", 18, 710, 160, 82, "expiry"))
     p.append(_zone("T2", "T2", 190, 710, 105, 82, "support"))
 
     p.append(_zone("REC", '<span><span style="color:#ef2d22">REC</span><br>Receiving</span>', 490, 690, 130, 72, "support"))
@@ -112,14 +115,14 @@ def _map_markup() -> str:
     p.append('<div class="nw-outline" style="left:410px;top:865px;width:520px;height:45px;border-right:0;border-bottom:0;"></div>')
     p.append('<div class="nw-outline" style="left:930px;top:775px;width:1px;height:90px;border-width:0 0 0 1.5px;"></div>')
 
-    p.append('<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button></div>')
+    p.append('<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button><button type="button" data-special-loc="지엠메딕">지엠메딕</button></div>')
     return '<div class="map-scroll"><div class="map-stage">' + ''.join(p) + '</div></div>'
 
 
 _DYNAMIC_DOTS_JS = r"""
 function refreshApprovedMapDots(){
   document.querySelectorAll('.map-stage .dynamic-stock-dot').forEach(el=>el.remove());
-  const specialStockLocations=['오른쪽 창고','사무실(4층)'];
+  const specialStockLocations=['오른쪽 창고','사무실(4층)','지엠메딕'];
   const hasStock = (loc) => {
     if(loc==='N') return specialStockLocations.some(special => (inventory[special]||[]).some(row => Number(row.qty||0)>0));
     return Object.entries(inventory||{}).some(([key, rows]) => {

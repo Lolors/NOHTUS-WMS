@@ -24,11 +24,6 @@ def _is_non_counted_location(value):
     return _normalized_location(value) == _NON_COUNTED_LOCATION
 
 
-def _is_material_or_promo_location(value):
-    location = _normalized_location(value)
-    return location.startswith("G1") or location.startswith("G2") or "홍보물랙" in location
-
-
 def _material_product_names() -> set[str]:
     try:
         rows = q(
@@ -73,7 +68,6 @@ def _page_map_search_results_with_available_filter(term, compact: bool = False):
             if available_only:
                 keep &= ~locations.apply(lambda value: _normalized_location(value).startswith("P"))
             if exclude_materials:
-                keep &= ~locations.apply(_is_material_or_promo_location)
                 if material_products and "product_name" in result.columns:
                     keep &= ~result["product_name"].fillna("").astype(str).str.strip().isin(material_products)
             result = result.loc[keep].copy()
@@ -194,7 +188,7 @@ def page_map():
                 ].copy()
                 locations = filtered_inv["location"].fillna("").astype(str)
             if bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)):
-                keep = ~locations.apply(_is_material_or_promo_location)
+                keep = pd.Series(True, index=filtered_inv.index)
                 if material_products and "product_name" in filtered_inv.columns:
                     keep &= ~filtered_inv["product_name"].fillna("").astype(str).str.strip().isin(material_products)
                 filtered_inv = filtered_inv.loc[keep].copy()
@@ -242,10 +236,10 @@ def page_map():
             with materials_col:
                 st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
                 st.checkbox(
-                    "부자재 및 홍보물 제외",
+                    "부자재 제외",
                     value=bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)),
                     key=_EXCLUDE_MATERIALS_KEY,
-                    help="G1/G2 계열, 홍보물랙 및 제품마스터에서 '부자재'로 체크한 제품을 총재고와 재고 분포에서 제외합니다.",
+                    help="부자재 관리 메뉴에 등록된 제품을 총재고와 재고 분포에서 제외합니다.",
                 )
             return value
         return original_text_input(label, *args, **kwargs)

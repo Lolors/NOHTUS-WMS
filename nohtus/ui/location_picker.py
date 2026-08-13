@@ -98,13 +98,19 @@ def inbound_location_picker(default_area="REC"):
     level_default = str(defaults.get("level") or "")
     token = int(st.session_state.get("_inbound_picker_token", 0) or 0)
 
-    areas = list(AREA_CONFIG.keys())
+    areas = [area for area in AREA_CONFIG if area != "N"] + (["N"] if "N" in AREA_CONFIG else [])
     if area_default not in areas:
         area_default = default_area if default_area in areas else areas[0]
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        area = st.selectbox("구역", areas, index=areas.index(area_default), key=f"inbound_area_{token}")
+        area = st.selectbox(
+            "구역",
+            areas,
+            index=areas.index(area_default),
+            key=f"inbound_area_{token}",
+            format_func=lambda value: "기타 위치" if value == "N" else value,
+        )
 
     cfg = AREA_CONFIG.get(area, {"lines": [], "levels": []})
     if area == "Q":

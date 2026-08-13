@@ -11,10 +11,6 @@ from nohtus.export_app.views.주문_검색_및_수정 import render_wms_confirma
 RECENT_DAYS = 30
 
 
-class _HideDuplicateConfirmationSection(Exception):
-    """Stop the shared confirmation renderer before its duplicate second section."""
-
-
 def render() -> None:
     st.title('수출확정 매출 등록')
     st.markdown(
@@ -111,21 +107,8 @@ def render() -> None:
         st.warning('중복된 수출번호는 병합하거나 새 번호로 변경한 뒤 확정할 수 있습니다.')
         return
 
-    original_markdown = st.markdown
-
-    def patched_markdown(body, *args, **kwargs):
-        if str(body or '').strip() == '#### 선택 품목 수출확정':
-            raise _HideDuplicateConfirmationSection
-        return original_markdown(body, *args, **kwargs)
-
-    st.markdown = patched_markdown
-    try:
-        render_wms_confirmation_section(
-            export_no,
-            shipment_date_label='등록일자',
-            shipment_date_help='이번에 선택한 품목에 적용할 등록일자를 선택하세요.',
-        )
-    except _HideDuplicateConfirmationSection:
-        pass
-    finally:
-        st.markdown = original_markdown
+    render_wms_confirmation_section(
+        export_no,
+        shipment_date_label='등록일자',
+        shipment_date_help='이번에 선택한 품목에 적용할 등록일자를 선택하세요.',
+    )

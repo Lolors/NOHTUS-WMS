@@ -324,7 +324,7 @@ def page_history():
     with filter_col1:
         company = st.selectbox("사업장", ["전체"] + COMPANIES, index=0, key="history_company")
     with filter_col2:
-        tx_label = st.selectbox("이력유형", ["전체", "입고", "출고지시", "출고지시취소", "이동", "재고조정", "재고정보수정", "전산재고"], index=0, key="history_tx_label")
+        tx_label = st.selectbox("이력유형", ["전체", "입고", "출고지시", "출고지시취소", "패키지 생산", "이동", "재고조정", "재고정보수정", "전산재고"], index=0, key="history_tx_label")
     with filter_col3:
         start_date = st.date_input("시작일", value=default_start, key="history_start_date")
     with filter_col4:
@@ -478,7 +478,7 @@ def page_history():
         "memo": "메모",
     }
     show = show.rename(columns=rename_cols)
-    wanted = ["일시", "사용자", "이력유형", "매출처", "제품명", "LOT", "유통기한", "출발사업장", "출발위치", "도착사업장", "도착위치", "수량", "최종재고", "메모"]
+    wanted = ["일시", "이력유형", "매출처", "제품명", "LOT", "유통기한", "출발사업장", "출발위치", "도착사업장", "도착위치", "수량", "최종재고", "메모", "사용자"]
     show = show[[c for c in wanted if c in show.columns]]
 
     if is_admin():

@@ -9,7 +9,6 @@ import nohtus.pages.outbound as outbound_page
 import nohtus.pages.outbound_business as outbound_business
 
 
-_BLOCKED_OUTBOUND_LOCATIONS = {"홍보물랙", "G1", "G2"}
 _INVALID_RECENT_DATE_TEXTS = {"", "none", "nan", "nat", "null", "-"}
 
 
@@ -19,9 +18,7 @@ def _normalized_location(value):
 
 def _is_blocked_outbound_location(value):
     location = _normalized_location(value)
-    if location in _BLOCKED_OUTBOUND_LOCATIONS:
-        return True
-    return location.startswith("P") or location.startswith("G1-") or location.startswith("G2-")
+    return location.startswith("P")
 
 
 def _normalized_recent_date(value):
@@ -156,10 +153,6 @@ def page_outbound():
                 FROM inventory
                 WHERE product_name=? AND qty>0
                   AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT LIKE 'P%'
-                  AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') <> '홍보물랙'
-                  AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT IN ('G1','G2')
-                  AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT LIKE 'G1-%'
-                  AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT LIKE 'G2-%'
                 """,
                 params,
             )

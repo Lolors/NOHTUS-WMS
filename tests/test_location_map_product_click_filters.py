@@ -29,7 +29,6 @@ def _load_patched_product_groups(original_product_groups, session_state=None, ma
         "_AVAILABLE_ONLY_KEY": lmb._AVAILABLE_ONLY_KEY,
         "_EXCLUDE_MATERIALS_KEY": lmb._EXCLUDE_MATERIALS_KEY,
         "_normalized_location": lmb._normalized_location,
-        "_is_material_or_promo_location": lmb._is_material_or_promo_location,
         "_is_non_counted_location": lmb._is_non_counted_location,
         "_SPECIAL_SORT_PREFIX": lmb._SPECIAL_SORT_PREFIX,
         "material_products": set(material_products or []),
@@ -40,7 +39,7 @@ def _load_patched_product_groups(original_product_groups, session_state=None, ma
 
 class LocationMapProductClickFilterTests(unittest.TestCase):
     """제품명을 클릭했을 때 로케이션맵이 재고 분포를 만드는 patched_product_groups()의
-    실제 필터링/집계 로직을 검증한다. 체크박스 상태에 따라 P 재고와 부자재/홍보물 재고를
+    실제 필터링/집계 로직을 검증한다. 체크박스 상태에 따라 P 재고와 메뉴에 등록된 부자재를
     빼고 재계산하고, 홍보물랙처럼 집계 제외 로케이션은 별도로 처리해야 한다."""
 
     def test_p_location_excluded_when_available_only_checked(self):
@@ -81,14 +80,14 @@ class LocationMapProductClickFilterTests(unittest.TestCase):
 
         self.assertEqual(sorted(captured["inv_df"]["location"].tolist()), ["A1-01", "P"])
 
-    def test_material_locations_excluded_by_default(self):
+    def test_storage_location_does_not_classify_material_by_default(self):
         captured = {}
 
         def fake_original(product_name, inv_df):
             captured["inv_df"] = inv_df
             return []
 
-        # 세션에 값이 없으면 부자재/홍보물 제외는 기본값 True로 동작해야 한다.
+        # 세션에 값이 없어 부자재 제외가 켜져도 위치만으로는 제외하지 않는다.
         patched = _load_patched_product_groups(fake_original, session_state={})
         inv_df = pd.DataFrame([
             {"location": "A1-01", "qty": 5, "company": "NOH"},
@@ -98,7 +97,10 @@ class LocationMapProductClickFilterTests(unittest.TestCase):
         ])
         patched("제품", inv_df)
 
-        self.assertEqual(captured["inv_df"]["location"].tolist(), ["A1-01"])
+        self.assertEqual(
+            captured["inv_df"]["location"].tolist(),
+            ["A1-01", "G1-01", "G2-01", "홍보물랙"],
+        )
 
     def test_material_locations_kept_when_unchecked(self):
         captured = {}
@@ -118,7 +120,7 @@ class LocationMapProductClickFilterTests(unittest.TestCase):
 
         self.assertEqual(sorted(captured["inv_df"]["location"].tolist()), ["A1-01", "G1-01"])
 
-    def test_product_master_material_is_excluded_outside_material_locations(self):
+    def test_registered_material_is_excluded_regardless_of_location(self):
         captured = {}
 
         def fake_original(product_name, inv_df):

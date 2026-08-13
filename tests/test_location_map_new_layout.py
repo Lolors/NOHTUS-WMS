@@ -27,8 +27,18 @@ class LocationMapNewLayoutTests(unittest.TestCase):
 
     def test_labels_cell_size_and_open_refrigerator_lines(self):
         markup = _map_markup()
-        self.assertIn("P<br>-수출대기-", markup)
-        self.assertIn("Q<br>-유통기한임박-", markup)
+        self.assertIn("P<br>수출대기", markup)
+        self.assertIn("Q<br>유통기한임박", markup)
+        self.assertNotIn("-수출대기-", markup)
+        self.assertNotIn("-유통기한임박-", markup)
+        self.assertIn(".map-stage .export{color:#c2410c!important}", _NEW_CSS)
+        self.assertIn(".map-stage .expiry{color:#dc2626!important}", _NEW_CSS)
+
+    def test_special_location_menu_is_positioned_as_an_overlay(self):
+        markup = _map_markup()
+        self.assertIn('data-special-loc="지엠메딕"', markup)
+        self.assertIn("position:absolute!important", _NEW_CSS)
+        self.assertIn(".map-stage .special-menu.open{display:grid!important", _NEW_CSS)
         self.assertIn('left:650px;top:330px;width:83px;height:235px', markup)
         self.assertIn('left:930px;top:590px;width:330px;height:185px;border-right:0;border-bottom:0', markup)
         self.assertIn('left:1260px;top:590px;width:1px;height:110px;border-width:0 0 0 1.5px', markup)

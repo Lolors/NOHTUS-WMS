@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from html import escape
+import re
+import unicodedata
 
 import pandas as pd
 import streamlit as st
@@ -48,7 +50,12 @@ def _normalized_name(value: object) -> str:
     name = _clean_text(value)
     if not name:
         return ''
-    return order_service.normalize_product_name(name) or name.casefold()
+    # 주문행 중복 여부는 검색/유사 제품 매칭보다 보수적으로 판단해야 한다.
+    # 괄호와 숫자는 포장 규격을 나타내므로 제거하지 않는다. 예를 들어
+    # ``니들 (1EA)``와 ``니들(20EA)``는 서로 다른 주문 제품이다.
+    normalized = unicodedata.normalize('NFKC', name)
+    normalized = normalized.replace('\u200b', '').replace('\ufeff', '')
+    return re.sub(r'\s+', '', normalized).casefold()
 
 
 def duplicate_groups(cleaned: pd.DataFrame) -> list[list[int]]:

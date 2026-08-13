@@ -44,6 +44,8 @@ def init_db():
             cur.execute(f"ALTER TABLE products ADD COLUMN {col} TEXT")
     if "is_material" not in product_cols:
         cur.execute("ALTER TABLE products ADD COLUMN is_material INTEGER NOT NULL DEFAULT 0")
+    if "material_type" not in product_cols:
+        cur.execute("ALTER TABLE products ADD COLUMN material_type TEXT")
     cur.execute("""
     CREATE TABLE IF NOT EXISTS inventory(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -201,6 +203,17 @@ def init_db():
     """)
     cur.execute("CREATE INDEX IF NOT EXISTS idx_outbound_items_order ON outbound_order_items(order_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_outbound_items_product_order ON outbound_order_items(product_name, order_id)")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS product_bom_items(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        finished_product TEXT NOT NULL,
+        material_product TEXT NOT NULL,
+        quantity_per REAL NOT NULL DEFAULT 1,
+        updated_at TEXT,
+        UNIQUE(finished_product, material_product)
+    )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_product_bom_finished ON product_bom_items(finished_product)")
     _migrate_promo_rack_locations(cur)
     cur.execute("""
     CREATE TABLE IF NOT EXISTS product_match_conflict_approvals(

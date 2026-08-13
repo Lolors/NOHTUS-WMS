@@ -43,10 +43,7 @@ def _build_where(companies, product_term, erp_term, exclude_p=False, exclude_mat
     if exclude_p:
         where.append(f"{normalized} NOT LIKE 'P%'")
     if exclude_materials:
-        where.append(f"{normalized} NOT LIKE 'G1%'")
-        where.append(f"{normalized} NOT LIKE 'G2%'")
-        where.append(f"{normalized} NOT LIKE '%홍보물랙%'")
-        # 제품마스터의 부자재 플래그도 로케이션과 무관하게 같은 옵션으로 제외한다.
+        # 보관 위치가 아니라 부자재 관리 메뉴에서 지정한 분류만 기준으로 제외한다.
         # SQLite의 느슨한 타입 특성상 기존 DB/수입 데이터에 숫자, 문자열, boolean
         # 표현이 섞여 있어도 참으로 저장된 값은 모두 동일하게 처리한다.
         where.append(
@@ -185,10 +182,10 @@ def page_all_inventory():
             )
         with c2:
             exclude_materials = st.checkbox(
-                "부자재 및 홍보물 제외",
+                "부자재 제외",
                 value=True,
                 key="all_inv_exclude_materials",
-                help="G1 계열, G2 계열 및 홍보물랙 재고를 조회 결과와 합계에서 제외합니다.",
+                help="부자재 관리 메뉴에 등록된 제품을 조회 결과와 합계에서 제외합니다.",
             )
 
     row_count, total_qty, by_company = _summary_query(

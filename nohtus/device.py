@@ -31,9 +31,14 @@ def sync_mobile_flag():
             if (url.searchParams.get("force_desktop") === "1") {
               return;
             }
-            const isMobile = window.parent.innerWidth <= 768 ? "1" : "0";
-            if (url.searchParams.get("wms_mobile") !== isMobile) {
-              url.searchParams.set("wms_mobile", isMobile);
+            const isMobile = window.parent.innerWidth <= 768;
+            const current = url.searchParams.get("wms_mobile");
+            if (isMobile && current !== "1") {
+              url.searchParams.set("wms_mobile", "1");
+              window.parent.history.replaceState(null, "", url.toString());
+              window.parent.location.reload();
+            } else if (!isMobile && current !== null) {
+              url.searchParams.delete("wms_mobile");
               window.parent.history.replaceState(null, "", url.toString());
               window.parent.location.reload();
             }

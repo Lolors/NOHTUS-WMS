@@ -21,7 +21,7 @@ from nohtus.services.inbound import (
     product_mapping_names_for,
     strip_company_stock_label,
 )
-from nohtus.services.inbound_bridge_runtime import _apply_inbound_location_pending, _inbound_js_loc_changed
+from nohtus.services.inbound_bridge_runtime import _apply_inbound_location_pending
 from nohtus.db import connect
 
 
@@ -102,7 +102,6 @@ def _apply_selected_inbound_date(*, company, product, warehouse, lot, exp, locat
 
 
 def page_inbound():
-    from styles import apply_inbound_bridge_style
     from nohtus.ui.location_picker import inbound_location_picker
     from inbound_map import render_inbound_quick_location_map
 
@@ -116,22 +115,6 @@ def page_inbound():
         key="inbound_date",
         help="선택한 날짜가 이력조회 입고 기록일로 저장됩니다.",
     )
-
-    apply_inbound_bridge_style()
-    st.text_input(
-        "__입고도면선택값",
-        key="_inbound_js_loc_buffer",
-        label_visibility="collapsed",
-        on_change=_inbound_js_loc_changed,
-    )
-    if st.button("__입고도면적용", key="_inbound_apply_btn"):
-        _inbound_js_loc_changed()
-        _apply_inbound_location_pending()
-        _keep_first_product_section_open_if_needed()
-        st.rerun()
-
-    _apply_inbound_location_pending()
-    _keep_first_product_section_open_if_needed()
 
     def inbound_product_label(value):
         if value == "":

@@ -137,8 +137,69 @@ def assign_repeated_ctns(
     return preview_rows
 
 
+@dialog('프리셋 관리', width='small')
+def box_preset_management_dialog(case_id: int) -> None:
+    presets = packing_service.list_box_presets()
+
+    st.markdown('#### 새 프리셋 추가')
+    preset_name = st.text_input('프리셋 이름', key=f'manual_preset_name_{case_id}')
+    add_cols = st.columns(2)
+    preset_length = add_cols[0].number_input('가로(cm)', min_value=0, step=1, format='%d', key=f'manual_preset_length_{case_id}')
+    preset_width = add_cols[1].number_input('세로(cm)', min_value=0, step=1, format='%d', key=f'manual_preset_width_{case_id}')
+    preset_height = add_cols[0].number_input('높이(cm)', min_value=0, step=1, format='%d', key=f'manual_preset_height_{case_id}')
+    preset_weight = add_cols[1].number_input('무게(kg)', min_value=0, step=1, format='%d', key=f'manual_preset_weight_{case_id}')
+    if st.button('새 프리셋 추가', use_container_width=True):
+        try:
+            packing_service.save_box_preset(
+                preset_name,
+                preset_length,
+                preset_width,
+                preset_height,
+                preset_weight,
+            )
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            st.success(f'{preset_name.strip()} 프리셋을 추가했습니다.')
+            st.rerun()
+
+    st.divider()
+    st.markdown('#### 기존 프리셋 수정·삭제')
+    managed_name = st.selectbox(
+        '관리할 프리셋', ['선택해주세요'] + sorted(presets),
+        key=f'manage_box_preset_{case_id}',
+    )
+    if managed_name not in presets:
+        return
+
+    managed = presets[managed_name]
+    edited_name = st.text_input('프리셋 이름 수정', value=managed_name, key=f'edit_box_preset_name_{case_id}_{managed_name}')
+    edit_cols = st.columns(2)
+    edit_length = edit_cols[0].number_input('길이(cm)', min_value=0, value=int(managed['length_cm']), step=1, format='%d', key=f'edit_box_preset_length_{case_id}_{managed_name}')
+    edit_width = edit_cols[1].number_input('너비(cm)', min_value=0, value=int(managed['width_cm']), step=1, format='%d', key=f'edit_box_preset_width_{case_id}_{managed_name}')
+    edit_height = edit_cols[0].number_input('높이(cm)', min_value=0, value=int(managed['height_cm']), step=1, format='%d', key=f'edit_box_preset_height_{case_id}_{managed_name}')
+    edit_weight = edit_cols[1].number_input('GW(kg)', min_value=0, value=int(managed['weight_kg']), step=1, format='%d', key=f'edit_box_preset_weight_{case_id}_{managed_name}')
+    manage_cols = st.columns(2)
+    if manage_cols[0].button('프리셋 수정', type='primary', use_container_width=True, key=f'update_box_preset_{case_id}_{managed_name}'):
+        try:
+            packing_service.save_box_preset(edited_name, edit_length, edit_width, edit_height, edit_weight)
+            if edited_name.strip() != managed_name:
+                packing_service.delete_box_preset(managed_name)
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            st.session_state.pop(f'manage_box_preset_{case_id}', None)
+            st.success('프리셋을 수정했습니다.')
+            st.rerun()
+    if manage_cols[1].button('프리셋 삭제', use_container_width=True, key=f'delete_box_preset_{case_id}_{managed_name}'):
+        packing_service.delete_box_preset(managed_name)
+        st.session_state.pop(f'manage_box_preset_{case_id}', None)
+        st.session_state.pop(f'box_preset_select_{case_id}', None)
+        st.rerun()
+
+
 def render() -> None:
-    st.title('CTN 패킹')
+    st.title('박스 패킹')
     st.markdown(
         """
         <style>
@@ -150,6 +211,13 @@ def render() -> None:
             font-size: 0.76rem !important;
             padding-left: 3px !important;
             padding-right: 3px !important;
+        }
+        div[data-testid="stMetric"] label,
+        div[data-testid="stMetric"] [data-testid="stMetricLabel"] {
+            display:flex !important;
+            justify-content:center !important;
+            width:100% !important;
+            text-align:center !important;
         }
         </style>
         """,
@@ -203,7 +271,7 @@ def render() -> None:
     elif st.session_state.get(active_label_key) not in active_options:
         st.session_state[active_label_key] = new_box_label
 
-    left_column, right_column = st.columns([6, 4], gap='large')
+    left_column, right_column = st.columns([5.6, 4.4], gap='large')
 
     # 오른쪽을 먼저 실행해 왼쪽 배정 버튼이 현재 CTN 번호를 바로 사용하게 합니다.
     with right_column:
@@ -250,53 +318,11 @@ def render() -> None:
                 for _, row in edited_active_items.iterrows()
                 if bool(row['빼기'])
             ]
-            if st.button(
-                f'선택 제품 CTN에서 빼기 ({len(remove_item_ids)}개)',
-                use_container_width=True,
-                disabled=not remove_item_ids,
-                key=f'remove_active_ctn_items_{case_id}_{active_box_no}',
-            ):
-                packing_service.unassign_items(case_id, remove_item_ids)
-                history_service.add(
-                    case_id,
-                    'CTN 배정 해제',
-                    f'CTN {active_box_no}에서 {len(remove_item_ids)}개 실제 출고 행 제거',
-                )
-                st.success(f'{len(remove_item_ids)}개 제품을 CTN {active_box_no}에서 뺐습니다.')
-                st.rerun()
         else:
+            remove_item_ids = []
             st.info('왼쪽에서 제품을 선택해 이 CTN에 담으세요.')
 
         if active_box is not None:
-            with st.expander('CTN No. 변경'):
-                with st.form(f'rename_ctn_{case_id}_{active_box_no}'):
-                    new_box_no = st.number_input(
-                        '새 CTN No.',
-                        min_value=1,
-                        step=1,
-                        value=int(active_box_no),
-                        key=f'new_ctn_no_{case_id}_{active_box_no}',
-                    )
-                    rename_box_clicked = st.form_submit_button(
-                        'CTN No. 변경',
-                        use_container_width=True,
-                    )
-                if rename_box_clicked:
-                    try:
-                        packing_edit_service.rename_box(case_id, active_box_no, int(new_box_no))
-                    except ValueError as exc:
-                        st.error(str(exc))
-                    else:
-                        history_service.add(
-                            case_id,
-                            'CTN No. 변경',
-                            f'CTN {active_box_no} → CTN {int(new_box_no)}',
-                        )
-                        st.session_state[pending_active_key] = f'CTN {int(new_box_no)}'
-                        st.session_state.pop(active_label_key, None)
-                        st.success(f'CTN {active_box_no}을 CTN {int(new_box_no)}으로 변경했습니다.')
-                        st.rerun()
-
             dimension_keys = {
                 'length_cm': f'ctn_length_{case_id}_{active_box_no}',
                 'width_cm': f'ctn_width_{case_id}_{active_box_no}',
@@ -304,31 +330,24 @@ def render() -> None:
                 'weight_kg': f'ctn_weight_{case_id}_{active_box_no}',
             }
             pending_values_key = f'pending_ctn_values_{case_id}_{active_box_no}'
-            continuous_key = f'continuous_box_preset_{case_id}'
             active_values_key = f'active_box_values_{case_id}'
 
             if pending_values_key in st.session_state:
                 pending_values = st.session_state.pop(pending_values_key)
                 for field, key in dimension_keys.items():
                     st.session_state[key] = float(pending_values[field])
-            elif st.session_state.get(continuous_key) and st.session_state.get(active_values_key):
-                box_is_blank = not any(float(active_box[field] or 0) > 0 for field in dimension_keys)
-                if box_is_blank:
-                    for field, key in dimension_keys.items():
-                        st.session_state.setdefault(key, float(st.session_state[active_values_key][field]))
-
             with st.form(f'current_ctn_form_{case_id}_{active_box_no}'):
-                dimension_columns = st.columns(2)
+                dimension_columns = st.columns(4)
                 length = dimension_columns[0].number_input(
                     '가로(cm)', min_value=0.0, value=float(active_box['length_cm'] or 0), key=dimension_keys['length_cm']
                 )
                 width = dimension_columns[1].number_input(
                     '세로(cm)', min_value=0.0, value=float(active_box['width_cm'] or 0), key=dimension_keys['width_cm']
                 )
-                height = dimension_columns[0].number_input(
+                height = dimension_columns[2].number_input(
                     '높이(cm)', min_value=0.0, value=float(active_box['height_cm'] or 0), key=dimension_keys['height_cm']
                 )
-                weight = dimension_columns[1].number_input(
+                weight = dimension_columns[3].number_input(
                     'GW(kg)', min_value=0.0, value=float(active_box['weight_kg'] or 0), key=dimension_keys['weight_kg']
                 )
                 save_box = st.form_submit_button('CTN 저장 후 다음 CTN', type='primary', use_container_width=True)
@@ -358,30 +377,11 @@ def render() -> None:
         st.markdown('#### 박스 프리셋')
         presets = packing_service.list_box_presets()
         last_values = packing_service.get_last_box_values()
-        preset_options = ['선택 안 함'] + (['마지막 사용값'] if last_values else []) + sorted(presets)
-        selected_preset = st.selectbox('프리셋', preset_options, key=f'box_preset_select_{case_id}')
-        preset_cols = st.columns(2)
-        apply_preset = preset_cols[0].button('현재 CTN에 적용', use_container_width=True, disabled=active_box is None)
-        delete_preset = preset_cols[1].button('프리셋 삭제', use_container_width=True, disabled=selected_preset not in presets)
-        continuous_apply = st.toggle('다음 CTN에도 연속 적용', key=f'continuous_box_preset_{case_id}')
-
-        if apply_preset and active_box is not None:
-            values = last_values if selected_preset == '마지막 사용값' else presets.get(selected_preset)
-            if values is None:
-                st.warning('적용할 프리셋을 선택하세요.')
-            else:
-                st.session_state[f'pending_ctn_values_{case_id}_{active_box_no}'] = values
-                st.session_state[f'active_box_values_{case_id}'] = values
-                st.rerun()
-
-        if delete_preset and selected_preset in presets:
-            packing_service.delete_box_preset(selected_preset)
-            st.session_state.pop(f'box_preset_select_{case_id}', None)
-            st.rerun()
-
-        with st.expander('현재 규격을 새 프리셋으로 저장'):
+        preset_save_col, _preset_save_space = st.columns([1, 1])
+        with preset_save_col:
+            st.markdown('###### 현재 규격을 프리셋으로 저장')
             preset_name = st.text_input('프리셋 이름', key=f'new_preset_name_{case_id}')
-            if st.button('프리셋 저장', use_container_width=True, disabled=active_box is None):
+            if st.button('현재 규격 프리셋 저장', use_container_width=True, disabled=active_box is None):
                 try:
                     packing_service.save_box_preset(
                         preset_name,
@@ -396,66 +396,119 @@ def render() -> None:
                     st.success(f'{preset_name.strip()} 프리셋을 저장했습니다.')
                     st.rerun()
 
-        if active_box is not None:
-            st.markdown('#### CTN 구성 복제')
-            clone_count = st.number_input(
-                '복제할 CTN 개수', min_value=1, value=1, step=1,
-                key=f'clone_count_{case_id}_{active_box_no}',
-            )
-            if st.button(
-                '현재 CTN 복제',
-                use_container_width=True,
-                key=f'clone_ctn_{case_id}_{active_box_no}',
-            ):
-                try:
-                    created_boxes = packing_service.clone_box(
-                        case_id,
-                        active_box_no,
-                        int(clone_count),
-                    )
-                except ValueError as exc:
-                    st.error(str(exc))
-                else:
-                    created_text = ', '.join(f'CTN {number}' for number in created_boxes)
+        preset_options = ['선택 안 함'] + (['마지막 사용값'] if last_values else []) + sorted(presets)
+        preset_select_col, preset_manage_col = st.columns([7, 3])
+        preset_select_key = f'box_preset_select_{case_id}'
+
+        def apply_selected_preset() -> None:
+            if active_box is None:
+                return
+            chosen = st.session_state.get(preset_select_key)
+            values = last_values if chosen == '마지막 사용값' else presets.get(chosen)
+            if values is None:
+                return
+            st.session_state[f'pending_ctn_values_{case_id}_{active_box_no}'] = values
+            st.session_state[f'active_box_values_{case_id}'] = values
+
+        selected_preset = preset_select_col.selectbox(
+            '프리셋', preset_options, key=preset_select_key,
+            on_change=apply_selected_preset,
+        )
+        preset_manage_col.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        if preset_manage_col.button('프리셋 관리', use_container_width=True, key=f'open_box_preset_manage_{case_id}'):
+            box_preset_management_dialog(case_id)
+        st.divider()
+        box_manage_left, box_manage_middle, box_manage_right = st.columns(3, gap='large')
+        with box_manage_left:
+            with st.expander('선택 제품 박스에서 빼기'):
+                if st.button(
+                    f'선택 제품 박스에서 빼기 ({len(remove_item_ids)}개)',
+                    use_container_width=True,
+                    disabled=not remove_item_ids,
+                    key=f'remove_active_ctn_items_{case_id}_{active_box_no}',
+                ):
+                    packing_service.unassign_items(case_id, remove_item_ids)
                     history_service.add(
                         case_id,
-                        'CTN 구성 복제',
-                        f'CTN {active_box_no} → {created_text}',
+                        'CTN 배정 해제',
+                        f'CTN {active_box_no}에서 {len(remove_item_ids)}개 실제 출고 행 제거',
                     )
-                    st.session_state[pending_active_key] = f'CTN {created_boxes[0]}'
-                    st.success(f'{created_text}을 생성했습니다.')
+                    st.success(f'{len(remove_item_ids)}개 제품을 CTN {active_box_no}에서 뺐습니다.')
                     st.rerun()
 
-        st.divider()
-        with st.expander('CTN 삭제'):
-            delete_label_map = {}
-            for delete_box in boxes:
-                delete_box_no = int(delete_box['box_no'])
-                delete_box_items = items_grouped_by_box.get(delete_box_no, [])
-                delete_label = (
-                    f"CTN {delete_box_no} · {len(delete_box_items)}행 · "
-                    f"{product_summary(delete_box_items)}"
-                )
-                delete_label_map[delete_label] = delete_box_no
-            selected_delete_labels = st.multiselect('삭제할 CTN', list(delete_label_map))
-            selected_delete_boxes = [delete_label_map[label] for label in selected_delete_labels]
-            st.caption('삭제한 CTN의 제품은 다시 미패킹 상태로 돌아갑니다.')
-            if st.button(
-                f'선택한 CTN 삭제 ({len(selected_delete_boxes)}개)',
-                disabled=not selected_delete_boxes,
-                use_container_width=True,
-                key=f'delete_ctns_{case_id}',
-            ):
-                for delete_box_no in selected_delete_boxes:
-                    packing_service.clear_box(case_id, delete_box_no)
-                history_service.add(
-                    case_id,
-                    'CTN 삭제',
-                    ', '.join(f'CTN {number}' for number in selected_delete_boxes),
-                )
-                st.session_state.pop(active_label_key, None)
-                st.success('선택한 CTN을 삭제하고 포함 제품을 미패킹 상태로 돌렸습니다.')
-                st.rerun()
+            if active_box is not None:
+                with st.expander('박스 번호 변경'):
+                    with st.form(f'rename_ctn_{case_id}_{active_box_no}'):
+                        new_box_no = st.number_input(
+                            '새 박스 번호', min_value=1, step=1, value=int(active_box_no),
+                            key=f'new_ctn_no_{case_id}_{active_box_no}',
+                        )
+                        rename_box_clicked = st.form_submit_button('박스 번호 변경', use_container_width=True)
+                    if rename_box_clicked:
+                        try:
+                            packing_edit_service.rename_box(case_id, active_box_no, int(new_box_no))
+                        except ValueError as exc:
+                            st.error(str(exc))
+                        else:
+                            history_service.add(case_id, '박스 번호 변경', f'CTN {active_box_no} → CTN {int(new_box_no)}')
+                            st.session_state[pending_active_key] = f'CTN {int(new_box_no)}'
+                            st.session_state.pop(active_label_key, None)
+                            st.success(f'CTN {active_box_no}을 CTN {int(new_box_no)}으로 변경했습니다.')
+                            st.rerun()
+
+        with box_manage_middle:
+            with st.expander('CTN 삭제'):
+                delete_label_map = {}
+                for delete_box in boxes:
+                    delete_box_no = int(delete_box['box_no'])
+                    delete_box_items = items_grouped_by_box.get(delete_box_no, [])
+                    delete_label = (
+                        f"CTN {delete_box_no} · {len(delete_box_items)}행 · "
+                        f"{product_summary(delete_box_items)}"
+                    )
+                    delete_label_map[delete_label] = delete_box_no
+                selected_delete_labels = st.multiselect('삭제할 CTN', list(delete_label_map))
+                selected_delete_boxes = [delete_label_map[label] for label in selected_delete_labels]
+                st.caption('삭제한 CTN의 제품은 다시 미패킹 상태로 돌아갑니다.')
+                if st.button(
+                    f'선택한 CTN 삭제 ({len(selected_delete_boxes)}개)',
+                    disabled=not selected_delete_boxes,
+                    use_container_width=True,
+                    key=f'delete_ctns_{case_id}',
+                ):
+                    for delete_box_no in selected_delete_boxes:
+                        packing_service.clear_box(case_id, delete_box_no)
+                    history_service.add(
+                        case_id,
+                        'CTN 삭제',
+                        ', '.join(f'CTN {number}' for number in selected_delete_boxes),
+                    )
+                    st.session_state.pop(active_label_key, None)
+                    st.success('선택한 CTN을 삭제하고 포함 제품을 미패킹 상태로 돌렸습니다.')
+                    st.rerun()
+
+        with box_manage_right:
+            if active_box is not None:
+                with st.expander('CTN 구성 복제'):
+                    clone_count = st.number_input(
+                        '복제할 CTN 개수', min_value=1, value=1, step=1,
+                        key=f'clone_count_{case_id}_{active_box_no}',
+                    )
+                    if st.button(
+                        '현재 CTN 복제',
+                        use_container_width=True,
+                        key=f'clone_ctn_{case_id}_{active_box_no}',
+                    ):
+                        try:
+                            created_boxes = packing_service.clone_box(case_id, active_box_no, int(clone_count))
+                        except ValueError as exc:
+                            st.error(str(exc))
+                        else:
+                            created_text = ', '.join(f'CTN {number}' for number in created_boxes)
+                            history_service.add(case_id, 'CTN 구성 복제', f'CTN {active_box_no} → {created_text}')
+                            st.session_state[pending_active_key] = f'CTN {created_boxes[0]}'
+                            st.success(f'{created_text}을 생성했습니다.')
+                            st.rerun()
 
     with left_column:
         st.markdown('### 미패킹 제품 선택')

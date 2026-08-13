@@ -156,8 +156,7 @@ def render() -> None:
     with example_col:
         st.markdown('#### 자동 생성 예시')
         st.code(
-            '''수출관리
-    └─ 필리핀
+            '''필리핀
        └─ 2026
           └─ 07월
              ├─ [AIR] 리쥬네르 인젝터, 모니터 전원 케이블
@@ -179,7 +178,7 @@ def render() -> None:
         folder_text = st.text_input(
             '내 폴더 위치',
             key='folder_path_input',
-            placeholder=r'예: E:\수출관리 또는 \\NAS\수출관리',
+            placeholder=r'예: E:\ 또는 \\NAS\공유경로',
             label_visibility='collapsed',
         )
 

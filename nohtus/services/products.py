@@ -189,15 +189,6 @@ def product_options(term="", *, exclude_materials=False):
              WHERE NOT ? OR (
                  LOWER(TRIM(CAST(COALESCE(is_material, 0) AS TEXT)))
                      NOT IN ('1','true','yes','y','o','v','체크','부자재')
-                 AND NOT EXISTS (
-                     SELECT 1 FROM inventory i
-                     WHERE TRIM(COALESCE(i.product_name,''))=TRIM(COALESCE(products.standard_name,''))
-                       AND (
-                           REPLACE(UPPER(TRIM(COALESCE(i.location,''))), ' ', '') LIKE 'G1%'
-                           OR REPLACE(UPPER(TRIM(COALESCE(i.location,''))), ' ', '') LIKE 'G2%'
-                           OR REPLACE(UPPER(TRIM(COALESCE(i.location,''))), ' ', '') LIKE '%홍보물랙%'
-                       )
-                 )
              )
              ORDER BY standard_name, id""", (1 if exclude_materials else 0,))
     if term:

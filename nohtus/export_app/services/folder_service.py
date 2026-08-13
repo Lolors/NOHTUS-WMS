@@ -133,7 +133,7 @@ def _configured_storage_path() -> Path | None:
     configured = db.get_setting('shared_root').strip()
     if not configured:
         usb_root = usb_storage_service.find_export_usb()
-        return (usb_root / '수출관리') if usb_root else None
+        return usb_root
 
     path = Path(configured).expanduser()
     if path.is_absolute():

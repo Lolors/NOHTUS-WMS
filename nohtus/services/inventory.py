@@ -12,7 +12,7 @@ from datetime import date, datetime
 from nohtus.db import connect, q
 
 
-OUTBOUND_DEDUCT_TYPES = ["출고지시", "출고", "출고지시수정", "출고확정", "출고지시 재차감"]
+OUTBOUND_DEDUCT_TYPES = ["출고지시", "출고", "출고지시수정", "출고확정", "출고지시 재차감", "패키지 생산"]
 
 
 def first_nonblank(*values):
