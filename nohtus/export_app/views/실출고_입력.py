@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from nohtus.export_app import db as export_db
 from nohtus.export_app.components.case_selector import select_export_case
 from nohtus.export_app.components.editors import order_editor
 from nohtus.export_app.components.streamlit_compat import dialog
