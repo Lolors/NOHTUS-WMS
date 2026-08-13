@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 from datetime import datetime
@@ -282,12 +283,32 @@ def resolve_database_path(path_text: str) -> Path | None:
     return None
 
 
-def write_case_marker(folder: Path, case) -> Path:
+def case_content_fingerprint(case_id: int) -> str:
+    """Return a stable digest of every record that affects the case folder/workbook."""
+    payload = {
+        'case': dict(db.row('SELECT * FROM export_cases WHERE id=?', (case_id,)) or {}),
+        'orders': [dict(row) for row in db.rows('SELECT * FROM order_items WHERE case_id=? ORDER BY id', (case_id,))],
+        'shipments': [dict(row) for row in db.rows('SELECT * FROM shipment_items WHERE case_id=? ORDER BY id', (case_id,))],
+        'boxes': [dict(row) for row in db.rows('SELECT * FROM boxes WHERE case_id=? ORDER BY id', (case_id,))],
+        'attachments': [dict(row) for row in db.rows('SELECT * FROM attachments WHERE case_id=? ORDER BY id', (case_id,))],
+    }
+    # folder_path is an output of synchronization, not user data. Including it
+    # would make a successful move look like a content change on the next run.
+    payload['case'].pop('folder_path', None)
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str)
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+
+def write_case_marker(folder: Path, case, fingerprint: str | None = None) -> Path:
     marker = folder / CASE_MARKER_NAME
     _write_hidden_text(
         marker,
         json.dumps(
-            {'case_id': int(case['id']), 'export_no': str(case['export_no'])},
+            {
+                'case_id': int(case['id']),
+                'export_no': str(case['export_no']),
+                'content_fingerprint': fingerprint or case_content_fingerprint(int(case['id'])),
+            },
             ensure_ascii=False,
             indent=2,
         ),
@@ -302,6 +323,13 @@ def _marker_matches(marker: Path, case_id: int) -> bool:
         return int(data.get('case_id')) == int(case_id)
     except (OSError, ValueError, TypeError):
         return False
+
+
+def _marker_fingerprint(marker: Path) -> str:
+    try:
+        return str(json.loads(marker.read_text(encoding='utf-8')).get('content_fingerprint') or '')
+    except (OSError, ValueError, TypeError):
+        return ''
 
 
 def find_case_folder(case_id: int) -> Path | None:
@@ -400,12 +428,30 @@ def _write_case_workbook(case_id: int, folder: Path) -> None:
 
 def _prepare_folder(case, folder: Path, *, force_workbook: bool = False) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
-    write_case_marker(folder, case)
     set_hidden(folder / BACKUP_FOLDER_NAME)
     ensure_category_folders(folder)
     if _workbook_needs_update(int(case['id']), folder, force=force_workbook):
         _write_case_workbook(int(case['id']), folder)
+    write_case_marker(folder, case, case_content_fingerprint(int(case['id'])))
     return folder
+
+
+def _case_folder_is_current(case, folder: Path, expected_target: Path) -> bool:
+    try:
+        if folder.resolve() != expected_target.resolve():
+            return False
+    except OSError:
+        return False
+    marker = folder / CASE_MARKER_NAME
+    if _marker_fingerprint(marker) != case_content_fingerprint(int(case['id'])):
+        return False
+    if any(not (folder / name).is_dir() for name in CATEGORY_FOLDERS.values()):
+        return False
+    workbook = folder / '수출진행내역.xlsx'
+    if not workbook.exists():
+        return False
+    from nohtus.export_app.services.workbook_service import is_valid_xlsx
+    return is_valid_xlsx(workbook)
 
 
 @db.backup_batch
@@ -465,6 +511,25 @@ def sync_case_folder(case_id: int, *, force_workbook: bool = False) -> Path:
     return target
 
 
+def sync_case_folder_if_changed(case_id: int) -> tuple[Path, bool]:
+    """Synchronize one case only when its content or required files changed.
+
+    Returns ``(folder, changed)``. Legacy markers without a fingerprint are
+    intentionally rebuilt once and upgraded to the new marker format.
+    """
+    case = db.row('SELECT * FROM export_cases WHERE id=?', (case_id,))
+    if not case:
+        raise ValueError(f'수출 건을 찾을 수 없습니다: {case_id}')
+    current = find_case_folder(case_id)
+    base = case_folder_base(case)
+    target = unique_folder_path(base, case_folder_name(case), current)
+    if current and current.exists() and _case_folder_is_current(case, current, target):
+        return current, False
+    # A fingerprint mismatch is authoritative even when filesystem mtimes are
+    # unchanged or have been copied from another machine.
+    return sync_case_folder(case_id, force_workbook=True), True
+
+
 def rebuild_all_case_folders() -> list[tuple[int, Path]]:
     cases = db.rows(
         """SELECT id FROM export_cases
@@ -472,7 +537,7 @@ def rebuild_all_case_folders() -> list[tuple[int, Path]]:
            ORDER BY id"""
     )
     return [
-        (int(case['id']), sync_case_folder(int(case['id']), force_workbook=True))
+        (int(case['id']), sync_case_folder_if_changed(int(case['id']))[0])
         for case in cases
     ]
 

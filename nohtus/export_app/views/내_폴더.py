@@ -114,6 +114,7 @@ def render() -> None:
                 ]
 
             successes: list[str] = []
+            skipped: list[str] = []
             failures: list[str] = []
             drive_corruption_detected = False
             range_text = '전체 수출' if folder_confirm else f'최근 {RECENT_FOLDER_DAYS}일 수출'
@@ -121,11 +122,11 @@ def render() -> None:
             total = max(len(target_cases), 1)
             for index, case in enumerate(target_cases, start=1):
                 try:
-                    folder = folder_service.sync_case_folder(
-                        int(case['id']),
-                        force_workbook=True,
-                    )
-                    successes.append(f"{case['export_no']} → {folder}")
+                    folder, changed = folder_service.sync_case_folder_if_changed(int(case['id']))
+                    if changed:
+                        successes.append(f"{case['export_no']} → {folder}")
+                    else:
+                        skipped.append(str(case['export_no']))
                 except Exception as exc:
                     failures.append(f"{case['export_no']}: {exc}")
                     if getattr(exc, 'winerror', None) == 1392:
@@ -137,12 +138,14 @@ def render() -> None:
                 history_service.add_history(
                     None,
                     '수출 폴더 및 엑셀 전체 재생성' if folder_confirm else f'최근 {RECENT_FOLDER_DAYS}일 수출 폴더 갱신',
-                    f'{range_text} {len(successes)}건 완료 / {len(failures)}건 실패 / 취소 건 제외',
+                    f'{range_text} {len(successes)}건 재생성 / {len(skipped)}건 변경 없음 / {len(failures)}건 실패 / 취소 건 제외',
                 )
                 st.success(
                     f'{range_text} {len(successes)}건의 폴더를 동기화하고 '
-                    '수출진행내역.xlsx를 새로 생성했습니다.'
+                    f'수출진행내역.xlsx를 새로 생성했습니다. 변경 없음 {len(skipped)}건은 건너뛰었습니다.'
                 )
+            elif skipped and not failures:
+                st.info(f'{range_text} {len(skipped)}건 모두 변경사항이 없어 재생성을 건너뛰었습니다.')
             elif not failures:
                 st.info(f'갱신할 {range_text} 건이 없습니다.')
             if drive_corruption_detected:

@@ -322,6 +322,24 @@ def render() -> None:
             remove_item_ids = []
             st.info('왼쪽에서 제품을 선택해 이 CTN에 담으세요.')
 
+        _remove_space_left, remove_button_col, _remove_space_right = st.columns([1, 1.4, 1])
+        with remove_button_col:
+            if st.button(
+                f'↩ 박스에서 빼기 ({len(remove_item_ids)})',
+                use_container_width=True,
+                disabled=not remove_item_ids,
+                key=f'remove_active_ctn_items_{case_id}_{active_box_no}',
+                help='표에서 체크한 제품을 현재 박스에서 빼기',
+            ):
+                packing_service.unassign_items(case_id, remove_item_ids)
+                history_service.add(
+                    case_id,
+                    'CTN 배정 해제',
+                    f'CTN {active_box_no}에서 {len(remove_item_ids)}개 실제 출고 행 제거',
+                )
+                st.success(f'{len(remove_item_ids)}개 제품을 CTN {active_box_no}에서 뺐습니다.')
+                st.rerun()
+
         if active_box is not None:
             dimension_keys = {
                 'length_cm': f'ctn_length_{case_id}_{active_box_no}',
@@ -420,41 +438,25 @@ def render() -> None:
         st.divider()
         box_manage_left, box_manage_middle, box_manage_right = st.columns(3, gap='large')
         with box_manage_left:
-            with st.expander('선택 제품 박스에서 빼기'):
-                if st.button(
-                    f'선택 제품 박스에서 빼기 ({len(remove_item_ids)}개)',
-                    use_container_width=True,
-                    disabled=not remove_item_ids,
-                    key=f'remove_active_ctn_items_{case_id}_{active_box_no}',
-                ):
-                    packing_service.unassign_items(case_id, remove_item_ids)
-                    history_service.add(
-                        case_id,
-                        'CTN 배정 해제',
-                        f'CTN {active_box_no}에서 {len(remove_item_ids)}개 실제 출고 행 제거',
-                    )
-                    st.success(f'{len(remove_item_ids)}개 제품을 CTN {active_box_no}에서 뺐습니다.')
-                    st.rerun()
-
             if active_box is not None:
-                with st.expander('박스 번호 변경'):
-                    with st.form(f'rename_ctn_{case_id}_{active_box_no}'):
-                        new_box_no = st.number_input(
-                            '새 박스 번호', min_value=1, step=1, value=int(active_box_no),
-                            key=f'new_ctn_no_{case_id}_{active_box_no}',
-                        )
-                        rename_box_clicked = st.form_submit_button('박스 번호 변경', use_container_width=True)
-                    if rename_box_clicked:
-                        try:
-                            packing_edit_service.rename_box(case_id, active_box_no, int(new_box_no))
-                        except ValueError as exc:
-                            st.error(str(exc))
-                        else:
-                            history_service.add(case_id, '박스 번호 변경', f'CTN {active_box_no} → CTN {int(new_box_no)}')
-                            st.session_state[pending_active_key] = f'CTN {int(new_box_no)}'
-                            st.session_state.pop(active_label_key, None)
-                            st.success(f'CTN {active_box_no}을 CTN {int(new_box_no)}으로 변경했습니다.')
-                            st.rerun()
+                st.markdown('##### 박스 번호 변경')
+                with st.form(f'rename_ctn_{case_id}_{active_box_no}'):
+                    new_box_no = st.number_input(
+                        '새 박스 번호', min_value=1, step=1, value=int(active_box_no),
+                        key=f'new_ctn_no_{case_id}_{active_box_no}',
+                    )
+                    rename_box_clicked = st.form_submit_button('박스 번호 변경', use_container_width=True)
+                if rename_box_clicked:
+                    try:
+                        packing_edit_service.rename_box(case_id, active_box_no, int(new_box_no))
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    else:
+                        history_service.add(case_id, '박스 번호 변경', f'CTN {active_box_no} → CTN {int(new_box_no)}')
+                        st.session_state[pending_active_key] = f'CTN {int(new_box_no)}'
+                        st.session_state.pop(active_label_key, None)
+                        st.success(f'CTN {active_box_no}을 CTN {int(new_box_no)}으로 변경했습니다.')
+                        st.rerun()
 
         with box_manage_middle:
             with st.expander('CTN 삭제'):
@@ -489,26 +491,26 @@ def render() -> None:
 
         with box_manage_right:
             if active_box is not None:
-                with st.expander('CTN 구성 복제'):
-                    clone_count = st.number_input(
-                        '복제할 CTN 개수', min_value=1, value=1, step=1,
-                        key=f'clone_count_{case_id}_{active_box_no}',
-                    )
-                    if st.button(
-                        '현재 CTN 복제',
-                        use_container_width=True,
-                        key=f'clone_ctn_{case_id}_{active_box_no}',
-                    ):
-                        try:
-                            created_boxes = packing_service.clone_box(case_id, active_box_no, int(clone_count))
-                        except ValueError as exc:
-                            st.error(str(exc))
-                        else:
-                            created_text = ', '.join(f'CTN {number}' for number in created_boxes)
-                            history_service.add(case_id, 'CTN 구성 복제', f'CTN {active_box_no} → {created_text}')
-                            st.session_state[pending_active_key] = f'CTN {created_boxes[0]}'
-                            st.success(f'{created_text}을 생성했습니다.')
-                            st.rerun()
+                st.markdown('##### CTN 구성 복제')
+                clone_count = st.number_input(
+                    '복제할 CTN 개수', min_value=1, value=1, step=1,
+                    key=f'clone_count_{case_id}_{active_box_no}',
+                )
+                if st.button(
+                    '현재 CTN 복제',
+                    use_container_width=True,
+                    key=f'clone_ctn_{case_id}_{active_box_no}',
+                ):
+                    try:
+                        created_boxes = packing_service.clone_box(case_id, active_box_no, int(clone_count))
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    else:
+                        created_text = ', '.join(f'CTN {number}' for number in created_boxes)
+                        history_service.add(case_id, 'CTN 구성 복제', f'CTN {active_box_no} → {created_text}')
+                        st.session_state[pending_active_key] = f'CTN {created_boxes[0]}'
+                        st.success(f'{created_text}을 생성했습니다.')
+                        st.rerun()
 
     with left_column:
         st.markdown('### 미패킹 제품 선택')

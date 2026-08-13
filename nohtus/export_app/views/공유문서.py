@@ -159,6 +159,7 @@ def render() -> None:
     )
     open_shipment_products = action_cols[2].button(
         '출고 예정 제품 리스트',
+        type='primary',
         use_container_width=True,
     )
 

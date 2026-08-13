@@ -27,10 +27,41 @@ class InternalStorageItemTests(unittest.TestCase):
             case = {'id': 7, 'export_no': 'EXP-007'}
 
             with patch.object(folder_service, 'set_hidden', return_value=True) as set_hidden:
-                marker = folder_service.write_case_marker(root, case)
+                marker = folder_service.write_case_marker(root, case, 'digest-123')
 
         self.assertEqual(folder_service.CASE_MARKER_NAME, marker.name)
         set_hidden.assert_called_once_with(marker)
+
+    def test_marker_stores_content_fingerprint(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            case = {'id': 7, 'export_no': 'EXP-007'}
+            with patch.object(folder_service, 'set_hidden', return_value=True):
+                marker = folder_service.write_case_marker(root, case, 'digest-123')
+
+            content = marker.read_text(encoding='utf-8')
+
+        self.assertIn('"content_fingerprint": "digest-123"', content)
+
+    def test_unchanged_case_skips_folder_and_workbook_sync(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            current = Path(temporary) / 'KR' / 'case'
+            current.mkdir(parents=True)
+            case = {'id': 7, 'export_no': 'EXP-007'}
+            with (
+                patch.object(folder_service.db, 'row', return_value=case),
+                patch.object(folder_service, 'find_case_folder', return_value=current),
+                patch.object(folder_service, 'case_folder_base', return_value=current.parent),
+                patch.object(folder_service, 'case_folder_name', return_value='case'),
+                patch.object(folder_service, 'unique_folder_path', return_value=current),
+                patch.object(folder_service, '_case_folder_is_current', return_value=True),
+                patch.object(folder_service, 'sync_case_folder') as sync,
+            ):
+                folder, changed = folder_service.sync_case_folder_if_changed(7)
+
+        self.assertEqual(current, folder)
+        self.assertFalse(changed)
+        sync.assert_not_called()
 
     def test_existing_internal_items_are_reprocessed_on_windows(self):
         with tempfile.TemporaryDirectory() as temporary:
