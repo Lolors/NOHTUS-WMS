@@ -34,20 +34,32 @@ def _patched_export_waiting_rows(original_q, ds):
         (date_text,),
     )
 
-    # 과거에 등록한 수출대기를 오늘 수정한 경우에는 P로 새로 들어간
-    # 품목 추가·수량 증가분만 가져온다. P에서 원래 위치로 돌아간
-    # 품목 삭제·수량 감소·취소분은 마감 체크리스트에서 완전히 제외한다.
+    # 과거 수출대기 수정은 기존 목록 전체를 원복한 뒤 다시 P에 적재한다.
+    # 따라서 P 적재 이력만 세면 수정/삭제 시도 횟수만큼 주문 전체가 반복된다.
+    # 같은 날의 P 입출고를 재고키별로 상계해 실제 순증가분만 표시한다.
     changed_rows = original_q(
         """
         SELECT o.title AS 출고지시서제목,
                -o.id AS 출고지시서ID,
                NULL AS 재고ID,
-               COALESCE(NULLIF(TRIM(t.from_company),''), t.to_company) AS 사업장,
-               COALESCE(NULLIF(TRIM(t.from_location),''), '-') AS 로케이션,
+               CASE
+                 WHEN TRIM(COALESCE(t.to_location,''))='P' THEN COALESCE(NULLIF(TRIM(t.from_company),''), t.to_company)
+                 ELSE COALESCE(NULLIF(TRIM(t.to_company),''), t.from_company)
+               END AS 사업장,
+               CASE
+                 WHEN TRIM(COALESCE(t.to_location,''))='P' THEN COALESCE(NULLIF(TRIM(t.from_location),''), '-')
+                 ELSE COALESCE(NULLIF(TRIM(t.to_location),''), '-')
+               END AS 로케이션,
                t.product_name AS 표준제품명,
                COALESCE(t.lot, '-') AS 제조번호,
                COALESCE(t.exp_date, '-') AS 유통기한,
-               ABS(COALESCE(t.qty, 0)) AS 출고수량
+               SUM(
+                 CASE
+                   WHEN TRIM(COALESCE(t.to_location,''))='P' THEN ABS(COALESCE(t.qty,0))
+                   WHEN TRIM(COALESCE(t.from_location,''))='P' THEN -ABS(COALESCE(t.qty,0))
+                   ELSE 0
+                 END
+               ) AS 출고수량
         FROM transactions t
         JOIN export_waiting_orders o
           ON COALESCE(t.memo,'') LIKE '%수출번호: ' || o.export_no || '%'
@@ -59,11 +71,29 @@ def _patched_export_waiting_rows(original_q, ds):
         WHERE substr(COALESCE(t.created_at,''), 1, 10)=?
           AND t.tx_type='위치이동'
           AND COALESCE(t.memo,'') LIKE '수출대기 수정 /%'
-          AND TRIM(COALESCE(t.to_location,''))='P'
-          AND TRIM(COALESCE(t.from_location,''))<>'P'
-          AND COALESCE(t.qty, 0)>0
+          AND (
+                TRIM(COALESCE(t.to_location,''))='P'
+                OR TRIM(COALESCE(t.from_location,''))='P'
+              )
           AND substr(COALESCE(o.created_at,''), 1, 10)<>?
-        ORDER BY t.id
+        GROUP BY o.id, o.title,
+                 CASE
+                   WHEN TRIM(COALESCE(t.to_location,''))='P' THEN COALESCE(NULLIF(TRIM(t.from_company),''), t.to_company)
+                   ELSE COALESCE(NULLIF(TRIM(t.to_company),''), t.from_company)
+                 END,
+                 CASE
+                   WHEN TRIM(COALESCE(t.to_location,''))='P' THEN COALESCE(NULLIF(TRIM(t.from_location),''), '-')
+                   ELSE COALESCE(NULLIF(TRIM(t.to_location),''), '-')
+                 END,
+                 t.product_name, COALESCE(t.lot,'-'), COALESCE(t.exp_date,'-')
+        HAVING SUM(
+                 CASE
+                   WHEN TRIM(COALESCE(t.to_location,''))='P' THEN ABS(COALESCE(t.qty,0))
+                   WHEN TRIM(COALESCE(t.from_location,''))='P' THEN -ABS(COALESCE(t.qty,0))
+                   ELSE 0
+                 END
+               ) > 0
+        ORDER BY 사업장, 로케이션, 표준제품명
         """,
         (date_text, date_text),
     )
