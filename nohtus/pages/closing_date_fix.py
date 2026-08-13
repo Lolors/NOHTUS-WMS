@@ -102,6 +102,17 @@ def _sort_checklist_items(items):
     return sorted_items.reset_index(drop=True)
 
 
+def _deduplicate_outbound_details(items):
+    """조인 결과가 늘어나도 일반 출고 상세는 체크리스트에 한 번만 남긴다."""
+    if items is None or items.empty or "출고상세ID" not in items.columns:
+        return items
+
+    result = items.copy()
+    detail_ids = result["출고상세ID"]
+    duplicated = detail_ids.notna() & detail_ids.duplicated(keep="first")
+    return result.loc[~duplicated].reset_index(drop=True)
+
+
 def _location_final_stock_map(items, query_func):
     """출고·수출대기 후 각 출발 로케이션에 실제로 남은 현재 수량을 계산한다."""
     if items is None or items.empty:
@@ -256,7 +267,7 @@ def page_closing():
                 result = export_rows
             else:
                 result = pd.concat([result, export_rows], ignore_index=True)
-        return _sort_checklist_items(result)
+        return _sort_checklist_items(_deduplicate_outbound_details(result))
 
     closing_page.q = patched_q
     closing_page._today_outbound_html = _location_aware_html

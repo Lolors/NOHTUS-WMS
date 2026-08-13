@@ -367,6 +367,7 @@ def page_closing():
     if tab == "오늘 출고 체크":
         items = q("""SELECT COALESCE(o.title, '') AS 출고지시서제목,
                             o.id AS 출고지시서ID,
+                            i.id AS 출고상세ID,
                             i.inventory_id AS 재고ID,
                             i.company AS 사업장,
                             i.location AS 로케이션,
