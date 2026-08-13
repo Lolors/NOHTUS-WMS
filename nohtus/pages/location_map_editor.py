@@ -7,6 +7,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from nohtus.services.location_map_layout import load_location_map_layout, save_location_map_layout
+from nohtus.services.location_map_layout_seed import initial_layout
 
 
 def _consume_save_payload() -> bool:
@@ -30,9 +31,11 @@ def _consume_save_payload() -> bool:
 
 def page_location_map_editor():
     st.title("🧭 로케이션맵 편집")
-    st.caption("로케이션을 마우스로 끌어 이동한 뒤 오른쪽 위 저장 버튼을 누르세요. 위치는 10px 격자에 맞춰집니다.")
+    st.caption("로케이션을 마우스로 끌어 이동한 뒤 배치 저장을 누르세요. 저장된 좌표는 실제 로케이션맵에 그대로 적용됩니다.")
     _consume_save_payload()
     layout = load_location_map_layout()
+    if not layout.get("items"):
+        layout = initial_layout()
     payload = json.dumps(layout, ensure_ascii=False)
 
     html = f'''<style>
@@ -56,7 +59,6 @@ def page_location_map_editor():
     <script>
     const layout={payload}; const stage=document.getElementById('stage'); const viewport=document.getElementById('viewport'); const status=document.getElementById('status');
     const grid=Number(layout.canvas.grid||10); let scale=0.82; let drag=null;
-    const colors={{}};
     function draw(){{stage.innerHTML=''; stage.style.width=layout.canvas.width+'px';stage.style.height=layout.canvas.height+'px';stage.style.transform=`scale(${{scale}})`;stage.style.transformOrigin='top left';
       layout.items.forEach((it,idx)=>{{const el=document.createElement('div');el.className='loc '+(it.company||'기타');el.dataset.idx=idx;el.style.left=it.x+'px';el.style.top=it.y+'px';el.style.width=it.width+'px';el.style.height=it.height+'px';el.innerHTML=`<span>${{it.label||it.code}}</span><small class="coords">${{it.x}}, ${{it.y}}</small>`;stage.appendChild(el);}});
     }}
