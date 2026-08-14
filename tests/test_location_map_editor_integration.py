@@ -247,6 +247,8 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn("window.open(u.toString(),'nohtus-layout-save'", editor_html)
         self.assertIn("e.data.type==='nohtus-layout-saved'", editor_html)
         self.assertIn('배치 저장이 완료되었습니다', editor_html)
+        self.assertIn('저장 창이 닫혔다면 저장이 완료되었습니다', editor_html)
+        self.assertIn('}},5000)', editor_html)
         self.assertNotIn("link.target='_top'", editor_html)
         self.assertNotIn('window.parent.location.href=u.toString()', editor_html)
         self.assertIn('배치를 저장하고 있습니다', editor_html)
