@@ -92,6 +92,7 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
                 layout['items'][0]['group_id'] = 'split-group-1'
                 layout['items'][0]['fill_type'] = 'solid'
                 layout['items'][0]['fill_color'] = '#abcdef'
+                layout['items'][0]['stroke_style'] = 'dashed'
                 layout['company_colors'] = {'노투스팜': '#102030', 'NOH': '#aabbcc'}
                 location_map_layout.save_location_map_layout(layout)
                 restored = location_map_layout.load_location_map_layout()
@@ -99,6 +100,7 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertEqual(restored['items'][0]['group_id'], 'split-group-1')
         self.assertEqual(restored['items'][0]['fill_type'], 'solid')
         self.assertEqual(restored['items'][0]['fill_color'], '#abcdef')
+        self.assertEqual(restored['items'][0]['stroke_style'], 'dashed')
         self.assertEqual(restored['company_colors']['노투스팜'], '#102030')
         self.assertEqual(restored['company_colors']['NOH'], '#aabbcc')
 
@@ -130,13 +132,14 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
             'kind': 'shape',
             'shape_type': 'line',
             'stroke': '#123456',
+            'stroke_style': 'dashed',
             'note': '',
         })
         markup = _saved_layout_markup(layout)
         self.assertIn('class="map-shape map-shape-line"', markup)
         self.assertIn('#123456', markup)
         self.assertIn('calc(50% - .75px)', markup)
-        self.assertIn('calc(50% + .75px)', markup)
+        self.assertIn('repeating-linear-gradient(to right,#123456 0 10px,transparent 10px 17px)', markup)
         self.assertNotIn('data-loc="__shape-test"', markup)
         self.assertNotIn('class="nw-outline"', markup)
         layout['items'].append({
@@ -235,6 +238,12 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn("label.style.transform=`rotate(${-Number(it.rotation||0)}deg)`", editor_html)
         self.assertIn('data-tab="shapeTab"', editor_html)
         self.assertIn('id="propShapeStroke"', editor_html)
+        self.assertIn('id="propShapeStrokeStyle"', editor_html)
+        self.assertIn('id="shapeStrokeStyle"', editor_html)
+        self.assertIn('<option value="solid">실선</option>', editor_html)
+        self.assertIn('<option value="dashed">점선</option>', editor_html)
+        self.assertIn("item.stroke_style=fields.propShapeStrokeStyle.value", editor_html)
+        self.assertIn("stroke_style:document.getElementById('shapeStrokeStyle').value", editor_html)
         self.assertIn('id="propShapeFillType"', editor_html)
         self.assertIn('id="propShapeFillColor"', editor_html)
         self.assertIn('id="applyShapeStyle"', editor_html)
