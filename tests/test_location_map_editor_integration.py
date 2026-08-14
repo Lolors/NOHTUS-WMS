@@ -184,6 +184,10 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('resizeDy=-dx*Math.sin(resizeAngle)+dy*Math.cos(resizeAngle)', editor_html)
         self.assertIn("action.width+resizeDx", editor_html)
         self.assertIn("action.height+resizeDy", editor_html)
+        self.assertIn('function resizeCursor(dir,rotation)', editor_html)
+        self.assertIn("['ew-resize','nwse-resize','ns-resize','nesw-resize'][bucket]", editor_html)
+        self.assertIn('function applyHandleCursors(el,rotation)', editor_html)
+        self.assertIn('applyHandleCursors(el,it.rotation)', editor_html)
 
 
 if __name__ == '__main__':
