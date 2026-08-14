@@ -18,6 +18,14 @@ from nohtus.services.location_map_layout import (
 from nohtus.services.location_map_layout_seed import initial_layout
 
 
+def _decode_layout_payload(raw: str) -> dict:
+    padded = raw + "=" * (-len(raw) % 4)
+    decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
+    if decoded.startswith(b"\x1f\x8b"):
+        decoded = gzip.decompress(decoded)
+    return json.loads(decoded.decode("utf-8"))
+
+
 def _consume_save_payload() -> bool:
     raw = st.query_params.get("layout_save", "")
     if isinstance(raw, list):
@@ -26,11 +34,7 @@ def _consume_save_payload() -> bool:
     if not raw:
         return False
     try:
-        padded = raw + "=" * (-len(raw) % 4)
-        decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
-        if decoded.startswith(b"\x1f\x8b"):
-            decoded = gzip.decompress(decoded)
-        save_location_map_layout(json.loads(decoded.decode("utf-8")))
+        save_location_map_layout(_decode_layout_payload(raw))
         del st.query_params["layout_save"]
         st.success("로케이션맵 배치를 저장했습니다.")
         return True
