@@ -97,6 +97,13 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn("showSmartGuides(it,action.idx)", editor_html)
         self.assertIn('data-tab="changeTab"', editor_html)
         self.assertIn('data-tab="newTab"', editor_html)
+        self.assertIn('id="undo"', editor_html)
+        self.assertIn('id="redo"', editor_html)
+        self.assertIn('function checkpoint()', editor_html)
+        self.assertIn('function deleteSelection(', editor_html)
+        self.assertIn("e.key==='Delete'", editor_html)
+        self.assertIn("e.key.toLowerCase()==='z'", editor_html)
+        self.assertIn("e.key.toLowerCase()==='y'", editor_html)
 
 
 if __name__ == '__main__':
