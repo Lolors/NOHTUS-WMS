@@ -7,7 +7,13 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from nohtus.auth import is_admin
-from nohtus.services.location_map_layout import load_location_map_layout, save_location_map_layout
+from nohtus.services.location_map_layout import (
+    delete_location_map_draft,
+    load_location_map_draft,
+    load_location_map_layout,
+    save_location_map_draft,
+    save_location_map_layout,
+)
 from nohtus.services.location_map_layout_seed import initial_layout
 
 
@@ -30,6 +36,35 @@ def _consume_save_payload() -> bool:
         return False
 
 
+
+def _consume_draft_payload() -> bool:
+    raw = st.query_params.get("layout_draft_save", "")
+    if isinstance(raw, list):
+        raw = raw[0] if raw else ""
+    raw = str(raw or "").strip()
+    if raw:
+        try:
+            padded = raw + "=" * (-len(raw) % 4)
+            data = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+            save_location_map_draft(json.loads(data))
+            del st.query_params["layout_draft_save"]
+            st.success("편집 내용을 임시저장했습니다. 실제 로케이션맵에는 아직 반영되지 않았습니다.")
+            return True
+        except Exception as exc:
+            st.error(f"임시저장에 실패했습니다: {exc}")
+            return False
+
+    delete_requested = st.query_params.get("layout_draft_delete", "")
+    if isinstance(delete_requested, list):
+        delete_requested = delete_requested[0] if delete_requested else ""
+    if str(delete_requested or "").strip():
+        delete_location_map_draft()
+        del st.query_params["layout_draft_delete"]
+        st.success("임시저장 내용을 삭제했습니다.")
+        return True
+    return False
+
+
 def page_location_map_editor():
     if not is_admin():
         st.warning("admin 계정만 로케이션맵 편집에 접근할 수 있습니다.")
@@ -37,10 +72,12 @@ def page_location_map_editor():
     st.title("🧭 로케이션맵 편집")
     st.caption("로케이션을 마우스로 끌어 이동한 뒤 배치 저장을 누르세요. 저장된 좌표는 실제 로케이션맵에 그대로 적용됩니다.")
     _consume_save_payload()
+    _consume_draft_payload()
     layout = load_location_map_layout()
     if not layout.get("items"):
         layout = initial_layout()
     payload = json.dumps(layout, ensure_ascii=False)
+    draft_payload = json.dumps(load_location_map_draft(), ensure_ascii=False)
 
     html = f'''<style>
     *{{box-sizing:border-box}} body{{margin:0;font-family:Inter,Segoe UI,Arial,'Noto Sans KR',sans-serif;background:#f8fafc;color:#0f172a}}
@@ -61,7 +98,7 @@ def page_location_map_editor():
     </style>
     <div class="toolbar">
       <button type="button" id="zoomOut">−</button><button type="button" id="zoomIn">＋</button><button type="button" id="fit">전체보기</button><button type="button" id="undo">↶ 되돌리기</button><button type="button" id="redo">↷ 다시 실행</button><button type="button" id="selectAll">도형 전체 선택</button><button type="button" id="clearSelection">선택 해제</button>
-      <button type="button" class="primary" id="save">배치 저장</button><span class="status" id="status">박스를 선택해 이동·변형하세요</span>
+      <button type="button" id="saveDraft">임시저장</button><button type="button" id="loadDraft">임시저장 불러오기</button><button type="button" class="danger" id="deleteDraft">임시저장 삭제</button><button type="button" class="primary" id="save">배치 저장</button><span class="status" id="status">박스를 선택해 이동·변형하세요</span>
     </div>
     <div class="editor-shell">
       <div class="viewport" id="viewport"><div class="stage" id="stage"></div></div>
@@ -105,7 +142,7 @@ def page_location_map_editor():
       </aside>
     </div>
     <script>
-    const layout={payload}; const stage=document.getElementById('stage'); const viewport=document.getElementById('viewport'); const status=document.getElementById('status');
+    const layout={payload}; const draftLayout={draft_payload}; const stage=document.getElementById('stage'); const viewport=document.getElementById('viewport'); const status=document.getElementById('status');
     const grid=Number(layout.canvas.grid||10); const minWidth=36,minHeight=30; let scale=.82,action=null,selectedIndex=null; const selectedIndices=new Set(),undoStack=[],redoStack=[]; const guideTolerance=Math.max(4,grid/2);
     const fieldIds=['propCode','propLabel','propCompany','propKind'];
     const fields=Object.fromEntries(fieldIds.map(id=>[id,document.getElementById(id)])); const snap=v=>Math.round(v/grid)*grid; const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
@@ -147,7 +184,7 @@ def page_location_map_editor():
         document.getElementById('selectAll').addEventListener('click',()=>{{selectedIndices.clear();layout.items.forEach((_,i)=>selectedIndices.add(i));selectedIndex=layout.items.length?0:null;draw();status.textContent=`도형 ${{selectedIndices.size}}개 전체 선택됨`;}});document.getElementById('clearSelection').addEventListener('click',()=>{{selectedIndices.clear();selectedIndex=null;draw();status.textContent='선택 해제됨';}});
     document.querySelectorAll('.tab-button').forEach(button=>button.addEventListener('click',()=>{{document.querySelectorAll('.tab-button').forEach(x=>x.classList.toggle('active',x===button));document.querySelectorAll('.tab-panel').forEach(panel=>panel.hidden=panel.id!==button.dataset.tab);}}));
     function setScale(v){{scale=Math.max(.1,Math.min(1.5,v));draw();status.textContent='확대 '+Math.round(scale*100)+'%';}}document.getElementById('zoomIn').addEventListener('click',()=>setScale(scale+.1));document.getElementById('zoomOut').addEventListener('click',()=>setScale(scale-.1));document.getElementById('fit').addEventListener('click',()=>{{const s=Math.min((viewport.clientWidth-30)/(layout.canvas.width+2),(viewport.clientHeight-30)/(layout.canvas.height+2));setScale(s);viewport.scrollLeft=0;viewport.scrollTop=0;}});
-    document.getElementById('save').addEventListener('click',()=>{{const txt=JSON.stringify(layout);const bytes=new TextEncoder().encode(txt);let binary='';bytes.forEach(b=>binary+=String.fromCharCode(b));const enc=btoa(binary).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');const u=new URL(window.parent.location.href);u.searchParams.set('layout_save',enc);window.parent.location.href=u.toString();}});
-    draw();
+    function encodedLayout(){{const bytes=new TextEncoder().encode(JSON.stringify(layout));let binary='';bytes.forEach(b=>binary+=String.fromCharCode(b));return btoa(binary).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}}function navigateWithParam(name,value){{const u=new URL(window.parent.location.href);u.searchParams.set(name,value);window.parent.location.href=u.toString();}}document.getElementById('saveDraft').addEventListener('click',()=>navigateWithParam('layout_draft_save',encodedLayout()));document.getElementById('loadDraft').addEventListener('click',()=>{{if(!draftLayout){{status.textContent='불러올 임시저장 내용이 없습니다.';return}}if(!confirm('현재 편집 화면을 임시저장 내용으로 바꿀까요?'))return;checkpoint();restore(JSON.stringify(draftLayout));status.textContent='임시저장 내용을 불러왔습니다. 배치 저장 전까지 실제 지도에는 반영되지 않습니다.';}});document.getElementById('deleteDraft').addEventListener('click',()=>{{if(!draftLayout){{status.textContent='삭제할 임시저장 내용이 없습니다.';return}}if(confirm('임시저장 내용을 삭제할까요?'))navigateWithParam('layout_draft_delete','1');}});document.getElementById('save').addEventListener('click',()=>navigateWithParam('layout_save',encodedLayout()));
+    draw();if(draftLayout)status.textContent='임시저장된 편집 내용이 있습니다.';
     </script>'''
     components.html(html, height=790, scrolling=False)
