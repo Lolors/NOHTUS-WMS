@@ -6,17 +6,18 @@ from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _LAYOUT_PATH = _PROJECT_ROOT / "data" / "location_map_layout.json"
+_DRAFT_PATH = _PROJECT_ROOT / "data" / "location_map_layout.draft.json"
 
 
 def layout_path() -> Path:
     return _LAYOUT_PATH
 
 
-def load_location_map_layout() -> dict:
-    if not _LAYOUT_PATH.exists():
+def _load_layout(path: Path) -> dict:
+    if not path.exists():
         return {"version": 1, "canvas": {"width": 1280, "height": 900, "grid": 10}, "items": []}
     try:
-        data = json.loads(_LAYOUT_PATH.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {"version": 1, "canvas": {"width": 1280, "height": 900, "grid": 10}, "items": []}
     if not isinstance(data, dict):
@@ -27,7 +28,15 @@ def load_location_map_layout() -> dict:
     return data
 
 
-def save_location_map_layout(layout: dict) -> None:
+def load_location_map_layout() -> dict:
+    return _load_layout(_LAYOUT_PATH)
+
+
+def load_location_map_draft() -> dict | None:
+    return _load_layout(_DRAFT_PATH) if _DRAFT_PATH.exists() else None
+
+
+def _clean_layout(layout: dict) -> dict:
     if not isinstance(layout, dict):
         raise ValueError("레이아웃 데이터 형식이 올바르지 않습니다.")
     canvas = layout.get("canvas") or {}
@@ -68,7 +77,25 @@ def save_location_map_layout(layout: dict) -> None:
         "canvas": {"width": width, "height": height, "grid": grid},
         "items": cleaned,
     }
-    _LAYOUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _LAYOUT_PATH.with_suffix(".json.tmp")
+    return payload
+
+
+def _write_layout(path: Path, layout: dict) -> None:
+    payload = _clean_layout(layout)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(_LAYOUT_PATH)
+    tmp.replace(path)
+
+
+def save_location_map_layout(layout: dict) -> None:
+    _write_layout(_LAYOUT_PATH, layout)
+
+
+def save_location_map_draft(layout: dict) -> None:
+    _write_layout(_DRAFT_PATH, layout)
+
+
+def delete_location_map_draft() -> None:
+    if _DRAFT_PATH.exists():
+        _DRAFT_PATH.unlink()
