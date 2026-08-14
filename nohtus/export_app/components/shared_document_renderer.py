@@ -54,7 +54,7 @@ def render_document(case, packed, actual_rows=None) -> None:
             if index == 0:
                 rows_html.append(f'<td rowspan="{rowspan}" class="center merged">CTN {box_no}</td>')
             detail_values = [row['business_unit'], row['product_name'], row['lot_no'], row['expiry_date']]
-            detail_classes = ['center', '', 'center', 'center']
+            detail_classes = ['center', 'product-name', 'center', 'center']
             for value, css_class in zip(detail_values, detail_classes):
                 class_attr = f' class="{css_class}"' if css_class else ''
                 rows_html.append(f'<td{class_attr}>{html.escape(str(value or ""))}</td>')
@@ -100,7 +100,7 @@ def render_document(case, packed, actual_rows=None) -> None:
         f'<td class="right"><b>{fmt_number(total_qty)}</b></td><td></td>'
         f'<td class="center"><b>{fmt_number(total_weight)} kg</b></td><td></td></tr>'
     )
-    table_columns = '<colgroup><col style="width:9%"><col style="width:8%"><col style="width:22%"><col style="width:13%"><col style="width:11%"><col style="width:6%"><col style="width:6%"><col style="width:9%"><col style="width:16%"></colgroup>'
+    table_columns = '<colgroup><col style="width:8%"><col style="width:7%"><col style="width:32%"><col style="width:11%"><col style="width:10%"><col style="width:5%"><col style="width:5%"><col style="width:8%"><col style="width:14%"></colgroup>'
     table_header = '<tr><th>CTN No.</th><th>출고처</th><th>제품명</th><th>제조번호</th><th>유통기한</th><th>수량</th><th>단위</th><th>GW (kg)</th><th>CTN 사이즈</th></tr>'
     first_summary = f'{len({row["box_no"] for row in packed})} CTN'
     display_rows = packed
@@ -135,7 +135,7 @@ html,body{{margin:0;padding:0;background:#f4f7fa;color:#172033;font-family:-appl
 .body{{padding:12px 8px 10px}} .section{{font-size:13px;font-weight:800;color:#294f71;margin:0 0 4px;display:flex;align-items:center;gap:5px}} .section-icon{{width:18px;height:18px;border-radius:5px;background:#e8f1f8;color:#245d88;display:inline-flex;align-items:center;justify-content:center;flex:0 0 18px}} .section-icon svg{{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}}
 .grid{{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid #dce3eb;border-radius:7px;overflow:hidden;margin-bottom:7px}} .domestic-grid{{grid-template-columns:repeat(5,1fr)}} .cell{{padding:5px 6px;border-right:1px solid #e5eaf0}} .grid .cell:last-child{{border-right:0}} .label{{font-size:11px;color:#7c8797}} .value{{font-size:13px;font-weight:700;margin-top:2px;white-space:pre-wrap;word-break:break-word}} .address-value{{font-size:11px}}
 .summary{{display:grid;grid-template-columns:repeat({summary_column_count},1fr);gap:6px;margin-bottom:20px}} .card{{border:1px solid #dce3eb;border-radius:7px;padding:6px 7px;background:#f8fafc;text-align:center;display:flex;flex-direction:column;justify-content:center}} .card small{{font-size:12px;color:#7c8797}} .card b{{font-size:18px;color:#214f76;white-space:nowrap}} .card>small+ b{{margin-top:5px}} .freight-ref{{margin:5px auto 0;display:grid;grid-template-columns:auto auto;justify-content:center;gap:3px 8px;align-items:baseline;text-align:center}} .freight-ref span{{font-size:10px;color:#607083;text-align:center}} .freight-ref b{{font-size:13px;text-align:center}}
-.wrap{{width:100%;max-width:100%;margin:0 auto;overflow:hidden;border:1px solid #d8e0e8;border-radius:7px}} table{{border-collapse:collapse;width:100%;max-width:100%;min-width:0;table-layout:fixed;font-size:11.67px}} th{{background:#294f71;color:#fff;padding:6px 4px;text-align:center;white-space:nowrap;line-height:1.2}} td{{padding:6px 4px;border-right:1px solid #e0e6ed;border-bottom:1px solid #e0e6ed;vertical-align:middle;line-height:1.2;overflow-wrap:anywhere}} tr{{break-inside:avoid}} .center{{text-align:center}} .right{{text-align:right}} .merged{{background:#f5f8fb;font-weight:700;white-space:nowrap}} .total-row td{{background:#eef3f8;font-weight:700}}
+.wrap{{width:100%;max-width:100%;margin:0 auto;overflow:hidden;border:1px solid #d8e0e8;border-radius:7px}} table{{border-collapse:collapse;width:100%;max-width:100%;min-width:0;table-layout:fixed;font-size:11.67px}} th{{background:#294f71;color:#fff;padding:6px 4px;text-align:center;white-space:nowrap;line-height:1.2}} td{{padding:6px 4px;border-right:1px solid #e0e6ed;border-bottom:1px solid #e0e6ed;vertical-align:middle;line-height:1.2;overflow-wrap:anywhere}} .product-name{{white-space:nowrap;font-size:10.8px;letter-spacing:-.15px}} tr{{break-inside:avoid}} .center{{text-align:center}} .right{{text-align:right}} .merged{{background:#f5f8fb;font-weight:700;white-space:nowrap}} .total-row td{{background:#eef3f8;font-weight:700}}
 .note-box{{width:100%;margin:6px auto 0;padding:5px 7px;border:1px solid #dce3eb;border-left:4px solid #294f71;border-radius:7px;font-size:8px}}
 @media print{{html,body{{width:210mm;height:297mm;background:#fff;padding:0}} .toolbar{{display:none!important}} .document{{width:198mm;max-width:none;margin:0 auto}} .header,th,.merged,.total-row td{{-webkit-print-color-adjust:exact;print-color-adjust:exact}}}}
 </style></head><body>
