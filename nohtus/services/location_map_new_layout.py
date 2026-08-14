@@ -173,7 +173,9 @@ def _saved_layout_markup(layout: dict) -> str:
         else:
             items.append(
                 f'<button type="button" class="nw-zone zone {_layout_class(item)}" '
-                f'data-loc="{escape(code, quote=True)}" style="{style}">{label}</button>'
+                f'data-loc="{escape(code, quote=True)}" style="{style}">'
+                f'<span style="display:inline-block;transform:rotate({-rotation}deg);'
+                f'transform-origin:center;">{label}</span></button>'
             )
     items.extend([
         '<div class="nw-outline" style="left:930px;top:590px;width:330px;height:185px;border-right:0;border-bottom:0;"></div>',
