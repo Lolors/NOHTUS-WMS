@@ -100,7 +100,7 @@ def render_document(case, packed, actual_rows=None) -> None:
         f'<td class="right"><b>{fmt_number(total_qty)}</b></td><td></td>'
         f'<td class="center"><b>{fmt_number(total_weight)} kg</b></td><td></td></tr>'
     )
-    table_columns = '<colgroup><col style="width:9%"><col style="width:8%"><col style="width:23%"><col style="width:12%"><col style="width:11%"><col style="width:10%"><col style="width:5%"><col style="width:8%"><col style="width:14%"></colgroup>'
+    table_columns = '<colgroup><col style="width:9%"><col style="width:8%"><col style="width:26%"><col style="width:12%"><col style="width:11%"><col style="width:7%"><col style="width:5%"><col style="width:8%"><col style="width:14%"></colgroup>'
     table_header = '<tr><th>CTN No.</th><th>출고처</th><th>제품명</th><th>제조번호</th><th>유통기한</th><th>수량</th><th>단위</th><th>GW (kg)</th><th>CTN 사이즈</th></tr>'
     first_summary = f'{len({row["box_no"] for row in packed})} CTN'
     display_rows = packed
