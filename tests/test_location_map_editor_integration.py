@@ -174,6 +174,11 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn("key==='v'", editor_html)
         self.assertIn('itemClipboard.length', editor_html)
         self.assertIn('layout.canvas.width=Math.max(2000', editor_html)
+        self.assertIn('resizeAngle=action.rotation*Math.PI/180', editor_html)
+        self.assertIn('resizeDx=dx*Math.cos(resizeAngle)+dy*Math.sin(resizeAngle)', editor_html)
+        self.assertIn('resizeDy=-dx*Math.sin(resizeAngle)+dy*Math.cos(resizeAngle)', editor_html)
+        self.assertIn("action.width+resizeDx", editor_html)
+        self.assertIn("action.height+resizeDy", editor_html)
 
 
 if __name__ == '__main__':
