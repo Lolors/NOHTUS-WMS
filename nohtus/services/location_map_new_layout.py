@@ -137,6 +137,20 @@ def _layout_class(item: dict) -> str:
     }.get(company, "support")
 
 
+def _location_fill_style(item: dict) -> str:
+    fill_type = str(item.get("fill_type") or "company").strip()
+    fill_color = str(item.get("fill_color") or "#ffffff").strip()
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", fill_color):
+        fill_color = "#ffffff"
+    if fill_type == "solid":
+        return f"background:{fill_color};"
+    if fill_type == "hatched":
+        return f"background:repeating-linear-gradient(135deg,{fill_color} 0 2px,#fff 2px 8px);"
+    if fill_type == "none":
+        return "background:transparent;"
+    return ""
+
+
 def _saved_layout_markup(layout: dict) -> str:
     items = []
     for layer_index, item in enumerate(layout.get("items") or [], start=1):
@@ -173,7 +187,7 @@ def _saved_layout_markup(layout: dict) -> str:
         else:
             items.append(
                 f'<button type="button" class="nw-zone zone {_layout_class(item)}" '
-                f'data-loc="{escape(code, quote=True)}" style="{style}">'
+                f'data-loc="{escape(code, quote=True)}" style="{style}{_location_fill_style(item)}">'
                 f'<span style="display:inline-block;transform:rotate({-rotation}deg);'
                 f'transform-origin:center;">{label}</span></button>'
             )
