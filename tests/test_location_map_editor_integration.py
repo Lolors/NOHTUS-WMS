@@ -143,6 +143,10 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('data-add-shape="circle"', editor_html)
         self.assertIn('function addMapShape(', editor_html)
         self.assertIn("kind:'shape'", editor_html)
+        self.assertIn('stage.style.zoom=String(scale)', editor_html)
+        self.assertNotIn('stage.style.transform=`scale(', editor_html)
+        self.assertIn('viewport.scrollLeft=0', editor_html)
+        self.assertIn('viewport.scrollTop=0', editor_html)
 
 
 if __name__ == '__main__':
