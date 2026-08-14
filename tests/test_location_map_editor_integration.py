@@ -58,9 +58,11 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
             with patch.object(location_map_layout, '_LAYOUT_PATH', path):
                 layout = initial_layout()
                 layout['items'][0]['rotation'] = 90
+                layout['items'][0]['group_id'] = 'split-group-1'
                 location_map_layout.save_location_map_layout(layout)
                 restored = location_map_layout.load_location_map_layout()
         self.assertEqual(restored['items'][0]['rotation'], 90)
+        self.assertEqual(restored['items'][0]['group_id'], 'split-group-1')
 
     def test_editor_supports_shape_transform_and_new_location_setup(self):
         with (
