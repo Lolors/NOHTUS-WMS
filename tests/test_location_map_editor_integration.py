@@ -101,6 +101,8 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         markup = _saved_layout_markup(layout)
         self.assertIn('class="map-shape map-shape-line"', markup)
         self.assertIn('#123456', markup)
+        self.assertIn('calc(50% - .75px)', markup)
+        self.assertIn('calc(50% + .75px)', markup)
         self.assertNotIn('data-loc="__shape-test"', markup)
 
     def test_editor_supports_shape_transform_and_new_location_setup(self):
@@ -163,6 +165,8 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('data-add-shape="circle"', editor_html)
         self.assertIn('function addMapShape(', editor_html)
         self.assertIn("kind:'shape'", editor_html)
+        self.assertIn('border:1.5px solid #475569', editor_html)
+        self.assertNotIn('border:4px solid #475569', editor_html)
         self.assertIn('stage.style.zoom=String(scale)', editor_html)
         self.assertNotIn('stage.style.transform=`scale(', editor_html)
         self.assertIn('viewport.scrollLeft=0', editor_html)
