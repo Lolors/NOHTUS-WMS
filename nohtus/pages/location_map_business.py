@@ -172,6 +172,10 @@ def page_map():
             width: 100% !important;
             max-width: 100% !important;
         }
+        /* Keep the wider export filter, but reduce the visual gap before materials. */
+        div[data-testid="stColumn"]:has(#map-materials-filter-anchor) {
+            transform: translateX(-3rem);
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -234,7 +238,7 @@ def page_map():
                     help="수출대기(P) 재고를 총재고와 재고 분포에서 제외합니다.",
                 )
             with materials_col:
-                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                st.markdown("<div id='map-materials-filter-anchor' style='height:28px'></div>", unsafe_allow_html=True)
                 st.checkbox(
                     "부자재 제외",
                     value=bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)),
