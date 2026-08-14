@@ -33,6 +33,9 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('page_location_map_editor()', source)
         self.assertNotIn('page_shippable_inventory', source)
         self.assertNotIn('menu == "출고가능 관리"', source)
+        self.assertIn('if is_admin() and _consume_save_payload():', source)
+        self.assertIn("postMessage({type:'nohtus-layout-saved'}", source)
+        self.assertIn('window.parent.close()', source)
 
     def test_non_admin_cannot_see_or_directly_open_editor(self):
         with patch.object(navigation, 'is_admin', return_value=False):
@@ -241,8 +244,10 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn("new CompressionStream('gzip')", editor_html)
         self.assertIn('function prepareSavePayload()', editor_html)
         self.assertIn('function encodedLayoutNow()', editor_html)
-        self.assertIn("link.target='_top'", editor_html)
-        self.assertIn('link.click()', editor_html)
+        self.assertIn("window.open(u.toString(),'nohtus-layout-save'", editor_html)
+        self.assertIn("e.data.type==='nohtus-layout-saved'", editor_html)
+        self.assertIn('배치 저장이 완료되었습니다', editor_html)
+        self.assertNotIn("link.target='_top'", editor_html)
         self.assertNotIn('window.parent.location.href=u.toString()', editor_html)
         self.assertIn('배치를 저장하고 있습니다', editor_html)
         self.assertIn('id="saveDraft"', editor_html)
