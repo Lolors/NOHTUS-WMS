@@ -69,6 +69,8 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertNotIn('class="nw-outline"', markup)
         self.assertIn('background:#112233', markup)
         self.assertIn('.nw-zone.selected', _NEW_CSS)
+        self.assertIn('.nw-zone:not([data-loc="Q"]):not([data-loc^="X1"])', _NEW_CSS)
+        self.assertIn('font-size:calc(17px + 2pt)', _NEW_CSS)
         self.assertIn('.dynamic-stock-dot', _NEW_CSS)
         renderer_source = (Path(__file__).resolve().parents[1] / 'nohtus' / 'services' / 'location_map_new_layout.py').read_text(encoding='utf-8')
         self.assertIn('function fitApprovedMapToWidth()', renderer_source)
