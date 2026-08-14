@@ -15,7 +15,7 @@ from nohtus.services.products import product_options
 
 
 def search_products(term: str = "") -> pd.DataFrame:
-    return product_options(term)
+    return product_options(term, exclude_materials=True)
 
 
 def expiry_options(product_name: str) -> list[str]:
@@ -52,6 +52,13 @@ def product_stock_rows(product_name: str) -> pd.DataFrame:
         """SELECT id, company, location, product_name, lot, exp_date, qty, warehouse_name
            FROM inventory
            WHERE product_name=? AND qty>0 AND location<>'P'
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM products
+                 WHERE TRIM(COALESCE(standard_name, '')) = TRIM(COALESCE(inventory.product_name, ''))
+                   AND LOWER(TRIM(CAST(COALESCE(is_material, 0) AS TEXT)))
+                       IN ('1', 'true', 'yes', 'y', 'o', 'v', '체크', '부자재')
+             )
            ORDER BY company, exp_date, lot, location""",
         (product_name,),
     )

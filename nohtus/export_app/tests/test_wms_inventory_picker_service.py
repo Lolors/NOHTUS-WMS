@@ -43,11 +43,15 @@ class WmsInventoryPickerServiceTests(unittest.TestCase):
             con.execute(
                 """CREATE TABLE products(
                        id INTEGER PRIMARY KEY,standard_name TEXT,warehouse_name TEXT,aliases TEXT,
-                       erp_nohtuspharm_name TEXT,erp_nohtus_name TEXT,erp_noh_name TEXT,bidata_name TEXT
+                       erp_nohtuspharm_name TEXT,erp_nohtus_name TEXT,erp_noh_name TEXT,bidata_name TEXT,
+                       is_material INTEGER DEFAULT 0
                    )"""
             )
             con.execute(
                 "INSERT INTO products(id,standard_name) VALUES(1,'제품A')"
+            )
+            con.execute(
+                "INSERT INTO products(id,standard_name,is_material) VALUES(2,'부자재A',1)"
             )
             con.executemany(
                 """INSERT INTO inventory(id,location,company,product_name,warehouse_name,lot,exp_date,qty,updated_at)
@@ -57,6 +61,7 @@ class WmsInventoryPickerServiceTests(unittest.TestCase):
                     (2, "B1-02", "노투스팜", "제품A", "ERP-A", "LOT-1", "2027-01-01", 5, "2026-01-01"),
                     (3, "A1-02", "NOH", "제품A", "ERP-A", "LOT-2", "2027-06-01", 20, "2026-01-01"),
                     (4, "A1-03", "NOH", "제품A", "ERP-A", "LOT-1", "2027-01-01", 0, "2026-01-01"),
+                    (5, "A1-04", "NOH", "부자재A", "ERP-M", "MAT-1", "2027-01-01", 30, "2026-01-01"),
                 ],
             )
 
@@ -67,6 +72,14 @@ class WmsInventoryPickerServiceTests(unittest.TestCase):
     def test_search_products_matches_standard_name(self):
         df = picker.search_products("제품A")
         self.assertEqual(list(df["standard_name"]), ["제품A"])
+
+    def test_search_products_excludes_materials(self):
+        df = picker.search_products("부자재A")
+        self.assertTrue(df.empty)
+
+    def test_product_stock_rows_excludes_materials(self):
+        rows = picker.product_stock_rows("부자재A")
+        self.assertTrue(rows.empty)
 
     def test_expiry_options_lists_distinct_dates_with_stock_only(self):
         options = picker.expiry_options("제품A")
