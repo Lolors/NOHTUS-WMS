@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 
 # 수출대기 화면은 출고지시 렌더러를 재사용하면서 Streamlit 위젯을 임시로
 # 바꾼다. 일반 출고지시 진입점에서는 반드시 앱 시작 시점의 원본 위젯을
@@ -28,7 +29,7 @@ from nohtus.pages.export_waiting import page_export_waiting as _page_export_wait
 from nohtus.pages.history_business import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.location_map_business import page_map
-from nohtus.pages.location_map_editor import page_location_map_editor
+from nohtus.pages.location_map_editor import _consume_save_payload, page_location_map_editor
 from nohtus.pages.material_management import page_material_management
 from nohtus.pages.customer_master_business import page_customer_master
 from nohtus.pages.mobile_stock_business import page_mobile_stock_finder
@@ -246,6 +247,27 @@ def main():
         _inject_mobile_login_css()
 
     if not require_login():
+        return
+
+    if is_admin() and _consume_save_payload():
+        st.info("저장 완료 창은 잠시 후 자동으로 닫힙니다.")
+        components.html(
+            """<script>
+            setTimeout(function(){
+              try {
+                const opener = window.parent.opener;
+                if (opener) {
+                  opener.document.querySelectorAll('iframe').forEach(function(frame){
+                    try { frame.contentWindow.postMessage({type:'nohtus-layout-saved'}, '*'); } catch(e) {}
+                  });
+                }
+              } catch(e) {}
+              try { window.parent.close(); } catch(e) {}
+            }, 700);
+            </script>""",
+            height=0,
+            scrolling=False,
+        )
         return
 
     if mobile_view:
