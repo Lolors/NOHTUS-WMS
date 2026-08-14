@@ -75,7 +75,14 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('availableWidth/naturalWidth', renderer_source)
         self.assertIn("Math.ceil(naturalHeight*fittedScale)+'px'", renderer_source)
         self.assertIn("new ResizeObserver(fitApprovedMapToWidth)", renderer_source)
-        self.assertIn("window.addEventListener('resize',fitApprovedMapToWidth)", renderer_source)
+        self.assertIn('function positionSpecialMenu()', renderer_source)
+        self.assertIn("stage.querySelector('[data-loc=\"N\"]')", renderer_source)
+        self.assertIn("menu.style.setProperty('left'", renderer_source)
+        self.assertIn("menu.style.setProperty('top'", renderer_source)
+        self.assertIn('new MutationObserver(positionSpecialMenu)', renderer_source)
+        self.assertIn("font-size:calc(13px + 2pt)!important", renderer_source)
+        self.assertNotIn("left:995px!important;top:630px!important", renderer_source)
+        self.assertIn("window.addEventListener('resize',()=>{fitApprovedMapToWidth();positionSpecialMenu();})", renderer_source)
         c1['rotation'] = 90
         c1['fill_type'] = 'hatched'
         c1['fill_color'] = '#123456'
