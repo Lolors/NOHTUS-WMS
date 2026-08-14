@@ -79,8 +79,11 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('class="resize-handle', editor_html)
         self.assertIn('class="rotate-handle"', editor_html)
         self.assertIn('id="propCode"', editor_html)
-        self.assertIn('id="propWidth"', editor_html)
-        self.assertIn('id="propRotation"', editor_html)
+        self.assertNotIn('id="propX"', editor_html)
+        self.assertNotIn('id="propY"', editor_html)
+        self.assertNotIn('id="propWidth"', editor_html)
+        self.assertNotIn('id="propHeight"', editor_html)
+        self.assertNotIn('id="propRotation"', editor_html)
         self.assertIn('id="newCode"', editor_html)
         self.assertIn('id="newKind"', editor_html)
         self.assertIn("isDuplicateCode(code)", editor_html)
@@ -88,6 +91,12 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('id="duplicateSelected"', editor_html)
         self.assertIn('showSmartGuides', editor_html)
         self.assertIn('group_id', editor_html)
+        self.assertIn('id="selectAll"', editor_html)
+        self.assertIn('const selectedIndices=new Set()', editor_html)
+        self.assertIn("action.members.forEach", editor_html)
+        self.assertIn("showSmartGuides(it,action.idx)", editor_html)
+        self.assertIn('data-tab="changeTab"', editor_html)
+        self.assertIn('data-tab="newTab"', editor_html)
 
 
 if __name__ == '__main__':
