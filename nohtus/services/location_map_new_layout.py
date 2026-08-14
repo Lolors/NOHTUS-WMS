@@ -21,6 +21,7 @@ _NEW_CSS = r"""
   appearance:none;box-sizing:border-box;color:#0f172a;font-family:Inter,Segoe UI,Arial,'Noto Sans KR',sans-serif;
 }
 .map-stage .nw-zone{position:absolute;display:flex;align-items:center;justify-content:center;border:1.5px solid #64748b;border-radius:11px;background:#fff;font-size:17px;font-weight:900;cursor:pointer;box-shadow:0 3px 9px rgba(15,23,42,.05);}
+.map-stage .nw-zone:not([data-loc="Q"]):not([data-loc^="X1"]){font-size:calc(17px + 2pt);}
 .map-stage .nw-rack{position:absolute;display:grid;overflow:hidden;border:1.5px solid #64748b;border-radius:11px;box-shadow:0 3px 9px rgba(15,23,42,.05);}
 .map-stage .nw-grid6{grid-template-columns:1fr 1fr;grid-template-rows:repeat(3,1fr)}
 .map-stage .nw-grid3{grid-template-columns:1fr;grid-template-rows:repeat(3,1fr)}
