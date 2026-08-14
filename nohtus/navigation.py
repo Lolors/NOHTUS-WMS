@@ -18,7 +18,7 @@ MENU_SECTIONS = [
         "기간별 통계",
         "내 폴더",
     ]),
-    ("기초", ["제품 매칭 관리", "부자재 관리", "거래처 관리"]),
+    ("기초", ["제품 매칭 관리", "부자재 관리", "거래처 관리", "로케이션맵 편집"]),
 ]
 
 # The export section is collapsed by default and rendered only when explicitly
@@ -31,7 +31,7 @@ HIDDEN_PAGES = {
     "재고 찾기": "RC3.3: 모바일용 재고 찾기 메뉴는 임시 숨김. 기능 함수는 유지한다.",
 }
 
-ADMIN_ONLY_PAGES = set()
+ADMIN_ONLY_PAGES = {"로케이션맵 편집"}
 DEFAULT_PAGE = "로케이션 맵"
 _OUTBOUND_WORK_PAGES = {"출고지시"}
 _OUTBOUND_STATE_KEYS = [
