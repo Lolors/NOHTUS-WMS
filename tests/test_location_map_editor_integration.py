@@ -64,6 +64,27 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertEqual(restored['items'][0]['rotation'], 90)
         self.assertEqual(restored['items'][0]['group_id'], 'split-group-1')
 
+    def test_decorative_shapes_are_saved_but_not_location_click_targets(self):
+        layout = initial_layout()
+        layout['items'].append({
+            'code': '__shape-test',
+            'label': '직선',
+            'x': 10,
+            'y': 20,
+            'width': 240,
+            'height': 30,
+            'rotation': 35,
+            'company': '기타',
+            'kind': 'shape',
+            'shape_type': 'line',
+            'stroke': '#123456',
+            'note': '',
+        })
+        markup = _saved_layout_markup(layout)
+        self.assertIn('class="map-shape map-shape-line"', markup)
+        self.assertIn('#123456', markup)
+        self.assertNotIn('data-loc="__shape-test"', markup)
+
     def test_editor_supports_shape_transform_and_new_location_setup(self):
         with (
             patch.object(location_map_editor, 'is_admin', return_value=True),
@@ -108,6 +129,12 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn("mode:'marquee'", editor_html)
         self.assertIn('it.x<right&&it.x+it.width>left', editor_html)
         self.assertIn('target.rotation=targetRotation', editor_html)
+        self.assertIn('data-tab="shapeTab"', editor_html)
+        self.assertIn('data-add-shape="rounded_rect"', editor_html)
+        self.assertIn('data-add-shape="line"', editor_html)
+        self.assertIn('data-add-shape="circle"', editor_html)
+        self.assertIn('function addMapShape(', editor_html)
+        self.assertIn("kind:'shape'", editor_html)
 
 
 if __name__ == '__main__':
