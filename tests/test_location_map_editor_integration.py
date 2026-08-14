@@ -10,7 +10,7 @@ from nohtus import navigation
 from nohtus.pages import location_map_editor
 from nohtus.services import location_map_layout
 from nohtus.services.location_map_layout_seed import initial_layout
-from nohtus.services.location_map_new_layout import _NEW_CSS, _saved_layout_markup
+from nohtus.services.location_map_new_layout import _NEW_CSS, _company_legend_css, _saved_layout_markup
 
 
 class LocationMapEditorIntegrationTests(unittest.TestCase):
@@ -55,6 +55,21 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertEqual(layout['canvas'], {'width': 1482, 'height': 910, 'grid': 10})
         self.assertEqual({code for code in codes if code.startswith('C1-')}, {'C1-01', 'C1-02', 'C1-03'})
         self.assertFalse({'C1-04', 'C1-05', 'C1-06'} & codes)
+
+    def test_company_palette_is_applied_to_map_legend(self):
+        css = _company_legend_css({
+            'company_colors': {
+                '노투스팜': '#111111',
+                '노투스': '#222222',
+                'NOH': '#333333',
+                '비자료': '#444444',
+            }
+        })
+        self.assertIn('.legend-chip .swatch.y{background:#111111!important;}', css)
+        self.assertIn('.legend-chip .swatch.b{background:#222222!important;}', css)
+        self.assertIn('.legend-chip .swatch.p{background:#333333!important;}', css)
+        self.assertIn('.legend-chip .swatch.g{background:#444444!important;}', css)
+        self.assertEqual(_company_legend_css({'company_colors': {'NOH': 'invalid'}}), '')
 
     def test_saved_json_generates_existing_click_targets_and_styles(self):
         layout = initial_layout()
