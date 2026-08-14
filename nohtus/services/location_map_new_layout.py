@@ -153,10 +153,28 @@ def _saved_layout_markup(layout: dict) -> str:
             f"left:{x}px;top:{y}px;width:{width}px;height:{height}px;"
             f"transform:rotate({rotation}deg);"
         )
-        items.append(
-            f'<button type="button" class="nw-zone zone {_layout_class(item)}" '
-            f'data-loc="{escape(code, quote=True)}" style="{style}">{label}</button>'
-        )
+        if str(item.get("kind") or "") == "shape":
+            shape_type = str(item.get("shape_type") or "rounded_rect").strip()
+            stroke = escape(str(item.get("stroke") or "#475569").strip(), quote=True)
+            decoration = {
+                "rounded_rect": f"border:4px solid {stroke};border-radius:18px;background:transparent;",
+                "circle": f"border:4px solid {stroke};border-radius:50%;background:transparent;",
+                "line": (
+                    "border:0;background:linear-gradient(to bottom,"
+                    f"transparent calc(50% - 2px),{stroke} calc(50% - 2px),"
+                    f"{stroke} calc(50% + 2px),transparent calc(50% + 2px));"
+                ),
+            }.get(shape_type, f"border:4px solid {stroke};border-radius:18px;background:transparent;")
+            items.append(
+                f'<div class="map-shape map-shape-{escape(shape_type, quote=True)}" '
+                f'aria-hidden="true" style="{style}{decoration}'
+                'position:absolute;pointer-events:none;z-index:1;"></div>'
+            )
+        else:
+            items.append(
+                f'<button type="button" class="nw-zone zone {_layout_class(item)}" '
+                f'data-loc="{escape(code, quote=True)}" style="{style}">{label}</button>'
+            )
     items.extend([
         '<div class="nw-outline" style="left:930px;top:590px;width:330px;height:185px;border-right:0;border-bottom:0;"></div>',
         '<div class="nw-outline" style="left:1260px;top:590px;width:1px;height:110px;border-width:0 0 0 1.5px;"></div>',
