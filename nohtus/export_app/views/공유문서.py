@@ -117,6 +117,52 @@ def render() -> None:
         st.session_state.pop('shared_document_view', None)
     case = export_service.get_case(case_id)
 
+    from nohtus.export_app.services import document_unit_conversion_service
+
+    conversion_rows = document_unit_conversion_service.list_case_conversions(case_id)
+    with st.expander('문서 단위 환산 설정', expanded=False):
+        st.caption(
+            '재고와 수출대기는 EA로 유지하고 최종 문서에 표시할 단위만 환산합니다. '
+            '예: 문서 단위 BOX, 1 문서단위당 EA 50 → 2,500 EA가 50 BOX로 출력됩니다.'
+        )
+        conversion_source = [
+            {
+                '_id': int(row['id']),
+                '제품명': str(row['product_name'] or ''),
+                '전산 출고수량(EA)': float(row['internal_ea_qty'] or 0),
+                '문서 단위': str(row['document_unit'] or 'EA'),
+                '1 문서단위당 EA': float(row['ea_per_document_unit'] or 1),
+            }
+            for row in conversion_rows
+        ]
+        converted = st.data_editor(
+            conversion_source,
+            hide_index=True,
+            use_container_width=True,
+            disabled=['_id', '제품명', '전산 출고수량(EA)'],
+            column_config={
+                '_id': None,
+                '제품명': st.column_config.TextColumn('제품명', width='large'),
+                '전산 출고수량(EA)': st.column_config.NumberColumn('전산 출고수량(EA)'),
+                '문서 단위': st.column_config.TextColumn('문서 단위', help='예: BOX, SET, PACK'),
+                '1 문서단위당 EA': st.column_config.NumberColumn(
+                    '1 문서단위당 EA', min_value=0.000001, step=1.0,
+                ),
+            },
+            key=f'document_unit_conversion_{case_id}',
+        )
+        if st.button('문서 단위 환산 저장', type='primary', key=f'save_document_conversion_{case_id}'):
+            try:
+                document_unit_conversion_service.save_case_conversions(
+                    case_id,
+                    converted.to_dict('records') if hasattr(converted, 'to_dict') else converted,
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.success('문서 단위 환산 설정을 저장했습니다.')
+                st.rerun()
+
     is_domestic_delivery = (
         str(case['case_type'] or '').strip() != 'historical'
         and str(case['stage'] or '').strip() == '국내배송'

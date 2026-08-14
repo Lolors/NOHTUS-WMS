@@ -256,6 +256,8 @@ def init_db() -> None:
             quantity REAL NOT NULL DEFAULT 0,
             unit TEXT DEFAULT 'EA',
             purchase_price REAL NOT NULL DEFAULT 0,
+            document_unit TEXT DEFAULT '',
+            ea_per_document_unit REAL NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS purchase_price_history (
@@ -336,6 +338,8 @@ def init_db() -> None:
         _add_column(conn, 'shipment_items', 'order_item_id INTEGER')
         _add_column(conn, 'shipment_items', 'source_inventory_id INTEGER')
         _add_column(conn, 'order_items', 'purchase_price REAL NOT NULL DEFAULT 0')
+        _add_column(conn, 'order_items', "document_unit TEXT DEFAULT ''")
+        _add_column(conn, 'order_items', 'ea_per_document_unit REAL NOT NULL DEFAULT 1')
 
         conn.execute("UPDATE export_cases SET stage='패킹 대기' WHERE stage='출고 대기'")
         conn.execute("UPDATE export_cases SET previous_stage='패킹 대기' WHERE previous_stage='출고 대기'")

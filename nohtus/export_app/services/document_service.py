@@ -112,6 +112,12 @@ def _aggregate_packed(rows, boxes_by_no: dict[int, object]) -> list[dict]:
         lot = _text(row['lot_no'])
         expiry = _text(row['expiry_date'])
         unit = _text(row['unit'])
+        try:
+            ea_per_unit = float(row['ea_per_document_unit'] or 1)
+        except (KeyError, IndexError, TypeError, ValueError):
+            ea_per_unit = 1.0
+        if ea_per_unit <= 0:
+            ea_per_unit = 1.0
         key = (box_no, business, product, lot, expiry, unit)
         box = boxes_by_no.get(box_no)
 
@@ -130,7 +136,7 @@ def _aggregate_packed(rows, boxes_by_no: dict[int, object]) -> list[dict]:
                 'width_cm': box['width_cm'] if box else 0,
                 'height_cm': box['height_cm'] if box else 0,
             }
-        grouped[key]['requested_qty'] += float(row['requested_qty'] or 0)
+        grouped[key]['requested_qty'] += float(row['requested_qty'] or 0) / ea_per_unit
 
     return sorted(
         grouped.values(),
@@ -150,7 +156,11 @@ def get_packed_document_data(case_id: int) -> list[dict]:
         '''SELECT s.id, s.box_no,
                   COALESCE(NULLIF(TRIM(s.business_unit),''), NULLIF(TRIM(s.location),''), '') AS business_unit,
                   s.product_name, s.lot_no, s.expiry_date, s.requested_qty,
-                  o.unit
+                  COALESCE(NULLIF(TRIM(o.document_unit), ''), NULLIF(TRIM(o.unit), ''), 'EA') AS unit,
+                  CASE
+                    WHEN COALESCE(o.ea_per_document_unit, 0) > 0 THEN o.ea_per_document_unit
+                    ELSE 1
+                  END AS ea_per_document_unit
            FROM shipment_items s
            JOIN order_items o
              ON o.id=s.order_item_id

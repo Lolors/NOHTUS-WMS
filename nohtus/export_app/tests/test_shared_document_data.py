@@ -4,7 +4,7 @@ import unittest
 from datetime import date
 from unittest.mock import patch
 
-from nohtus.export_app.services.document_service import _build_shipment_product_rows
+from nohtus.export_app.services.document_service import _aggregate_packed, _build_shipment_product_rows
 from nohtus.export_app.services import export_service
 from nohtus.export_app.services.shared_document_view_service import default_document_period, format_case_option
 
@@ -105,6 +105,28 @@ class SharedDocumentDataTests(unittest.TestCase):
         self.assertEqual(60.0, by_name['주문 제품 A']['requested_qty'])
         self.assertEqual(50.0, by_name['주문 제품 B']['requested_qty'])
         self.assertEqual(150.0, sum(row['requested_qty'] for row in rows))
+
+    def test_converts_internal_ea_to_document_box_quantity(self) -> None:
+        packed_rows = [
+            {
+                'id': 1, 'box_no': 1, 'business_unit': 'NOH', 'product_name': '제품 A',
+                'lot_no': 'LOT-1', 'expiry_date': '2028-12-31', 'requested_qty': 1000,
+                'unit': 'BOX', 'ea_per_document_unit': 50,
+            },
+            {
+                'id': 2, 'box_no': 1, 'business_unit': 'NOH', 'product_name': '제품 A',
+                'lot_no': 'LOT-1', 'expiry_date': '2028-12-31', 'requested_qty': 1500,
+                'unit': 'BOX', 'ea_per_document_unit': 50,
+            },
+        ]
+        boxes = {1: {'weight_kg': 10, 'length_cm': 20, 'width_cm': 30, 'height_cm': 40}}
+
+        result = _aggregate_packed(packed_rows, boxes)
+
+        self.assertEqual(1, len(result))
+        self.assertEqual(50.0, result[0]['requested_qty'])
+        self.assertEqual('BOX', result[0]['unit'])
+
 
 
 if __name__ == '__main__':

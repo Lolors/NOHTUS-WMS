@@ -104,7 +104,11 @@ def render_document(case, packed, actual_rows=None) -> None:
                 shipment_id = int(row['id'])
             except (KeyError, TypeError, ValueError):
                 shipment_id = 0
-            unit = unit_by_shipment_id.get(shipment_id, '-')
+            try:
+                unit = str(row['unit'] or '').strip()
+            except (KeyError, IndexError, TypeError):
+                unit = ''
+            unit = unit or unit_by_shipment_id.get(shipment_id, '-')
             rows_html.append(f'<td class="center">{html.escape(unit)}</td>')
             if index == 0:
                 weight = f'{fmt_number(row["weight_kg"])} kg' if row['weight_kg'] else '-'
