@@ -19,6 +19,11 @@ class LocationMapPatchRestoreTests(unittest.TestCase):
         self.assertIn('st.columns([4.6, 2.95, 2.45], gap="small")', source)
         self.assertNotIn('st.columns([4.6, 2.45, 2.95], gap="small")', source)
 
+    def test_material_filter_gap_is_visually_reduced(self):
+        source = Path(location_map_business.__file__).read_text(encoding="utf-8")
+        self.assertIn("id='map-materials-filter-anchor'", source)
+        self.assertIn("transform: translateX(-3rem);", source)
+
     def test_map_page_hides_stray_caret_but_keeps_input_caret(self):
         source = Path(location_map_business.__file__).read_text(encoding="utf-8")
         self.assertIn("#wms-top-anchor", source)
