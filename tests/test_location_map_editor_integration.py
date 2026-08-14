@@ -164,9 +164,16 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('id="saveDraft"', editor_html)
         self.assertIn('id="loadDraft"', editor_html)
         self.assertIn('id="deleteDraft"', editor_html)
-        self.assertIn("layout_draft_save", editor_html)
-        self.assertIn("layout_draft_delete", editor_html)
+        self.assertIn('localStorage.setItem(draftKey,snapshot())', editor_html)
+        self.assertIn('localStorage.removeItem(draftKey)', editor_html)
+        self.assertIn("draftKey='nohtus-location-map-editor-draft-v2'", editor_html)
         self.assertIn('실제 지도에는 반영되지 않습니다', editor_html)
+        self.assertIn('function copySelection()', editor_html)
+        self.assertIn('function pasteSelection()', editor_html)
+        self.assertIn("key==='c'", editor_html)
+        self.assertIn("key==='v'", editor_html)
+        self.assertIn('itemClipboard.length', editor_html)
+        self.assertIn('layout.canvas.width=Math.max(2000', editor_html)
 
 
 if __name__ == '__main__':
