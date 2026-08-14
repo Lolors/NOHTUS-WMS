@@ -67,6 +67,20 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertEqual(restored['items'][0]['rotation'], 90)
         self.assertEqual(restored['items'][0]['group_id'], 'split-group-1')
 
+    def test_draft_layout_is_separate_and_can_be_deleted(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            draft_path = Path(temp_dir) / 'location_map_layout.draft.json'
+            with patch.object(location_map_layout, '_DRAFT_PATH', draft_path):
+                layout = initial_layout()
+                layout['items'][0]['x'] = 654
+                location_map_layout.save_location_map_draft(layout)
+                restored = location_map_layout.load_location_map_draft()
+                self.assertEqual(restored['items'][0]['x'], 654)
+                self.assertTrue(draft_path.exists())
+                location_map_layout.delete_location_map_draft()
+                self.assertIsNone(location_map_layout.load_location_map_draft())
+                self.assertFalse(draft_path.exists())
+
     def test_decorative_shapes_are_saved_but_not_location_click_targets(self):
         layout = initial_layout()
         layout['items'].append({
@@ -147,6 +161,12 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertNotIn('stage.style.transform=`scale(', editor_html)
         self.assertIn('viewport.scrollLeft=0', editor_html)
         self.assertIn('viewport.scrollTop=0', editor_html)
+        self.assertIn('id="saveDraft"', editor_html)
+        self.assertIn('id="loadDraft"', editor_html)
+        self.assertIn('id="deleteDraft"', editor_html)
+        self.assertIn("layout_draft_save", editor_html)
+        self.assertIn("layout_draft_delete", editor_html)
+        self.assertIn('실제 지도에는 반영되지 않습니다', editor_html)
 
 
 if __name__ == '__main__':
