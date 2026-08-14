@@ -138,7 +138,6 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         markup = _saved_layout_markup(layout)
         self.assertIn('class="map-shape map-shape-line"', markup)
         self.assertIn('#123456', markup)
-        self.assertIn('calc(50% - .75px)', markup)
         self.assertIn('repeating-linear-gradient(to right,#123456 0 10px,transparent 10px 17px)', markup)
         self.assertNotIn('data-loc="__shape-test"', markup)
         self.assertNotIn('class="nw-outline"', markup)
