@@ -279,6 +279,22 @@ if(window.ResizeObserver){
 """
 
 
+def _company_legend_css(layout: dict) -> str:
+    selectors = {
+        "노투스팜": ".legend-chip .swatch.y",
+        "노투스": ".legend-chip .swatch.b",
+        "NOH": ".legend-chip .swatch.p",
+        "비자료": ".legend-chip .swatch.g",
+    }
+    rules = []
+    company_colors = layout.get("company_colors") or {}
+    for company, selector in selectors.items():
+        color = str(company_colors.get(company) or "").strip()
+        if re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+            rules.append(f"{selector}{{background:{color}!important;}}")
+    return f"<style id=\"wms-company-legend-colors\">{''.join(rules)}</style>" if rules else ""
+
+
 def apply_new_layout(html: str) -> str:
     """Replace the legacy map canvas with the approved interactive floor plan."""
     layout = load_location_map_layout()
@@ -289,7 +305,7 @@ def apply_new_layout(html: str) -> str:
         width = max(400, int(canvas.get("width") or 1482))
         height = max(300, int(canvas.get("height") or 910))
         canvas_css = f"<style>.map-stage{{width:{width}px!important;height:{height}px!important;min-width:{width}px!important;}}</style>"
-    html = html.replace("</head>", _NEW_CSS + canvas_css + "</head>", 1)
+    html = html.replace("</head>", _NEW_CSS + _company_legend_css(layout) + canvas_css + "</head>", 1)
     replacement = _saved_layout_markup(layout) if has_saved_layout else _map_markup()
     pattern = re.compile(
         r'<div class="map-scroll"><div class="map-stage">.*?</div></div>\s*</div>\s*<div class="side-card"',
