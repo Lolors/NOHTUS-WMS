@@ -70,6 +70,9 @@ def _clean_layout(layout: dict) -> dict:
         fill_color = str(raw.get("fill_color") or "#ffffff").strip()
         if not re.fullmatch(r"#[0-9a-fA-F]{6}", fill_color):
             fill_color = "#ffffff"
+        stroke_style = str(raw.get("stroke_style") or "solid").strip()
+        if stroke_style not in {"solid", "dashed"}:
+            stroke_style = "solid"
         cleaned.append({
             "code": code,
             "label": str(raw.get("label") or code).strip() or code,
@@ -84,6 +87,7 @@ def _clean_layout(layout: dict) -> dict:
             "group_id": str(raw.get("group_id") or "").strip(),
             "shape_type": str(raw.get("shape_type") or "").strip(),
             "stroke": str(raw.get("stroke") or "#475569").strip() or "#475569",
+            "stroke_style": stroke_style,
             "fill_type": fill_type,
             "fill_color": fill_color,
         })
