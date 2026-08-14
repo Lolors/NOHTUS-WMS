@@ -137,11 +137,16 @@ def _layout_class(item: dict) -> str:
     }.get(company, "support")
 
 
-def _location_fill_style(item: dict) -> str:
+def _location_fill_style(item: dict, company_colors: dict) -> str:
     fill_type = str(item.get("fill_type") or "company").strip()
     fill_color = str(item.get("fill_color") or "#ffffff").strip()
     if not re.fullmatch(r"#[0-9a-fA-F]{6}", fill_color):
         fill_color = "#ffffff"
+    if fill_type == "company":
+        company_color = str(company_colors.get(str(item.get("company") or "").strip()) or "").strip()
+        if re.fullmatch(r"#[0-9a-fA-F]{6}", company_color):
+            return f"background:{company_color};"
+        return ""
     if fill_type == "solid":
         return f"background:{fill_color};"
     if fill_type == "hatched":
@@ -153,6 +158,7 @@ def _location_fill_style(item: dict) -> str:
 
 def _saved_layout_markup(layout: dict) -> str:
     items = []
+    company_colors = layout.get("company_colors") or {}
     for layer_index, item in enumerate(layout.get("items") or [], start=1):
         code = str(item.get("code") or "").strip()
         if not code:
@@ -187,7 +193,7 @@ def _saved_layout_markup(layout: dict) -> str:
         else:
             items.append(
                 f'<button type="button" class="nw-zone zone {_layout_class(item)}" '
-                f'data-loc="{escape(code, quote=True)}" style="{style}{_location_fill_style(item)}">'
+                f'data-loc="{escape(code, quote=True)}" style="{style}{_location_fill_style(item, company_colors)}">'
                 f'<span style="display:inline-block;transform:rotate({-rotation}deg);'
                 f'transform-origin:center;">{label}</span></button>'
             )
