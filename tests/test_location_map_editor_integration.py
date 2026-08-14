@@ -82,6 +82,10 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('id="newCode"', editor_html)
         self.assertIn('id="newKind"', editor_html)
         self.assertIn("isDuplicateCode(code)", editor_html)
+        self.assertIn('id="splitSelected"', editor_html)
+        self.assertIn('id="duplicateSelected"', editor_html)
+        self.assertIn('showSmartGuides', editor_html)
+        self.assertIn('group_id', editor_html)
 
 
 if __name__ == '__main__':
