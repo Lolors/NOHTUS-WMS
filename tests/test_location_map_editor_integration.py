@@ -48,6 +48,7 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         markup = _saved_layout_markup(layout)
         self.assertIn('data-loc="C1-01"', markup)
         self.assertIn('left:777px', markup)
+        self.assertIn('z-index:1', markup)
         self.assertIn('class="nw-zone zone farm"', markup)
         self.assertIn('.nw-zone.selected', _NEW_CSS)
         self.assertIn('.dynamic-stock-dot', _NEW_CSS)
@@ -193,6 +194,13 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('function resizeCursor(dir,rotation)', editor_html)
         self.assertIn("['ew-resize','nwse-resize','ns-resize','nesw-resize'][bucket]", editor_html)
         self.assertIn('function applyHandleCursors(el,rotation)', editor_html)
+        self.assertIn('id="bringToFront"', editor_html)
+        self.assertIn('id="sendToBack"', editor_html)
+        self.assertIn('function moveSelectionLayer(toFront)', editor_html)
+        self.assertIn('toFront?[...remaining,...chosen]:[...chosen,...remaining]', editor_html)
+        self.assertIn('document.elementsFromPoint(e.clientX,e.clientY)', editor_html)
+        self.assertIn('if(e.altKey)', editor_html)
+        self.assertIn('겹친 항목 중', editor_html)
         self.assertIn('applyHandleCursors(el,it.rotation)', editor_html)
 
 
