@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 import re
 import unicodedata
 from datetime import date
@@ -20,6 +21,35 @@ def _pdf_document_title(case, today: date | None = None) -> str:
     current_date = today or date.today()
     parts = [safe_part(case[key]) for key in ('country', 'buyer', 'transport_mode')]
     return '_'.join([*parts, current_date.isoformat()])
+
+
+def _print_title_script(title: str) -> str:
+    encoded_title = json.dumps(title, ensure_ascii=False)
+    return f'''<script>
+function printFinalDocument() {{
+  const requestedTitle = {encoded_title};
+  let hostDocument = document;
+  try {{
+    if (window.parent && window.parent.document) hostDocument = window.parent.document;
+  }} catch (error) {{
+    hostDocument = document;
+  }}
+  const previousHostTitle = hostDocument.title;
+  const previousDocumentTitle = document.title;
+  hostDocument.title = requestedTitle;
+  document.title = requestedTitle;
+  let restored = false;
+  const restoreTitle = () => {{
+    if (restored) return;
+    restored = true;
+    hostDocument.title = previousHostTitle;
+    document.title = previousDocumentTitle;
+  }};
+  window.addEventListener('afterprint', restoreTitle, {{once: true}});
+  window.setTimeout(restoreTitle, 120000);
+  window.print();
+}}
+</script>'''
 
 
 def render_document(case, packed, actual_rows=None) -> None:
@@ -135,7 +165,9 @@ def render_document(case, packed, actual_rows=None) -> None:
             f'<div class="card"><small>품목 수</small><b>{item_count} 품목</b></div>'
             f'<div class="card"><small>출고 수량</small><b>{fmt_number(total_qty)}</b></div>'
         )
-    document_title = html.escape(_pdf_document_title(case))
+    raw_document_title = _pdf_document_title(case)
+    document_title = html.escape(raw_document_title)
+    print_title_script = _print_title_script(raw_document_title)
     document = f'''<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{document_title}</title>
 <style>
@@ -150,8 +182,8 @@ html,body{{margin:0;padding:0;background:#f4f7fa;color:#172033;font-family:-appl
 .wrap{{width:100%;max-width:100%;margin:0 auto;overflow:hidden;border:1px solid #d8e0e8;border-radius:7px}} table{{border-collapse:collapse;width:100%;max-width:100%;min-width:0;table-layout:fixed;font-size:11.67px}} th{{background:#294f71;color:#fff;padding:6px 4px;text-align:center;white-space:nowrap;line-height:1.2}} td{{padding:6px 4px;border-right:1px solid #e0e6ed;border-bottom:1px solid #e0e6ed;vertical-align:middle;line-height:1.2;overflow-wrap:anywhere}} .product-name{{white-space:nowrap;font-size:10.8px;letter-spacing:-.15px}} tr{{break-inside:avoid}} .center{{text-align:center}} .right{{text-align:right}} .merged{{background:#f5f8fb;font-weight:700;white-space:nowrap}} .total-row td{{background:#eef3f8;font-weight:700}}
 .note-box{{width:100%;margin:6px auto 0;padding:5px 7px;border:1px solid #dce3eb;border-left:4px solid #294f71;border-radius:7px;font-size:8px}}
 @media print{{html,body{{width:210mm;height:297mm;background:#fff;padding:0}} .toolbar{{display:none!important}} .document{{width:198mm;max-width:none;margin:0 auto}} .header,th,.merged,.total-row td{{-webkit-print-color-adjust:exact;print-color-adjust:exact}}}}
-</style></head><body>
-<div class="toolbar"><button class="print" onclick="window.print()">🖨 출력하기</button></div>
+</style>{print_title_script}</head><body>
+<div class="toolbar"><button class="print" onclick="printFinalDocument()">🖨 출력하기</button></div>
 <div class="document"><div class="header"><div><div class="title">주문 정보 및 패킹 리스트</div><div class="sub">ORDER INFORMATION &amp; PACKING LIST</div></div><div class="number"><small>EXPORT NO.</small><br><b>{html.escape(case['export_no'])}</b></div></div>
 <div class="body"><div class="section"><span class="section-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg></span>EXPORT INFORMATION</div><div class="grid">
 <div class="cell"><div class="label">국가 / Country</div><div class="value">{html.escape(case['country'] or '-')}</div></div>
