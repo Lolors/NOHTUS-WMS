@@ -1,3 +1,6 @@
+import base64
+import gzip
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +14,15 @@ from nohtus.services.location_map_new_layout import _NEW_CSS, _saved_layout_mark
 
 
 class LocationMapEditorIntegrationTests(unittest.TestCase):
+    def test_large_layout_save_payload_supports_gzip_and_legacy_encoding(self):
+        layout = initial_layout()
+        raw = json.dumps(layout, ensure_ascii=False).encode("utf-8")
+        legacy = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+        compressed = base64.urlsafe_b64encode(gzip.compress(raw)).decode("ascii").rstrip("=")
+        self.assertEqual(location_map_editor._decode_layout_payload(legacy), layout)
+        self.assertEqual(location_map_editor._decode_layout_payload(compressed), layout)
+        self.assertLess(len(compressed), len(legacy))
+
     def test_admin_menu_is_under_basic_section_and_shippable_menu_is_removed(self):
         basic = dict(navigation.MENU_SECTIONS)['기초']
         self.assertIn('로케이션맵 편집', basic)
@@ -226,6 +238,9 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertNotIn('stage.style.transform=`scale(', editor_html)
         self.assertIn('viewport.scrollLeft=0', editor_html)
         self.assertIn('viewport.scrollTop=0', editor_html)
+        self.assertIn("new CompressionStream('gzip')", editor_html)
+        self.assertIn("await encodedLayout()", editor_html)
+        self.assertIn('배치를 저장하고 있습니다', editor_html)
         self.assertIn('id="saveDraft"', editor_html)
         self.assertIn('id="loadDraft"', editor_html)
         self.assertIn('id="deleteDraft"', editor_html)
