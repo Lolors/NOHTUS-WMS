@@ -104,6 +104,10 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn("e.key==='Delete'", editor_html)
         self.assertIn("e.key.toLowerCase()==='z'", editor_html)
         self.assertIn("e.key.toLowerCase()==='y'", editor_html)
+        self.assertIn('className=\'selection-box\'', editor_html)
+        self.assertIn("mode:'marquee'", editor_html)
+        self.assertIn('it.x<right&&it.x+it.width>left', editor_html)
+        self.assertIn('target.rotation=targetRotation', editor_html)
 
 
 if __name__ == '__main__':
