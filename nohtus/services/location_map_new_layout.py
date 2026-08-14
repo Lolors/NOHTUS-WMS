@@ -210,6 +210,19 @@ def _saved_layout_markup(layout: dict) -> str:
 
 
 _DYNAMIC_DOTS_JS = r"""
+function fitApprovedMapToWidth(){
+  const scroll=document.querySelector('.map-scroll');
+  const stage=scroll&&scroll.querySelector('.map-stage');
+  if(!scroll||!stage)return;
+  const naturalWidth=Math.max(1,stage.offsetWidth);
+  const naturalHeight=Math.max(1,stage.offsetHeight);
+  const availableWidth=Math.max(1,scroll.clientWidth);
+  const fittedScale=availableWidth/naturalWidth;
+  stage.style.setProperty('transform',`scale(${fittedScale})`,'important');
+  stage.style.setProperty('transform-origin','top left','important');
+  scroll.style.setProperty('height',Math.ceil(naturalHeight*fittedScale)+'px','important');
+  scroll.style.setProperty('overflow','hidden','important');
+}
 function refreshApprovedMapDots(){
   document.querySelectorAll('.map-stage .dynamic-stock-dot').forEach(el=>el.remove());
   const specialStockLocations=['오른쪽 창고','사무실(4층)','지엠메딕'];
@@ -229,6 +242,12 @@ function refreshApprovedMapDots(){
   });
 }
 refreshApprovedMapDots();
+requestAnimationFrame(fitApprovedMapToWidth);
+window.addEventListener('resize',fitApprovedMapToWidth);
+if(window.ResizeObserver){
+  const mapScroll=document.querySelector('.map-scroll');
+  if(mapScroll)new ResizeObserver(fitApprovedMapToWidth).observe(mapScroll);
+}
 """
 
 
