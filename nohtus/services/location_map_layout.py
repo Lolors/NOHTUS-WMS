@@ -26,6 +26,7 @@ def _load_layout(path: Path) -> dict:
     data.setdefault("version", 1)
     data.setdefault("canvas", {"width": 1280, "height": 900, "grid": 10})
     data.setdefault("items", [])
+    data.setdefault("company_colors", {})
     return data
 
 
@@ -42,6 +43,12 @@ def _clean_layout(layout: dict) -> dict:
         raise ValueError("레이아웃 데이터 형식이 올바르지 않습니다.")
     canvas = layout.get("canvas") or {}
     items = layout.get("items") or []
+    raw_company_colors = layout.get("company_colors") or {}
+    company_colors = {}
+    for company in ("노투스팜", "노투스", "NOH", "비자료", "특수", "기타"):
+        color = str(raw_company_colors.get(company) or "").strip()
+        if re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+            company_colors[company] = color
     width = int(canvas.get("width") or 1280)
     height = int(canvas.get("height") or 900)
     grid = max(1, int(canvas.get("grid") or 10))
@@ -84,6 +91,7 @@ def _clean_layout(layout: dict) -> dict:
     payload = {
         "version": int(layout.get("version") or 1),
         "canvas": {"width": width, "height": height, "grid": grid},
+        "company_colors": company_colors,
         "items": cleaned,
     }
     return payload
