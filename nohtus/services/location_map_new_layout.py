@@ -47,9 +47,9 @@ _NEW_CSS = r"""
 .map-stage .nw-note{position:absolute;padding:15px 18px;border:1.5px dashed #cbd5e1;border-radius:14px;color:#64748b;font-size:16px;line-height:1.7;background:rgba(255,255,255,.78);pointer-events:none;}
 .map-stage .nw-rec-label{position:absolute;color:#0f172a;font-size:14px;font-weight:800;text-align:center;pointer-events:none;}
 .map-stage .nw-hatched{background:repeating-linear-gradient(135deg,#fff 0,#fff 8px,#d9efff 8px,#d9efff 10px)!important;border-color:#38a6e8!important;z-index:12!important;isolation:isolate;}
-.map-stage .special-menu{position:absolute!important;left:995px!important;top:630px!important;width:180px!important;display:none;grid-template-columns:1fr!important;z-index:30!important;background:#fff!important;border:1px solid #cbd5e1!important;border-radius:12px!important;box-shadow:0 12px 28px rgba(15,23,42,.18)!important;padding:6px!important;}
+.map-stage .special-menu{position:absolute!important;width:180px!important;display:none;grid-template-columns:1fr!important;z-index:30!important;background:#fff!important;border:1px solid #cbd5e1!important;border-radius:12px!important;box-shadow:0 12px 28px rgba(15,23,42,.18)!important;padding:6px!important;}
 .map-stage .special-menu.open{display:grid!important;gap:6px!important;}
-.map-stage .special-menu button{appearance:none!important;border:1px solid #e2e8f0!important;background:#f8fafc!important;border-radius:9px!important;font-size:13px!important;font-weight:900!important;color:#0f172a!important;padding:8px 10px!important;cursor:pointer!important;}
+.map-stage .special-menu button{appearance:none!important;border:1px solid #e2e8f0!important;background:#f8fafc!important;border-radius:9px!important;font-size:calc(13px + 2pt)!important;font-weight:900!important;color:#0f172a!important;padding:8px 10px!important;cursor:pointer!important;}
 .map-stage .special-menu button:hover,.map-stage .special-menu button.selected{background:#22c55e!important;color:#fff!important;border-color:#16a34a!important;}
 
 @media(max-width:1500px){.map-stage{transform:scale(.62)!important}.map-scroll{height:565px!important}}
@@ -215,6 +215,25 @@ def _saved_layout_markup(layout: dict) -> str:
 
 
 _DYNAMIC_DOTS_JS = r"""
+function positionSpecialMenu(){
+  const stage=document.querySelector('.map-stage');
+  const anchor=stage&&stage.querySelector('[data-loc="N"]');
+  const menu=stage&&stage.querySelector('#specialMenu');
+  if(!stage||!anchor||!menu)return;
+  requestAnimationFrame(()=>{
+    const menuWidth=menu.offsetWidth||180;
+    const menuHeight=menu.offsetHeight||150;
+    const gap=8;
+    const centeredLeft=anchor.offsetLeft+(anchor.offsetWidth-menuWidth)/2;
+    const left=Math.max(0,Math.min(centeredLeft,stage.offsetWidth-menuWidth));
+    const below=anchor.offsetTop+anchor.offsetHeight+gap;
+    const top=below+menuHeight<=stage.offsetHeight
+      ?below
+      :Math.max(0,anchor.offsetTop-menuHeight-gap);
+    menu.style.setProperty('left',Math.round(left)+'px','important');
+    menu.style.setProperty('top',Math.round(top)+'px','important');
+  });
+}
 function fitApprovedMapToWidth(){
   const scroll=document.querySelector('.map-scroll');
   const stage=scroll&&scroll.querySelector('.map-stage');
@@ -248,7 +267,10 @@ function refreshApprovedMapDots(){
 }
 refreshApprovedMapDots();
 requestAnimationFrame(fitApprovedMapToWidth);
-window.addEventListener('resize',fitApprovedMapToWidth);
+positionSpecialMenu();
+const specialMenu=document.getElementById('specialMenu');
+if(specialMenu)new MutationObserver(positionSpecialMenu).observe(specialMenu,{attributes:true,attributeFilter:['class']});
+window.addEventListener('resize',()=>{fitApprovedMapToWidth();positionSpecialMenu();});
 if(window.ResizeObserver){
   const mapScroll=document.querySelector('.map-scroll');
   if(mapScroll)new ResizeObserver(fitApprovedMapToWidth).observe(mapScroll);
