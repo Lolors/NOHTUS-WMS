@@ -51,6 +51,9 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('class="nw-zone zone farm"', markup)
         self.assertIn('.nw-zone.selected', _NEW_CSS)
         self.assertIn('.dynamic-stock-dot', _NEW_CSS)
+        c1['rotation'] = 90
+        rotated_markup = _saved_layout_markup(layout)
+        self.assertIn('transform:rotate(-90deg)', rotated_markup)
 
     def test_layout_round_trip_keeps_rotation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -128,7 +131,12 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('className=\'selection-box\'', editor_html)
         self.assertIn("mode:'marquee'", editor_html)
         self.assertIn('it.x<right&&it.x+it.width>left', editor_html)
-        self.assertIn('target.rotation=targetRotation', editor_html)
+        self.assertIn('groupCx', editor_html)
+        self.assertIn('groupCy', editor_html)
+        self.assertIn('newCx=action.groupCx+dx*cos-dy*sin', editor_html)
+        self.assertIn('newCy=action.groupCy+dx*sin+dy*cos', editor_html)
+        self.assertIn('target.rotation=m.rotation+deltaRotation', editor_html)
+        self.assertIn("label.style.transform=`rotate(${-Number(it.rotation||0)}deg)`", editor_html)
         self.assertIn('data-tab="shapeTab"', editor_html)
         self.assertIn('data-add-shape="rounded_rect"', editor_html)
         self.assertIn('data-add-shape="line"', editor_html)
