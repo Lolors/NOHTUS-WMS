@@ -45,11 +45,13 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         layout = initial_layout()
         c1 = next(item for item in layout['items'] if item['code'] == 'C1-01')
         c1['x'] = 777
+        layout['company_colors'] = {'노투스팜': '#112233'}
         markup = _saved_layout_markup(layout)
         self.assertIn('data-loc="C1-01"', markup)
         self.assertIn('left:777px', markup)
         self.assertIn('z-index:1', markup)
         self.assertIn('class="nw-zone zone farm"', markup)
+        self.assertIn('background:#112233', markup)
         self.assertIn('.nw-zone.selected', _NEW_CSS)
         self.assertIn('.dynamic-stock-dot', _NEW_CSS)
         c1['rotation'] = 90
@@ -68,12 +70,15 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
                 layout['items'][0]['group_id'] = 'split-group-1'
                 layout['items'][0]['fill_type'] = 'solid'
                 layout['items'][0]['fill_color'] = '#abcdef'
+                layout['company_colors'] = {'노투스팜': '#102030', 'NOH': '#aabbcc'}
                 location_map_layout.save_location_map_layout(layout)
                 restored = location_map_layout.load_location_map_layout()
         self.assertEqual(restored['items'][0]['rotation'], 90)
         self.assertEqual(restored['items'][0]['group_id'], 'split-group-1')
         self.assertEqual(restored['items'][0]['fill_type'], 'solid')
         self.assertEqual(restored['items'][0]['fill_color'], '#abcdef')
+        self.assertEqual(restored['company_colors']['노투스팜'], '#102030')
+        self.assertEqual(restored['company_colors']['NOH'], '#aabbcc')
 
     def test_draft_layout_is_separate_and_can_be_deleted(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -126,6 +131,13 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         editor_html = rendered.call_args.args[0]
         self.assertIn('class="resize-handle', editor_html)
         self.assertIn('class="rotate-handle"', editor_html)
+        self.assertIn('id="companyColorMenu"', editor_html)
+        self.assertIn('사업장 색상 설정', editor_html)
+        self.assertIn('id="applyCompanyColors"', editor_html)
+        self.assertIn('data-company-color="노투스팜"', editor_html)
+        self.assertIn('layout.company_colors=layout.company_colors||{}', editor_html)
+        self.assertIn('defaultCompanyColors', editor_html)
+        self.assertIn('layout.company_colors[input.dataset.companyColor]=input.value', editor_html)
         self.assertIn('id="propCode"', editor_html)
         self.assertIn('id="propFillType"', editor_html)
         self.assertIn('id="propFillColor"', editor_html)
