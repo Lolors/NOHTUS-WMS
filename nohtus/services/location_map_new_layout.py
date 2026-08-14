@@ -308,7 +308,6 @@ function installApprovedMapPan(){
     mapDidPan=false;
     scroll.setPointerCapture(event.pointerId);
     scroll.classList.add('map-panning');
-    event.preventDefault();
   });
   scroll.addEventListener('pointermove',event=>{
     if(!mapPointer||mapPointer.id!==event.pointerId)return;
