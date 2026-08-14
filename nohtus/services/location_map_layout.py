@@ -59,6 +59,8 @@ def save_location_map_layout(layout: dict) -> None:
             "kind": str(raw.get("kind") or "location").strip() or "location",
             "note": str(raw.get("note") or "").strip(),
             "group_id": str(raw.get("group_id") or "").strip(),
+            "shape_type": str(raw.get("shape_type") or "").strip(),
+            "stroke": str(raw.get("stroke") or "#475569").strip() or "#475569",
         })
 
     payload = {
