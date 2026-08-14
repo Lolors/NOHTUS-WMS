@@ -69,6 +69,12 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('background:#112233', markup)
         self.assertIn('.nw-zone.selected', _NEW_CSS)
         self.assertIn('.dynamic-stock-dot', _NEW_CSS)
+        renderer_source = (Path(__file__).resolve().parents[1] / 'nohtus' / 'services' / 'location_map_new_layout.py').read_text(encoding='utf-8')
+        self.assertIn('function fitApprovedMapToWidth()', renderer_source)
+        self.assertIn('availableWidth/naturalWidth', renderer_source)
+        self.assertIn("Math.ceil(naturalHeight*fittedScale)+'px'", renderer_source)
+        self.assertIn("new ResizeObserver(fitApprovedMapToWidth)", renderer_source)
+        self.assertIn("window.addEventListener('resize',fitApprovedMapToWidth)", renderer_source)
         c1['rotation'] = 90
         c1['fill_type'] = 'hatched'
         c1['fill_color'] = '#123456'
