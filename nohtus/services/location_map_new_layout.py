@@ -52,6 +52,13 @@ _NEW_CSS = r"""
 .map-stage .special-menu.open{display:grid!important;gap:6px!important;}
 .map-stage .special-menu button{appearance:none!important;border:1px solid #e2e8f0!important;background:#f8fafc!important;border-radius:9px!important;font-size:calc(13px + 2pt)!important;font-weight:900!important;color:#0f172a!important;padding:8px 10px!important;cursor:pointer!important;}
 .map-stage .special-menu button:hover,.map-stage .special-menu button.selected{background:#22c55e!important;color:#fff!important;border-color:#16a34a!important;}
+.map-zoom-controls{display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 0 2px;background:#fff;}
+.map-zoom-controls button{appearance:none;border:1px solid #cbd5e1;background:#fff;color:#0f172a;border-radius:9px;padding:7px 13px;font-size:14px;font-weight:900;cursor:pointer;}
+.map-zoom-controls button:hover{background:#f1f5f9;border-color:#94a3b8;}
+.map-zoom-level{min-width:58px;text-align:center;color:#475569;font-size:13px;font-weight:900;}
+.map-scroll.map-zoomed,.map-scroll.map-zoomed .map-stage,.map-scroll.map-zoomed .map-stage *{cursor:grab!important;}
+.map-scroll.map-panning,.map-scroll.map-panning .map-stage,.map-scroll.map-panning .map-stage *{cursor:grabbing!important;}
+.map-scroll.map-zoomed{touch-action:none;user-select:none;}
 
 @media(max-width:1500px){.map-stage{transform:scale(.62)!important}.map-scroll{height:565px!important}}
 @media(max-width:1250px){.map-stage{transform:scale(.54)!important}.map-scroll{height:492px!important}}
@@ -73,6 +80,16 @@ def _zone(loc: str, label: str, x: int, y: int, w: int, h: int, cls: str = "supp
 
 def _six(prefix: str) -> list[str]:
     return [_cell(f"{prefix}-03"), _cell(f"{prefix}-04"), _cell(f"{prefix}-02"), _cell(f"{prefix}-05"), _cell(f"{prefix}-01"), _cell(f"{prefix}-06")]
+
+
+_ZOOM_CONTROLS = (
+    '<div class="map-zoom-controls" aria-label="지도 확대 축소">'
+    '<button type="button" id="mapZoomOut" aria-label="축소">− 축소</button>'
+    '<span class="map-zoom-level" id="mapZoomLevel">100%</span>'
+    '<button type="button" id="mapZoomIn" aria-label="확대">＋ 확대</button>'
+    '<button type="button" id="mapZoomFit">화면 맞춤</button>'
+    '</div>'
+)
 
 
 def _map_markup() -> str:
@@ -120,7 +137,7 @@ def _map_markup() -> str:
     p.append('<div class="nw-outline" style="left:930px;top:775px;width:1px;height:90px;border-width:0 0 0 1.5px;"></div>')
 
     p.append('<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button><button type="button" data-special-loc="지엠메딕">지엠메딕</button></div>')
-    return '<div class="map-scroll"><div class="map-stage">' + ''.join(p) + '</div></div>'
+    return '<div class="map-scroll"><div class="map-stage">' + ''.join(p) + '</div></div>' + _ZOOM_CONTROLS
 
 
 def _layout_class(item: dict) -> str:
@@ -212,7 +229,7 @@ def _saved_layout_markup(layout: dict) -> str:
     items.append(
         '<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button><button type="button" data-special-loc="지엠메딕">지엠메딕</button></div>'
     )
-    return '<div class="map-scroll"><div class="map-stage">' + ''.join(items) + '</div></div>'
+    return '<div class="map-scroll"><div class="map-stage">' + ''.join(items) + '</div></div>' + _ZOOM_CONTROLS
 
 
 _DYNAMIC_DOTS_JS = r"""
