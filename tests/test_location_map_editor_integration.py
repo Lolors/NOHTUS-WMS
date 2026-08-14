@@ -66,6 +66,7 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('left:777px', markup)
         self.assertIn('z-index:1', markup)
         self.assertIn('class="nw-zone zone farm"', markup)
+        self.assertNotIn('class="nw-outline"', markup)
         self.assertIn('background:#112233', markup)
         self.assertIn('.nw-zone.selected', _NEW_CSS)
         self.assertIn('.dynamic-stock-dot', _NEW_CSS)
@@ -137,6 +138,7 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('calc(50% - .75px)', markup)
         self.assertIn('calc(50% + .75px)', markup)
         self.assertNotIn('data-loc="__shape-test"', markup)
+        self.assertNotIn('class="nw-outline"', markup)
         layout['items'].append({
             'code': '__shape-filled',
             'label': '원',
