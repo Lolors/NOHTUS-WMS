@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _LAYOUT_PATH = _PROJECT_ROOT / "data" / "location_map_layout.json"
@@ -56,6 +57,12 @@ def _clean_layout(layout: dict) -> dict:
         if not code or code in seen:
             continue
         seen.add(code)
+        fill_type = str(raw.get("fill_type") or "company").strip()
+        if fill_type not in {"company", "solid", "hatched", "none"}:
+            fill_type = "company"
+        fill_color = str(raw.get("fill_color") or "#ffffff").strip()
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", fill_color):
+            fill_color = "#ffffff"
         cleaned.append({
             "code": code,
             "label": str(raw.get("label") or code).strip() or code,
@@ -70,6 +77,8 @@ def _clean_layout(layout: dict) -> dict:
             "group_id": str(raw.get("group_id") or "").strip(),
             "shape_type": str(raw.get("shape_type") or "").strip(),
             "stroke": str(raw.get("stroke") or "#475569").strip() or "#475569",
+            "fill_type": fill_type,
+            "fill_color": fill_color,
         })
 
     payload = {
