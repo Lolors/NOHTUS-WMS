@@ -3,12 +3,23 @@ from __future__ import annotations
 import html
 import re
 import unicodedata
+from datetime import date
 
 import streamlit as st
 import streamlit.components.v1 as components
 
 from nohtus.export_app.services.shared_document_view_service import quantity_with_unit, shipment_date
 from nohtus.export_app.utils.formatters import fmt_number
+
+
+def _pdf_document_title(case, today: date | None = None) -> str:
+    def safe_part(value: object) -> str:
+        text = re.sub(r'[<>:"/\\|?*\x00-\x1f]', ' ', str(value or '').strip())
+        return re.sub(r'\s+', ' ', text).strip(' .') or '-'
+
+    current_date = today or date.today()
+    parts = [safe_part(case[key]) for key in ('country', 'buyer', 'transport_mode')]
+    return '_'.join([*parts, current_date.isoformat()])
 
 
 def render_document(case, packed, actual_rows=None) -> None:
@@ -124,8 +135,9 @@ def render_document(case, packed, actual_rows=None) -> None:
             f'<div class="card"><small>품목 수</small><b>{item_count} 품목</b></div>'
             f'<div class="card"><small>출고 수량</small><b>{fmt_number(total_qty)}</b></div>'
         )
+    document_title = html.escape(_pdf_document_title(case))
     document = f'''<!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{document_title}</title>
 <style>
 *{{box-sizing:border-box}} @page{{size:A4 portrait;margin:6mm}}
 html,body{{margin:0;padding:0;background:#f4f7fa;color:#172033;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",Arial,sans-serif}} body{{padding:8px}}
