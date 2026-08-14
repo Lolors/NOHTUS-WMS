@@ -176,16 +176,23 @@ def _saved_layout_markup(layout: dict) -> str:
         if str(item.get("kind") or "") == "shape":
             shape_type = str(item.get("shape_type") or "rounded_rect").strip()
             stroke = escape(str(item.get("stroke") or "#475569").strip(), quote=True)
+            stroke_style = "dashed" if str(item.get("stroke_style") or "solid") == "dashed" else "solid"
             fill_style = _location_fill_style(item, {})
-            decoration = {
-                "rounded_rect": f"border:1.5px solid {stroke};border-radius:18px;{fill_style}",
-                "circle": f"border:1.5px solid {stroke};border-radius:50%;{fill_style}",
-                "line": (
-                    "border:0;background:linear-gradient(to bottom,"
+            line_background = (
+                f"repeating-linear-gradient(to right,{stroke} 0 10px,transparent 10px 17px) "
+                "center/100% 1.5px no-repeat"
+                if stroke_style == "dashed"
+                else (
+                    "linear-gradient(to bottom,"
                     f"transparent calc(50% - .75px),{stroke} calc(50% - .75px),"
-                    f"{stroke} calc(50% + .75px),transparent calc(50% + .75px));"
-                ),
-            }.get(shape_type, f"border:1.5px solid {stroke};border-radius:18px;{fill_style}")
+                    f"{stroke} calc(50% + .75px),transparent calc(50% + .75px))"
+                )
+            )
+            decoration = {
+                "rounded_rect": f"border:1.5px {stroke_style} {stroke};border-radius:18px;{fill_style}",
+                "circle": f"border:1.5px {stroke_style} {stroke};border-radius:50%;{fill_style}",
+                "line": f"border:0;background:{line_background};",
+            }.get(shape_type, f"border:1.5px {stroke_style} {stroke};border-radius:18px;{fill_style}")
             items.append(
                 f'<div class="map-shape map-shape-{escape(shape_type, quote=True)}" '
                 f'aria-hidden="true" style="{style}{decoration}'
