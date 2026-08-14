@@ -62,6 +62,27 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
                 restored = location_map_layout.load_location_map_layout()
         self.assertEqual(restored['items'][0]['rotation'], 90)
 
+    def test_editor_supports_shape_transform_and_new_location_setup(self):
+        with (
+            patch.object(location_map_editor, 'is_admin', return_value=True),
+            patch.object(location_map_editor, '_consume_save_payload', return_value=False),
+            patch.object(location_map_editor, 'load_location_map_layout', return_value=initial_layout()),
+            patch.object(location_map_editor.components, 'html') as rendered,
+            patch.object(location_map_editor.st, 'title'),
+            patch.object(location_map_editor.st, 'caption'),
+        ):
+            location_map_editor.page_location_map_editor()
+
+        editor_html = rendered.call_args.args[0]
+        self.assertIn('class="resize-handle', editor_html)
+        self.assertIn('class="rotate-handle"', editor_html)
+        self.assertIn('id="propCode"', editor_html)
+        self.assertIn('id="propWidth"', editor_html)
+        self.assertIn('id="propRotation"', editor_html)
+        self.assertIn('id="newCode"', editor_html)
+        self.assertIn('id="newKind"', editor_html)
+        self.assertIn("isDuplicateCode(code)", editor_html)
+
 
 if __name__ == '__main__':
     unittest.main()
