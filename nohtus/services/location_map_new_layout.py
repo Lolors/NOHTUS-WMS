@@ -252,6 +252,33 @@ function positionSpecialMenu(){
     menu.style.setProperty('top',Math.round(top)+'px','important');
   });
 }
+let mapFitScale=1;
+let mapZoomFactor=1;
+let mapPanX=0;
+let mapPanY=0;
+let mapPointer=null;
+let mapDidPan=false;
+function clampMapPan(){
+  const scroll=document.querySelector('.map-scroll');
+  const stage=scroll&&scroll.querySelector('.map-stage');
+  if(!scroll||!stage)return;
+  const scaledWidth=stage.offsetWidth*mapFitScale*mapZoomFactor;
+  const scaledHeight=stage.offsetHeight*mapFitScale*mapZoomFactor;
+  mapPanX=Math.min(0,Math.max(scroll.clientWidth-scaledWidth,mapPanX));
+  mapPanY=Math.min(0,Math.max(scroll.clientHeight-scaledHeight,mapPanY));
+}
+function applyApprovedMapTransform(){
+  const scroll=document.querySelector('.map-scroll');
+  const stage=scroll&&scroll.querySelector('.map-stage');
+  if(!scroll||!stage)return;
+  clampMapPan();
+  const scale=mapFitScale*mapZoomFactor;
+  stage.style.setProperty('transform',`translate(${mapPanX}px,${mapPanY}px) scale(${scale})`,'important');
+  stage.style.setProperty('transform-origin','top left','important');
+  scroll.classList.toggle('map-zoomed',mapZoomFactor>1);
+  const level=document.getElementById('mapZoomLevel');
+  if(level)level.textContent=Math.round(mapZoomFactor*100)+'%';
+}
 function fitApprovedMapToWidth(){
   const scroll=document.querySelector('.map-scroll');
   const stage=scroll&&scroll.querySelector('.map-stage');
@@ -259,11 +286,51 @@ function fitApprovedMapToWidth(){
   const naturalWidth=Math.max(1,stage.offsetWidth);
   const naturalHeight=Math.max(1,stage.offsetHeight);
   const availableWidth=Math.max(1,scroll.clientWidth);
-  const fittedScale=availableWidth/naturalWidth;
-  stage.style.setProperty('transform',`scale(${fittedScale})`,'important');
-  stage.style.setProperty('transform-origin','top left','important');
-  scroll.style.setProperty('height',Math.ceil(naturalHeight*fittedScale)+'px','important');
+  mapFitScale=availableWidth/naturalWidth;
+  scroll.style.setProperty('height',Math.ceil(naturalHeight*mapFitScale)+'px','important');
   scroll.style.setProperty('overflow','hidden','important');
+  applyApprovedMapTransform();
+}
+function setApprovedMapZoom(nextZoom){
+  mapZoomFactor=Math.max(1,Math.min(2.5,nextZoom));
+  if(mapZoomFactor===1){mapPanX=0;mapPanY=0;}
+  applyApprovedMapTransform();
+}
+function installApprovedMapPan(){
+  const scroll=document.querySelector('.map-scroll');
+  if(!scroll)return;
+  document.getElementById('mapZoomIn')?.addEventListener('click',()=>setApprovedMapZoom(mapZoomFactor+.25));
+  document.getElementById('mapZoomOut')?.addEventListener('click',()=>setApprovedMapZoom(mapZoomFactor-.25));
+  document.getElementById('mapZoomFit')?.addEventListener('click',()=>setApprovedMapZoom(1));
+  scroll.addEventListener('pointerdown',event=>{
+    if(mapZoomFactor<=1||event.button!==0)return;
+    mapPointer={id:event.pointerId,x:event.clientX,y:event.clientY,startX:event.clientX,startY:event.clientY};
+    mapDidPan=false;
+    scroll.setPointerCapture(event.pointerId);
+    scroll.classList.add('map-panning');
+    event.preventDefault();
+  });
+  scroll.addEventListener('pointermove',event=>{
+    if(!mapPointer||mapPointer.id!==event.pointerId)return;
+    const dx=event.clientX-mapPointer.x;
+    const dy=event.clientY-mapPointer.y;
+    mapPanX+=dx;mapPanY+=dy;
+    mapPointer.x=event.clientX;mapPointer.y=event.clientY;
+    if(Math.hypot(event.clientX-mapPointer.startX,event.clientY-mapPointer.startY)>4)mapDidPan=true;
+    applyApprovedMapTransform();
+    event.preventDefault();
+  });
+  const finishPan=event=>{
+    if(!mapPointer||mapPointer.id!==event.pointerId)return;
+    mapPointer=null;
+    scroll.classList.remove('map-panning');
+  };
+  scroll.addEventListener('pointerup',finishPan);
+  scroll.addEventListener('pointercancel',finishPan);
+  scroll.addEventListener('click',event=>{
+    if(!mapDidPan)return;
+    event.preventDefault();event.stopImmediatePropagation();mapDidPan=false;
+  },true);
 }
 function refreshApprovedMapDots(){
   document.querySelectorAll('.map-stage .dynamic-stock-dot').forEach(el=>el.remove());
@@ -284,6 +351,7 @@ function refreshApprovedMapDots(){
   });
 }
 refreshApprovedMapDots();
+installApprovedMapPan();
 requestAnimationFrame(fitApprovedMapToWidth);
 positionSpecialMenu();
 const specialMenu=document.getElementById('specialMenu');
