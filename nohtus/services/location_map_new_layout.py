@@ -198,14 +198,12 @@ def _saved_layout_markup(layout: dict) -> str:
                 f'<span style="display:inline-block;transform:rotate({-rotation}deg);'
                 f'transform-origin:center;">{label}</span></button>'
             )
-    items.extend([
-        '<div class="nw-outline" style="left:930px;top:590px;width:330px;height:185px;border-right:0;border-bottom:0;"></div>',
-        '<div class="nw-outline" style="left:1260px;top:590px;width:1px;height:110px;border-width:0 0 0 1.5px;"></div>',
-        '<div class="nw-outline" style="left:1260px;top:590px;width:222px;height:110px;border-width:0 0 1.5px 0;"></div>',
-        '<div class="nw-outline" style="left:410px;top:865px;width:520px;height:45px;border-right:0;border-bottom:0;"></div>',
-        '<div class="nw-outline" style="left:930px;top:775px;width:1px;height:90px;border-width:0 0 0 1.5px;"></div>',
-        '<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button><button type="button" data-special-loc="지엠메딕">지엠메딕</button></div>',
-    ])
+    # A saved layout is authoritative: decorative walls/outlines come only
+    # from the shapes created in the editor.  Legacy fixed outlines would be
+    # drawn on top of the user's design and create duplicate or stray lines.
+    items.append(
+        '<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button><button type="button" data-special-loc="지엠메딕">지엠메딕</button></div>'
+    )
     return '<div class="map-scroll"><div class="map-stage">' + ''.join(items) + '</div></div>'
 
 
