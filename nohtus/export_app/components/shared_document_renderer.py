@@ -20,7 +20,7 @@ def _pdf_document_title(case, today: date | None = None) -> str:
 
     current_date = today or date.today()
     parts = [safe_part(case[key]) for key in ('country', 'buyer', 'transport_mode')]
-    return '_'.join([*parts, current_date.isoformat()])
+    return '_'.join([*parts, current_date.strftime('%y%m%d')])
 
 
 def _print_title_script(title: str) -> str:

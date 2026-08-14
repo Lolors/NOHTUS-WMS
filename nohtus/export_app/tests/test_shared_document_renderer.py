@@ -10,18 +10,18 @@ class SharedDocumentRendererTests(unittest.TestCase):
 
         title = _pdf_document_title(case, date(2026, 8, 14))
 
-        self.assertEqual(title, 'Japan_ABC Buyer_AIR_2026-08-14')
+        self.assertEqual(title, 'Japan_ABC Buyer_AIR_260814')
 
     def test_pdf_title_removes_characters_forbidden_in_windows_filenames(self):
         case = {'country': 'Korea/Japan', 'buyer': 'A*B?', 'transport_mode': 'DHL: AIR'}
 
         title = _pdf_document_title(case, date(2026, 8, 14))
 
-        self.assertEqual(title, 'Korea Japan_A B_DHL AIR_2026-08-14')
+        self.assertEqual(title, 'Korea Japan_A B_DHL AIR_260814')
         self.assertNotRegex(title, r'[<>:"/\\|?*]')
 
     def test_print_script_temporarily_changes_parent_document_title(self):
-        script = _print_title_script('Japan_ABC Buyer_AIR_2026-08-14')
+        script = _print_title_script('Japan_ABC Buyer_AIR_260814')
 
         self.assertIn('function printFinalDocument()', script)
         self.assertIn('window.parent.document', script)
