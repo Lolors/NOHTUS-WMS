@@ -58,6 +58,7 @@ def save_location_map_layout(layout: dict) -> None:
             "company": str(raw.get("company") or "기타").strip() or "기타",
             "kind": str(raw.get("kind") or "location").strip() or "location",
             "note": str(raw.get("note") or "").strip(),
+            "group_id": str(raw.get("group_id") or "").strip(),
         })
 
     payload = {
