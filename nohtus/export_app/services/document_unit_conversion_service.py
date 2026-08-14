@@ -6,7 +6,14 @@ from nohtus.export_app import db
 def list_case_conversions(case_id: int) -> list[dict]:
     rows = db.rows(
         '''SELECT o.id, o.product_name,
-                  COALESCE(SUM(s.requested_qty), o.quantity, 0) AS internal_ea_qty,
+                  COALESCE(
+                    SUM(s.requested_qty),
+                    o.quantity * CASE
+                      WHEN COALESCE(o.ea_per_document_unit, 0) > 0 THEN o.ea_per_document_unit
+                      ELSE 1
+                    END,
+                    0
+                  ) AS internal_ea_qty,
                   COALESCE(NULLIF(TRIM(o.document_unit), ''), NULLIF(TRIM(o.unit), ''), 'EA') AS document_unit,
                   CASE
                     WHEN COALESCE(o.ea_per_document_unit, 0) > 0 THEN o.ea_per_document_unit

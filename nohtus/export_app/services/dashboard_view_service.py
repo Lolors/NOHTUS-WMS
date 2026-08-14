@@ -253,7 +253,12 @@ def intake_progress_percentages(case_ids: list[int]) -> dict[int, float]:
     placeholders = ','.join('?' for _ in ids)
     rows = db.rows(
         f'''SELECT o.case_id AS case_id,
-                   SUM(o.quantity) AS ordered_qty,
+                   SUM(
+                       o.quantity * CASE
+                         WHEN COALESCE(o.ea_per_document_unit, 0) > 0 THEN o.ea_per_document_unit
+                         ELSE 1
+                       END
+                   ) AS ordered_qty,
                    COALESCE(SUM(r.received_qty), 0) AS received_qty
             FROM order_items o
             LEFT JOIN (

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import math
 from difflib import SequenceMatcher
 
 import streamlit as st
@@ -57,7 +58,19 @@ def _cached_orders_for_case(
     cache_token: tuple[int, int, int, int],
 ) -> list[dict]:
     rows = db.rows(
-        '''SELECT id, product_name, quantity, unit, purchase_price, created_at
+        '''SELECT id, product_name,
+                  quantity AS document_quantity,
+                  quantity * CASE
+                    WHEN COALESCE(ea_per_document_unit, 0) > 0 THEN ea_per_document_unit
+                    ELSE 1
+                  END AS quantity,
+                  'EA' AS unit,
+                  COALESCE(NULLIF(TRIM(document_unit), ''), NULLIF(TRIM(unit), ''), 'EA') AS document_unit,
+                  CASE
+                    WHEN COALESCE(ea_per_document_unit, 0) > 0 THEN ea_per_document_unit
+                    ELSE 1
+                  END AS ea_per_document_unit,
+                  purchase_price, created_at
            FROM order_items
            WHERE case_id=?
            ORDER BY id''',
@@ -78,8 +91,9 @@ def get_order_items_dataframe(case_id: int):
         {
             '_id': row['id'],
             '제품명': row['product_name'],
-            '수량': row['quantity'],
-            '단위': row['unit'],
+            '수량': row['document_quantity'],
+            '단위': row['document_unit'],
+            '1단위당 EA': row['ea_per_document_unit'],
             '매입가': row['purchase_price'],
         }
         for row in rows
@@ -342,6 +356,9 @@ def save_order_items(case_id: int, edited) -> None:
             quantity = float(row.get('수량', 0) or 0)
             unit = str(row.get('단위', 'EA') or 'EA').strip() or 'EA'
             purchase_price = float(row.get('매입가', 0) or 0)
+            ea_per_document_unit = float(row.get('1단위당 EA', 1) or 1)
+            if not math.isfinite(ea_per_document_unit) or ea_per_document_unit <= 0:
+                raise ValueError('1단위당 EA는 0보다 커야 합니다.')
 
             if not product_name:
                 continue
@@ -351,9 +368,13 @@ def save_order_items(case_id: int, edited) -> None:
                 seen_ids.add(order_id)
                 conn.execute(
                     '''UPDATE order_items
-                       SET product_name=?,quantity=?,unit=?,purchase_price=?
+                       SET product_name=?,quantity=?,unit=?,purchase_price=?,
+                           document_unit=?,ea_per_document_unit=?
                        WHERE id=? AND case_id=?''',
-                    (product_name, quantity, unit, purchase_price, order_id, case_id),
+                    (
+                        product_name, quantity, unit, purchase_price,
+                        unit, ea_per_document_unit, order_id, case_id,
+                    ),
                 )
                 if (
                     float(previous['purchase_price'] or 0) != purchase_price
@@ -376,9 +397,14 @@ def save_order_items(case_id: int, edited) -> None:
                     )
             else:
                 cursor = conn.execute(
-                    '''INSERT INTO order_items(case_id,product_name,quantity,unit,purchase_price,created_at)
-                       VALUES (?,?,?,?,?,?)''',
-                    (case_id, product_name, quantity, unit, purchase_price, now),
+                    '''INSERT INTO order_items(
+                           case_id,product_name,quantity,unit,purchase_price,
+                           document_unit,ea_per_document_unit,created_at
+                       ) VALUES (?,?,?,?,?,?,?,?)''',
+                    (
+                        case_id, product_name, quantity, unit, purchase_price,
+                        unit, ea_per_document_unit, now,
+                    ),
                 )
                 order_id = int(cursor.lastrowid)
                 seen_ids.add(order_id)

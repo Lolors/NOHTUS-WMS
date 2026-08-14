@@ -53,7 +53,11 @@ def sync_case_stage(case_id: int, now: str | None = None) -> str:
                COALESCE(SUM(COALESCE(received.received_qty, 0)), 0) AS total_received_qty,
                SUM(
                    CASE
-                       WHEN COALESCE(received.received_qty, 0) + 0.000001 < COALESCE(o.quantity, 0)
+                       WHEN COALESCE(received.received_qty, 0) + 0.000001 <
+                            COALESCE(o.quantity, 0) * CASE
+                              WHEN COALESCE(o.ea_per_document_unit, 0) > 0 THEN o.ea_per_document_unit
+                              ELSE 1
+                            END
                        THEN 1
                        ELSE 0
                    END
