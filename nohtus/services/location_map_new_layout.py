@@ -157,14 +157,14 @@ def _saved_layout_markup(layout: dict) -> str:
             shape_type = str(item.get("shape_type") or "rounded_rect").strip()
             stroke = escape(str(item.get("stroke") or "#475569").strip(), quote=True)
             decoration = {
-                "rounded_rect": f"border:4px solid {stroke};border-radius:18px;background:transparent;",
-                "circle": f"border:4px solid {stroke};border-radius:50%;background:transparent;",
+                "rounded_rect": f"border:1.5px solid {stroke};border-radius:18px;background:transparent;",
+                "circle": f"border:1.5px solid {stroke};border-radius:50%;background:transparent;",
                 "line": (
                     "border:0;background:linear-gradient(to bottom,"
-                    f"transparent calc(50% - 2px),{stroke} calc(50% - 2px),"
-                    f"{stroke} calc(50% + 2px),transparent calc(50% + 2px));"
+                    f"transparent calc(50% - .75px),{stroke} calc(50% - .75px),"
+                    f"{stroke} calc(50% + .75px),transparent calc(50% + .75px));"
                 ),
-            }.get(shape_type, f"border:4px solid {stroke};border-radius:18px;background:transparent;")
+            }.get(shape_type, f"border:1.5px solid {stroke};border-radius:18px;background:transparent;")
             items.append(
                 f'<div class="map-shape map-shape-{escape(shape_type, quote=True)}" '
                 f'aria-hidden="true" style="{style}{decoration}'
