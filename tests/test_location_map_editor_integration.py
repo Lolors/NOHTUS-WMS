@@ -53,8 +53,11 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('.nw-zone.selected', _NEW_CSS)
         self.assertIn('.dynamic-stock-dot', _NEW_CSS)
         c1['rotation'] = 90
+        c1['fill_type'] = 'hatched'
+        c1['fill_color'] = '#123456'
         rotated_markup = _saved_layout_markup(layout)
         self.assertIn('transform:rotate(-90deg)', rotated_markup)
+        self.assertIn('repeating-linear-gradient(135deg,#123456 0 2px,#fff 2px 8px)', rotated_markup)
 
     def test_layout_round_trip_keeps_rotation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -63,10 +66,14 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
                 layout = initial_layout()
                 layout['items'][0]['rotation'] = 90
                 layout['items'][0]['group_id'] = 'split-group-1'
+                layout['items'][0]['fill_type'] = 'solid'
+                layout['items'][0]['fill_color'] = '#abcdef'
                 location_map_layout.save_location_map_layout(layout)
                 restored = location_map_layout.load_location_map_layout()
         self.assertEqual(restored['items'][0]['rotation'], 90)
         self.assertEqual(restored['items'][0]['group_id'], 'split-group-1')
+        self.assertEqual(restored['items'][0]['fill_type'], 'solid')
+        self.assertEqual(restored['items'][0]['fill_color'], '#abcdef')
 
     def test_draft_layout_is_separate_and_can_be_deleted(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -120,6 +127,12 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('class="resize-handle', editor_html)
         self.assertIn('class="rotate-handle"', editor_html)
         self.assertIn('id="propCode"', editor_html)
+        self.assertIn('id="propFillType"', editor_html)
+        self.assertIn('id="propFillColor"', editor_html)
+        self.assertIn('id="newFillType"', editor_html)
+        self.assertIn('id="newFillColor"', editor_html)
+        self.assertIn('function fillBackground(type,color)', editor_html)
+        self.assertIn("it.fill_type||'company'", editor_html)
         self.assertNotIn('id="propX"', editor_html)
         self.assertNotIn('id="propY"', editor_html)
         self.assertNotIn('id="propWidth"', editor_html)
