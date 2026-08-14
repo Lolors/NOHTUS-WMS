@@ -139,7 +139,7 @@ def _layout_class(item: dict) -> str:
 
 def _saved_layout_markup(layout: dict) -> str:
     items = []
-    for item in layout.get("items") or []:
+    for layer_index, item in enumerate(layout.get("items") or [], start=1):
         code = str(item.get("code") or "").strip()
         if not code:
             continue
@@ -151,7 +151,7 @@ def _saved_layout_markup(layout: dict) -> str:
         rotation = int(item.get("rotation") or 0)
         style = (
             f"left:{x}px;top:{y}px;width:{width}px;height:{height}px;"
-            f"transform:rotate({rotation}deg);"
+            f"transform:rotate({rotation}deg);z-index:{layer_index};"
         )
         if str(item.get("kind") or "") == "shape":
             shape_type = str(item.get("shape_type") or "rounded_rect").strip()
@@ -168,7 +168,7 @@ def _saved_layout_markup(layout: dict) -> str:
             items.append(
                 f'<div class="map-shape map-shape-{escape(shape_type, quote=True)}" '
                 f'aria-hidden="true" style="{style}{decoration}'
-                'position:absolute;pointer-events:none;z-index:1;"></div>'
+                'position:absolute;pointer-events:none;"></div>'
             )
         else:
             items.append(
