@@ -116,6 +116,24 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('calc(50% - .75px)', markup)
         self.assertIn('calc(50% + .75px)', markup)
         self.assertNotIn('data-loc="__shape-test"', markup)
+        layout['items'].append({
+            'code': '__shape-filled',
+            'label': '원',
+            'x': 300,
+            'y': 20,
+            'width': 100,
+            'height': 100,
+            'rotation': 0,
+            'company': '기타',
+            'kind': 'shape',
+            'shape_type': 'circle',
+            'stroke': '#654321',
+            'fill_type': 'hatched',
+            'fill_color': '#abcdef',
+            'note': '',
+        })
+        filled_markup = _saved_layout_markup(layout)
+        self.assertIn('border-radius:50%;background:repeating-linear-gradient(135deg,#abcdef', filled_markup)
 
     def test_editor_supports_shape_transform_and_new_location_setup(self):
         with (
@@ -189,6 +207,14 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('target.rotation=m.rotation+deltaRotation', editor_html)
         self.assertIn("label.style.transform=`rotate(${-Number(it.rotation||0)}deg)`", editor_html)
         self.assertIn('data-tab="shapeTab"', editor_html)
+        self.assertIn('id="propShapeStroke"', editor_html)
+        self.assertIn('id="propShapeFillType"', editor_html)
+        self.assertIn('id="propShapeFillColor"', editor_html)
+        self.assertIn('id="applyShapeStyle"', editor_html)
+        self.assertIn('id="shapeFillType"', editor_html)
+        self.assertIn('id="shapeFillColor"', editor_html)
+        self.assertIn("else if(shapeType!=='line')el.style.background=fillBackground", editor_html)
+        self.assertIn("item.shape_type!=='line'", editor_html)
         self.assertIn('data-add-shape="rounded_rect"', editor_html)
         self.assertIn('data-add-shape="line"', editor_html)
         self.assertIn('data-add-shape="circle"', editor_html)
