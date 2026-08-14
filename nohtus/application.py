@@ -28,6 +28,7 @@ from nohtus.pages.export_waiting import page_export_waiting as _page_export_wait
 from nohtus.pages.history_business import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.location_map_business import page_map
+from nohtus.pages.location_map_editor import page_location_map_editor
 from nohtus.pages.material_management import page_material_management
 from nohtus.pages.customer_master_business import page_customer_master
 from nohtus.pages.mobile_stock_business import page_mobile_stock_finder
@@ -50,7 +51,6 @@ from nohtus.pages.product_matching_business import page_product_matching
 from nohtus.pages.product_shortcuts import page_recent_products
 from nohtus.pages.purchase_history_single import page_purchase_history
 from nohtus.pages.saved_outbound_date_fix import page_saved_outbound as page_saved_outbound_refactored
-from nohtus.pages.shippable_inventory import page_shippable_inventory
 from nohtus.pages.stocktake_business import page_stocktake
 
 
@@ -298,11 +298,11 @@ def main():
     elif menu == "입고 등록": page_inbound_refactored()
     elif menu == "이동 등록": page_move()
     elif menu == "재고 실사": page_stocktake()
-    elif menu == "출고가능 관리":
+    elif menu == "로케이션맵 편집":
         if not is_admin():
             st.warning("admin 계정만 접근할 수 있습니다.")
             return
-        page_shippable_inventory()
+        page_location_map_editor()
     elif menu == "제품 매칭 관리": page_product_matching()
     elif menu == "부자재 관리": page_material_management()
     elif menu == "거래처 관리": page_customer_master()

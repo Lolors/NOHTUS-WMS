@@ -5,7 +5,10 @@ continues to be provided by location_map_legacy through the same data-loc button
 """
 from __future__ import annotations
 
+from html import escape
 import re
+
+from nohtus.services.location_map_layout import load_location_map_layout
 
 
 _NEW_CSS = r"""
@@ -119,6 +122,52 @@ def _map_markup() -> str:
     return '<div class="map-scroll"><div class="map-stage">' + ''.join(p) + '</div></div>'
 
 
+def _layout_class(item: dict) -> str:
+    code = str(item.get("code") or "").strip()
+    company = str(item.get("company") or "").strip()
+    if code == "P":
+        return "export"
+    if code == "Q":
+        return "expiry"
+    if code in {"R1", "R2"}:
+        return "cold"
+    return {
+        "노투스팜": "farm", "노투스": "notus", "NOH": "noh",
+        "비자료": "bidata", "특수": "support",
+    }.get(company, "support")
+
+
+def _saved_layout_markup(layout: dict) -> str:
+    items = []
+    for item in layout.get("items") or []:
+        code = str(item.get("code") or "").strip()
+        if not code:
+            continue
+        label = escape(str(item.get("label") or code).strip() or code).replace("\n", "<br>")
+        x = max(0, int(item.get("x") or 0))
+        y = max(0, int(item.get("y") or 0))
+        width = max(36, int(item.get("width") or 80))
+        height = max(30, int(item.get("height") or 56))
+        rotation = int(item.get("rotation") or 0)
+        style = (
+            f"left:{x}px;top:{y}px;width:{width}px;height:{height}px;"
+            f"transform:rotate({rotation}deg);"
+        )
+        items.append(
+            f'<button type="button" class="nw-zone zone {_layout_class(item)}" '
+            f'data-loc="{escape(code, quote=True)}" style="{style}">{label}</button>'
+        )
+    items.extend([
+        '<div class="nw-outline" style="left:930px;top:590px;width:330px;height:185px;border-right:0;border-bottom:0;"></div>',
+        '<div class="nw-outline" style="left:1260px;top:590px;width:1px;height:110px;border-width:0 0 0 1.5px;"></div>',
+        '<div class="nw-outline" style="left:1260px;top:590px;width:222px;height:110px;border-width:0 0 1.5px 0;"></div>',
+        '<div class="nw-outline" style="left:410px;top:865px;width:520px;height:45px;border-right:0;border-bottom:0;"></div>',
+        '<div class="nw-outline" style="left:930px;top:775px;width:1px;height:90px;border-width:0 0 0 1.5px;"></div>',
+        '<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button><button type="button" data-special-loc="지엠메딕">지엠메딕</button></div>',
+    ])
+    return '<div class="map-scroll"><div class="map-stage">' + ''.join(items) + '</div></div>'
+
+
 _DYNAMIC_DOTS_JS = r"""
 function refreshApprovedMapDots(){
   document.querySelectorAll('.map-stage .dynamic-stock-dot').forEach(el=>el.remove());
@@ -144,8 +193,16 @@ refreshApprovedMapDots();
 
 def apply_new_layout(html: str) -> str:
     """Replace the legacy map canvas with the approved interactive floor plan."""
-    html = html.replace("</head>", _NEW_CSS + "</head>", 1)
-    replacement = _map_markup()
+    layout = load_location_map_layout()
+    canvas = layout.get("canvas") or {}
+    has_saved_layout = bool(layout.get("items"))
+    canvas_css = ""
+    if has_saved_layout:
+        width = max(400, int(canvas.get("width") or 1482))
+        height = max(300, int(canvas.get("height") or 910))
+        canvas_css = f"<style>.map-stage{{width:{width}px!important;height:{height}px!important;min-width:{width}px!important;}}</style>"
+    html = html.replace("</head>", _NEW_CSS + canvas_css + "</head>", 1)
+    replacement = _saved_layout_markup(layout) if has_saved_layout else _map_markup()
     pattern = re.compile(
         r'<div class="map-scroll"><div class="map-stage">.*?</div></div>\s*</div>\s*<div class="side-card"',
         re.S,

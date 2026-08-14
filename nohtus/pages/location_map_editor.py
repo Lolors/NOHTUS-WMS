@@ -6,6 +6,7 @@ import json
 import streamlit as st
 import streamlit.components.v1 as components
 
+from nohtus.auth import is_admin
 from nohtus.services.location_map_layout import load_location_map_layout, save_location_map_layout
 from nohtus.services.location_map_layout_seed import initial_layout
 
@@ -30,6 +31,9 @@ def _consume_save_payload() -> bool:
 
 
 def page_location_map_editor():
+    if not is_admin():
+        st.warning("admin 계정만 로케이션맵 편집에 접근할 수 있습니다.")
+        return
     st.title("🧭 로케이션맵 편집")
     st.caption("로케이션을 마우스로 끌어 이동한 뒤 배치 저장을 누르세요. 저장된 좌표는 실제 로케이션맵에 그대로 적용됩니다.")
     _consume_save_payload()
@@ -60,7 +64,7 @@ def page_location_map_editor():
     const layout={payload}; const stage=document.getElementById('stage'); const viewport=document.getElementById('viewport'); const status=document.getElementById('status');
     const grid=Number(layout.canvas.grid||10); let scale=0.82; let drag=null;
     function draw(){{stage.innerHTML=''; stage.style.width=layout.canvas.width+'px';stage.style.height=layout.canvas.height+'px';stage.style.transform=`scale(${{scale}})`;stage.style.transformOrigin='top left';
-      layout.items.forEach((it,idx)=>{{const el=document.createElement('div');el.className='loc '+(it.company||'기타');el.dataset.idx=idx;el.style.left=it.x+'px';el.style.top=it.y+'px';el.style.width=it.width+'px';el.style.height=it.height+'px';el.innerHTML=`<span>${{it.label||it.code}}</span><small class="coords">${{it.x}}, ${{it.y}}</small>`;stage.appendChild(el);}});
+      layout.items.forEach((it,idx)=>{{const el=document.createElement('div');el.className='loc '+(it.company||'기타');el.dataset.idx=idx;el.style.left=it.x+'px';el.style.top=it.y+'px';el.style.width=it.width+'px';el.style.height=it.height+'px';el.style.transform=`rotate(${{Number(it.rotation||0)}}deg)`;el.innerHTML=`<span>${{it.label||it.code}}</span><small class="coords">${{it.x}}, ${{it.y}}</small>`;stage.appendChild(el);}});
     }}
     stage.addEventListener('pointerdown',e=>{{const el=e.target.closest('.loc');if(!el)return; const idx=Number(el.dataset.idx); const it=layout.items[idx];drag={{el,idx,sx:e.clientX,sy:e.clientY,x:it.x,y:it.y}};el.setPointerCapture(e.pointerId);document.querySelectorAll('.loc.selected').forEach(x=>x.classList.remove('selected'));el.classList.add('selected');}});
     stage.addEventListener('pointermove',e=>{{if(!drag)return; const it=layout.items[drag.idx];const dx=(e.clientX-drag.sx)/scale,dy=(e.clientY-drag.sy)/scale;it.x=Math.max(0,Math.round((drag.x+dx)/grid)*grid);it.y=Math.max(0,Math.round((drag.y+dy)/grid)*grid);drag.el.style.left=it.x+'px';drag.el.style.top=it.y+'px';drag.el.querySelector('.coords').textContent=it.x+', '+it.y;status.textContent=`${{it.code}} → ${{it.x}}, ${{it.y}}`;}});

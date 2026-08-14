@@ -54,6 +54,7 @@ def save_location_map_layout(layout: dict) -> None:
             "y": max(0, int(raw.get("y") or 0)),
             "width": max(36, int(raw.get("width") or 80)),
             "height": max(30, int(raw.get("height") or 56)),
+            "rotation": int(raw.get("rotation") or 0),
             "company": str(raw.get("company") or "기타").strip() or "기타",
             "kind": str(raw.get("kind") or "location").strip() or "location",
             "note": str(raw.get("note") or "").strip(),
