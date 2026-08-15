@@ -5,6 +5,7 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+from nohtus.export_app import db
 from nohtus.export_app.components.delivery_method_input import delivery_method_input, is_courier_delivery
 from nohtus.export_app.components.editors import historical_box_editor, historical_order_editor, order_editor
 from nohtus.export_app.config import TRANSPORT_MODES
@@ -31,9 +32,40 @@ FORM_KEYS = {
     'historical_driver_phone',
     'historical_consignee_name',
     'historical_consignee_address',
+    'historical_attachment_shipment',
+    'historical_attachment_ci',
+    'historical_attachment_shipping_mark',
+    'historical_attachment_other',
     'create_case',
     'price_lookup_query',
 }
+
+
+HISTORICAL_ATTACHMENT_UPLOADERS = (
+    ('출고사진', '01 출고제품 사진', 'historical_attachment_shipment'),
+    ('CI', '02 CI', 'historical_attachment_ci'),
+    ('Shipping Mark', '03 Shipping Mark', 'historical_attachment_shipping_mark'),
+    ('기타', '04 기타', 'historical_attachment_other'),
+)
+
+
+def historical_attachment_uploads(key_factory) -> dict[str, list]:
+    """과거 수출 생성 전에 분류별 다중 첨부를 메모리로 받는다."""
+    st.markdown('#### 수출 문서 첨부')
+    st.caption(
+        '파일은 WMS 프로젝트에 저장하지 않고, 수출 → 내 폴더에서 지정한 위치의 '
+        '해당 수출 건 폴더에 직접 저장됩니다. 각 분류에 여러 파일을 첨부할 수 있습니다.'
+    )
+    columns = st.columns(2, gap='large')
+    result: dict[str, list] = {}
+    for index, (category, label, key) in enumerate(HISTORICAL_ATTACHMENT_UPLOADERS):
+        with columns[index % 2]:
+            result[category] = list(st.file_uploader(
+                label,
+                accept_multiple_files=True,
+                key=key_factory(key),
+            ) or [])
+    return result
 
 
 def historical_order_source() -> pd.DataFrame:
@@ -267,6 +299,7 @@ def render() -> None:
             tracking_no = ''
             driver_name = ''
             driver_phone = ''
+        attachment_uploads = historical_attachment_uploads(form_widget_key)
     else:
         historical_boxes = pd.DataFrame()
         delivery_method = ''
@@ -275,6 +308,7 @@ def render() -> None:
         driver_phone = ''
         consignee_name = ''
         consignee_address = ''
+        attachment_uploads = {}
 
     button_left, button_center, button_right = st.columns([4, 2, 4])
     button_center.markdown('<span id="create-case-button-anchor"></span>', unsafe_allow_html=True)
@@ -286,6 +320,20 @@ def render() -> None:
     )
 
     if create_case:
+        attachment_storage_error = ''
+        if is_historical and any(attachment_uploads.values()):
+            configured_root = db.get_setting('shared_root').strip()
+            if not configured_root:
+                attachment_storage_error = (
+                    '첨부파일을 저장하려면 먼저 수출 → 내 폴더에서 내 폴더 위치를 지정하세요.'
+                )
+            else:
+                storage_ok, storage_message = folder_service.test_storage_root(configured_root)
+                if not storage_ok:
+                    attachment_storage_error = (
+                        '수출 → 내 폴더에서 지정한 위치에 파일을 저장할 수 없습니다. '
+                        f'경로를 확인하세요: {storage_message}'
+                    )
         valid_orders = []
         for _, row in new_orders.iterrows():
             product_name = safe_text(row.get('제품명'))
@@ -327,6 +375,8 @@ def render() -> None:
             st.error('CTN 정보를 한 개 이상 입력하세요.')
         elif is_historical and not {item[7] for item in valid_orders}.issubset({box[0] for box in valid_boxes}):
             st.error('제품에 연결한 모든 CTN 번호의 규격과 GW를 입력하세요.')
+        elif attachment_storage_error:
+            st.error(attachment_storage_error)
         else:
             prefix = 'HIS' if is_historical else 'EXP'
             number_year = historical_date.year if historical_date else None
@@ -359,6 +409,14 @@ def render() -> None:
                     consignee_name=consignee_name,
                     consignee_address=consignee_address,
                 )
+                for category, uploaded_files in attachment_uploads.items():
+                    for uploaded in uploaded_files:
+                        folder_service.save_uploaded_file(
+                            case_id,
+                            uploaded.name,
+                            uploaded.getvalue(),
+                            category,
+                        )
             else:
                 order_service.create_order_items(case_id, valid_orders)
             folder_service.sync_case_folder(case_id)

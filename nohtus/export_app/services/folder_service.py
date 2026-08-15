@@ -560,9 +560,33 @@ def move_file_to_case(case_id: int, source: Path, category: str = '출고사진'
         counter += 1
     shutil.copy2(source, destination)
     db.execute(
-        '''INSERT INTO attachments(case_id,category,original_name,stored_path,created_at)
+        '''INSERT INTO attachments(case_id,category,file_name,stored_path,uploaded_at)
            VALUES (?,?,?,?,?)''',
         (case_id, category, source.name, _path_for_database(destination), now_text()),
+    )
+    return destination
+
+
+@db.backup_batch
+def save_uploaded_file(case_id: int, file_name: str, content: bytes, category: str) -> Path:
+    """업로드 바이트를 WMS 내부 임시파일 없이 설정된 수출 폴더에 직접 저장한다."""
+    if category not in CATEGORY_FOLDERS:
+        raise ValueError(f'지원하지 않는 첨부 분류입니다: {category}')
+    safe_name = Path(str(file_name or '')).name.strip()
+    if not safe_name or safe_name.startswith('.'):
+        raise ValueError('첨부파일 이름이 올바르지 않습니다.')
+
+    destination_folder = category_folder(case_id, category)
+    destination = destination_folder / safe_name
+    counter = 2
+    while destination.exists():
+        destination = destination_folder / f'{destination.stem}_{counter}{destination.suffix}'
+        counter += 1
+    destination.write_bytes(bytes(content))
+    db.execute(
+        '''INSERT INTO attachments(case_id,category,file_name,stored_path,uploaded_at)
+           VALUES (?,?,?,?,?)''',
+        (case_id, category, safe_name, _path_for_database(destination), now_text()),
     )
     return destination
 
@@ -581,7 +605,9 @@ def list_attachments(case_id: int):
     return [
         attachment
         for attachment in db.rows(
-            'SELECT id,category,original_name,stored_path,created_at FROM attachments WHERE case_id=? ORDER BY id',
+            '''SELECT id,category,file_name AS original_name,stored_path,
+                      uploaded_at AS created_at
+               FROM attachments WHERE case_id=? ORDER BY id''',
             (case_id,),
         )
         if not Path(str(attachment['original_name'] or '')).name.startswith('.')
