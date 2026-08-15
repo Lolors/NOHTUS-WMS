@@ -21,7 +21,6 @@ _NEW_CSS = r"""
   appearance:none;box-sizing:border-box;color:#0f172a;font-family:Inter,Segoe UI,Arial,'Noto Sans KR',sans-serif;
 }
 .map-stage .nw-zone{position:absolute;display:flex;align-items:center;justify-content:center;border:1.5px solid #64748b;border-radius:11px;background:#fff;font-size:17px;font-weight:900;cursor:pointer;box-shadow:0 3px 9px rgba(15,23,42,.05);}
-.map-stage .nw-zone:not([data-loc="Q"]):not([data-loc^="X1"]){font-size:calc(17px + 2pt);}
 .map-stage .nw-rack{position:absolute;display:grid;overflow:hidden;border:1.5px solid #64748b;border-radius:11px;box-shadow:0 3px 9px rgba(15,23,42,.05);}
 .map-stage .nw-grid6{grid-template-columns:1fr 1fr;grid-template-rows:repeat(3,1fr)}
 .map-stage .nw-grid3{grid-template-columns:1fr;grid-template-rows:repeat(3,1fr)}
@@ -304,18 +303,23 @@ function installApprovedMapPan(){
   document.getElementById('mapZoomFit')?.addEventListener('click',()=>setApprovedMapZoom(1));
   scroll.addEventListener('pointerdown',event=>{
     if(mapZoomFactor<=1||event.button!==0)return;
-    mapPointer={id:event.pointerId,x:event.clientX,y:event.clientY,startX:event.clientX,startY:event.clientY};
+    mapPointer={id:event.pointerId,x:event.clientX,y:event.clientY,startX:event.clientX,startY:event.clientY,active:false};
     mapDidPan=false;
-    scroll.setPointerCapture(event.pointerId);
-    scroll.classList.add('map-panning');
   });
   scroll.addEventListener('pointermove',event=>{
     if(!mapPointer||mapPointer.id!==event.pointerId)return;
+    const distance=Math.hypot(event.clientX-mapPointer.startX,event.clientY-mapPointer.startY);
+    if(!mapPointer.active){
+      if(distance<=4)return;
+      mapPointer.active=true;
+      mapDidPan=true;
+      scroll.setPointerCapture(event.pointerId);
+      scroll.classList.add('map-panning');
+    }
     const dx=event.clientX-mapPointer.x;
     const dy=event.clientY-mapPointer.y;
     mapPanX+=dx;mapPanY+=dy;
     mapPointer.x=event.clientX;mapPointer.y=event.clientY;
-    if(Math.hypot(event.clientX-mapPointer.startX,event.clientY-mapPointer.startY)>4)mapDidPan=true;
     applyApprovedMapTransform();
     event.preventDefault();
   });
