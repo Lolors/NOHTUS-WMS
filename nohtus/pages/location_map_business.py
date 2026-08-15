@@ -172,10 +172,6 @@ def page_map():
             width: 100% !important;
             max-width: 100% !important;
         }
-        /* Keep the wider export filter, but reduce the visual gap before materials. */
-        div[data-testid="stColumn"]:has(#map-materials-filter-anchor) {
-            transform: translateX(-3rem);
-        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -226,7 +222,7 @@ def page_map():
 
     def patched_text_input(label, *args, **kwargs):
         if isinstance(label, str) and label == "제품명 검색":
-            search_col, p_col, materials_col = st.columns([4.6, 2.95, 2.45], gap="small")
+            search_col, p_col, materials_col = st.columns([4.6, 2.55, 2.85], gap="small")
             with search_col:
                 value = original_text_input(label, *args, **kwargs)
             with p_col:
@@ -238,7 +234,7 @@ def page_map():
                     help="수출대기(P) 재고를 총재고와 재고 분포에서 제외합니다.",
                 )
             with materials_col:
-                st.markdown("<div id='map-materials-filter-anchor' style='height:28px'></div>", unsafe_allow_html=True)
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
                 st.checkbox(
                     "부자재 제외",
                     value=bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)),
