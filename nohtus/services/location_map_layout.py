@@ -73,6 +73,12 @@ def _clean_layout(layout: dict) -> dict:
         stroke_style = str(raw.get("stroke_style") or "solid").strip()
         if stroke_style not in {"solid", "dashed"}:
             stroke_style = "solid"
+        group_style = str(raw.get("group_style") or "").strip()
+        if group_style not in {"", "partitioned"}:
+            group_style = ""
+        group_axis = str(raw.get("group_axis") or "").strip()
+        if group_axis not in {"", "x", "y"}:
+            group_axis = ""
         cleaned.append({
             "code": code,
             "label": str(raw.get("label") or code).strip() or code,
@@ -85,6 +91,10 @@ def _clean_layout(layout: dict) -> dict:
             "kind": str(raw.get("kind") or "location").strip() or "location",
             "note": str(raw.get("note") or "").strip(),
             "group_id": str(raw.get("group_id") or "").strip(),
+            "group_style": group_style,
+            "group_axis": group_axis,
+            "group_order": max(0, int(raw.get("group_order") or 0)),
+            "group_count": max(0, int(raw.get("group_count") or 0)),
             "shape_type": str(raw.get("shape_type") or "").strip(),
             "stroke": str(raw.get("stroke") or "#475569").strip() or "#475569",
             "stroke_style": stroke_style,

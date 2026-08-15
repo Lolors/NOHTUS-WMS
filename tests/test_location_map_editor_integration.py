@@ -142,6 +142,22 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertEqual(restored['company_colors']['노투스팜'], '#102030')
         self.assertEqual(restored['company_colors']['NOH'], '#aabbcc')
 
+    def test_partitioned_rack_metadata_round_trip(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / 'location_map_layout.json'
+            with patch.object(location_map_layout, '_LAYOUT_PATH', path):
+                layout = initial_layout()
+                layout['items'][0].update({
+                    'group_id': 'rack-a1', 'group_style': 'partitioned',
+                    'group_axis': 'x', 'group_order': 0, 'group_count': 3,
+                })
+                location_map_layout.save_location_map_layout(layout)
+                restored = location_map_layout.load_location_map_layout()
+        self.assertEqual(restored['items'][0]['group_style'], 'partitioned')
+        self.assertEqual(restored['items'][0]['group_axis'], 'x')
+        self.assertEqual(restored['items'][0]['group_order'], 0)
+        self.assertEqual(restored['items'][0]['group_count'], 3)
+
     def test_draft_layout_is_separate_and_can_be_deleted(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             draft_path = Path(temp_dir) / 'location_map_layout.draft.json'
@@ -249,6 +265,11 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('for(let i=0;i<cellCount;i++)', editor_html)
         self.assertIn('i===cellCount-1', editor_html)
         self.assertIn('id="duplicateSelected"', editor_html)
+        self.assertIn('id="groupSelected"', editor_html)
+        self.assertIn('id="ungroupSelected"', editor_html)
+        self.assertIn('function groupSelection()', editor_html)
+        self.assertIn("group_style:'partitioned'", editor_html)
+        self.assertIn("candidate.group_id===item.group_id", editor_html)
         self.assertIn('showSmartGuides', editor_html)
         self.assertIn('group_id', editor_html)
         self.assertIn('id="selectAll"', editor_html)

@@ -21,6 +21,7 @@ _NEW_CSS = r"""
   appearance:none;box-sizing:border-box;color:#0f172a;font-family:Inter,Segoe UI,Arial,'Noto Sans KR',sans-serif;
 }
 .map-stage .nw-zone{position:absolute;display:flex;align-items:center;justify-content:center;border:1.5px solid #64748b;border-radius:11px;background:#fff;font-size:17px;font-weight:900;cursor:pointer;box-shadow:0 3px 9px rgba(15,23,42,.05);}
+.map-stage .nw-zone.partitioned-rack{border-radius:0;box-shadow:none}.map-stage .nw-zone.partitioned-rack.group-x:not(.group-last){border-right:0}.map-stage .nw-zone.partitioned-rack.group-y:not(.group-last){border-bottom:0}.map-stage .nw-zone.partitioned-rack.group-first.group-x{border-radius:11px 0 0 11px}.map-stage .nw-zone.partitioned-rack.group-last.group-x{border-radius:0 11px 11px 0}.map-stage .nw-zone.partitioned-rack.group-first.group-y{border-radius:11px 11px 0 0}.map-stage .nw-zone.partitioned-rack.group-last.group-y{border-radius:0 0 11px 11px}.map-stage .nw-zone.partitioned-rack.group-first.group-last{border-radius:11px}
 .map-stage .nw-rack{position:absolute;display:grid;overflow:hidden;border:1.5px solid #64748b;border-radius:11px;box-shadow:0 3px 9px rgba(15,23,42,.05);}
 .map-stage .nw-grid6{grid-template-columns:1fr 1fr;grid-template-rows:repeat(3,1fr)}
 .map-stage .nw-grid3{grid-template-columns:1fr;grid-template-rows:repeat(3,1fr)}
@@ -216,8 +217,18 @@ def _saved_layout_markup(layout: dict) -> str:
                 'position:absolute;pointer-events:none;"></div>'
             )
         else:
+            partition_classes = ""
+            if str(item.get("group_style") or "") == "partitioned":
+                axis = "y" if str(item.get("group_axis") or "") == "y" else "x"
+                order = max(0, int(item.get("group_order") or 0))
+                count = max(1, int(item.get("group_count") or 1))
+                partition_classes = f" partitioned-rack group-{axis}"
+                if order == 0:
+                    partition_classes += " group-first"
+                if order == count - 1:
+                    partition_classes += " group-last"
             items.append(
-                f'<button type="button" class="nw-zone zone {_layout_class(item)}" '
+                f'<button type="button" class="nw-zone zone {_layout_class(item)}{partition_classes}" '
                 f'data-loc="{escape(code, quote=True)}" style="{style}{_location_fill_style(item, company_colors)}">'
                 f'<span style="display:inline-block;transform:rotate({-rotation}deg);'
                 f'transform-origin:center;">{label}</span></button>'
