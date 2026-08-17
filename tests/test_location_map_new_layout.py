@@ -1,7 +1,7 @@
 import unittest
 
 from nohtus.config import AREA_CONFIG, SPECIAL_LOCATIONS
-from nohtus.services.location_map_new_layout import _NEW_CSS, _map_markup
+from nohtus.services.location_map_new_layout import _NEW_CSS, _map_markup, _saved_layout_markup
 
 
 class LocationMapNewLayoutTests(unittest.TestCase):
@@ -48,6 +48,22 @@ class LocationMapNewLayoutTests(unittest.TestCase):
         self.assertIn('left:1418px;top:250px;width:64px;height:240px', markup)
         self.assertIn('left:1195px;top:335px;width:210px', markup)
         self.assertIn('z-index:12!important;isolation:isolate', _NEW_CSS)
+
+    def test_partitioned_group_renders_as_one_rack_with_clickable_cells(self):
+        items = []
+        for order, code in enumerate(('A1-01', 'A1-02', 'A1-03')):
+            items.append({
+                'code': code, 'label': code, 'x': 100 + order * 60, 'y': 50,
+                'width': 60, 'height': 50, 'company': '노투스팜',
+                'group_id': 'rack-a1', 'group_style': 'partitioned',
+                'group_axis': 'x', 'group_order': order, 'group_count': 3,
+            })
+        markup = _saved_layout_markup({'items': items, 'company_colors': {}})
+        self.assertEqual(markup.count('partitioned-rack group-x'), 3)
+        self.assertIn('partitioned-rack group-x group-first', markup)
+        self.assertIn('partitioned-rack group-x group-last', markup)
+        self.assertEqual(markup.count('data-loc="A1-0'), 3)
+        self.assertIn('.partitioned-rack.group-x:not(.group-last){border-right:0}', _NEW_CSS)
 
 
 if __name__ == "__main__":

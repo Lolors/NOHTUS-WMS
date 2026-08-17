@@ -21,6 +21,7 @@ _NEW_CSS = r"""
   appearance:none;box-sizing:border-box;color:#0f172a;font-family:Inter,Segoe UI,Arial,'Noto Sans KR',sans-serif;
 }
 .map-stage .nw-zone{position:absolute;display:flex;align-items:center;justify-content:center;border:1.5px solid #64748b;border-radius:11px;background:#fff;font-size:17px;font-weight:900;cursor:pointer;box-shadow:0 3px 9px rgba(15,23,42,.05);}
+.map-stage .nw-zone.partitioned-rack{border-radius:0;box-shadow:none}.map-stage .nw-zone.partitioned-rack.group-x:not(.group-last){border-right:0}.map-stage .nw-zone.partitioned-rack.group-y:not(.group-last){border-bottom:0}.map-stage .nw-zone.partitioned-rack.group-first.group-x{border-radius:11px 0 0 11px}.map-stage .nw-zone.partitioned-rack.group-last.group-x{border-radius:0 11px 11px 0}.map-stage .nw-zone.partitioned-rack.group-first.group-y{border-radius:11px 11px 0 0}.map-stage .nw-zone.partitioned-rack.group-last.group-y{border-radius:0 0 11px 11px}.map-stage .nw-zone.partitioned-rack.group-first.group-last{border-radius:11px}
 .map-stage .nw-rack{position:absolute;display:grid;overflow:hidden;border:1.5px solid #64748b;border-radius:11px;box-shadow:0 3px 9px rgba(15,23,42,.05);}
 .map-stage .nw-grid6{grid-template-columns:1fr 1fr;grid-template-rows:repeat(3,1fr)}
 .map-stage .nw-grid3{grid-template-columns:1fr;grid-template-rows:repeat(3,1fr)}
@@ -47,10 +48,17 @@ _NEW_CSS = r"""
 .map-stage .nw-note{position:absolute;padding:15px 18px;border:1.5px dashed #cbd5e1;border-radius:14px;color:#64748b;font-size:16px;line-height:1.7;background:rgba(255,255,255,.78);pointer-events:none;}
 .map-stage .nw-rec-label{position:absolute;color:#0f172a;font-size:14px;font-weight:800;text-align:center;pointer-events:none;}
 .map-stage .nw-hatched{background:repeating-linear-gradient(135deg,#fff 0,#fff 8px,#d9efff 8px,#d9efff 10px)!important;border-color:#38a6e8!important;z-index:12!important;isolation:isolate;}
-.map-stage .special-menu{position:absolute!important;left:995px!important;top:630px!important;width:180px!important;display:none;grid-template-columns:1fr!important;z-index:30!important;background:#fff!important;border:1px solid #cbd5e1!important;border-radius:12px!important;box-shadow:0 12px 28px rgba(15,23,42,.18)!important;padding:6px!important;}
+.map-stage .special-menu{position:absolute!important;width:180px!important;display:none;grid-template-columns:1fr!important;z-index:30!important;background:#fff!important;border:1px solid #cbd5e1!important;border-radius:12px!important;box-shadow:0 12px 28px rgba(15,23,42,.18)!important;padding:6px!important;}
 .map-stage .special-menu.open{display:grid!important;gap:6px!important;}
-.map-stage .special-menu button{appearance:none!important;border:1px solid #e2e8f0!important;background:#f8fafc!important;border-radius:9px!important;font-size:13px!important;font-weight:900!important;color:#0f172a!important;padding:8px 10px!important;cursor:pointer!important;}
+.map-stage .special-menu button{appearance:none!important;border:1px solid #e2e8f0!important;background:#f8fafc!important;border-radius:9px!important;font-size:calc(13px + 2pt)!important;font-weight:900!important;color:#0f172a!important;padding:8px 10px!important;cursor:pointer!important;}
 .map-stage .special-menu button:hover,.map-stage .special-menu button.selected{background:#22c55e!important;color:#fff!important;border-color:#16a34a!important;}
+.map-zoom-controls{display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 0 2px;background:#fff;}
+.map-zoom-controls button{appearance:none;border:1px solid #cbd5e1;background:#fff;color:#0f172a;border-radius:9px;padding:7px 13px;font-size:14px;font-weight:900;cursor:pointer;}
+.map-zoom-controls button:hover{background:#f1f5f9;border-color:#94a3b8;}
+.map-zoom-level{min-width:58px;text-align:center;color:#475569;font-size:13px;font-weight:900;}
+.map-scroll.map-zoomed,.map-scroll.map-zoomed .map-stage,.map-scroll.map-zoomed .map-stage *{cursor:grab!important;}
+.map-scroll.map-panning,.map-scroll.map-panning .map-stage,.map-scroll.map-panning .map-stage *{cursor:grabbing!important;}
+.map-scroll.map-zoomed{touch-action:none;user-select:none;}
 
 @media(max-width:1500px){.map-stage{transform:scale(.62)!important}.map-scroll{height:565px!important}}
 @media(max-width:1250px){.map-stage{transform:scale(.54)!important}.map-scroll{height:492px!important}}
@@ -72,6 +80,16 @@ def _zone(loc: str, label: str, x: int, y: int, w: int, h: int, cls: str = "supp
 
 def _six(prefix: str) -> list[str]:
     return [_cell(f"{prefix}-03"), _cell(f"{prefix}-04"), _cell(f"{prefix}-02"), _cell(f"{prefix}-05"), _cell(f"{prefix}-01"), _cell(f"{prefix}-06")]
+
+
+_ZOOM_CONTROLS = (
+    '<div class="map-zoom-controls" aria-label="지도 확대 축소">'
+    '<button type="button" id="mapZoomOut" aria-label="축소">− 축소</button>'
+    '<span class="map-zoom-level" id="mapZoomLevel">100%</span>'
+    '<button type="button" id="mapZoomIn" aria-label="확대">＋ 확대</button>'
+    '<button type="button" id="mapZoomFit">화면 맞춤</button>'
+    '</div>'
+)
 
 
 def _map_markup() -> str:
@@ -119,7 +137,7 @@ def _map_markup() -> str:
     p.append('<div class="nw-outline" style="left:930px;top:775px;width:1px;height:90px;border-width:0 0 0 1.5px;"></div>')
 
     p.append('<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button><button type="button" data-special-loc="지엠메딕">지엠메딕</button></div>')
-    return '<div class="map-scroll"><div class="map-stage">' + ''.join(p) + '</div></div>'
+    return '<div class="map-scroll"><div class="map-stage">' + ''.join(p) + '</div></div>' + _ZOOM_CONTROLS
 
 
 def _layout_class(item: dict) -> str:
@@ -137,9 +155,29 @@ def _layout_class(item: dict) -> str:
     }.get(company, "support")
 
 
+def _location_fill_style(item: dict, company_colors: dict) -> str:
+    fill_type = str(item.get("fill_type") or "company").strip()
+    fill_color = str(item.get("fill_color") or "#ffffff").strip()
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", fill_color):
+        fill_color = "#ffffff"
+    if fill_type == "company":
+        company_color = str(company_colors.get(str(item.get("company") or "").strip()) or "").strip()
+        if re.fullmatch(r"#[0-9a-fA-F]{6}", company_color):
+            return f"background:{company_color};"
+        return ""
+    if fill_type == "solid":
+        return f"background:{fill_color};"
+    if fill_type == "hatched":
+        return f"background:repeating-linear-gradient(135deg,{fill_color} 0 2px,#fff 2px 8px);"
+    if fill_type == "none":
+        return "background:transparent;"
+    return ""
+
+
 def _saved_layout_markup(layout: dict) -> str:
     items = []
-    for item in layout.get("items") or []:
+    company_colors = layout.get("company_colors") or {}
+    for layer_index, item in enumerate(layout.get("items") or [], start=1):
         code = str(item.get("code") or "").strip()
         if not code:
             continue
@@ -151,24 +189,163 @@ def _saved_layout_markup(layout: dict) -> str:
         rotation = int(item.get("rotation") or 0)
         style = (
             f"left:{x}px;top:{y}px;width:{width}px;height:{height}px;"
-            f"transform:rotate({rotation}deg);"
+            f"transform:rotate({rotation}deg);z-index:{layer_index};"
         )
-        items.append(
-            f'<button type="button" class="nw-zone zone {_layout_class(item)}" '
-            f'data-loc="{escape(code, quote=True)}" style="{style}">{label}</button>'
-        )
-    items.extend([
-        '<div class="nw-outline" style="left:930px;top:590px;width:330px;height:185px;border-right:0;border-bottom:0;"></div>',
-        '<div class="nw-outline" style="left:1260px;top:590px;width:1px;height:110px;border-width:0 0 0 1.5px;"></div>',
-        '<div class="nw-outline" style="left:1260px;top:590px;width:222px;height:110px;border-width:0 0 1.5px 0;"></div>',
-        '<div class="nw-outline" style="left:410px;top:865px;width:520px;height:45px;border-right:0;border-bottom:0;"></div>',
-        '<div class="nw-outline" style="left:930px;top:775px;width:1px;height:90px;border-width:0 0 0 1.5px;"></div>',
-        '<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button><button type="button" data-special-loc="지엠메딕">지엠메딕</button></div>',
-    ])
-    return '<div class="map-scroll"><div class="map-stage">' + ''.join(items) + '</div></div>'
+        if str(item.get("kind") or "") == "shape":
+            shape_type = str(item.get("shape_type") or "rounded_rect").strip()
+            stroke = escape(str(item.get("stroke") or "#475569").strip(), quote=True)
+            stroke_style = "dashed" if str(item.get("stroke_style") or "solid") == "dashed" else "solid"
+            fill_style = _location_fill_style(item, {})
+            line_background = (
+                f"repeating-linear-gradient(to right,{stroke} 0 10px,transparent 10px 17px) "
+                "center/100% 1.5px no-repeat"
+                if stroke_style == "dashed"
+                else (
+                    "linear-gradient(to bottom,"
+                    f"transparent calc(50% - .75px),{stroke} calc(50% - .75px),"
+                    f"{stroke} calc(50% + .75px),transparent calc(50% + .75px))"
+                )
+            )
+            decoration = {
+                "rounded_rect": f"border:1.5px {stroke_style} {stroke};border-radius:18px;{fill_style}",
+                "circle": f"border:1.5px {stroke_style} {stroke};border-radius:50%;{fill_style}",
+                "line": f"border:0;background:{line_background};",
+            }.get(shape_type, f"border:1.5px {stroke_style} {stroke};border-radius:18px;{fill_style}")
+            items.append(
+                f'<div class="map-shape map-shape-{escape(shape_type, quote=True)}" '
+                f'aria-hidden="true" style="{style}{decoration}'
+                'position:absolute;pointer-events:none;"></div>'
+            )
+        else:
+            partition_classes = ""
+            if str(item.get("group_style") or "") == "partitioned":
+                axis = "y" if str(item.get("group_axis") or "") == "y" else "x"
+                order = max(0, int(item.get("group_order") or 0))
+                count = max(1, int(item.get("group_count") or 1))
+                partition_classes = f" partitioned-rack group-{axis}"
+                if order == 0:
+                    partition_classes += " group-first"
+                if order == count - 1:
+                    partition_classes += " group-last"
+            items.append(
+                f'<button type="button" class="nw-zone zone {_layout_class(item)}{partition_classes}" '
+                f'data-loc="{escape(code, quote=True)}" style="{style}{_location_fill_style(item, company_colors)}">'
+                f'<span style="display:inline-block;transform:rotate({-rotation}deg);'
+                f'transform-origin:center;">{label}</span></button>'
+            )
+    # A saved layout is authoritative: decorative walls/outlines come only
+    # from the shapes created in the editor.  Legacy fixed outlines would be
+    # drawn on top of the user's design and create duplicate or stray lines.
+    items.append(
+        '<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button><button type="button" data-special-loc="지엠메딕">지엠메딕</button></div>'
+    )
+    return '<div class="map-scroll"><div class="map-stage">' + ''.join(items) + '</div></div>' + _ZOOM_CONTROLS
 
 
 _DYNAMIC_DOTS_JS = r"""
+function positionSpecialMenu(){
+  const stage=document.querySelector('.map-stage');
+  const anchor=stage&&stage.querySelector('[data-loc="N"]');
+  const menu=stage&&stage.querySelector('#specialMenu');
+  if(!stage||!anchor||!menu)return;
+  requestAnimationFrame(()=>{
+    const menuWidth=menu.offsetWidth||180;
+    const menuHeight=menu.offsetHeight||150;
+    const gap=8;
+    const centeredLeft=anchor.offsetLeft+(anchor.offsetWidth-menuWidth)/2;
+    const left=Math.max(0,Math.min(centeredLeft,stage.offsetWidth-menuWidth));
+    const below=anchor.offsetTop+anchor.offsetHeight+gap;
+    const top=below+menuHeight<=stage.offsetHeight
+      ?below
+      :Math.max(0,anchor.offsetTop-menuHeight-gap);
+    menu.style.setProperty('left',Math.round(left)+'px','important');
+    menu.style.setProperty('top',Math.round(top)+'px','important');
+  });
+}
+let mapFitScale=1;
+let mapZoomFactor=1;
+let mapPanX=0;
+let mapPanY=0;
+let mapPointer=null;
+let mapDidPan=false;
+function clampMapPan(){
+  const scroll=document.querySelector('.map-scroll');
+  const stage=scroll&&scroll.querySelector('.map-stage');
+  if(!scroll||!stage)return;
+  const scaledWidth=stage.offsetWidth*mapFitScale*mapZoomFactor;
+  const scaledHeight=stage.offsetHeight*mapFitScale*mapZoomFactor;
+  mapPanX=Math.min(0,Math.max(scroll.clientWidth-scaledWidth,mapPanX));
+  mapPanY=Math.min(0,Math.max(scroll.clientHeight-scaledHeight,mapPanY));
+}
+function applyApprovedMapTransform(){
+  const scroll=document.querySelector('.map-scroll');
+  const stage=scroll&&scroll.querySelector('.map-stage');
+  if(!scroll||!stage)return;
+  clampMapPan();
+  const scale=mapFitScale*mapZoomFactor;
+  stage.style.setProperty('transform',`translate(${mapPanX}px,${mapPanY}px) scale(${scale})`,'important');
+  stage.style.setProperty('transform-origin','top left','important');
+  scroll.classList.toggle('map-zoomed',mapZoomFactor>1);
+  const level=document.getElementById('mapZoomLevel');
+  if(level)level.textContent=Math.round(mapZoomFactor*100)+'%';
+}
+function fitApprovedMapToWidth(){
+  const scroll=document.querySelector('.map-scroll');
+  const stage=scroll&&scroll.querySelector('.map-stage');
+  if(!scroll||!stage)return;
+  const naturalWidth=Math.max(1,stage.offsetWidth);
+  const naturalHeight=Math.max(1,stage.offsetHeight);
+  const availableWidth=Math.max(1,scroll.clientWidth);
+  mapFitScale=availableWidth/naturalWidth;
+  scroll.style.setProperty('height',Math.ceil(naturalHeight*mapFitScale)+'px','important');
+  scroll.style.setProperty('overflow','hidden','important');
+  applyApprovedMapTransform();
+}
+function setApprovedMapZoom(nextZoom){
+  mapZoomFactor=Math.max(1,Math.min(2.5,nextZoom));
+  if(mapZoomFactor===1){mapPanX=0;mapPanY=0;}
+  applyApprovedMapTransform();
+}
+function installApprovedMapPan(){
+  const scroll=document.querySelector('.map-scroll');
+  if(!scroll)return;
+  document.getElementById('mapZoomIn')?.addEventListener('click',()=>setApprovedMapZoom(mapZoomFactor+.25));
+  document.getElementById('mapZoomOut')?.addEventListener('click',()=>setApprovedMapZoom(mapZoomFactor-.25));
+  document.getElementById('mapZoomFit')?.addEventListener('click',()=>setApprovedMapZoom(1));
+  scroll.addEventListener('pointerdown',event=>{
+    if(mapZoomFactor<=1||event.button!==0)return;
+    mapPointer={id:event.pointerId,x:event.clientX,y:event.clientY,startX:event.clientX,startY:event.clientY,active:false};
+    mapDidPan=false;
+  });
+  scroll.addEventListener('pointermove',event=>{
+    if(!mapPointer||mapPointer.id!==event.pointerId)return;
+    const distance=Math.hypot(event.clientX-mapPointer.startX,event.clientY-mapPointer.startY);
+    if(!mapPointer.active){
+      if(distance<=4)return;
+      mapPointer.active=true;
+      mapDidPan=true;
+      scroll.setPointerCapture(event.pointerId);
+      scroll.classList.add('map-panning');
+    }
+    const dx=event.clientX-mapPointer.x;
+    const dy=event.clientY-mapPointer.y;
+    mapPanX+=dx;mapPanY+=dy;
+    mapPointer.x=event.clientX;mapPointer.y=event.clientY;
+    applyApprovedMapTransform();
+    event.preventDefault();
+  });
+  const finishPan=event=>{
+    if(!mapPointer||mapPointer.id!==event.pointerId)return;
+    mapPointer=null;
+    scroll.classList.remove('map-panning');
+  };
+  scroll.addEventListener('pointerup',finishPan);
+  scroll.addEventListener('pointercancel',finishPan);
+  scroll.addEventListener('click',event=>{
+    if(!mapDidPan)return;
+    event.preventDefault();event.stopImmediatePropagation();mapDidPan=false;
+  },true);
+}
 function refreshApprovedMapDots(){
   document.querySelectorAll('.map-stage .dynamic-stock-dot').forEach(el=>el.remove());
   const specialStockLocations=['오른쪽 창고','사무실(4층)','지엠메딕'];
@@ -188,7 +365,33 @@ function refreshApprovedMapDots(){
   });
 }
 refreshApprovedMapDots();
+installApprovedMapPan();
+requestAnimationFrame(fitApprovedMapToWidth);
+positionSpecialMenu();
+const specialMenu=document.getElementById('specialMenu');
+if(specialMenu)new MutationObserver(positionSpecialMenu).observe(specialMenu,{attributes:true,attributeFilter:['class']});
+window.addEventListener('resize',()=>{fitApprovedMapToWidth();positionSpecialMenu();});
+if(window.ResizeObserver){
+  const mapScroll=document.querySelector('.map-scroll');
+  if(mapScroll)new ResizeObserver(fitApprovedMapToWidth).observe(mapScroll);
+}
 """
+
+
+def _company_legend_css(layout: dict) -> str:
+    selectors = {
+        "노투스팜": ".legend-chip .swatch.y",
+        "노투스": ".legend-chip .swatch.b",
+        "NOH": ".legend-chip .swatch.p",
+        "비자료": ".legend-chip .swatch.g",
+    }
+    rules = []
+    company_colors = layout.get("company_colors") or {}
+    for company, selector in selectors.items():
+        color = str(company_colors.get(company) or "").strip()
+        if re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+            rules.append(f"{selector}{{background:{color}!important;}}")
+    return f"<style id=\"wms-company-legend-colors\">{''.join(rules)}</style>" if rules else ""
 
 
 def apply_new_layout(html: str) -> str:
@@ -201,7 +404,7 @@ def apply_new_layout(html: str) -> str:
         width = max(400, int(canvas.get("width") or 1482))
         height = max(300, int(canvas.get("height") or 910))
         canvas_css = f"<style>.map-stage{{width:{width}px!important;height:{height}px!important;min-width:{width}px!important;}}</style>"
-    html = html.replace("</head>", _NEW_CSS + canvas_css + "</head>", 1)
+    html = html.replace("</head>", _NEW_CSS + _company_legend_css(layout) + canvas_css + "</head>", 1)
     replacement = _saved_layout_markup(layout) if has_saved_layout else _map_markup()
     pattern = re.compile(
         r'<div class="map-scroll"><div class="map-stage">.*?</div></div>\s*</div>\s*<div class="side-card"',

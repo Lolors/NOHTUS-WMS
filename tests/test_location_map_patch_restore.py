@@ -14,6 +14,16 @@ class LocationMapPatchRestoreTests(unittest.TestCase):
         self.assertIn('[data-testid="stMainBlockContainer"]', source)
         self.assertIn('padding-top: 1rem !important;', source)
 
+    def test_search_filter_columns_use_balanced_real_widths(self):
+        source = Path(location_map_business.__file__).read_text(encoding="utf-8")
+        self.assertIn('st.columns([4.6, 2.55, 2.85], gap="small")', source)
+        self.assertNotIn('st.columns([4.6, 2.95, 2.45], gap="small")', source)
+
+    def test_search_filters_are_not_shifted_outside_their_columns(self):
+        source = Path(location_map_business.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("map-materials-filter-anchor", source)
+        self.assertNotIn("transform: translateX(-3rem);", source)
+
     def test_map_page_hides_stray_caret_but_keeps_input_caret(self):
         source = Path(location_map_business.__file__).read_text(encoding="utf-8")
         self.assertIn("#wms-top-anchor", source)

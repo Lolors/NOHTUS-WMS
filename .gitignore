@@ -40,3 +40,4 @@ data/export.db
 data/export.db
 
 backups/
+.claude/launch.json

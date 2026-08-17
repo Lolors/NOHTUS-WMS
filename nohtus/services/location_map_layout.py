@@ -3,20 +3,22 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _LAYOUT_PATH = _PROJECT_ROOT / "data" / "location_map_layout.json"
+_DRAFT_PATH = _PROJECT_ROOT / "data" / "location_map_layout.draft.json"
 
 
 def layout_path() -> Path:
     return _LAYOUT_PATH
 
 
-def load_location_map_layout() -> dict:
-    if not _LAYOUT_PATH.exists():
+def _load_layout(path: Path) -> dict:
+    if not path.exists():
         return {"version": 1, "canvas": {"width": 1280, "height": 900, "grid": 10}, "items": []}
     try:
-        data = json.loads(_LAYOUT_PATH.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {"version": 1, "canvas": {"width": 1280, "height": 900, "grid": 10}, "items": []}
     if not isinstance(data, dict):
@@ -24,14 +26,29 @@ def load_location_map_layout() -> dict:
     data.setdefault("version", 1)
     data.setdefault("canvas", {"width": 1280, "height": 900, "grid": 10})
     data.setdefault("items", [])
+    data.setdefault("company_colors", {})
     return data
 
 
-def save_location_map_layout(layout: dict) -> None:
+def load_location_map_layout() -> dict:
+    return _load_layout(_LAYOUT_PATH)
+
+
+def load_location_map_draft() -> dict | None:
+    return _load_layout(_DRAFT_PATH) if _DRAFT_PATH.exists() else None
+
+
+def _clean_layout(layout: dict) -> dict:
     if not isinstance(layout, dict):
         raise ValueError("레이아웃 데이터 형식이 올바르지 않습니다.")
     canvas = layout.get("canvas") or {}
     items = layout.get("items") or []
+    raw_company_colors = layout.get("company_colors") or {}
+    company_colors = {}
+    for company in ("노투스팜", "노투스", "NOH", "비자료", "특수", "기타"):
+        color = str(raw_company_colors.get(company) or "").strip()
+        if re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+            company_colors[company] = color
     width = int(canvas.get("width") or 1280)
     height = int(canvas.get("height") or 900)
     grid = max(1, int(canvas.get("grid") or 10))
@@ -47,6 +64,21 @@ def save_location_map_layout(layout: dict) -> None:
         if not code or code in seen:
             continue
         seen.add(code)
+        fill_type = str(raw.get("fill_type") or "company").strip()
+        if fill_type not in {"company", "solid", "hatched", "none"}:
+            fill_type = "company"
+        fill_color = str(raw.get("fill_color") or "#ffffff").strip()
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", fill_color):
+            fill_color = "#ffffff"
+        stroke_style = str(raw.get("stroke_style") or "solid").strip()
+        if stroke_style not in {"solid", "dashed"}:
+            stroke_style = "solid"
+        group_style = str(raw.get("group_style") or "").strip()
+        if group_style not in {"", "partitioned"}:
+            group_style = ""
+        group_axis = str(raw.get("group_axis") or "").strip()
+        if group_axis not in {"", "x", "y"}:
+            group_axis = ""
         cleaned.append({
             "code": code,
             "label": str(raw.get("label") or code).strip() or code,
@@ -58,14 +90,43 @@ def save_location_map_layout(layout: dict) -> None:
             "company": str(raw.get("company") or "기타").strip() or "기타",
             "kind": str(raw.get("kind") or "location").strip() or "location",
             "note": str(raw.get("note") or "").strip(),
+            "group_id": str(raw.get("group_id") or "").strip(),
+            "group_style": group_style,
+            "group_axis": group_axis,
+            "group_order": max(0, int(raw.get("group_order") or 0)),
+            "group_count": max(0, int(raw.get("group_count") or 0)),
+            "shape_type": str(raw.get("shape_type") or "").strip(),
+            "stroke": str(raw.get("stroke") or "#475569").strip() or "#475569",
+            "stroke_style": stroke_style,
+            "fill_type": fill_type,
+            "fill_color": fill_color,
         })
 
     payload = {
         "version": int(layout.get("version") or 1),
         "canvas": {"width": width, "height": height, "grid": grid},
+        "company_colors": company_colors,
         "items": cleaned,
     }
-    _LAYOUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _LAYOUT_PATH.with_suffix(".json.tmp")
+    return payload
+
+
+def _write_layout(path: Path, layout: dict) -> None:
+    payload = _clean_layout(layout)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(_LAYOUT_PATH)
+    tmp.replace(path)
+
+
+def save_location_map_layout(layout: dict) -> None:
+    _write_layout(_LAYOUT_PATH, layout)
+
+
+def save_location_map_draft(layout: dict) -> None:
+    _write_layout(_DRAFT_PATH, layout)
+
+
+def delete_location_map_draft() -> None:
+    if _DRAFT_PATH.exists():
+        _DRAFT_PATH.unlink()
