@@ -4,7 +4,7 @@ import streamlit as st
 
 
 DELIVERY_TYPE_OPTIONS = ['택배', '퀵', '핸드캐리']
-COURIER_OPTIONS = ['로젠택배', 'CJ택배']
+COURIER_OPTIONS = ['로젠택배', 'CJ택배', 'DHL']
 
 
 def delivery_method_input(*, saved_method: str = '', key_prefix: str) -> str:

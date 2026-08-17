@@ -58,7 +58,10 @@ def historical_order_editor(dataframe, *, key: str):
         column_order=['출고처', '제품명', '제조번호', '유효기간', '수량', '단위', '매입가', 'CTN 번호'],
         column_config={
             '출고처': st.column_config.TextColumn('출고처'),
-            '제품명': st.column_config.TextColumn('제품명', required=True),
+            # 빈 입력행을 시작점으로 쓰므로 required=True를 지정하면 다른
+            # 텍스트 셀을 먼저 편집해 Enter를 누를 때 행 전체가 무효화된다.
+            # 제품명 필수 검증은 저장 시점에 처리한다.
+            '제품명': st.column_config.TextColumn('제품명'),
             '제조번호': st.column_config.TextColumn('제조번호'),
             '유효기간': st.column_config.TextColumn('유효기간', help='예: 2028-06-30'),
             '수량': st.column_config.NumberColumn('수량', min_value=0.0, step=1.0),

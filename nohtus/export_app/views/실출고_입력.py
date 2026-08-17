@@ -417,8 +417,30 @@ def render() -> None:
             saved_source = saved_inventory_source(current)
             if saved_source.empty:
                 st.info('아직 출고 저장된 재고가 없습니다.')
+                selected_saved_ids: list[int] = []
+                delete_clicked = False
             else:
-                st.caption('수량은 선택수량에서 수정하고, 삭제할 행은 선택한 뒤 아래의 선택 행 삭제를 누르세요.')
+                st.caption('수량은 선택수량에서 수정하고, 삭제할 행은 아래 선택창에서 고르세요.')
+                delete_options = {
+                    (
+                        f"#{int(row['_shipment_id'])} · {row['사업장']} · {row['제품명']} · "
+                        f"{row['제조번호'] or '-'} · {fmt_number(row['선택수량'])}EA"
+                    ): int(row['_shipment_id'])
+                    for _, row in saved_source.iterrows()
+                }
+                delete_labels = st.multiselect(
+                    '삭제할 저장 재고',
+                    list(delete_options),
+                    key=f'delete_saved_inventory_{case_id}_{selected_order_id}',
+                )
+                selected_saved_ids = [delete_options[label] for label in delete_labels]
+                delete_clicked = st.button(
+                    '선택 행 삭제',
+                    type='secondary',
+                    use_container_width=True,
+                    disabled=not selected_saved_ids,
+                    key=f'delete_saved_rows_{case_id}_{selected_order_id}',
+                )
             summary_slot = st.empty()
 
             st.markdown('##### 재고 선택')
@@ -443,10 +465,10 @@ def render() -> None:
                 editor_product = picked_product
                 stock_rows = wms_inventory_picker_service.product_stock_rows(picked_product)
 
-            # 저장된 재고 편집과 재고 선택을 하나의 폼으로 묶어서, 셀 하나
+            # 저장된 재고 수량 편집과 새 재고 선택을 하나의 폼으로 묶어서, 셀 하나
             # 고칠 때마다 전체 화면이 다시 실행되지 않게 한다(제출 버튼을
             # 누를 때만 한 번에 반영). 폼 안에는 제출 버튼을 여러 개 둘 수
-            # 있어 "선택 행 삭제"와 "출고 저장"을 함께 넣을 수 있다.
+            # 있다. 삭제 선택과 버튼은 체크 상태 유실을 막기 위해 폼 밖에서 처리한다.
             selection_source = inventory_selection_source([], stock_rows)
             with st.form(
                 key=f'wms_pick_form_{case_id}_{selected_order_id}_{editor_product}',
@@ -454,31 +476,21 @@ def render() -> None:
             ):
                 if saved_source.empty:
                     edited_saved = saved_source
-                    selected_saved_ids: list[int] = []
-                    delete_clicked = False
                 else:
                     edited_saved = st.data_editor(
                         saved_source,
                         hide_index=True,
                         use_container_width=True,
                         disabled=['사업장', '제품명', '제조번호', '유통기한'],
-                        column_order=['선택', '사업장', '제품명', '제조번호', '유통기한', '선택수량'],
+                        column_order=['사업장', '제품명', '제조번호', '유통기한', '선택수량'],
                         column_config={
                             '_shipment_id': None,
                             '_inventory_id': None,
                             '_location': None,
                             '_product_name': None,
-                            '선택': st.column_config.CheckboxColumn('선택', help='삭제할 저장 재고 행을 선택하세요.'),
                             '선택수량': st.column_config.NumberColumn('선택수량', min_value=0, step=1, format='%g'),
                         },
                         key=f'saved_wms_editor_{case_id}_{selected_order_id}',
-                    )
-                    selected_saved_ids = selected_shipment_ids(edited_saved)
-                    delete_clicked = st.form_submit_button(
-                        '선택 행 삭제',
-                        type='secondary',
-                        use_container_width=True,
-                        key=f'delete_saved_rows_{case_id}_{selected_order_id}',
                     )
 
                 active_saved = edited_saved

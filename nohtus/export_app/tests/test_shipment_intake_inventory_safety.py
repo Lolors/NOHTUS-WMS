@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
@@ -12,6 +13,13 @@ from nohtus.export_app.views.실출고_입력 import (
 
 
 class ShipmentIntakeInventorySafetyTests(unittest.TestCase):
+    def test_saved_inventory_deletion_uses_selection_outside_the_form(self):
+        source = Path('nohtus/export_app/views/실출고_입력.py').read_text(encoding='utf-8')
+        selection = source.index("delete_labels = st.multiselect(")
+        form = source.index("with st.form(", selection)
+        self.assertLess(selection, form)
+        self.assertIn("disabled=not selected_saved_ids", source[selection:form])
+
     def test_stock_rows_show_location_to_distinguish_real_inventory(self):
         stock = pd.DataFrame([
             {

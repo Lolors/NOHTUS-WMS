@@ -300,6 +300,32 @@ def _take_p(cur, item, now, qty=None):
     cur.execute("UPDATE inventory SET qty=?,updated_at=? WHERE id=?", (int(row[1] or 0) - take_qty, now, int(row[0])))
 
 
+def _restore_waiting_item(cur, item, now, qty=None):
+    """P 예약분을 원위치로 돌리되 이미 원복된 재고는 중복 가산하지 않는다."""
+    restore_qty = int(item.get("qty") or 0) if qty is None else int(qty or 0)
+    restore_item = dict(item)
+    restore_item["qty"] = restore_qty
+    try:
+        _take_p(cur, restore_item, now)
+    except ValueError:
+        # 주문행을 먼저 삭제하거나 재고조사에서 P→원위치로 옮긴 경우에는
+        # 수출대기 연결만 남고 실재고는 이미 source_location에 존재한다.
+        # 그 수량을 다시 더하면 재고가 부풀기 때문에 현재 원본행을 그대로 쓴다.
+        source = _resolve_source_row(
+            cur,
+            item.get("source_inventory_id"),
+            item,
+            required_qty=restore_qty,
+        )
+        if not source or int(source.get("qty") or 0) < restore_qty:
+            raise
+        return source, False
+
+    restored_id = _add(cur, item, item["source_location"], restore_qty, now, 1)
+    restored = _dict_row(cur, "SELECT * FROM inventory WHERE id=?", (restored_id,))
+    return restored, True
+
+
 def _items(cur, order_id, *, confirmed=None):
     where = "order_id=?"
     params = [int(order_id)]
@@ -318,8 +344,9 @@ def _items(cur, order_id, *, confirmed=None):
 
 def _restore(cur, order_id, now, memo):
     for item in _items(cur, order_id, confirmed=False):
-        _take_p(cur, item, now)
-        _add(cur, item, item["source_location"], int(item["qty"]), now, 1)
+        _, moved_from_p = _restore_waiting_item(cur, item, now)
+        if not moved_from_p:
+            continue
         insert_transaction_log(cur, created_at=now, tx_type="위치이동", product_name=item["product_name"],
             warehouse_name=item.get("warehouse_name", ""), lot=item.get("lot", "-"), exp_date=item.get("exp_date", "-"),
             from_company=item["company"], from_location=P, to_company=item["company"],
@@ -333,6 +360,31 @@ def _current_item_signature(cur, order_id, *, confirmed=False):
     return dict(grouped)
 
 
+def _waiting_inventory_matches_items(cur, order_id):
+    """미확정 연결 수량만큼 실제 P 재고가 남아 있는지 확인한다."""
+    required_by_inventory = defaultdict(int)
+    available_by_inventory = {}
+    for item in _items(cur, order_id, confirmed=False):
+        waiting_id = int(item.get("waiting_inventory_id") or 0)
+        row = None
+        if waiting_id:
+            row = cur.execute(
+                "SELECT id,qty FROM inventory WHERE id=? AND location=?",
+                (waiting_id, P),
+            ).fetchone()
+        if not row:
+            row = _find(cur, item, P)
+        if not row:
+            return False
+        inventory_id = int(row[0])
+        required_by_inventory[inventory_id] += int(item.get("qty") or 0)
+        available_by_inventory[inventory_id] = int(row[1] or 0)
+    return all(
+        available_by_inventory.get(inventory_id, 0) >= required
+        for inventory_id, required in required_by_inventory.items()
+    )
+
+
 def _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now, title, export_no):
     current_items = _items(cur, order_id, confirmed=False)
     target_qty = {int(k): int(v) for k, v in dict(grouped).items() if int(v) > 0}
@@ -340,12 +392,12 @@ def _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now
     restored_source_rows = {}
     for item in current_items:
         source_id = int(item.get("source_inventory_id") or 0)
-        _take_p(cur, item, now)
-        restored_id = _add(cur, item, item["source_location"], int(item["qty"]), now, 1)
-        restored = _dict_row(cur, "SELECT * FROM inventory WHERE id=?", (restored_id,))
+        restored, moved_from_p = _restore_waiting_item(cur, item, now)
         if restored:
             restored_source_rows[source_id] = restored
             source_hints[source_id] = restored
+        if not moved_from_p:
+            continue
         insert_transaction_log(
             cur,
             created_at=now,
@@ -466,13 +518,11 @@ def _apply_confirmed_export_item_changes(
 
         if not removed_qty:
             continue
-        partial_item = dict(item)
-        partial_item["qty"] = removed_qty
-        _take_p(cur, partial_item, now)
-        restored_id = _add(cur, item, item["source_location"], removed_qty, now, 1)
-        restored = _dict_row(cur, "SELECT * FROM inventory WHERE id=?", (restored_id,))
+        restored, moved_from_p = _restore_waiting_item(cur, item, now, removed_qty)
         if restored:
             source_hints[source_id] = restored
+        if not moved_from_p:
+            continue
         insert_transaction_log(
             cur,
             created_at=now,
@@ -615,7 +665,9 @@ def save_export_waiting_order(cart, *, country, buyer="", transport_method="미�
                 cur,
                 editing_order_id,
                 confirmed=is_confirmed,
-            ) != dict(grouped)
+            ) != dict(grouped) or not _waiting_inventory_matches_items(
+                cur, editing_order_id
+            )
             cur.execute("UPDATE export_waiting_orders SET export_no=?,country=?,buyer=?,transport_method=?,title=?,updated_at=? WHERE id=?",
                         (export_no,country,buyer,transport_method,title,now,int(editing_order_id)))
             order_id = int(editing_order_id)

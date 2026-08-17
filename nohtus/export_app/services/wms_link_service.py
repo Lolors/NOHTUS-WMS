@@ -196,6 +196,31 @@ def _waiting_rows_for_order(order_id: int) -> list[dict]:
     return df.to_dict("records") if not df.empty else []
 
 
+def _cart_row_from_waiting_row(row: dict) -> dict:
+    return {
+        "id": int(row.get("source_inventory_id") or 0),
+        "요청수량": float(row.get("qty") or 0),
+        "사업장": row.get("company") or "",
+        "제품명": row.get("product_name") or "",
+        "LOT": row.get("lot") or "",
+        "유통기한": row.get("exp_date") or "",
+        "로케이션": row.get("source_location") or "",
+    }
+
+
+def authoritative_other_cart_rows(
+    waiting_rows: list[dict], selected_source_ids: set[int]
+) -> list[dict]:
+    """현재 편집 재고 외의 WMS 예약은 미러가 아닌 WMS 원본 그대로 보존한다."""
+    return [
+        _cart_row_from_waiting_row(row)
+        for row in waiting_rows
+        if int(row.get("source_inventory_id") or 0) > 0
+        and int(row.get("source_inventory_id") or 0) not in selected_source_ids
+        and float(row.get("qty") or 0) > 0
+    ]
+
+
 def _fill_missing_source_links(rows: list[dict], waiting_rows: list[dict]) -> None:
     """구형/편집표 행에서 source_inventory_id가 빠졌다면 현재 WMS 대기행으로 복구한다."""
     used: set[int] = set()
@@ -226,20 +251,33 @@ def save_picked_inventory(*, case_id:int, order_item_id:int, kept_rows:list[dict
     editing_order_id=_find_open_order_id(export_no)
 
     all_kept_rows=list(kept_rows)
-    other_rows=[row for row in shipment_service.list_case_items(case_id) if int(row["order_item_id"] or 0)!=int(order_item_id)]
+    case_rows = shipment_service.list_case_items(case_id)
+    current_rows = [row for row in case_rows if int(row["order_item_id"] or 0)==int(order_item_id)]
+    other_rows=[row for row in case_rows if int(row["order_item_id"] or 0)!=int(order_item_id)]
     if editing_order_id:
         waiting_rows=_waiting_rows_for_order(editing_order_id)
         _fill_missing_source_links(all_kept_rows, waiting_rows)
         _fill_missing_source_links(other_rows, waiting_rows)
     linked_kept_rows=[row for row in all_kept_rows if row.get("source_inventory_id")]
     linked_other_rows=[row for row in other_rows if row.get("source_inventory_id")]
-    cart=[_cart_row_from_shipment_row(row) for row in linked_other_rows]
+    selected_source_ids = {
+        int(row.get("source_inventory_id") or 0) for row in linked_kept_rows
+    } | {
+        int(pick.get("inventory_id") or 0) for pick in picked_rows
+    } | {
+        int(row.get("source_inventory_id") or 0) for row in current_rows
+    }
+    cart = (
+        authoritative_other_cart_rows(waiting_rows, selected_source_ids)
+        if editing_order_id else
+        [_cart_row_from_shipment_row(row) for row in linked_other_rows]
+    )
     cart += [_cart_row_from_shipment_row(row) for row in linked_kept_rows]
     cart += [_cart_row_from_pick(pick) for pick in picked_rows]
 
     mirror_rows=[{"_id":row["id"],"business_unit":row.get("business_unit") or "","location":row.get("source_location") or row.get("location") or "","source_inventory_id":row.get("source_inventory_id"),"product_name":row.get("product_name") or "","lot_no":row.get("lot_no") or "","expiry_date":row.get("expiry_date") or "","requested_qty":float(row["requested_qty"] or 0)} for row in all_kept_rows]
     mirror_rows += [{"_id":None,"business_unit":pick.get("company") or "","location":pick.get("location") or "","source_inventory_id":int(pick["inventory_id"]),"product_name":pick.get("product_name") or "","lot_no":pick.get("lot") or "","expiry_date":pick.get("exp_date") or "","requested_qty":float(pick["qty"])} for pick in picked_rows]
-    original_mirror_rows=[{"_id":row["id"],"business_unit":row.get("business_unit") or "","location":row.get("source_location") or row.get("location") or "","source_inventory_id":row.get("source_inventory_id"),"product_name":row.get("product_name") or "","lot_no":row.get("lot_no") or "","expiry_date":row.get("expiry_date") or "","requested_qty":float(row["requested_qty"] or 0)} for row in shipment_service.list_case_items(case_id) if int(row["order_item_id"] or 0)==int(order_item_id)]
+    original_mirror_rows=[{"_id":row["id"],"business_unit":row.get("business_unit") or "","location":row.get("source_location") or row.get("location") or "","source_inventory_id":row.get("source_inventory_id"),"product_name":row.get("product_name") or "","lot_no":row.get("lot_no") or "","expiry_date":row.get("expiry_date") or "","requested_qty":float(row["requested_qty"] or 0)} for row in current_rows]
     total_qty=shipment_service.save_for_order(case_id,order_item_id,mirror_rows)
     try:
         result=save_export_waiting_order(cart,country=country,buyer=str(case.get("buyer") or ""),transport_method=transport_method,export_no=export_no,editing_order_id=editing_order_id)

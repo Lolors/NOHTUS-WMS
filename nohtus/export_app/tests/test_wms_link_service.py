@@ -468,6 +468,102 @@ class WmsLinkServiceTests(unittest.TestCase):
         self.assertEqual(len(linked_b_after), 1)
         self.assertEqual(float(linked_b_after[0]["requested_qty"]), 3.0)
 
+    def test_relinks_when_waiting_stock_was_already_moved_from_p_to_source(self) -> None:
+        case_id, order_a, _ = self._create_case("EXP-LINK-REC")
+        pick = {
+            "inventory_id": 1,
+            "company": "NOH",
+            "product_name": "제품A",
+            "lot": "LOT-1",
+            "exp_date": "2027-01-01",
+            "location": "A1-01",
+            "qty": 5.0,
+        }
+        wms_link_service.save_picked_inventory(
+            case_id=case_id,
+            order_item_id=order_a,
+            kept_rows=[],
+            picked_rows=[pick],
+        )
+
+        # 주문 연결만 없어지고 사용자가 재고조사에서 P→원위치로 먼저 옮긴
+        # 상태를 재현한다. WMS 수출대기 연결행은 의도적으로 남겨 둔다.
+        con = sqlite3.connect(self.wms_db_path)
+        try:
+            con.execute("UPDATE inventory SET qty=20 WHERE id=1")
+            con.execute("UPDATE inventory SET qty=0 WHERE product_name='제품A' AND location='P'")
+            con.commit()
+        finally:
+            con.close()
+
+        wms_link_service.save_picked_inventory(
+            case_id=case_id,
+            order_item_id=order_a,
+            kept_rows=[],
+            picked_rows=[pick],
+        )
+
+        self.assertEqual(self._wms_inventory_row("제품A")["qty"], 15)
+        self.assertEqual(self._wms_p_qty("제품A"), 5)
+        waiting = [
+            row for row in self._wms_export_waiting_items()
+            if row["product_name"] == "제품A" and not int(row["confirmed"] or 0)
+        ]
+        self.assertEqual(len(waiting), 1)
+        self.assertTrue(waiting[0]["waiting_inventory_id"])
+
+    def test_unrelated_duplicate_mirror_does_not_inflate_wms_request(self) -> None:
+        case_id, order_a, order_b = self._create_case("EXP-LINK-DUP-MIRROR")
+        for order_id, inventory_id, product, lot, exp, location, qty in (
+            (order_a, 1, "제품A", "LOT-1", "2027-01-01", "A1-01", 5.0),
+            (order_b, 2, "제품B", "LOT-2", "2027-02-01", "A1-02", 3.0),
+        ):
+            wms_link_service.save_picked_inventory(
+                case_id=case_id,
+                order_item_id=order_id,
+                kept_rows=[],
+                picked_rows=[{
+                    "inventory_id": inventory_id,
+                    "company": "NOH",
+                    "product_name": product,
+                    "lot": lot,
+                    "exp_date": exp,
+                    "location": location,
+                    "qty": qty,
+                }],
+            )
+
+        linked = shipment_service.list_case_items(case_id)
+        row_a = next(row for row in linked if int(row["order_item_id"]) == order_a)
+        row_b = next(row for row in linked if int(row["order_item_id"]) == order_b)
+        db.execute(
+            '''INSERT INTO shipment_items(
+                   case_id,order_item_id,business_unit,location,source_inventory_id,
+                   product_name,lot_no,expiry_date,requested_qty,created_at,updated_at
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?)''',
+            (
+                case_id, order_b, row_b["business_unit"], row_b["source_location"], 999,
+                row_b["product_name"], row_b["lot_no"], row_b["expiry_date"],
+                row_b["requested_qty"], now_text(), now_text(),
+            ),
+        )
+
+        wms_link_service.save_picked_inventory(
+            case_id=case_id,
+            order_item_id=order_a,
+            kept_rows=[dict(row_a)],
+            picked_rows=[],
+        )
+
+        self.assertEqual(self._wms_p_qty("제품A"), 5)
+        self.assertEqual(self._wms_p_qty("제품B"), 3)
+        waiting_b = [
+            row for row in self._wms_export_waiting_items()
+            if row["product_name"] == "제품B" and not int(row["confirmed"] or 0)
+        ]
+        self.assertEqual(len(waiting_b), 1)
+        self.assertEqual(int(waiting_b[0]["qty"]), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -286,6 +286,26 @@ def _delete_transaction_ids(tx_ids):
     return len(rows)
 
 
+def _delete_transaction_ids_without_reversal(tx_ids):
+    """재고·주문 상태를 건드리지 않고 선택한 이력 행만 삭제한다."""
+    tx_ids = sorted({int(x) for x in tx_ids if x})
+    if not tx_ids:
+        return 0
+    placeholders = ",".join(["?"] * len(tx_ids))
+    with connect() as con:
+        cur = con.cursor()
+        existing = cur.execute(
+            f"SELECT COUNT(*) FROM transactions WHERE id IN ({placeholders})",
+            tuple(tx_ids),
+        ).fetchone()[0]
+        cur.execute(
+            f"DELETE FROM transactions WHERE id IN ({placeholders})",
+            tuple(tx_ids),
+        )
+        con.commit()
+    return int(existing or 0)
+
+
 def _append_history_keyword_filter(conditions, params, keyword):
     """Apply keyword search to the whole date-filtered transaction set before pagination."""
     term = str(keyword or "").strip()
@@ -494,14 +514,16 @@ def page_history():
         )
         selected_ids = [tx_ids[i] for i, checked in enumerate(edited["선택"].tolist()) if checked and i < len(tx_ids)]
         if selected_ids:
-            st.warning(f"선택한 이력 {len(selected_ids)}건은 삭제 시 재고 수량도 함께 원복됩니다.")
+            st.warning(f"선택한 이력 {len(selected_ids)}건의 삭제 방식을 선택하세요.")
             c1, c2 = st.columns([1, 1])
             with c1:
-                if st.button("선택 삭제", type="primary", use_container_width=True):
+                if st.button("삭제 + 재고 원복", type="primary", use_container_width=True):
                     st.session_state["history_delete_pending_ids"] = selected_ids
                     st.rerun()
             with c2:
-                st.caption("삭제 대상 이력의 재고 변동을 반대로 적용합니다.")
+                if st.button("이력만 삭제 (원복 없음)", use_container_width=True):
+                    st.session_state["history_log_only_delete_pending_ids"] = selected_ids
+                    st.rerun()
         pending_ids = st.session_state.get("history_delete_pending_ids") or []
         if pending_ids:
             st.error(f"정말 삭제하시겠습니까? 대상: {len(pending_ids)}건")
@@ -516,6 +538,30 @@ def page_history():
                         deleted = _delete_transaction_ids(pending_ids)
                         st.session_state.pop("history_delete_pending_ids", None)
                         st.success(f"이력 {deleted}건을 삭제하고 재고를 원복했습니다.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(str(e))
+        log_only_pending_ids = st.session_state.get("history_log_only_delete_pending_ids") or []
+        if log_only_pending_ids:
+            st.error(
+                f"재고·위치·주문 상태를 전혀 바꾸지 않고 이력 {len(log_only_pending_ids)}건만 삭제합니다."
+            )
+            r1, r2 = st.columns([1, 1])
+            with r1:
+                if st.button("취소", use_container_width=True, key="history_log_only_delete_cancel"):
+                    st.session_state.pop("history_log_only_delete_pending_ids", None)
+                    st.rerun()
+            with r2:
+                if st.button(
+                    "예, 이력만 영구 삭제합니다",
+                    type="primary",
+                    use_container_width=True,
+                    key="history_log_only_delete_confirm",
+                ):
+                    try:
+                        deleted = _delete_transaction_ids_without_reversal(log_only_pending_ids)
+                        st.session_state.pop("history_log_only_delete_pending_ids", None)
+                        st.success(f"재고 원복 없이 이력 {deleted}건만 삭제했습니다.")
                         st.rerun()
                     except Exception as e:
                         st.error(str(e))

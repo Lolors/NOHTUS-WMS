@@ -156,8 +156,13 @@ def _patched_save_picked_inventory(*, case_id: int, order_item_id: int, kept_row
     editing_order_id = _editable_order_id(export_no)
 
     all_kept_rows = [dict(row) for row in (kept_rows or [])]
+    case_rows = [dict(row) for row in shipment_service.list_case_items(case_id)]
+    current_rows = [
+        row for row in case_rows
+        if int(row['order_item_id'] or 0) == int(order_item_id)
+    ]
     other_rows = [
-        dict(row) for row in shipment_service.list_case_items(case_id)
+        row for row in case_rows
         if int(row['order_item_id'] or 0) != int(order_item_id)
     ]
     if editing_order_id:
@@ -167,7 +172,18 @@ def _patched_save_picked_inventory(*, case_id: int, order_item_id: int, kept_row
 
     linked_kept = [row for row in all_kept_rows if row.get('source_inventory_id')]
     linked_other = [row for row in other_rows if row.get('source_inventory_id')]
-    cart = [link_service._cart_row_from_shipment_row(row) for row in linked_other]
+    selected_source_ids = {
+        int(row.get('source_inventory_id') or 0) for row in linked_kept
+    } | {
+        int(pick.get('inventory_id') or 0) for pick in (picked_rows or [])
+    } | {
+        int(row.get('source_inventory_id') or 0) for row in current_rows
+    }
+    cart = (
+        link_service.authoritative_other_cart_rows(waiting_rows, selected_source_ids)
+        if editing_order_id else
+        [link_service._cart_row_from_shipment_row(row) for row in linked_other]
+    )
     cart += [link_service._cart_row_from_shipment_row(row) for row in linked_kept]
     cart += [link_service._cart_row_from_pick(pick) for pick in (picked_rows or []) if float(pick.get('qty') or 0) > 0]
 
@@ -208,8 +224,7 @@ def _patched_save_picked_inventory(*, case_id: int, order_item_id: int, kept_row
             'expiry_date': row.get('expiry_date') or '',
             'requested_qty': float(row.get('requested_qty') or 0),
         }
-        for row in shipment_service.list_case_items(case_id)
-        if int(row['order_item_id'] or 0) == int(order_item_id)
+        for row in current_rows
     ]
 
     total_qty = shipment_service.save_for_order(case_id, order_item_id, mirror_rows)

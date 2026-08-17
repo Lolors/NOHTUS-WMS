@@ -31,20 +31,7 @@ def _patched_apply_export_waiting_item_changes(
     restored_source_rows = {}
     for item in current_items:
         source_id = int(item.get("source_inventory_id") or 0)
-        export_waiting._take_p(cur, item, now)
-        restored_id = export_waiting._add(
-            cur,
-            item,
-            item["source_location"],
-            int(item["qty"]),
-            now,
-            1,
-        )
-        restored = export_waiting._dict_row(
-            cur,
-            "SELECT * FROM inventory WHERE id=?",
-            (restored_id,),
-        )
+        restored, _ = export_waiting._restore_waiting_item(cur, item, now)
         if restored:
             restored_source_rows[source_id] = restored
             source_hints[source_id] = restored
@@ -58,16 +45,19 @@ def _patched_apply_export_waiting_item_changes(
         resolved_inventory_id = int(
             source.get("_resolved_inventory_id") or source.get("id") or source_id
         )
-        export_waiting._add(cur, source, export_waiting.P, qty, now, 0)
+        waiting_inventory_id = export_waiting._add(
+            cur, source, export_waiting.P, qty, now, 0
+        )
         cur.execute(
             """INSERT INTO export_waiting_items(
-                   order_id,source_inventory_id,company,product_name,
+                   order_id,source_inventory_id,waiting_inventory_id,company,product_name,
                    warehouse_name,lot,exp_date,source_location,waiting_location,
                    qty,moved_at,confirmed
-               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,0)""",
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)""",
             (
                 order_id,
                 resolved_inventory_id,
+                waiting_inventory_id,
                 source.get("company", ""),
                 source.get("product_name", ""),
                 source.get("warehouse_name", "") or "",
