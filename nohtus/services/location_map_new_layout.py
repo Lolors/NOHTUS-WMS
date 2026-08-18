@@ -227,6 +227,7 @@ def _saved_layout_markup(layout: dict) -> str:
             )
         else:
             partition_classes = ""
+            map_group = str(item.get("group_id") or code).strip() or code
             if str(item.get("group_style") or "") == "partitioned":
                 axis = "y" if str(item.get("group_axis") or "") == "y" else "x"
                 order = max(0, int(item.get("group_order") or 0))
@@ -238,7 +239,9 @@ def _saved_layout_markup(layout: dict) -> str:
                     partition_classes += " group-last"
             items.append(
                 f'<button type="button" class="nw-zone zone {_layout_class(item)}{partition_classes}" '
-                f'data-loc="{escape(code, quote=True)}" style="{style}{_location_fill_style(item, company_colors)}">'
+                f'data-loc="{escape(code, quote=True)}" '
+                f'data-map-group="{escape(map_group, quote=True)}" '
+                f'style="{style}{_location_fill_style(item, company_colors)}">'
                 f'<span style="display:inline-block;transform:rotate({-rotation}deg);'
                 f'transform-origin:center;">{label}</span></button>'
             )
@@ -317,18 +320,34 @@ function projectSavedMapToPixels(stage,scale){
   stage.style.setProperty('width',Math.round(naturalWidth*scale)+'px','important');
   stage.style.setProperty('min-width',Math.round(naturalWidth*scale)+'px','important');
   stage.style.setProperty('height',Math.round(naturalHeight*scale)+'px','important');
+  const zones=Array.from(stage.querySelectorAll('.nw-zone'));
   Array.from(stage.children).forEach(el=>{
     const geometry=(el.dataset.mapNaturalGeometry||'').split(',').map(Number);
     if(geometry.length!==4||geometry.some(Number.isNaN))return;
     const [x,y,width,height]=geometry;
     const left=Math.round(x*scale),top=Math.round(y*scale);
     const right=Math.round((x+width)*scale),bottom=Math.round((y+height)*scale);
-    const partitionGapX=el.classList.contains('partitioned-rack')&&el.classList.contains('group-x')&&!el.classList.contains('group-last')?1:0;
-    const partitionGapY=el.classList.contains('partitioned-rack')&&el.classList.contains('group-y')&&!el.classList.contains('group-last')?1:0;
+    let groupGapX=0,groupGapY=0;
+    if(el.classList.contains('nw-zone')){
+      const group=el.dataset.mapGroup||el.dataset.loc||'';
+      zones.some(other=>{
+        if(other===el||(other.dataset.mapGroup||other.dataset.loc||'')===group)return false;
+        const otherGeometry=(other.dataset.mapNaturalGeometry||'').split(',').map(Number);
+        if(otherGeometry.length!==4||otherGeometry.some(Number.isNaN))return false;
+        const [ox,oy,ow,oh]=otherGeometry;
+        const otherLeft=Math.round(ox*scale),otherTop=Math.round(oy*scale);
+        const otherRight=Math.round((ox+ow)*scale),otherBottom=Math.round((oy+oh)*scale);
+        const verticalOverlap=Math.min(bottom,otherBottom)-Math.max(top,otherTop);
+        const horizontalOverlap=Math.min(right,otherRight)-Math.max(left,otherLeft);
+        if(Math.abs(right-otherLeft)<=1&&verticalOverlap>1)groupGapX=1;
+        if(Math.abs(bottom-otherTop)<=1&&horizontalOverlap>1)groupGapY=1;
+        return groupGapX&&groupGapY;
+      });
+    }
     el.style.setProperty('left',left+'px','important');
     el.style.setProperty('top',top+'px','important');
-    el.style.setProperty('width',Math.max(1,right-left-partitionGapX)+'px','important');
-    el.style.setProperty('height',Math.max(1,bottom-top-partitionGapY)+'px','important');
+    el.style.setProperty('width',Math.max(1,right-left-groupGapX)+'px','important');
+    el.style.setProperty('height',Math.max(1,bottom-top-groupGapY)+'px','important');
   });
   separateTouchingShapeBorders(stage);
   stage.style.setProperty('--map-zone-font-size',Math.max(9,Math.round(17*scale))+'px');
