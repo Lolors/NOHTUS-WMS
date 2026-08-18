@@ -469,6 +469,58 @@ class WmsLinkServiceTests(unittest.TestCase):
         self.assertEqual(len(linked_b_after), 1)
         self.assertEqual(float(linked_b_after[0]["requested_qty"]), 3.0)
 
+    def test_delete_then_readd_uses_matching_p_stock_when_linked_p_row_is_empty(self) -> None:
+        case_id, order_a, order_b = self._create_case("EXP-LINK-P-SPLIT")
+        pick_a = {
+            "inventory_id": 1,
+            "company": "NOH",
+            "product_name": "제품A",
+            "lot": "LOT-1",
+            "exp_date": "2027-01-01",
+            "location": "A1-01",
+            "qty": 2.0,
+        }
+        wms_link_service.save_picked_inventory(
+            case_id=case_id, order_item_id=order_a, kept_rows=[], picked_rows=[pick_a]
+        )
+        wms_link_service.save_picked_inventory(
+            case_id=case_id,
+            order_item_id=order_b,
+            kept_rows=[],
+            picked_rows=[{
+                "inventory_id": 2, "company": "NOH", "product_name": "제품B",
+                "lot": "LOT-2", "exp_date": "2027-02-01", "location": "A1-02", "qty": 3.0,
+            }],
+        )
+
+        # 연결 ID가 가리키는 P 행은 0EA지만, 완전히 같은 재고키의
+        # 다른 P 행에 2EA가 있는 실제 오류 상태를 재현한다.
+        con = sqlite3.connect(self.wms_db_path)
+        try:
+            linked_p_id = con.execute(
+                "SELECT waiting_inventory_id FROM export_waiting_items WHERE product_name='제품A'"
+            ).fetchone()[0]
+            con.execute("UPDATE inventory SET qty=0 WHERE id=?", (linked_p_id,))
+            con.execute(
+                """INSERT INTO inventory(location,company,product_name,warehouse_name,lot,exp_date,qty,updated_at)
+                   VALUES('P','NOH','제품A','ERP-A','LOT-1','2027-01-01',2,'2026-01-01')"""
+            )
+            con.commit()
+        finally:
+            con.close()
+
+        wms_link_service.save_picked_inventory(
+            case_id=case_id, order_item_id=order_a, kept_rows=[], picked_rows=[]
+        )
+        self.assertEqual(self._wms_inventory_row("제품A")["qty"], 20)
+        self.assertEqual(self._wms_p_qty("제품A"), 0)
+
+        wms_link_service.save_picked_inventory(
+            case_id=case_id, order_item_id=order_a, kept_rows=[], picked_rows=[pick_a]
+        )
+        self.assertEqual(self._wms_inventory_row("제품A")["qty"], 18)
+        self.assertEqual(self._wms_p_qty("제품A"), 2)
+
     def test_removing_broken_waiting_row_does_not_require_missing_p_inventory(self) -> None:
         case_id, order_a, order_b = self._create_case("EXP-LINK-BROKEN-DELETE")
         for order_id, inventory_id, product, lot, exp, location, qty in (

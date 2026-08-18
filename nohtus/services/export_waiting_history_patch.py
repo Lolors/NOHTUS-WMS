@@ -31,7 +31,14 @@ def _patched_apply_export_waiting_item_changes(
     restored_source_rows = {}
     for item in current_items:
         source_id = int(item.get("source_inventory_id") or 0)
-        restored, _ = export_waiting._restore_waiting_item(cur, item, now)
+        try:
+            restored, _ = export_waiting._restore_waiting_item(cur, item, now)
+        except ValueError:
+            # P와 원위치 재고가 모두 없는 고아 연결은 사용자가
+            # 이 품목을 삭제하는 경우에만 연결행을 정리한다.
+            if target_qty.get(source_id, 0) > 0:
+                raise
+            continue
         if restored:
             restored_source_rows[source_id] = restored
             source_hints[source_id] = restored

@@ -279,25 +279,43 @@ def _take_source(cur, inventory_id, qty, now, fallback=None):
 def _take_p(cur, item, now, qty=None):
     take_qty = int(item.get("qty") or 0) if qty is None else int(qty or 0)
     waiting_inventory_id = int(item.get("waiting_inventory_id") or 0)
-    row = None
-    if waiting_inventory_id:
-        row = cur.execute(
-            "SELECT id,qty FROM inventory WHERE id=? AND location=?",
-            (waiting_inventory_id, P),
-        ).fetchone()
-    if not row:
-        # 과거 자료에 연결 ID가 없을 때만 전체 재고키가 정확히 같은 P 행을 사용한다.
-        # 제품명이나 LOT 일부만 같은 다른 행을 임의로 고르지 않는다.
-        row = _find(cur, item, P)
-        if row and item.get("id"):
-            cur.execute(
-                "UPDATE export_waiting_items SET waiting_inventory_id=? WHERE id=?",
-                (int(row[0]), int(item["id"])),
-            )
-            item["waiting_inventory_id"] = int(row[0])
-    if not row or int(row[1] or 0) < take_qty:
+    rows = cur.execute(
+        """SELECT id,COALESCE(qty,0) FROM inventory
+           WHERE company=? AND product_name=? AND IFNULL(warehouse_name,'')=?
+             AND IFNULL(lot,'-')=? AND IFNULL(exp_date,'-')=? AND location=?
+           ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END, qty DESC, id""",
+        (
+            item.get("company", ""), item.get("product_name", ""),
+            item.get("warehouse_name", "") or "", item.get("lot", "-") or "-",
+            item.get("exp_date", "-") or "-", P, waiting_inventory_id,
+        ),
+    ).fetchall()
+    available = sum(int(row[1] or 0) for row in rows)
+    if take_qty <= 0 or available < take_qty:
         raise ValueError(f"P 로케이션의 {item['product_name']} 재고가 부족합니다.")
-    cur.execute("UPDATE inventory SET qty=?,updated_at=? WHERE id=?", (int(row[1] or 0) - take_qty, now, int(row[0])))
+
+    # 재고조사·행 병합 후 같은 P 재고가 여러 ID로 나뉘어도 총량을 사용한다.
+    # 연결된 행을 우선 차감하고, 부족하면 완전 일치하는 다른 P 행에서 이어서 차감한다.
+    remaining = take_qty
+    linked_id = 0
+    for inventory_id, row_qty in rows:
+        row_qty = int(row_qty or 0)
+        used = min(row_qty, remaining)
+        if used:
+            cur.execute(
+                "UPDATE inventory SET qty=?,updated_at=? WHERE id=?",
+                (row_qty - used, now, int(inventory_id)),
+            )
+            linked_id = linked_id or int(inventory_id)
+            remaining -= used
+        if remaining <= 0:
+            break
+    if linked_id and item.get("id") and linked_id != waiting_inventory_id:
+        cur.execute(
+            "UPDATE export_waiting_items SET waiting_inventory_id=? WHERE id=?",
+            (linked_id, int(item["id"])),
+        )
+        item["waiting_inventory_id"] = linked_id
 
 
 def _restore_waiting_item(cur, item, now, qty=None):

@@ -114,33 +114,8 @@ def page_export_waiting():
     original_take_p = export_waiting_service._take_p
 
     def tolerant_take_p(cur, item, now, qty=None):
-        """연결된 P 재고 ID를 우선 사용하고, 과거 자료는 완전 일치 키만 허용한다."""
-        needed = int(item.get("qty") or 0) if qty is None else int(qty or 0)
-        if needed <= 0:
-            return 0
-
-        waiting_inventory_id = int(item.get("waiting_inventory_id") or 0)
-        row = None
-        if waiting_inventory_id:
-            row = cur.execute(
-                "SELECT id,qty FROM inventory WHERE id=? AND location='P'",
-                (waiting_inventory_id,),
-            ).fetchone()
-        if not row:
-            row = export_waiting_service._find(cur, item, export_waiting_service.P)
-            if row and item.get("id"):
-                cur.execute(
-                    "UPDATE export_waiting_items SET waiting_inventory_id=? WHERE id=?",
-                    (int(row[0]), int(item["id"])),
-                )
-        if not row or int(row[1] or 0) < needed:
-            raise ValueError(f"P 로케이션의 {item.get('product_name','제품')} 재고가 부족합니다.")
-
-        cur.execute(
-            "UPDATE inventory SET qty=?,updated_at=? WHERE id=?",
-            (int(row[1] or 0) - needed, now, int(row[0])),
-        )
-        return needed
+        """과거 화면도 현재의 P 재고 연결·분할 복구 로직을 그대로 사용한다."""
+        return original_take_p(cur, item, now, qty)
 
     if original_customer_payload is not None:
         def compatible_current_customer_payload(selected_customer=None):
