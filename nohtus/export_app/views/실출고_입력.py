@@ -157,6 +157,132 @@ def recommended_inventory_search_term(product_name: object) -> str:
     return str(product_name or '').split('(', 1)[0].strip()
 
 
+@dialog('입고 수정', width='large')
+def edit_shipment_intake_dialog(
+    *, case_id: int, order_item_id: int, product_name: str,
+    order_qty: float, unit: str, current_rows: list[dict],
+) -> None:
+    """기존 저장분과 추가 가능한 재고를 한 표에서 수정한다."""
+    st.markdown(
+        """
+        <style>
+        div[role="dialog"] {
+            width: 800px !important;
+            max-width: calc(100vw - 32px) !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption('체크를 끄면 기존 입고가 삭제되고, 새 행을 체크하면 입고에 추가됩니다.')
+    search_key = f'wms_intake_modal_search_{case_id}_{order_item_id}'
+    search_term = st.text_input(
+        '제품 검색',
+        value=st.session_state.get(search_key, recommended_inventory_search_term(product_name)),
+        key=search_key,
+    ).strip()
+    products_df = wms_inventory_picker_service.search_products(search_term)
+    stock_rows = pd.DataFrame()
+    editor_product = '재고없음'
+    if products_df.empty:
+        st.info('일치하는 WMS 제품이 없습니다. 검색어를 바꿔 보세요.')
+    else:
+        picked_product = st.selectbox(
+            '추천 제품',
+            products_df['standard_name'].tolist(),
+            key=f'wms_intake_modal_product_{case_id}_{order_item_id}',
+        )
+        editor_product = picked_product
+        stock_rows = wms_inventory_picker_service.product_stock_rows(picked_product)
+
+    source = inventory_selection_source(current_rows, stock_rows)
+    if not source.empty:
+        source['제품명'] = source['_product_name']
+    with st.form(
+        key=f'wms_intake_modal_form_{case_id}_{order_item_id}_{editor_product}',
+        clear_on_submit=False,
+    ):
+        edited = st.data_editor(
+            source,
+            hide_index=True,
+            use_container_width=True,
+            disabled=['사업장', '제품명', '제조번호', '유통기한', '보유수량'],
+            column_order=['선택', '사업장', '제품명', '제조번호', '유통기한', '선택수량'],
+            column_config={
+                '_inventory_id': None,
+                '_location': None,
+                '_product_name': None,
+                '로케이션': None,
+                '보유수량': None,
+                '선택': st.column_config.CheckboxColumn('선택'),
+                '선택수량': st.column_config.NumberColumn(
+                    '선택수량', min_value=0, step=1, format='%g',
+                ),
+            },
+            key=f'wms_intake_modal_editor_{case_id}_{order_item_id}_{editor_product}',
+        )
+        selected = edited[edited['선택']].copy() if not edited.empty else edited
+        selected_qty = (
+            float(pd.to_numeric(selected['선택수량'], errors='coerce').fillna(0).sum())
+            if not selected.empty else 0.0
+        )
+        icon, state = order_state(order_qty, selected_qty)
+        st.info(
+            f'{icon} 선택 합계 {fmt_number(selected_qty)} / '
+            f'주문 {fmt_number(order_qty)} {unit} · {state}'
+        )
+        save_clicked = st.form_submit_button('입고 수정 저장', type='primary', use_container_width=True)
+
+    if not save_clicked:
+        return
+    invalid = selected[
+        (pd.to_numeric(selected['선택수량'], errors='coerce').fillna(0) <= 0)
+        | (pd.to_numeric(selected['선택수량'], errors='coerce').fillna(0)
+           > pd.to_numeric(selected['보유수량'], errors='coerce').fillna(0))
+    ] if not selected.empty else selected
+    if not invalid.empty:
+        st.error('선택수량은 1 이상, 보유수량 이하여야 합니다.')
+        return
+
+    current_by_inventory: dict[int, dict] = {}
+    for row in current_rows:
+        inventory_id = int(row.get('source_inventory_id') or 0)
+        if inventory_id and inventory_id not in current_by_inventory:
+            current_by_inventory[inventory_id] = dict(row)
+    kept_rows, picked_rows = [], []
+    for _, row in selected.iterrows():
+        inventory_id = int(row['_inventory_id'])
+        qty = float(row['선택수량'])
+        if inventory_id in current_by_inventory:
+            kept = dict(current_by_inventory[inventory_id])
+            kept['requested_qty'] = qty
+            kept_rows.append(kept)
+        else:
+            picked_rows.append({
+                'inventory_id': inventory_id,
+                'company': row['사업장'],
+                'product_name': row['_product_name'],
+                'lot': row['제조번호'],
+                'exp_date': row['유통기한'],
+                'location': row['_location'],
+                'qty': qty,
+            })
+    try:
+        wms_link_service.save_picked_inventory(
+            case_id=case_id,
+            order_item_id=order_item_id,
+            kept_rows=kept_rows,
+            picked_rows=picked_rows,
+        )
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+    _sync_folder_without_aborting_inventory(case_id)
+    history_service.add(case_id, '입고 수정', f'{product_name} · {len(selected)}개 행')
+    st.session_state['shipment_intake_success_message'] = '입고 내용을 수정했습니다.'
+    st.rerun()
+
+
 @dialog('수출대기로 되돌리기')
 def reopen_export_waiting_dialog(*, case_id: int, export_no: str) -> None:
     st.warning(f'{export_no}의 수출확정을 취소하고 수출대기 상태로 되돌립니다.')
@@ -432,6 +558,29 @@ def render() -> None:
             order_qty = safe_number(selected_order['quantity'])
             unit = str(selected_order['unit'] or 'EA')
             current = linked_rows_by_order.get(selected_order_id, [])
+
+            current_qty = sum(safe_number(row.get('requested_qty')) for row in current)
+            current_icon, current_state = order_state(order_qty, current_qty)
+            summary_col, edit_col = st.columns([4, 1])
+            summary_col.info(
+                f'{current_icon} 선택 합계 {fmt_number(current_qty)} / '
+                f'주문 {fmt_number(order_qty)} {unit} · {current_state}'
+            )
+            if edit_col.button(
+                '입고 수정',
+                type='secondary',
+                use_container_width=True,
+                key=f'open_intake_edit_{case_id}_{selected_order_id}',
+            ):
+                edit_shipment_intake_dialog(
+                    case_id=case_id,
+                    order_item_id=selected_order_id,
+                    product_name=selected_order_name,
+                    order_qty=order_qty,
+                    unit=unit,
+                    current_rows=current,
+                )
+            return
 
             st.markdown(f'**선택 주문:** {selected_order_name}')
 

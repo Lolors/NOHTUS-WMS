@@ -53,6 +53,16 @@ class ExportSearchAndWaitingSaveUiTests(TestCase):
         self.assertEqual(existing['보유수량'], 10)
         self.assertEqual(existing['선택수량'], 3)
 
+    def test_intake_editing_is_opened_in_an_800px_modal_from_the_summary(self):
+        source = Path('nohtus/export_app/views/실출고_입력.py').read_text(encoding='utf-8')
+        self.assertIn("@dialog('입고 수정', width='large')", source)
+        self.assertIn('width: 800px !important', source)
+        self.assertIn("summary_col, edit_col = st.columns([4, 1])", source)
+        self.assertIn("'입고 수정'", source)
+        self.assertIn("column_order=['선택', '사업장', '제품명', '제조번호', '유통기한', '선택수량']", source)
+        self.assertIn("inventory_selection_source(current_rows, stock_rows)", source)
+        self.assertIn("체크를 끄면 기존 입고가 삭제", source)
+
     def test_split_p_inventory_rows_are_shown_once_with_their_total_quantity(self):
         current = [
             {
