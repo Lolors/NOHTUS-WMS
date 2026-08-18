@@ -22,6 +22,14 @@ _NEW_CSS = r"""
 }
 .map-stage .nw-zone{position:absolute;display:flex;align-items:center;justify-content:center;border:1.5px solid #64748b;border-radius:11px;background:#fff;font-size:17px;font-weight:900;cursor:pointer;box-shadow:0 3px 9px rgba(15,23,42,.05);}
 .map-stage .nw-zone.partitioned-rack{border-radius:0;box-shadow:none}.map-stage .nw-zone.partitioned-rack.group-x:not(.group-last){border-right:0}.map-stage .nw-zone.partitioned-rack.group-y:not(.group-last){border-bottom:0}.map-stage .nw-zone.partitioned-rack.group-first.group-x{border-radius:11px 0 0 11px}.map-stage .nw-zone.partitioned-rack.group-last.group-x{border-radius:0 11px 11px 0}.map-stage .nw-zone.partitioned-rack.group-first.group-y{border-radius:11px 11px 0 0}.map-stage .nw-zone.partitioned-rack.group-last.group-y{border-radius:0 0 11px 11px}.map-stage .nw-zone.partitioned-rack.group-first.group-last{border-radius:11px}
+.map-stage.saved-map-stage.map-pixel-projected .nw-zone{border-width:1px;font-size:var(--map-zone-font-size,17px);border-radius:var(--map-zone-radius,11px)}
+.map-stage.saved-map-stage.map-pixel-projected .nw-zone.partitioned-rack{border-radius:0}
+.map-stage.saved-map-stage.map-pixel-projected .nw-zone.partitioned-rack.group-first.group-x{border-radius:var(--map-zone-radius,11px) 0 0 var(--map-zone-radius,11px)}
+.map-stage.saved-map-stage.map-pixel-projected .nw-zone.partitioned-rack.group-last.group-x{border-radius:0 var(--map-zone-radius,11px) var(--map-zone-radius,11px) 0}
+.map-stage.saved-map-stage.map-pixel-projected .nw-zone.partitioned-rack.group-first.group-y{border-radius:var(--map-zone-radius,11px) var(--map-zone-radius,11px) 0 0}
+.map-stage.saved-map-stage.map-pixel-projected .nw-zone.partitioned-rack.group-last.group-y{border-radius:0 0 var(--map-zone-radius,11px) var(--map-zone-radius,11px)}
+.map-stage.saved-map-stage.map-pixel-projected .nw-zone.partitioned-rack.group-first.group-last{border-radius:var(--map-zone-radius,11px)}
+.map-stage.saved-map-stage.map-pixel-projected .map-shape:not(.map-shape-line){border-width:1px!important}
 .map-stage .nw-rack{position:absolute;display:grid;overflow:hidden;border:1.5px solid #64748b;border-radius:11px;box-shadow:0 3px 9px rgba(15,23,42,.05);}
 .map-stage .nw-grid6{grid-template-columns:1fr 1fr;grid-template-rows:repeat(3,1fr)}
 .map-stage .nw-grid3{grid-template-columns:1fr;grid-template-rows:repeat(3,1fr)}
@@ -42,7 +50,7 @@ _NEW_CSS = r"""
 .map-stage .export.selected,.map-stage .expiry.selected{color:#fff!important}
 .swatch.g{background:#c5eceb!important;border-color:#4aa6a5!important;}
 
-.map-stage .stock-dot,.map-stage .dynamic-stock-dot{position:absolute!important;right:9px!important;top:9px!important;width:10px!important;height:10px!important;background:#62dc58!important;border:1.5px solid #15803d!important;border-radius:999px!important;box-shadow:0 0 0 2px rgba(255,255,255,.85)!important;pointer-events:none!important;z-index:7!important;}
+.map-stage .stock-dot,.map-stage .dynamic-stock-dot{position:absolute!important;right:var(--map-dot-offset,9px)!important;top:var(--map-dot-offset,9px)!important;width:var(--map-dot-size,10px)!important;height:var(--map-dot-size,10px)!important;background:#62dc58!important;border:1px solid #15803d!important;border-radius:999px!important;box-shadow:0 0 0 var(--map-dot-ring,2px) rgba(255,255,255,.85)!important;pointer-events:none!important;z-index:7!important;}
 
 .map-stage .nw-outline{position:absolute;border:1.5px solid #334155;background:transparent;pointer-events:none;}
 .map-stage .nw-note{position:absolute;padding:15px 18px;border:1.5px dashed #cbd5e1;border-radius:14px;color:#64748b;font-size:16px;line-height:1.7;background:rgba(255,255,255,.78);pointer-events:none;}
@@ -239,7 +247,7 @@ def _saved_layout_markup(layout: dict) -> str:
     items.append(
         '<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button><button type="button" data-special-loc="지엠메딕">지엠메딕</button></div>'
     )
-    return '<div class="map-scroll"><div class="map-stage">' + ''.join(items) + '</div></div>' + _ZOOM_CONTROLS
+    return '<div class="map-scroll"><div class="map-stage saved-map-stage">' + ''.join(items) + '</div></div>' + _ZOOM_CONTROLS
 
 
 _DYNAMIC_DOTS_JS = r"""
@@ -268,12 +276,51 @@ let mapPanX=0;
 let mapPanY=0;
 let mapPointer=null;
 let mapDidPan=false;
+function projectSavedMapToPixels(stage,scale){
+  if(!stage?.classList.contains('saved-map-stage'))return false;
+  if(!stage.dataset.naturalWidth){
+    stage.dataset.naturalWidth=String(stage.offsetWidth);
+    stage.dataset.naturalHeight=String(stage.offsetHeight);
+    Array.from(stage.children).forEach(el=>{
+      if(!el.matches('.nw-zone,.map-shape'))return;
+      const x=parseFloat(el.style.left),y=parseFloat(el.style.top);
+      const width=parseFloat(el.style.width),height=parseFloat(el.style.height);
+      if([x,y,width,height].some(Number.isNaN))return;
+      el.dataset.mapNaturalGeometry=[x,y,width,height].join(',');
+    });
+  }
+  const naturalWidth=Number(stage.dataset.naturalWidth)||stage.offsetWidth;
+  const naturalHeight=Number(stage.dataset.naturalHeight)||stage.offsetHeight;
+  stage.style.setProperty('width',Math.round(naturalWidth*scale)+'px','important');
+  stage.style.setProperty('min-width',Math.round(naturalWidth*scale)+'px','important');
+  stage.style.setProperty('height',Math.round(naturalHeight*scale)+'px','important');
+  Array.from(stage.children).forEach(el=>{
+    const geometry=(el.dataset.mapNaturalGeometry||'').split(',').map(Number);
+    if(geometry.length!==4||geometry.some(Number.isNaN))return;
+    const [x,y,width,height]=geometry;
+    const left=Math.round(x*scale),top=Math.round(y*scale);
+    const right=Math.round((x+width)*scale),bottom=Math.round((y+height)*scale);
+    el.style.setProperty('left',left+'px','important');
+    el.style.setProperty('top',top+'px','important');
+    el.style.setProperty('width',Math.max(1,right-left)+'px','important');
+    el.style.setProperty('height',Math.max(1,bottom-top)+'px','important');
+  });
+  stage.style.setProperty('--map-zone-font-size',Math.max(9,Math.round(17*scale))+'px');
+  stage.style.setProperty('--map-zone-radius',Math.max(4,Math.round(11*scale))+'px');
+  stage.style.setProperty('--map-dot-size',Math.max(5,Math.round(10*scale))+'px');
+  stage.style.setProperty('--map-dot-offset',Math.max(4,Math.round(9*scale))+'px');
+  stage.style.setProperty('--map-dot-ring',Math.max(1,Math.round(2*scale))+'px');
+  stage.classList.add('map-pixel-projected');
+  return true;
+}
 function clampMapPan(){
   const scroll=document.querySelector('.map-scroll');
   const stage=scroll&&scroll.querySelector('.map-stage');
   if(!scroll||!stage)return;
-  const scaledWidth=stage.offsetWidth*mapFitScale*mapZoomFactor;
-  const scaledHeight=stage.offsetHeight*mapFitScale*mapZoomFactor;
+  const projected=stage.classList.contains('map-pixel-projected');
+  const baseScale=projected?1:mapFitScale;
+  const scaledWidth=stage.offsetWidth*baseScale*mapZoomFactor;
+  const scaledHeight=stage.offsetHeight*baseScale*mapZoomFactor;
   mapPanX=Math.min(0,Math.max(scroll.clientWidth-scaledWidth,mapPanX));
   mapPanY=Math.min(0,Math.max(scroll.clientHeight-scaledHeight,mapPanY));
 }
@@ -282,7 +329,7 @@ function applyApprovedMapTransform(){
   const stage=scroll&&scroll.querySelector('.map-stage');
   if(!scroll||!stage)return;
   clampMapPan();
-  const scale=mapFitScale*mapZoomFactor;
+  const scale=(stage.classList.contains('map-pixel-projected')?1:mapFitScale)*mapZoomFactor;
   stage.style.setProperty('transform',`translate(${mapPanX}px,${mapPanY}px) scale(${scale})`,'important');
   stage.style.setProperty('transform-origin','top left','important');
   scroll.classList.toggle('map-zoomed',mapZoomFactor>1);
@@ -293,11 +340,13 @@ function fitApprovedMapToWidth(){
   const scroll=document.querySelector('.map-scroll');
   const stage=scroll&&scroll.querySelector('.map-stage');
   if(!scroll||!stage)return;
-  const naturalWidth=Math.max(1,stage.offsetWidth);
-  const naturalHeight=Math.max(1,stage.offsetHeight);
+  const naturalWidth=Math.max(1,Number(stage.dataset.naturalWidth)||stage.offsetWidth);
+  const naturalHeight=Math.max(1,Number(stage.dataset.naturalHeight)||stage.offsetHeight);
   const availableWidth=Math.max(1,scroll.clientWidth);
-  mapFitScale=availableWidth/naturalWidth;
-  scroll.style.setProperty('height',Math.ceil(naturalHeight*mapFitScale)+'px','important');
+  const fittedScale=Math.min(1,availableWidth/naturalWidth);
+  mapFitScale=fittedScale;
+  const projected=projectSavedMapToPixels(stage,fittedScale);
+  scroll.style.setProperty('height',projected?stage.offsetHeight+'px':Math.ceil(naturalHeight*fittedScale)+'px','important');
   scroll.style.setProperty('overflow','hidden','important');
   applyApprovedMapTransform();
 }
