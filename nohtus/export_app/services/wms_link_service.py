@@ -334,6 +334,45 @@ def safe_quantity(value: object) -> float:
         return 0.0
 
 
+def sync_mirror_source_links(case_id: int, order_id: int) -> int:
+    """WMS가 이동·병합 재고로 해석한 실제 source id를 EXPORT 미러에도 반영한다."""
+    waiting_rows = _all_rows_for_order(order_id)
+    linked_by_signature: dict[tuple[str, str, str, str], list[dict]] = {}
+    for row in waiting_rows:
+        linked_by_signature.setdefault(_stock_signature(row), []).append(row)
+
+    changed = 0
+    for mirror in shipment_service.list_case_items(case_id):
+        matches = linked_by_signature.get(_stock_signature(mirror), [])
+        source_ids = {
+            int(row.get("source_inventory_id") or 0)
+            for row in matches
+            if int(row.get("source_inventory_id") or 0) > 0
+        }
+        if len(source_ids) != 1:
+            continue
+        source_id = next(iter(source_ids))
+        source_location = str(matches[0].get("source_location") or "")
+        business_unit = str(matches[0].get("company") or mirror.get("business_unit") or "")
+        if (
+            int(mirror.get("source_inventory_id") or 0) == source_id
+            and str(mirror.get("source_location") or "") == source_location
+            and str(mirror.get("business_unit") or "") == business_unit
+        ):
+            continue
+        export_db.execute(
+            """UPDATE shipment_items
+               SET source_inventory_id=?,location=?,business_unit=?,updated_at=?
+               WHERE id=? AND case_id=?""",
+            (
+                source_id, source_location, business_unit, now_text(),
+                int(mirror["id"]), int(case_id),
+            ),
+        )
+        changed += 1
+    return changed
+
+
 def authoritative_other_cart_rows(
     waiting_rows: list[dict], selected_source_ids: set[int]
 ) -> list[dict]:
@@ -456,4 +495,5 @@ def save_picked_inventory(*, case_id:int, order_item_id:int, kept_rows:list[dict
         result=save_export_waiting_order(cart,country=country,buyer=str(case.get("buyer") or ""),transport_method=transport_method,export_no=export_no,editing_order_id=editing_order_id)
     except Exception:
         shipment_service.save_for_order(case_id,order_item_id,original_mirror_rows); raise
+    sync_mirror_source_links(case_id, int(result["order_id"]))
     return {"order_id":result["order_id"],"total_qty":total_qty,"row_count":len(mirror_rows)}

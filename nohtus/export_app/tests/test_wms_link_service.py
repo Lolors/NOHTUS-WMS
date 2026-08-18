@@ -799,6 +799,32 @@ class WmsLinkServiceTests(unittest.TestCase):
             [10, 20],
         )
 
+    def test_resolved_wms_source_id_is_written_back_to_export_mirror(self) -> None:
+        mirror = {
+            "id": 31, "source_inventory_id": 11666, "source_location": "F1-01-02",
+            "business_unit": "비자료", "product_name": "마이클리어 (10 EA)",
+            "lot_no": "NF25BR1202", "expiry_date": "2028-12-30",
+        }
+        waiting = {
+            "source_inventory_id": 12291, "source_location": "F1-01-02",
+            "company": "비자료", "product_name": "마이클리어 (10 EA)",
+            "lot": "NF25BR1202", "exp_date": "2028-12-30",
+        }
+        with (
+            patch.object(wms_link_service, "_all_rows_for_order", return_value=[waiting]),
+            patch.object(
+                wms_link_service.shipment_service,
+                "list_case_items",
+                return_value=[mirror],
+            ),
+            patch.object(wms_link_service.export_db, "execute") as execute,
+        ):
+            changed = wms_link_service.sync_mirror_source_links(43, 19)
+
+        self.assertEqual(changed, 1)
+        self.assertEqual(execute.call_args.args[1][0], 12291)
+        self.assertEqual(execute.call_args.args[1][-2:], (31, 43))
+
     def test_stale_source_location_recovers_one_unique_relocated_inventory(self) -> None:
         con = sqlite3.connect(self.wms_db_path)
         try:
