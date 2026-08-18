@@ -54,6 +54,22 @@ def _closing_customer_name(row, customers_df=None):
     return _infer_customer_from_title(title, customers_df)[0]
 
 
+def _outbound_customer_from_saved_or_title(customer_name, title, customers_df):
+    """출고지시에 저장된 선택 매출처를 우선하고 과거 데이터만 제목으로 보완한다."""
+    saved_customer = _safe_text(customer_name)
+    if not saved_customer:
+        return _infer_customer_from_title(title, customers_df)
+
+    manager = ""
+    if customers_df is not None and not customers_df.empty:
+        matched = customers_df[
+            customers_df["customer_name"].astype(str).str.strip() == saved_customer
+        ]
+        if not matched.empty:
+            manager = _safe_text(matched.iloc[0].get("manager"))
+    return saved_customer, manager
+
+
 def _today_outbound_final_stock_map(items):
     if items.empty:
         return {}
@@ -266,6 +282,7 @@ def _scheduled_outbound_business_log(ds, customers_df):
         SELECT o.order_date AS log_date,
                COALESCE(o.created_at, '') AS created_at,
                COALESCE(o.title, '') AS title,
+               COALESCE(o.customer_name, '') AS customer_name,
                i.company AS company,
                i.product_name AS product_name,
                COALESCE(i.lot, '-') AS lot,
@@ -288,7 +305,11 @@ def _scheduled_outbound_business_log(ds, customers_df):
         if not company and not product_name and qty == 0:
             continue
         title = _safe_text(getattr(r, "title", ""))
-        partner, manager = _infer_customer_from_title(title, customers_df)
+        partner, manager = _outbound_customer_from_saved_or_title(
+            getattr(r, "customer_name", ""),
+            title,
+            customers_df,
+        )
         created_at = _safe_text(getattr(r, "created_at", ""))
         time_text = created_at[11:16] if len(created_at) >= 16 else ""
         rows.append({
@@ -421,7 +442,7 @@ def page_closing():
                     axis=1,
                 )
             except Exception:
-                items["매출처"] = ""
+                items["매출처"] = items["저장매출처"].apply(_safe_text)
             _render_today_outbound_html(items)
             btn_left, btn_mid, btn_right = st.columns([3, 2, 3])
             with btn_mid:
