@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from nohtus.services.export_waiting import (
     ensure_export_waiting_tables,
+    return_confirmed_export_to_waiting,
     save_export_waiting_order,
     update_confirmed_export_waiting_items,
     update_confirmed_export_waiting_metadata,
@@ -113,6 +114,40 @@ class ConfirmedExportWaitingEditTests(unittest.TestCase):
         self.assertEqual(title, "JP-New Buyer-해상")
         self.assertEqual(order, ("JP", "New Buyer", "해상", "NEW-9", title, "confirmed"))
         self.assertEqual(item, (10, 3, 1))
+
+    def test_return_to_packing_restores_confirmed_stock_to_p_once(self):
+        order_id = self._add_order()
+
+        restored = return_confirmed_export_to_waiting("OLD-1")
+        restored_again = return_confirmed_export_to_waiting("OLD-1")
+
+        with sqlite3.connect(self.db_path, factory=self.connection_factory) as con:
+            item = con.execute(
+                """SELECT confirmed,waiting_location,waiting_inventory_id,
+                          confirmed_company,confirmed_at
+                   FROM export_waiting_items WHERE order_id=?""",
+                (order_id,),
+            ).fetchone()
+            order = con.execute(
+                """SELECT status,erp_company,order_date,confirmed_at
+                   FROM export_waiting_orders WHERE id=?""",
+                (order_id,),
+            ).fetchone()
+            p_qty = con.execute(
+                "SELECT COALESCE(SUM(qty),0) FROM inventory WHERE location='P'",
+            ).fetchone()[0]
+            tx_count = con.execute(
+                "SELECT COUNT(*) FROM transactions WHERE tx_type='출고취소'"
+            ).fetchone()[0]
+
+        self.assertEqual(restored, 1)
+        self.assertEqual(restored_again, 0)
+        self.assertEqual(item[0:2], (0, "P"))
+        self.assertTrue(int(item[2]) > 0)
+        self.assertEqual(item[3:], (None, None))
+        self.assertEqual(order, ("waiting", None, None, None))
+        self.assertEqual(p_qty, 3)
+        self.assertEqual(tx_count, 1)
 
     def test_rejects_non_confirmed_order(self):
         order_id = self._add_order(status="waiting")

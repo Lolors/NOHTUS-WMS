@@ -7,7 +7,10 @@ import streamlit as st
 from nohtus.db import q as wms_q
 from nohtus.export_app import db
 from nohtus.export_app.utils.dates import now_text
-from nohtus.services.export_waiting import cancel_export_waiting_order
+from nohtus.services.export_waiting import (
+    cancel_export_waiting_order,
+    return_confirmed_export_to_waiting,
+)
 
 
 @st.cache_data(show_spinner=False, persist='disk', max_entries=128)
@@ -80,7 +83,7 @@ def intake_editable_cases():
 def return_domestic_to_packing_complete(case_id: int) -> None:
     """Move a domestic-delivery case back to packing complete without data loss."""
     case = db.row(
-        'SELECT case_type,status,stage FROM export_cases WHERE id=?',
+        'SELECT export_no,case_type,status,stage FROM export_cases WHERE id=?',
         (case_id,),
     )
     if case is None:
@@ -89,6 +92,8 @@ def return_domestic_to_packing_complete(case_id: int) -> None:
         raise ValueError('과거 수출 건의 단계는 되돌릴 수 없습니다.')
     if str(case['stage'] or '').strip() != '국내배송':
         raise ValueError('국내배송 단계인 주문만 패킹완료로 되돌릴 수 있습니다.')
+
+    return_confirmed_export_to_waiting(str(case['export_no'] or ''))
 
     db.execute(
         "UPDATE export_cases SET stage='패킹 완료',status='진행중',updated_at=? WHERE id=?",

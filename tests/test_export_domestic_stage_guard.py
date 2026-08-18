@@ -12,20 +12,30 @@ class ExportDomesticStageGuardTests(unittest.TestCase):
         self.assertNotIn("'국내배송'", intake_sql)
 
     def test_return_to_packing_complete_changes_stage_and_status(self):
-        domestic = {'case_type': 'current', 'status': '완료', 'stage': '국내배송'}
+        domestic = {
+            'export_no': 'EXP-1', 'case_type': 'current',
+            'status': '완료', 'stage': '국내배송',
+        }
         with (
             patch.object(export_service.db, 'row', return_value=domestic),
             patch.object(export_service.db, 'execute') as execute,
             patch.object(export_service, 'now_text', return_value='2026-08-12 12:00:00'),
+            patch.object(
+                export_service, 'return_confirmed_export_to_waiting', return_value=2
+            ) as restore_stock,
         ):
             export_service.return_domestic_to_packing_complete(7)
+        restore_stock.assert_called_once_with('EXP-1')
         execute.assert_called_once_with(
             "UPDATE export_cases SET stage='패킹 완료',status='진행중',updated_at=? WHERE id=?",
             ('2026-08-12 12:00:00', 7),
         )
 
     def test_return_rejects_non_domestic_case(self):
-        packing = {'case_type': 'current', 'status': '진행중', 'stage': '패킹 완료'}
+        packing = {
+            'export_no': 'EXP-1', 'case_type': 'current',
+            'status': '진행중', 'stage': '패킹 완료',
+        }
         with patch.object(export_service.db, 'row', return_value=packing):
             with self.assertRaisesRegex(ValueError, '국내배송 단계'):
                 export_service.return_domestic_to_packing_complete(7)

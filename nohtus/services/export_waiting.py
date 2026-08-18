@@ -981,6 +981,68 @@ def confirm_export_waiting_items(
     }
 
 
+def return_confirmed_export_to_waiting(export_no: str) -> int:
+    """Restore confirmed stock to P and make the export selectable again."""
+    normalized = str(export_no or "").strip()
+    if not normalized:
+        return 0
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with connect() as con:
+        cur = con.cursor()
+        ensure_export_waiting_tables(cur)
+        orders = cur.execute(
+            """SELECT id,title,status FROM export_waiting_orders
+               WHERE TRIM(export_no)=TRIM(?) AND status IN ('partial','confirmed')
+               ORDER BY id""",
+            (normalized,),
+        ).fetchall()
+        if not orders:
+            return 0
+        if len(orders) > 1:
+            raise ValueError(
+                f"수출번호 {normalized}에 연결된 수출확정 건이 여러 개라 재고를 자동 원복할 수 없습니다."
+            )
+
+        order_id, title, _ = orders[0]
+        confirmed_items = _items(cur, int(order_id), confirmed=True)
+        for item in confirmed_items:
+            restored_id = _add(cur, item, P, int(item.get("qty") or 0), now, 0)
+            cur.execute(
+                """UPDATE export_waiting_items
+                   SET waiting_inventory_id=?,waiting_location=?,confirmed=0,
+                       confirmed_company=NULL,confirmed_customer_code=NULL,
+                       confirmed_customer_name=NULL,confirmed_at=NULL
+                   WHERE id=? AND COALESCE(confirmed,0)=1""",
+                (restored_id, P, int(item["id"])),
+            )
+            insert_transaction_log(
+                cur,
+                created_at=now,
+                tx_type="출고취소",
+                product_name=item["product_name"],
+                warehouse_name=item.get("warehouse_name", ""),
+                lot=item.get("lot", "-"),
+                exp_date=item.get("exp_date", "-"),
+                from_company=str(item.get("confirmed_company") or ""),
+                from_location="",
+                to_company=item["company"],
+                to_location=P,
+                qty=int(item.get("qty") or 0),
+                memo=f"패킹완료 단계로 되돌리기 / {title} / 수출번호: {normalized}",
+            )
+
+        if confirmed_items:
+            cur.execute(
+                """UPDATE export_waiting_orders
+                   SET status='waiting',erp_company=NULL,erp_customer_code=NULL,
+                       erp_customer_name=NULL,order_date=NULL,confirmed_at=NULL,updated_at=?
+                   WHERE id=?""",
+                (now, int(order_id)),
+            )
+        con.commit()
+        return len(confirmed_items)
+
+
 def update_confirmed_export_waiting_items(
     order_id,
     item_ids,
