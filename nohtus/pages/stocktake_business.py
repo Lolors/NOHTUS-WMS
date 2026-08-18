@@ -77,7 +77,12 @@ def _merge_inventory_rows(con, keep_id, duplicate_ids):
 
 
 def _update_inventory_identity(con, inventory_id, product_name, lot, exp_date, now):
-    """한 고유 재고행을 수정하고, 새 키와 충돌하는 행은 ID 참조를 옮긴 뒤 합친다."""
+    """재고 정보를 수정하고 같은 사업장·제품·LOT·유통기한·로케이션 행은 합친다.
+
+    ERP 원본명(warehouse_name)은 제품매칭 정보이므로 재고 행을 나누는 기준으로
+    사용하지 않는다. 로케이션이 다르면 물리적으로 다른 재고이므로 별도 행으로
+    유지한다.
+    """
     inventory_id = int(inventory_id)
     row = con.execute(
         """SELECT company,COALESCE(warehouse_name,''),location
@@ -86,15 +91,14 @@ def _update_inventory_identity(con, inventory_id, product_name, lot, exp_date, n
     ).fetchone()
     if not row:
         return
-    company, warehouse_name, location = row
+    company, _warehouse_name, location = row
     duplicates = con.execute(
         """SELECT id FROM inventory
            WHERE id<>? AND company=? AND product_name=?
-             AND COALESCE(warehouse_name,'')=?
              AND COALESCE(lot,'-')=? AND COALESCE(exp_date,'-')=?
              AND location=?
            ORDER BY id""",
-        (inventory_id, company, product_name, warehouse_name, lot, exp_date, location),
+        (inventory_id, company, product_name, lot, exp_date, location),
     ).fetchall()
     _merge_inventory_rows(con, inventory_id, [row[0] for row in duplicates])
     con.execute(
