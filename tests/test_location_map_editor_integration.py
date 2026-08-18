@@ -93,6 +93,8 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         renderer_source = (Path(__file__).resolve().parents[1] / 'nohtus' / 'services' / 'location_map_new_layout.py').read_text(encoding='utf-8')
         self.assertIn('function fitApprovedMapToWidth()', renderer_source)
         self.assertIn('function projectSavedMapToPixels(stage,scale)', renderer_source)
+        self.assertIn('function collapseTouchingShapeBorders(stage)', renderer_source)
+        self.assertIn('collapseTouchingShapeBorders(stage);', renderer_source)
         self.assertIn("stage.classList.add('map-pixel-projected')", renderer_source)
         self.assertIn('const right=Math.round((x+width)*scale)', renderer_source)
         self.assertIn("border-width:1px!important", renderer_source)

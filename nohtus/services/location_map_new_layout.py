@@ -206,12 +206,12 @@ def _saved_layout_markup(layout: dict) -> str:
             fill_style = _location_fill_style(item, {})
             line_background = (
                 f"repeating-linear-gradient(to right,{stroke} 0 10px,transparent 10px 17px) "
-                "center/100% 1.5px no-repeat"
+                "center/100% 1px no-repeat"
                 if stroke_style == "dashed"
                 else (
                     "linear-gradient(to bottom,"
-                    f"transparent calc(50% - .75px),{stroke} calc(50% - .75px),"
-                    f"{stroke} calc(50% + .75px),transparent calc(50% + .75px))"
+                    f"transparent calc(50% - .5px),{stroke} calc(50% - .5px),"
+                    f"{stroke} calc(50% + .5px),transparent calc(50% + .5px))"
                 )
             )
             decoration = {
@@ -276,6 +276,28 @@ let mapPanX=0;
 let mapPanY=0;
 let mapPointer=null;
 let mapDidPan=false;
+function collapseTouchingShapeBorders(stage){
+  const shapes=Array.from(stage.querySelectorAll('.map-shape-rounded_rect'))
+    .filter(el=>!el.style.transform||el.style.transform==='rotate(0deg)'||el.style.transform==='rotate(360deg)');
+  shapes.forEach((shape,index)=>{
+    let left=shape.offsetLeft,top=shape.offsetTop;
+    let width=shape.offsetWidth,height=shape.offsetHeight;
+    const right=left+width,bottom=top+height;
+    for(let otherIndex=0;otherIndex<index;otherIndex+=1){
+      const other=shapes[otherIndex];
+      const otherLeft=other.offsetLeft,otherTop=other.offsetTop;
+      const otherRight=otherLeft+other.offsetWidth,otherBottom=otherTop+other.offsetHeight;
+      const sameHorizontalSpan=Math.abs(left-otherLeft)<=1&&Math.abs(right-otherRight)<=1;
+      const sameVerticalSpan=Math.abs(top-otherTop)<=1&&Math.abs(bottom-otherBottom)<=1;
+      if(sameHorizontalSpan&&Math.abs(top-otherBottom)<=1){top=otherBottom-1;height=bottom-top;}
+      if(sameVerticalSpan&&Math.abs(left-otherRight)<=1){left=otherRight-1;width=right-left;}
+    }
+    shape.style.setProperty('left',left+'px','important');
+    shape.style.setProperty('top',top+'px','important');
+    shape.style.setProperty('width',Math.max(1,width)+'px','important');
+    shape.style.setProperty('height',Math.max(1,height)+'px','important');
+  });
+}
 function projectSavedMapToPixels(stage,scale){
   if(!stage?.classList.contains('saved-map-stage'))return false;
   if(!stage.dataset.naturalWidth){
@@ -305,6 +327,7 @@ function projectSavedMapToPixels(stage,scale){
     el.style.setProperty('width',Math.max(1,right-left)+'px','important');
     el.style.setProperty('height',Math.max(1,bottom-top)+'px','important');
   });
+  collapseTouchingShapeBorders(stage);
   stage.style.setProperty('--map-zone-font-size',Math.max(9,Math.round(17*scale))+'px');
   stage.style.setProperty('--map-zone-radius',Math.max(4,Math.round(11*scale))+'px');
   stage.style.setProperty('--map-dot-size',Math.max(5,Math.round(10*scale))+'px');
