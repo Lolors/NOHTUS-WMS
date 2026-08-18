@@ -9,7 +9,7 @@ from nohtus.config import COMPANIES
 from nohtus.export_app.components.delivery_method_input import delivery_method_input, is_courier_delivery
 from nohtus.export_app.components.editors import historical_box_editor, historical_order_editor, order_editor
 from nohtus.export_app.config import TRANSPORT_MODES
-from nohtus.export_app.services import export_confirm_service, export_service, folder_service, history_service, order_save_guard, order_service
+from nohtus.export_app.services import export_confirm_service, export_service, folder_service, history_service, order_save_guard, order_service, stale_inventory_cleanup_service
 from nohtus.export_app.services.case_merge_service import merge_case_into
 from nohtus.export_app.services.order_edit_service import (
     box_items,
@@ -64,6 +64,9 @@ def render_wms_confirmation_section(
     shipment_date_label: str = '출고일자',
     shipment_date_help: str = '이번에 선택한 품목에 적용할 출고일자를 선택하세요.',
 ) -> None:
+    # 삭제 도중 P 재고 불일치로 과거 연결행만 남은 경우, 화면에 표시하거나
+    # 확정 재고를 차감하기 전에 EXPORT의 실제 저장행 기준으로 정리한다.
+    stale_inventory_cleanup_service.reconcile_orphan_waiting_items(export_no)
     wms_orders = export_confirm_service.list_orders_for_export_no(export_no)
     if wms_orders.empty:
         return

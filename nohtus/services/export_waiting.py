@@ -392,7 +392,16 @@ def _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now
     restored_source_rows = {}
     for item in current_items:
         source_id = int(item.get("source_inventory_id") or 0)
-        restored, moved_from_p = _restore_waiting_item(cur, item, now)
+        try:
+            restored, moved_from_p = _restore_waiting_item(cur, item, now)
+        except ValueError:
+            # 사용자가 이 원본 재고를 목록에서 완전히 삭제하는 경우에는 이미
+            # P와 원위치 양쪽에 재고가 없어도 깨진 대기 연결 자체는 제거한다.
+            # 남겨 둘 수량이 있는 수정은 재고 정합성을 확인해야 하므로 기존
+            # 부족 오류를 그대로 전파한다.
+            if target_qty.get(source_id, 0) > 0:
+                raise
+            continue
         if restored:
             restored_source_rows[source_id] = restored
             source_hints[source_id] = restored

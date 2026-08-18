@@ -89,6 +89,30 @@ def _matching_p_row(cur, item: dict):
     return rows[0] if len(rows) == 1 else None
 
 
+def _set_order_status(cur, order_id: int, now: str) -> None:
+    remaining_status = cur.execute(
+        '''SELECT
+               SUM(CASE WHEN COALESCE(confirmed,0)=0 THEN 1 ELSE 0 END),
+               SUM(CASE WHEN COALESCE(confirmed,0)=1 THEN 1 ELSE 0 END)
+           FROM export_waiting_items WHERE order_id=?''',
+        (int(order_id),),
+    ).fetchone()
+    waiting_count = int((remaining_status or [0, 0])[0] or 0)
+    confirmed_count = int((remaining_status or [0, 0])[1] or 0)
+    if waiting_count and confirmed_count:
+        status = 'partial'
+    elif waiting_count:
+        status = 'waiting'
+    elif confirmed_count:
+        status = 'confirmed'
+    else:
+        status = 'cancelled'
+    cur.execute(
+        'UPDATE export_waiting_orders SET status=?,updated_at=? WHERE id=?',
+        (status, now, int(order_id)),
+    )
+
+
 def _best_effort_cleanup_wms(*, export_no: str, rows: list[dict], now: str) -> None:
     """선택행에 해당하는 WMS 대기기록만 가능한 범위에서 정리한다.
 
@@ -147,31 +171,136 @@ def _best_effort_cleanup_wms(*, export_no: str, rows: list[dict], now: str) -> N
                         )
                     remaining -= delete_qty
 
-            remaining_status = con.execute(
-                '''SELECT
-                       SUM(CASE WHEN COALESCE(confirmed,0)=0 THEN 1 ELSE 0 END),
-                       SUM(CASE WHEN COALESCE(confirmed,0)=1 THEN 1 ELSE 0 END)
-                   FROM export_waiting_items WHERE order_id=?''',
-                (order_id,),
-            ).fetchone()
-            waiting_count = int((remaining_status or [0, 0])[0] or 0)
-            confirmed_count = int((remaining_status or [0, 0])[1] or 0)
-            if waiting_count and confirmed_count:
-                status = 'partial'
-            elif waiting_count:
-                status = 'waiting'
-            elif confirmed_count:
-                status = 'confirmed'
-            else:
-                status = 'cancelled'
-            con.execute(
-                'UPDATE export_waiting_orders SET status=?,updated_at=? WHERE id=?',
-                (status, now, order_id),
-            )
+            _set_order_status(con.cursor(), order_id, now)
             con.commit()
     except Exception:
         # 강제삭제에서는 다른 WMS 재고 오류가 선택행 삭제를 막으면 안 된다.
         return
+
+
+def reconcile_orphan_waiting_items(export_no: str) -> int:
+    """EXPORT 저장행에서 삭제됐지만 WMS에 남은 미확정 행을 정리한다.
+
+    shipment_items를 수출확정 전 목록의 기준으로 삼는다. 확정된 수량은 건드리지
+    않고, 원본 inventory id별로 저장 수량을 초과한 미확정 연결만 제거한다.
+    P 재고가 이미 없어도 연결행은 제거해 확정 단계에서 다시 차감하지 않는다.
+    """
+    normalized_export_no = str(export_no or '').strip()
+    if not normalized_export_no:
+        return 0
+
+    cases = export_db.rows(
+        '''SELECT id FROM export_cases
+           WHERE TRIM(export_no)=TRIM(?)
+             AND case_type<>'historical'
+             AND status<>'취소' AND stage<>'취소'
+           ORDER BY id''',
+        (normalized_export_no,),
+    )
+    if len(cases) != 1:
+        return 0
+    case_id = int(cases[0]['id'])
+    expected_rows = export_db.rows(
+        '''SELECT source_inventory_id,CAST(SUM(requested_qty) AS INTEGER) AS qty
+           FROM shipment_items
+           WHERE case_id=? AND source_inventory_id IS NOT NULL
+           GROUP BY source_inventory_id''',
+        (case_id,),
+    )
+    expected_total = {
+        int(row['source_inventory_id']): max(0, int(row['qty'] or 0))
+        for row in expected_rows
+        if int(row['source_inventory_id'] or 0) > 0
+    }
+
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    removed = 0
+    with wms_connect() as con:
+        orders = con.execute(
+            '''SELECT id FROM export_waiting_orders
+               WHERE TRIM(export_no)=TRIM(?)
+                 AND status IN ('waiting','partial','confirmed')
+               ORDER BY id''',
+            (normalized_export_no,),
+        ).fetchall()
+        if len(orders) != 1:
+            return 0
+        order_id = int(orders[0][0])
+        items = con.execute(
+            '''SELECT id,source_inventory_id,waiting_inventory_id,company,product_name,
+                      IFNULL(warehouse_name,''),IFNULL(lot,'-'),IFNULL(exp_date,'-'),
+                      source_location,qty,COALESCE(confirmed,0)
+               FROM export_waiting_items
+               WHERE order_id=? ORDER BY COALESCE(confirmed,0) DESC,id''',
+            (order_id,),
+        ).fetchall()
+        keys = [
+            'id','source_inventory_id','waiting_inventory_id','company','product_name',
+            'warehouse_name','lot','exp_date','source_location','qty','confirmed',
+        ]
+        confirmed_by_source: dict[int, int] = {}
+        waiting_items: list[dict] = []
+        for raw in items:
+            item = dict(zip(keys, raw))
+            source_id = int(item.get('source_inventory_id') or 0)
+            if source_id <= 0:
+                continue
+            if int(item.get('confirmed') or 0):
+                confirmed_by_source[source_id] = (
+                    confirmed_by_source.get(source_id, 0) + int(item.get('qty') or 0)
+                )
+            else:
+                waiting_items.append(item)
+
+        allowed = {
+            source_id: max(0, qty - confirmed_by_source.get(source_id, 0))
+            for source_id, qty in expected_total.items()
+        }
+        kept_by_source: dict[int, int] = {}
+        for item in waiting_items:
+            source_id = int(item['source_inventory_id'])
+            item_qty = max(0, int(item.get('qty') or 0))
+            keep_qty = min(
+                item_qty,
+                max(0, allowed.get(source_id, 0) - kept_by_source.get(source_id, 0)),
+            )
+            kept_by_source[source_id] = kept_by_source.get(source_id, 0) + keep_qty
+            excess_qty = item_qty - keep_qty
+            if excess_qty <= 0:
+                continue
+
+            try:
+                p_row = _matching_p_row(con.cursor(), item)
+                if p_row:
+                    restore_qty = min(int(p_row[1] or 0), excess_qty)
+                    if restore_qty > 0:
+                        con.execute(
+                            'UPDATE inventory SET qty=?,updated_at=? WHERE id=?',
+                            (int(p_row[1] or 0) - restore_qty, now, int(p_row[0])),
+                        )
+                        source_location = str(item.get('source_location') or '').strip()
+                        if source_location and source_location.upper() != 'P':
+                            _add(con.cursor(), item, source_location, restore_qty, now, 1)
+            except Exception:
+                # 실제 재고가 이미 삭제/이동된 경우에도 고아 연결 제거는 계속한다.
+                pass
+
+            if keep_qty:
+                con.execute(
+                    'UPDATE export_waiting_items SET qty=? WHERE id=? AND COALESCE(confirmed,0)=0',
+                    (keep_qty, int(item['id'])),
+                )
+            else:
+                con.execute(
+                    'DELETE FROM export_waiting_items WHERE id=? AND COALESCE(confirmed,0)=0',
+                    (int(item['id']),),
+                )
+            removed += excess_qty
+
+        if removed:
+            _set_order_status(con.cursor(), order_id, now)
+            con.commit()
+    return removed
 
 
 def force_delete_stale_rows(*, case_id: int, order_item_id: int, shipment_ids: list[int]) -> dict:

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import nohtus.services.export_waiting as export_waiting_service
 from nohtus.export_app import db
-from nohtus.export_app.services import shipment_service, wms_link_service
+from nohtus.export_app.services import shipment_service, stale_inventory_cleanup_service, wms_link_service
 from nohtus.export_app.utils.dates import now_text
 
 
@@ -39,6 +39,7 @@ class WmsLinkServiceTests(unittest.TestCase):
         self.wms_connect_patchers = [
             patch("nohtus.db.connect", connect_wms_test_db),
             patch("nohtus.services.export_waiting.connect", connect_wms_test_db),
+            patch.object(stale_inventory_cleanup_service, "wms_connect", connect_wms_test_db),
         ]
         for patcher in self.wms_connect_patchers:
             patcher.start()
@@ -467,6 +468,90 @@ class WmsLinkServiceTests(unittest.TestCase):
         linked_b_after = [r for r in rows_after if r["order_item_id"] == order_b]
         self.assertEqual(len(linked_b_after), 1)
         self.assertEqual(float(linked_b_after[0]["requested_qty"]), 3.0)
+
+    def test_removing_broken_waiting_row_does_not_require_missing_p_inventory(self) -> None:
+        case_id, order_a, order_b = self._create_case("EXP-LINK-BROKEN-DELETE")
+        for order_id, inventory_id, product, lot, exp, location, qty in (
+            (order_a, 1, "제품A", "LOT-1", "2027-01-01", "A1-01", 5.0),
+            (order_b, 2, "제품B", "LOT-2", "2027-02-01", "A1-02", 3.0),
+        ):
+            wms_link_service.save_picked_inventory(
+                case_id=case_id,
+                order_item_id=order_id,
+                kept_rows=[],
+                picked_rows=[{
+                    "inventory_id": inventory_id,
+                    "company": "NOH",
+                    "product_name": product,
+                    "lot": lot,
+                    "exp_date": exp,
+                    "location": location,
+                    "qty": qty,
+                }],
+            )
+
+        con = sqlite3.connect(self.wms_db_path)
+        try:
+            con.execute("UPDATE inventory SET qty=0 WHERE product_name='제품A'")
+            con.commit()
+        finally:
+            con.close()
+
+        wms_link_service.save_picked_inventory(
+            case_id=case_id,
+            order_item_id=order_a,
+            kept_rows=[],
+            picked_rows=[],
+        )
+
+        self.assertFalse([
+            row for row in shipment_service.list_case_items(case_id)
+            if int(row["order_item_id"]) == order_a
+        ])
+        self.assertFalse([
+            row for row in self._wms_export_waiting_items()
+            if row["product_name"] == "제품A" and not int(row["confirmed"] or 0)
+        ])
+
+    def test_confirmation_reconciles_orphan_row_even_when_p_inventory_is_missing(self) -> None:
+        case_id, order_a, _ = self._create_case("EXP-LINK-ORPHAN-CONFIRM")
+        result = wms_link_service.save_picked_inventory(
+            case_id=case_id,
+            order_item_id=order_a,
+            kept_rows=[],
+            picked_rows=[{
+                "inventory_id": 1,
+                "company": "NOH",
+                "product_name": "제품A",
+                "lot": "LOT-1",
+                "exp_date": "2027-01-01",
+                "location": "A1-01",
+                "qty": 5.0,
+            }],
+        )
+        db.execute("DELETE FROM shipment_items WHERE case_id=?", (case_id,))
+        con = sqlite3.connect(self.wms_db_path)
+        try:
+            con.execute("UPDATE inventory SET qty=0 WHERE product_name='제품A'")
+            con.commit()
+        finally:
+            con.close()
+
+        removed = stale_inventory_cleanup_service.reconcile_orphan_waiting_items(
+            "EXP-LINK-ORPHAN-CONFIRM"
+        )
+
+        self.assertEqual(removed, 5)
+        self.assertFalse(self._wms_export_waiting_items())
+        con = sqlite3.connect(self.wms_db_path)
+        try:
+            status = con.execute(
+                "SELECT status FROM export_waiting_orders WHERE id=?",
+                (int(result["order_id"]),),
+            ).fetchone()[0]
+        finally:
+            con.close()
+        self.assertEqual(status, "cancelled")
 
     def test_relinks_when_waiting_stock_was_already_moved_from_p_to_source(self) -> None:
         case_id, order_a, _ = self._create_case("EXP-LINK-REC")
