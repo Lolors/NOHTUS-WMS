@@ -221,6 +221,54 @@ def authoritative_other_cart_rows(
     ]
 
 
+def cart_rows_after_selected_order_edit(
+    waiting_rows: list[dict],
+    current_rows: list[dict],
+    kept_rows: list[dict],
+    picked_rows: list[dict],
+) -> list[dict]:
+    """WMS 총예약량에서 현재 주문행 몫만 교체한다.
+
+    같은 source_inventory_id를 다른 주문행도 나눠 쓰는 경우 ID 전체를
+    제외하면 다른 주문행 수량까지 사라지므로 수량 차감/가산으로 계산한다.
+    """
+    totals: dict[int, dict] = {}
+
+    def add(row: dict, quantity: float) -> None:
+        source_id = int(row.get("id") or 0)
+        if source_id <= 0 or quantity == 0:
+            return
+        if source_id not in totals:
+            totals[source_id] = {**row, "id": source_id, "요청수량": 0.0}
+        totals[source_id]["요청수량"] = float(totals[source_id]["요청수량"]) + float(quantity)
+
+    for row in waiting_rows:
+        cart_row = _cart_row_from_waiting_row(row)
+        add(cart_row, float(cart_row["요청수량"]))
+    for row in current_rows:
+        if row.get("source_inventory_id"):
+            add(
+                _cart_row_from_shipment_row(row),
+                -float(row.get("requested_qty") or 0),
+            )
+    for row in kept_rows:
+        if row.get("source_inventory_id"):
+            add(
+                _cart_row_from_shipment_row(row),
+                float(row.get("requested_qty") or 0),
+            )
+    for pick in picked_rows:
+        cart_row = _cart_row_from_pick(pick)
+        add(cart_row, float(cart_row["요청수량"]))
+
+    result = []
+    for row in totals.values():
+        row["요청수량"] = max(0.0, float(row["요청수량"]))
+        if row["요청수량"] > 0:
+            result.append(row)
+    return result
+
+
 def _fill_missing_source_links(rows: list[dict], waiting_rows: list[dict]) -> None:
     """구형/편집표 행에서 source_inventory_id가 빠졌다면 현재 WMS 대기행으로 복구한다."""
     used: set[int] = set()
@@ -259,21 +307,16 @@ def save_picked_inventory(*, case_id:int, order_item_id:int, kept_rows:list[dict
         _fill_missing_source_links(all_kept_rows, waiting_rows)
         _fill_missing_source_links(other_rows, waiting_rows)
     linked_kept_rows=[row for row in all_kept_rows if row.get("source_inventory_id")]
-    linked_other_rows=[row for row in other_rows if row.get("source_inventory_id")]
-    selected_source_ids = {
-        int(row.get("source_inventory_id") or 0) for row in linked_kept_rows
-    } | {
-        int(pick.get("inventory_id") or 0) for pick in picked_rows
-    } | {
-        int(row.get("source_inventory_id") or 0) for row in current_rows
-    }
     cart = (
-        authoritative_other_cart_rows(waiting_rows, selected_source_ids)
+        cart_rows_after_selected_order_edit(
+            waiting_rows, current_rows, linked_kept_rows, picked_rows
+        )
         if editing_order_id else
-        [_cart_row_from_shipment_row(row) for row in linked_other_rows]
+        [_cart_row_from_shipment_row(row) for row in other_rows if row.get("source_inventory_id")]
     )
-    cart += [_cart_row_from_shipment_row(row) for row in linked_kept_rows]
-    cart += [_cart_row_from_pick(pick) for pick in picked_rows]
+    if not editing_order_id:
+        cart += [_cart_row_from_shipment_row(row) for row in linked_kept_rows]
+        cart += [_cart_row_from_pick(pick) for pick in picked_rows]
 
     mirror_rows=[{"_id":row["id"],"business_unit":row.get("business_unit") or "","location":row.get("source_location") or row.get("location") or "","source_inventory_id":row.get("source_inventory_id"),"product_name":row.get("product_name") or "","lot_no":row.get("lot_no") or "","expiry_date":row.get("expiry_date") or "","requested_qty":float(row["requested_qty"] or 0)} for row in all_kept_rows]
     mirror_rows += [{"_id":None,"business_unit":pick.get("company") or "","location":pick.get("location") or "","source_inventory_id":int(pick["inventory_id"]),"product_name":pick.get("product_name") or "","lot_no":pick.get("lot") or "","expiry_date":pick.get("exp_date") or "","requested_qty":float(pick["qty"])} for pick in picked_rows]

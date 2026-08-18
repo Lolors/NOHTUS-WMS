@@ -773,6 +773,26 @@ class WmsLinkServiceTests(unittest.TestCase):
             con.close()
         self.assertIsNone(row)
 
+    def test_deleting_one_order_keeps_other_order_quantity_for_shared_source(self) -> None:
+        waiting_rows = [{
+            "source_inventory_id": 10, "company": "NOH", "product_name": "제품A",
+            "warehouse_name": "ERP-A", "lot": "LOT-1", "exp_date": "2027-01-01",
+            "source_location": "A1-01", "qty": 7,
+        }]
+        current_rows = [{
+            "source_inventory_id": 10, "business_unit": "NOH", "product_name": "제품A",
+            "lot_no": "LOT-1", "expiry_date": "2027-01-01", "source_location": "A1-01",
+            "requested_qty": 2,
+        }]
+
+        cart = wms_link_service.cart_rows_after_selected_order_edit(
+            waiting_rows, current_rows, [], []
+        )
+
+        self.assertEqual(len(cart), 1)
+        self.assertEqual(int(cart[0]["id"]), 10)
+        self.assertEqual(float(cart[0]["요청수량"]), 5.0)
+
 
 if __name__ == "__main__":
     unittest.main()
