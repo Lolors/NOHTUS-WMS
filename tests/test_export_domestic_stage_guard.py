@@ -36,7 +36,10 @@ class ExportDomesticStageGuardTests(unittest.TestCase):
         self.assertNotIn("'출고일'", source)
         self.assertIn("'패킹완료 단계로 되돌리기'", source)
         self.assertIn("str(case['case_type'] or '').strip() != 'historical'", source)
-        self.assertIn("is_domestic_delivery and st.button", source)
+        self.assertIn("return_to_packing = is_domestic_delivery and action_cols[0].button", source)
+        self.assertIn("action_cols = st.columns(4)", source)
+        self.assertLess(source.index("'패킹완료 단계로 되돌리기'"), source.index("'📂 폴더 열기'"))
+        self.assertNotIn("'문서 단위 환산 설정'", source)
 
     def test_packing_explicitly_excludes_domestic_delivery(self):
         source = Path('nohtus/export_app/views/박스_패킹_edit.py').read_text(encoding='utf-8')

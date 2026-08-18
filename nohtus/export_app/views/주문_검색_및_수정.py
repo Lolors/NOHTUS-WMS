@@ -9,7 +9,7 @@ from nohtus.config import COMPANIES
 from nohtus.export_app.components.delivery_method_input import delivery_method_input, is_courier_delivery
 from nohtus.export_app.components.editors import historical_box_editor, historical_order_editor, order_editor
 from nohtus.export_app.config import TRANSPORT_MODES
-from nohtus.export_app.services import export_confirm_service, export_service, folder_service, history_service, order_save_guard, order_service, stale_inventory_cleanup_service
+from nohtus.export_app.services import export_confirm_service, export_service, folder_service, history_service, order_save_guard, order_service, stale_inventory_cleanup_service, wms_link_service
 from nohtus.export_app.services.case_merge_service import merge_case_into
 from nohtus.export_app.services.order_edit_service import (
     box_items,
@@ -95,6 +95,23 @@ def render_wms_confirmation_section(
 
     order_id = int(active_rows.iloc[0]['id'])
     order_title = str(active_rows.iloc[0]['title'] or export_no)
+    missing_count = wms_link_service.missing_saved_inventory_count(export_no)
+    if missing_count:
+        st.warning(
+            f'수출대기 저장에는 있지만 수출확정 목록에서 누락된 품목이 {missing_count}개 있습니다.'
+        )
+        if st.button(
+            f'누락 {missing_count}품목 연결 복구',
+            type='primary',
+            key=f'repair_missing_export_waiting_{order_id}_{missing_count}',
+        ):
+            try:
+                repaired = wms_link_service.repair_missing_saved_inventory(export_no)
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.success(f'누락된 {repaired}개 품목 연결을 복구했습니다.')
+                st.rerun()
     items = export_confirm_service.order_items(order_id)
     confirmed_count = int((items['confirmed'] == 1).sum()) if not items.empty else 0
     total_count = len(items)

@@ -117,82 +117,27 @@ def render() -> None:
         st.session_state.pop('shared_document_view', None)
     case = export_service.get_case(case_id)
 
-    from nohtus.export_app.services import document_unit_conversion_service
-
-    conversion_rows = document_unit_conversion_service.list_case_conversions(case_id)
-    with st.expander('문서 단위 환산 설정', expanded=False):
-        st.caption(
-            '재고와 수출대기는 EA로 유지하고 최종 문서에 표시할 단위만 환산합니다. '
-            '예: 문서 단위 BOX, 1 문서단위당 EA 50 → 2,500 EA가 50 BOX로 출력됩니다.'
-        )
-        conversion_source = [
-            {
-                '_id': int(row['id']),
-                '제품명': str(row['product_name'] or ''),
-                '전산 출고수량(EA)': float(row['internal_ea_qty'] or 0),
-                '문서 단위': str(row['document_unit'] or 'EA'),
-                '1 문서단위당 EA': float(row['ea_per_document_unit'] or 1),
-            }
-            for row in conversion_rows
-        ]
-        converted = st.data_editor(
-            conversion_source,
-            hide_index=True,
-            use_container_width=True,
-            disabled=['_id', '제품명', '전산 출고수량(EA)'],
-            column_config={
-                '_id': None,
-                '제품명': st.column_config.TextColumn('제품명', width='large'),
-                '전산 출고수량(EA)': st.column_config.NumberColumn('전산 출고수량(EA)'),
-                '문서 단위': st.column_config.TextColumn('문서 단위', help='예: BOX, SET, PACK'),
-                '1 문서단위당 EA': st.column_config.NumberColumn(
-                    '1 문서단위당 EA', min_value=0.000001, step=1.0,
-                ),
-            },
-            key=f'document_unit_conversion_{case_id}',
-        )
-        if st.button('문서 단위 환산 저장', type='primary', key=f'save_document_conversion_{case_id}'):
-            try:
-                document_unit_conversion_service.save_case_conversions(
-                    case_id,
-                    converted.to_dict('records') if hasattr(converted, 'to_dict') else converted,
-                )
-            except ValueError as exc:
-                st.error(str(exc))
-            else:
-                st.success('문서 단위 환산 설정을 저장했습니다.')
-                st.rerun()
-
     is_domestic_delivery = (
         str(case['case_type'] or '').strip() != 'historical'
         and str(case['stage'] or '').strip() == '국내배송'
     )
-    if is_domestic_delivery and st.button(
-        '패킹완료 단계로 되돌리기',
-        key=f'return_shared_document_to_packing_{case_id}',
-        type='secondary',
-    ):
-        try:
-            export_service.return_domestic_to_packing_complete(case_id)
-            folder_service.sync_case_folder(case_id)
-            history_service.add(case_id, '단계 되돌리기', '국내배송 → 패킹 완료')
-        except ValueError as exc:
-            st.error(str(exc))
-        else:
-            st.success('패킹완료 단계로 되돌렸습니다. 수출대기 저장과 박스 패킹에서 다시 선택할 수 있습니다.')
-            st.rerun()
-
     is_final_document_available = str(case['stage'] or '').strip() in {
         '패킹 대기',
         '패킹 완료',
         '국내배송',
     }
-    action_cols = st.columns(3)
-    open_folder = action_cols[0].button(
+    action_cols = st.columns(4)
+    return_to_packing = is_domestic_delivery and action_cols[0].button(
+        '패킹완료 단계로 되돌리기',
+        key=f'return_shared_document_to_packing_{case_id}',
+        type='secondary',
+        use_container_width=True,
+    )
+    open_folder = action_cols[1].button(
         '📂 폴더 열기',
         use_container_width=True,
     )
-    open_final_document = action_cols[1].button(
+    open_final_document = action_cols[2].button(
         '최종문서 출력하기',
         type='primary',
         use_container_width=True,
@@ -203,11 +148,22 @@ def render() -> None:
             else '패킹 대기, 패킹 완료 또는 국내배송 단계에서 최종문서를 출력할 수 있습니다.'
         ),
     )
-    open_shipment_products = action_cols[2].button(
+    open_shipment_products = action_cols[3].button(
         '출고 예정 제품 리스트',
         type='primary',
         use_container_width=True,
     )
+
+    if return_to_packing:
+        try:
+            export_service.return_domestic_to_packing_complete(case_id)
+            folder_service.sync_case_folder(case_id)
+            history_service.add(case_id, '단계 되돌리기', '국내배송 → 패킹 완료')
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            st.success('패킹완료 단계로 되돌렸습니다. 수출대기 저장과 박스 패킹에서 다시 선택할 수 있습니다.')
+            st.rerun()
 
     if open_folder:
         try:
