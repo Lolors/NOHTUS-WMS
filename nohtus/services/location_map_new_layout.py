@@ -205,6 +205,23 @@ def _saved_layout_markup(layout: dict) -> str:
             stroke = escape(str(item.get("stroke") or "#475569").strip(), quote=True)
             stroke_style = "dashed" if str(item.get("stroke_style") or "solid") == "dashed" else "solid"
             fill_style = _location_fill_style(item, {})
+            if shape_type == "polyline":
+                points = " ".join(
+                    f"{float(point[0]):g},{float(point[1]):g}"
+                    for point in item.get("path_points") or []
+                    if isinstance(point, (list, tuple)) and len(point) == 2
+                )
+                stroke_width = max(1, min(20, int(item.get("stroke_width") or 3)))
+                dash = ' stroke-dasharray="10 7"' if stroke_style == "dashed" else ""
+                items.append(
+                    f'<svg class="map-shape map-shape-polyline" aria-hidden="true" '
+                    f'viewBox="0 0 {width} {height}" preserveAspectRatio="none" '
+                    f'style="{style}position:absolute;overflow:visible;pointer-events:none;">'
+                    f'<polyline points="{escape(points, quote=True)}" fill="none" '
+                    f'stroke="{stroke}" stroke-width="{stroke_width}"{dash} '
+                    'stroke-linecap="round" stroke-linejoin="round"/></svg>'
+                )
+                continue
             line_background = (
                 f"repeating-linear-gradient(to right,{stroke} 0 10px,transparent 10px 17px) "
                 "center/100% 1px no-repeat"

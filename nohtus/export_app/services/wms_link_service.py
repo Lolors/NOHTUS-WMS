@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-from nohtus.db import q as wms_q
+from nohtus.db import connect as wms_connect, q as wms_q
 from nohtus.export_app import db as export_db
 from nohtus.export_app.services import export_service, shipment_service
 from nohtus.export_app.utils.dates import now_text
@@ -197,13 +197,17 @@ def _waiting_rows_for_order(order_id: int) -> list[dict]:
 
 
 def _all_rows_for_order(order_id: int) -> list[dict]:
-    df = wms_q(
-        """SELECT source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
-                  source_location,qty,COALESCE(confirmed,0) AS confirmed
-           FROM export_waiting_items WHERE order_id=? ORDER BY id""",
-        (int(order_id),),
-    )
-    return df.to_dict("records") if not df.empty else []
+    # 복구 직후에는 캐시된 q() 결과가 아니라 방금 커밋된 실제 연결행을 읽어야
+    # 새 source_inventory_id를 EXPORT 미러에 영구 반영할 수 있다.
+    with wms_connect() as con:
+        cursor = con.execute(
+            """SELECT source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
+                      source_location,qty,COALESCE(confirmed,0) AS confirmed
+               FROM export_waiting_items WHERE order_id=? ORDER BY id""",
+            (int(order_id),),
+        )
+        columns = [description[0] for description in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
 def _cart_row_from_waiting_row(row: dict) -> dict:

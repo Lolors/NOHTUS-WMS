@@ -79,6 +79,10 @@ def _clean_layout(layout: dict) -> dict:
         group_axis = str(raw.get("group_axis") or "").strip()
         if group_axis not in {"", "x", "y"}:
             group_axis = ""
+        path_points = []
+        for point in raw.get("path_points") or []:
+            if isinstance(point, (list, tuple)) and len(point) == 2:
+                path_points.append([float(point[0]), float(point[1])])
         cleaned.append({
             "code": code,
             "label": str(raw.get("label") or code).strip() or code,
@@ -98,6 +102,8 @@ def _clean_layout(layout: dict) -> dict:
             "shape_type": str(raw.get("shape_type") or "").strip(),
             "stroke": str(raw.get("stroke") or "#475569").strip() or "#475569",
             "stroke_style": stroke_style,
+            "stroke_width": max(1, min(20, int(raw.get("stroke_width") or 3))),
+            "path_points": path_points,
             "fill_type": fill_type,
             "fill_color": fill_color,
         })
