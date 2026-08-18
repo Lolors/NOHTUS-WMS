@@ -81,26 +81,13 @@ def _order_items_summary(order_id, max_items=3):
     return text
 
 
-def _order_company_summary(order_id, max_items=2):
-    df = saved_v2.q(
-        """
-        SELECT COALESCE(company, '') AS company, MIN(id) AS first_id
-        FROM outbound_order_items
-        WHERE order_id=?
-        GROUP BY COALESCE(company, '')
-        ORDER BY first_id
-        """,
-        (int(order_id),),
-    )
-    if df.empty:
-        return "-"
-    companies = [str(r.company or "-").strip() or "-" for r in df.itertuples(index=False)]
-    shown = companies[:max_items]
-    remain = max(0, len(companies) - len(shown))
-    text = ", ".join(shown)
-    if remain:
-        text += f" 외 {remain}"
-    return text
+def _order_customer_summary(order_row):
+    """저장된 출고지시 목록에 선택 매출처를 표시하고 과거 데이터만 제목으로 보완한다."""
+    customer_name = str(getattr(order_row, "customer_name", "") or "").strip()
+    if customer_name:
+        return customer_name
+    title = str(getattr(order_row, "title", "") or "").strip()
+    return (title.split(" - ", 1)[0].strip() if title else "") or "-"
 
 
 def _load_orders():
@@ -120,20 +107,11 @@ def _load_orders():
 
 
 def _load_order_summaries(order_ids) -> dict[int, dict[str, str]]:
-    """Load company/product summaries for the visible page in two queries."""
+    """Load product summaries for the visible page in one query."""
     ids = tuple(dict.fromkeys(int(order_id) for order_id in order_ids))
     if not ids:
         return {}
     placeholders = ",".join("?" for _ in ids)
-    companies = saved_v2.q(
-        f"""SELECT order_id, company FROM (
-                SELECT order_id, COALESCE(company,'') AS company, MIN(id) AS first_id
-                FROM outbound_order_items
-                WHERE order_id IN ({placeholders})
-                GROUP BY order_id, COALESCE(company,'')
-            ) ORDER BY order_id, first_id""",
-        ids,
-    )
     products = saved_v2.q(
         f"""SELECT order_id, product_name, qty FROM (
                 SELECT order_id, product_name, SUM(qty) AS qty, MIN(id) AS first_id
@@ -143,10 +121,7 @@ def _load_order_summaries(order_ids) -> dict[int, dict[str, str]]:
             ) ORDER BY order_id, first_id""",
         ids,
     )
-    result = {order_id: {"companies": "-", "products": "-"} for order_id in ids}
-    for order_id, group in companies.groupby("order_id", sort=False):
-        values = [str(value or "-").strip() or "-" for value in group["company"].tolist()]
-        result[int(order_id)]["companies"] = ", ".join(values[:2]) + (f" 외 {len(values)-2}" if len(values) > 2 else "")
+    result = {order_id: {"products": "-"} for order_id in ids}
     for order_id, group in products.groupby("order_id", sort=False):
         values = [f"{row.product_name or '-'} * {int(row.qty or 0)}" for row in group.itertuples(index=False)]
         result[int(order_id)]["products"] = ", ".join(values[:3]) + (f" 외 {len(values)-3}품목" if len(values) > 3 else "")
@@ -202,7 +177,7 @@ def _render_saved_orders(orders_df, selected_order_id, summaries=None):
         .saved-order-sep{{height:1px;background:#f6f7f9;margin:0;}}
         </style>
         <div class='saved-order-head-clean'>
-          <div>번호</div><div>날짜</div><div>사업장</div><div>출고지시서 제목</div>
+          <div>번호</div><div>날짜</div><div>매출처</div><div>출고지시서 제목</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -211,7 +186,7 @@ def _render_saved_orders(orders_df, selected_order_id, summaries=None):
         oid = int(getattr(r, "id"))
         created = str(getattr(r, "order_date", "") or getattr(r, "created_at", ""))[:10]
         summary = summaries.get(oid, {})
-        company_text = summary.get("companies") or _order_company_summary(oid)
+        customer_text = _order_customer_summary(r)
         display_no = str(getattr(r, "display_no", "") or getattr(r, "daily_no", "") or oid)
         order_title = str(getattr(r, "title", "") or "").strip() or summary.get("products") or _order_items_summary(oid)
         selected = int(selected_order_id or 0) == oid
@@ -224,7 +199,7 @@ def _render_saved_orders(orders_df, selected_order_id, summaries=None):
         with cols[1]:
             st.markdown(_cell(escape(created)), unsafe_allow_html=True)
         with cols[2]:
-            st.markdown(_cell(escape(company_text), title=company_text), unsafe_allow_html=True)
+            st.markdown(_cell(escape(customer_text), title=customer_text), unsafe_allow_html=True)
         with cols[3]:
             st.markdown(_cell(escape(order_title), title=order_title), unsafe_allow_html=True)
         st.markdown("<div class='saved-order-sep'></div>", unsafe_allow_html=True)
