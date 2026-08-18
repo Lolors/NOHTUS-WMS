@@ -210,7 +210,7 @@ class ExportIntegrationFollowupTests(TestCase):
             "expiry_date": "2027-11-03", "source_location": "R1",
             "requested_qty": 20,
         }
-        p_inventory = pd.DataFrame([{"id": 12199, "location": "P"}])
+        p_inventory = pd.DataFrame([{"id": 12199, "location": "P", "qty": 40}])
         with (
             patch.object(wms_link_edit_patch, "connect") as connect,
             patch.object(wms_link_edit_patch, "wms_q", return_value=p_inventory),
@@ -220,6 +220,27 @@ class ExportIntegrationFollowupTests(TestCase):
 
         self.assertEqual(row["source_inventory_id"], 12199)
         self.assertEqual(row["source_location"], "P")
+
+    def test_zero_quantity_p_row_falls_back_to_sufficient_source_stock(self):
+        row = {
+            "source_inventory_id": 11745, "business_unit": "NOHTUS",
+            "product_name": "Larapiel", "lot_no": "EAS1",
+            "expiry_date": "2029-01-19", "source_location": "REC",
+            "requested_qty": 2,
+        }
+        inventories = pd.DataFrame([
+            {"id": 12146, "location": "P", "qty": 0},
+            {"id": 12359, "location": "REC", "qty": 2},
+        ])
+        with (
+            patch.object(wms_link_edit_patch, "connect") as connect,
+            patch.object(wms_link_edit_patch, "wms_q", return_value=inventories),
+        ):
+            connect.return_value.__enter__.return_value.execute.return_value.fetchall.return_value = []
+            wms_link_edit_patch._fill_source_links([row], [])
+
+        self.assertEqual(row["source_inventory_id"], 12359)
+        self.assertEqual(row["source_location"], "REC")
 
     def test_dashboard_orders_early_stages_before_domestic_delivery(self):
         cases = [

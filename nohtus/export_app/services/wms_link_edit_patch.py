@@ -114,21 +114,27 @@ def _fill_source_links(rows: list[dict], waiting_rows: list[dict]) -> None:
             clauses.append("IFNULL(exp_date,'')=?")
             params.append(exp)
         candidates = wms_q(
-            f"SELECT id,location FROM inventory WHERE {' AND '.join(clauses)} ORDER BY id DESC",
+            f"SELECT id,location,COALESCE(qty,0) AS qty FROM inventory WHERE {' AND '.join(clauses)} ORDER BY id DESC",
             tuple(params),
         )
         if candidates.empty:
             continue
-        p_candidates = candidates[
-            candidates['location'].fillna('').astype(str).str.strip().str.upper() == 'P'
+        required_qty = float(row.get('requested_qty') or 0)
+        sufficient = candidates[
+            candidates['qty'].fillna(0).astype(float) >= required_qty
         ]
-        location_candidates = candidates[
-            candidates['location'].fillna('').astype(str).str.strip() == location
-        ] if location else candidates.iloc[0:0]
+        if sufficient.empty:
+            continue
+        p_candidates = sufficient[
+            sufficient['location'].fillna('').astype(str).str.strip().str.upper() == 'P'
+        ]
+        location_candidates = sufficient[
+            sufficient['location'].fillna('').astype(str).str.strip() == location
+        ] if location else sufficient.iloc[0:0]
         resolved = (
             p_candidates.iloc[0] if len(p_candidates.index) == 1 else
             location_candidates.iloc[0] if len(location_candidates.index) == 1 else
-            candidates.iloc[0] if len(candidates.index) == 1 else None
+            sufficient.iloc[0] if len(sufficient.index) == 1 else None
         )
         if resolved is not None:
             row['source_inventory_id'] = int(resolved['id'])
