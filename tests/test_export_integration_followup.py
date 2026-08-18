@@ -151,6 +151,7 @@ class ExportIntegrationFollowupTests(TestCase):
             patch.object(wms_link_service.export_service, "get_case", return_value=case),
             patch.object(wms_link_service.shipment_service, "list_case_items", return_value=original),
             patch.object(wms_link_edit_patch, "_editable_order_id", return_value=5),
+            patch.object(wms_link_edit_patch, "_rows_with_live_source_inventory", return_value=replacement),
             patch.object(wms_link_service.shipment_service, "save_for_order", return_value=1) as save_export,
             patch.object(
                 wms_link_edit_patch.export_waiting_service,
@@ -165,6 +166,40 @@ class ExportIntegrationFollowupTests(TestCase):
         self.assertEqual(save_export.call_count, 2)
         restored_rows = save_export.call_args_list[1].args[2]
         self.assertEqual(restored_rows[0]["requested_qty"], 2.0)
+
+    def test_saving_a_new_pick_does_not_retry_an_orphan_waiting_product(self):
+        case = {
+            "export_no": "EXP-1", "country": "KR", "buyer": "Buyer",
+            "transport_mode": "AIR",
+        }
+        orphan_waiting = [{
+            "source_inventory_id": 11, "company": "NOH", "product_name": "Larapiel",
+            "warehouse_name": "", "lot": "OLD", "exp_date": "2029-01-01",
+            "source_location": "P", "qty": 2,
+        }]
+        new_pick = [{
+            "inventory_id": 22, "company": "NOH", "product_name": "Doctor Kim",
+            "lot": "S103", "exp_date": "2029-07-23", "location": "REC", "qty": 10,
+        }]
+        with (
+            patch.object(wms_link_service.export_service, "get_case", return_value=case),
+            patch.object(wms_link_service.shipment_service, "list_case_items", return_value=[]),
+            patch.object(wms_link_service.shipment_service, "save_for_order", return_value=10),
+            patch.object(wms_link_edit_patch, "_editable_order_id", return_value=5),
+            patch.object(wms_link_service, "_waiting_rows_for_order", return_value=orphan_waiting),
+            patch.object(wms_link_edit_patch, "_rows_with_live_source_inventory", return_value=[]),
+            patch.object(
+                wms_link_edit_patch.export_waiting_service,
+                "save_export_waiting_order",
+                return_value={"order_id": 5},
+            ) as save_waiting,
+        ):
+            wms_link_service.save_picked_inventory(
+                case_id=1, order_item_id=7, kept_rows=[], picked_rows=new_pick
+            )
+
+        cart = save_waiting.call_args.args[0]
+        self.assertEqual([int(row["id"]) for row in cart], [22])
 
     def test_dashboard_orders_early_stages_before_domestic_delivery(self):
         cases = [

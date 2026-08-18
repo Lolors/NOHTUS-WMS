@@ -107,6 +107,30 @@ def _fill_source_links(rows: list[dict], waiting_rows: list[dict]) -> None:
             row['source_location'] = str(candidates.iloc[0]['location'] or location)
 
 
+def _rows_with_live_source_inventory(rows: list[dict]) -> list[dict]:
+    """Return only canonical shipment rows that still point to real inventory."""
+    source_ids = {
+        int(row.get('source_inventory_id') or 0)
+        for row in rows
+        if int(row.get('source_inventory_id') or 0) > 0
+    }
+    if not source_ids:
+        return []
+    placeholders = ','.join('?' for _ in source_ids)
+    with connect() as con:
+        live_ids = {
+            int(row[0])
+            for row in con.execute(
+                f'SELECT id FROM inventory WHERE id IN ({placeholders})',
+                tuple(sorted(source_ids)),
+            ).fetchall()
+        }
+    return [
+        row for row in rows
+        if int(row.get('source_inventory_id') or 0) in live_ids
+    ]
+
+
 def _empty_target_save(order_id: int, *, export_no: str, country: str, buyer: str, transport_method: str) -> dict:
     """마지막 저장행까지 삭제하는 경우 빈 cart 검증을 우회해 정상 원복한다."""
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -172,20 +196,10 @@ def _patched_save_picked_inventory(*, case_id: int, order_item_id: int, kept_row
 
     linked_kept = [row for row in all_kept_rows if row.get('source_inventory_id')]
     linked_other = [row for row in other_rows if row.get('source_inventory_id')]
-    selected_source_ids = {
-        int(row.get('source_inventory_id') or 0) for row in linked_kept
-    } | {
-        int(pick.get('inventory_id') or 0) for pick in (picked_rows or [])
-    } | {
-        int(row.get('source_inventory_id') or 0) for row in current_rows
-    }
-    cart = (
-        link_service.authoritative_other_cart_rows(waiting_rows, selected_source_ids)
-        if editing_order_id else
-        [link_service._cart_row_from_shipment_row(row) for row in linked_other]
+    canonical_rows = _rows_with_live_source_inventory(linked_other + linked_kept)
+    cart = link_service.cart_rows_after_selected_order_edit(
+        [], [], canonical_rows, list(picked_rows or [])
     )
-    cart += [link_service._cart_row_from_shipment_row(row) for row in linked_kept]
-    cart += [link_service._cart_row_from_pick(pick) for pick in (picked_rows or []) if float(pick.get('qty') or 0) > 0]
 
     mirror_rows = [
         {
