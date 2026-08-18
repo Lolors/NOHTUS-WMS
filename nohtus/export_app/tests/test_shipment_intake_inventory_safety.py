@@ -56,7 +56,7 @@ class ShipmentIntakeInventorySafetyTests(unittest.TestCase):
                 'lot_no': 'LOT-1', 'expiry_date': '2029-05-28', 'requested_qty': 2,
             },
             {
-                'id': 12, 'business_unit': '노투스팜', 'product_name': '제품A',
+                'id': 12, 'business_unit': '노투스', 'product_name': '제품A',
                 'lot_no': 'LOT-1', 'expiry_date': '2029-05-28', 'requested_qty': 3,
             },
         ]

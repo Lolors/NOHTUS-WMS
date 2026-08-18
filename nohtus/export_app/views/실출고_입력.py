@@ -112,15 +112,16 @@ def remaining_shipment_ids(case_id: int, order_item_id: int, shipment_ids: list[
 
 
 def saved_inventory_source(current_rows: list[dict]) -> pd.DataFrame:
-    """같은 사업장·제품·제조번호·유통기한은 화면에서 한 행으로 합친다."""
-    grouped: dict[tuple[str, str, str, str], dict] = {}
+    """같은 제품·제조번호·유통기한은 화면에서 한 행으로 합친다."""
+    grouped: dict[tuple[str, str, str], dict] = {}
     for row in current_rows:
         key = tuple(str(row.get(name) or '').strip() for name in (
-            'business_unit', 'product_name', 'lot_no', 'expiry_date'
+            'product_name', 'lot_no', 'expiry_date'
         ))
         item = grouped.setdefault(key, {
-            '_shipment_ids': [], '_product_name': key[1],
-            '사업장': key[0], '제품명': key[1], '제조번호': key[2], '유통기한': key[3],
+            '_shipment_ids': [], '_product_name': key[0],
+            '사업장': str(row.get('business_unit') or '').strip(),
+            '제품명': key[0], '제조번호': key[1], '유통기한': key[2],
             '선택수량': 0.0,
         })
         item['_shipment_ids'].append(int(row['id']))
