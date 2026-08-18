@@ -561,26 +561,27 @@ def render() -> None:
 
             current_qty = sum(safe_number(row.get('requested_qty')) for row in current)
             current_icon, current_state = order_state(order_qty, current_qty)
-            summary_col, edit_col = st.columns([4, 1])
-            summary_col.info(
-                f'{current_icon} 선택 합계 {fmt_number(current_qty)} / '
-                f'주문 {fmt_number(order_qty)} {unit} · {current_state}'
-            )
-            if edit_col.button(
-                '입고 수정',
-                type='secondary',
-                use_container_width=True,
-                key=f'open_intake_edit_{case_id}_{selected_order_id}',
-            ):
-                edit_shipment_intake_dialog(
-                    case_id=case_id,
-                    order_item_id=selected_order_id,
-                    product_name=selected_order_name,
-                    order_qty=order_qty,
-                    unit=unit,
-                    current_rows=current,
+            if current_state == '입고 완료':
+                summary_col, edit_col = st.columns([4, 1])
+                summary_col.info(
+                    f'{current_icon} 선택 합계 {fmt_number(current_qty)} / '
+                    f'주문 {fmt_number(order_qty)} {unit} · {current_state}'
                 )
-            return
+                if edit_col.button(
+                    '입고 수정',
+                    type='secondary',
+                    use_container_width=True,
+                    key=f'open_intake_edit_{case_id}_{selected_order_id}',
+                ):
+                    edit_shipment_intake_dialog(
+                        case_id=case_id,
+                        order_item_id=selected_order_id,
+                        product_name=selected_order_name,
+                        order_qty=order_qty,
+                        unit=unit,
+                        current_rows=current,
+                    )
+                return
 
             st.markdown(f'**선택 주문:** {selected_order_name}')
 

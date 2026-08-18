@@ -58,6 +58,7 @@ class ExportSearchAndWaitingSaveUiTests(TestCase):
         self.assertIn("@dialog('입고 수정', width='large')", source)
         self.assertIn('width: 800px !important', source)
         self.assertIn("summary_col, edit_col = st.columns([4, 1])", source)
+        self.assertIn("if current_state == '입고 완료':", source)
         self.assertIn("'입고 수정'", source)
         self.assertIn("column_order=['선택', '사업장', '제품명', '제조번호', '유통기한', '선택수량']", source)
         self.assertIn("inventory_selection_source(current_rows, stock_rows)", source)
