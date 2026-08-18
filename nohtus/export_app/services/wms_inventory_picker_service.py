@@ -62,3 +62,37 @@ def product_stock_rows(product_name: str) -> pd.DataFrame:
            ORDER BY company, exp_date, lot, location""",
         (product_name,),
     )
+
+
+def reserved_product_stock_rows(product_name: str, export_no: str) -> pd.DataFrame:
+    """현재 수출건에 이미 예약된 P 재고를 EXPORT 저장행 재연결 후보로 반환한다.
+
+    다른 수출건의 P 재고는 절대 포함하지 않고, 수출대기 연결행과
+    실제 P 재고 ID가 모두 유효한 행만 노출한다.
+    """
+    export_no = str(export_no or "").strip()
+    if not export_no:
+        return pd.DataFrame(columns=[
+            "id", "company", "location", "product_name", "lot", "exp_date", "qty", "warehouse_name",
+        ])
+    return wms_q(
+        """SELECT i.source_inventory_id AS id,
+                  i.company,
+                  i.source_location AS location,
+                  i.product_name,
+                  i.lot,
+                  i.exp_date,
+                  MIN(COALESCE(i.qty,0), COALESCE(p.qty,0)) AS qty,
+                  i.warehouse_name
+           FROM export_waiting_items i
+           JOIN export_waiting_orders o ON o.id=i.order_id
+           JOIN inventory p ON p.id=i.waiting_inventory_id AND UPPER(TRIM(p.location))='P'
+           WHERE TRIM(o.export_no)=TRIM(?)
+             AND o.status IN ('waiting','partial')
+             AND COALESCE(i.confirmed,0)=0
+             AND i.product_name=?
+             AND COALESCE(i.qty,0)>0
+             AND COALESCE(p.qty,0)>0
+           ORDER BY i.company, i.exp_date, i.lot, i.source_location""",
+        (export_no, product_name),
+    )

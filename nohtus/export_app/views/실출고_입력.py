@@ -464,6 +464,33 @@ def render() -> None:
                 )
                 editor_product = picked_product
                 stock_rows = wms_inventory_picker_service.product_stock_rows(picked_product)
+                reserved_rows = wms_inventory_picker_service.reserved_product_stock_rows(
+                    picked_product,
+                    str(selected_case.get('export_no') or ''),
+                )
+                linked_source_ids = {
+                    int(row.get('source_inventory_id') or 0)
+                    for row in current if row.get('source_inventory_id')
+                }
+                if not reserved_rows.empty:
+                    reserved_rows = reserved_rows[
+                        ~reserved_rows['id'].astype(int).isin(linked_source_ids)
+                    ]
+                if not reserved_rows.empty:
+                    stock_rows = pd.concat([stock_rows, reserved_rows], ignore_index=True)
+                    stock_rows = stock_rows.groupby('id', as_index=False, sort=False).agg({
+                        'company': 'first',
+                        'location': 'first',
+                        'product_name': 'first',
+                        'lot': 'first',
+                        'exp_date': 'first',
+                        'qty': 'sum',
+                        'warehouse_name': 'first',
+                    })
+                    st.caption(
+                        '현재 수출건에 이미 있는 P 재고는 재차감 없이 '
+                        '출고저장 연결만 복구합니다.'
+                    )
 
             # 저장된 재고 수량 편집과 새 재고 선택을 하나의 폼으로 묶어서, 셀 하나
             # 고칠 때마다 전체 화면이 다시 실행되지 않게 한다(제출 버튼을

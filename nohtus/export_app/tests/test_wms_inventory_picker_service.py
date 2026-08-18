@@ -53,6 +53,22 @@ class WmsInventoryPickerServiceTests(unittest.TestCase):
             con.execute(
                 "INSERT INTO products(id,standard_name,is_material) VALUES(2,'부자재A',1)"
             )
+            con.execute(
+                "INSERT INTO products(id,standard_name,is_material) VALUES(3,'제품C',0)"
+            )
+            con.execute(
+                """CREATE TABLE export_waiting_orders(
+                       id INTEGER PRIMARY KEY,export_no TEXT,status TEXT
+                   )"""
+            )
+            con.execute(
+                """CREATE TABLE export_waiting_items(
+                       id INTEGER PRIMARY KEY,order_id INTEGER,source_inventory_id INTEGER,
+                       waiting_inventory_id INTEGER,company TEXT,source_location TEXT,
+                       product_name TEXT,warehouse_name TEXT,lot TEXT,exp_date TEXT,
+                       qty INTEGER,confirmed INTEGER DEFAULT 0
+                   )"""
+            )
             con.executemany(
                 """INSERT INTO inventory(id,location,company,product_name,warehouse_name,lot,exp_date,qty,updated_at)
                    VALUES(?,?,?,?,?,?,?,?,?)""",
@@ -62,7 +78,17 @@ class WmsInventoryPickerServiceTests(unittest.TestCase):
                     (3, "A1-02", "NOH", "제품A", "ERP-A", "LOT-2", "2027-06-01", 20, "2026-01-01"),
                     (4, "A1-03", "NOH", "제품A", "ERP-A", "LOT-1", "2027-01-01", 0, "2026-01-01"),
                     (5, "A1-04", "NOH", "부자재A", "ERP-M", "MAT-1", "2027-01-01", 30, "2026-01-01"),
+                    (6, "P", "NOH", "제품C", "ERP-C", "LOT-C", "2028-01-01", 2, "2026-01-01"),
                 ],
+            )
+            con.execute(
+                "INSERT INTO export_waiting_orders(id,export_no,status) VALUES(1,'EXP-1','waiting')"
+            )
+            con.execute(
+                """INSERT INTO export_waiting_items(
+                       id,order_id,source_inventory_id,waiting_inventory_id,company,source_location,
+                       product_name,warehouse_name,lot,exp_date,qty,confirmed
+                   ) VALUES(1,1,99,6,'NOH','REC','제품C','ERP-C','LOT-C','2028-01-01',2,0)"""
             )
 
     def tearDown(self):
@@ -80,6 +106,14 @@ class WmsInventoryPickerServiceTests(unittest.TestCase):
     def test_product_stock_rows_excludes_materials(self):
         rows = picker.product_stock_rows("부자재A")
         self.assertTrue(rows.empty)
+
+    def test_reserved_product_stock_rows_only_returns_current_export_p_stock(self):
+        rows = picker.reserved_product_stock_rows("제품C", "EXP-1")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(int(rows.iloc[0]["id"]), 99)
+        self.assertEqual(rows.iloc[0]["location"], "REC")
+        self.assertEqual(int(rows.iloc[0]["qty"]), 2)
+        self.assertTrue(picker.reserved_product_stock_rows("제품C", "EXP-OTHER").empty)
 
     def test_expiry_options_lists_distinct_dates_with_stock_only(self):
         options = picker.expiry_options("제품A")
