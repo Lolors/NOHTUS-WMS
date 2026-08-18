@@ -114,15 +114,27 @@ def _fill_source_links(rows: list[dict], waiting_rows: list[dict]) -> None:
             clauses.append("IFNULL(exp_date,'')=?")
             params.append(exp)
         candidates = wms_q(
-            f"SELECT id,location,COALESCE(qty,0) AS qty FROM inventory WHERE {' AND '.join(clauses)} ORDER BY id DESC",
+            f"""SELECT id,location,COALESCE(qty,0) AS qty,
+                       COALESCE(qty,0) - CASE
+                         WHEN UPPER(TRIM(COALESCE(location,'')))='P' THEN COALESCE((
+                           SELECT SUM(COALESCE(i.qty,0))
+                           FROM export_waiting_items i
+                           JOIN export_waiting_orders o ON o.id=i.order_id
+                           WHERE i.waiting_inventory_id=inventory.id
+                             AND COALESCE(i.confirmed,0)=0
+                             AND o.status IN ('waiting','partial','confirmed')
+                         ),0) ELSE 0 END AS available_qty
+                FROM inventory WHERE {' AND '.join(clauses)} ORDER BY id DESC""",
             tuple(params),
         )
         if candidates.empty:
             continue
         required_qty = float(row.get('requested_qty') or 0)
-        sufficient = candidates[
-            candidates['qty'].fillna(0).astype(float) >= required_qty
-        ]
+        available_column = (
+            candidates['available_qty']
+            if 'available_qty' in candidates.columns else candidates['qty']
+        )
+        sufficient = candidates[available_column.fillna(0).astype(float) >= required_qty]
         if sufficient.empty:
             continue
         p_candidates = sufficient[

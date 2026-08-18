@@ -221,7 +221,7 @@ class ExportIntegrationFollowupTests(TestCase):
         self.assertEqual(row["source_inventory_id"], 12199)
         self.assertEqual(row["source_location"], "P")
 
-    def test_zero_quantity_p_row_falls_back_to_sufficient_source_stock(self):
+    def test_fully_reserved_p_row_falls_back_to_sufficient_source_stock(self):
         row = {
             "source_inventory_id": 11745, "business_unit": "NOHTUS",
             "product_name": "Larapiel", "lot_no": "EAS1",
@@ -229,8 +229,8 @@ class ExportIntegrationFollowupTests(TestCase):
             "requested_qty": 2,
         }
         inventories = pd.DataFrame([
-            {"id": 12146, "location": "P", "qty": 0},
-            {"id": 12359, "location": "REC", "qty": 2},
+            {"id": 12292, "location": "P", "qty": 4, "available_qty": 0},
+            {"id": 12291, "location": "F1-01-02", "qty": 53, "available_qty": 53},
         ])
         with (
             patch.object(wms_link_edit_patch, "connect") as connect,
@@ -239,8 +239,8 @@ class ExportIntegrationFollowupTests(TestCase):
             connect.return_value.__enter__.return_value.execute.return_value.fetchall.return_value = []
             wms_link_edit_patch._fill_source_links([row], [])
 
-        self.assertEqual(row["source_inventory_id"], 12359)
-        self.assertEqual(row["source_location"], "REC")
+        self.assertEqual(row["source_inventory_id"], 12291)
+        self.assertEqual(row["source_location"], "F1-01-02")
 
     def test_dashboard_orders_early_stages_before_domestic_delivery(self):
         cases = [
