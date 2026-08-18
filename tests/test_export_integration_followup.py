@@ -193,6 +193,7 @@ class ExportIntegrationFollowupTests(TestCase):
                 "save_export_waiting_order",
                 return_value={"order_id": 5},
             ) as save_waiting,
+            patch.object(wms_link_service, "sync_mirror_source_links") as sync_links,
         ):
             wms_link_service.save_picked_inventory(
                 case_id=1, order_item_id=7, kept_rows=[], picked_rows=new_pick
@@ -200,6 +201,7 @@ class ExportIntegrationFollowupTests(TestCase):
 
         cart = save_waiting.call_args.args[0]
         self.assertEqual([int(row["id"]) for row in cart], [22])
+        sync_links.assert_called_once_with(1, 5)
 
     def test_stale_source_id_relinks_to_existing_p_inventory_without_new_move(self):
         row = {

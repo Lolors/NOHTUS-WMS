@@ -294,8 +294,12 @@ def _patched_save_picked_inventory(*, case_id: int, order_item_id: int, kept_row
         shipment_service.save_for_order(case_id, order_item_id, original_rows)
         raise
 
+    order_id = int(result.get('order_id') or 0)
+    if order_id:
+        link_service.sync_mirror_source_links(case_id, order_id)
+
     return {
-        'order_id': int(result.get('order_id') or 0),
+        'order_id': order_id,
         'total_qty': total_qty,
         'row_count': len(mirror_rows),
     }
