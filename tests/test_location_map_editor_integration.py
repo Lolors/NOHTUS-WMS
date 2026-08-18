@@ -174,6 +174,26 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertEqual(restored['items'][0]['group_order'], 0)
         self.assertEqual(restored['items'][0]['group_count'], 3)
 
+    def test_editor_canvas_height_can_be_changed_without_clipping_items(self):
+        with (
+            patch.object(location_map_editor, 'is_admin', return_value=True),
+            patch.object(location_map_editor, '_consume_save_payload', return_value=False),
+            patch.object(location_map_editor, 'load_location_map_layout', return_value=initial_layout()),
+            patch.object(location_map_editor.components, 'html') as rendered,
+            patch.object(location_map_editor.st, 'title'),
+            patch.object(location_map_editor.st, 'caption'),
+        ):
+            location_map_editor.page_location_map_editor()
+        editor_html = rendered.call_args.args[0]
+
+        self.assertIn('id="canvasHeight"', editor_html)
+        self.assertIn('id="applyCanvasHeight"', editor_html)
+        self.assertIn('function applyCanvasHeight()', editor_html)
+        self.assertIn('function itemBottomEdge(it)', editor_html)
+        self.assertIn('layout.items.map(itemBottomEdge)', editor_html)
+        self.assertIn('layout.canvas.height=applied', editor_html)
+        self.assertIn('canvasHeightInput.value=String(layout.canvas.height)', editor_html)
+
     def test_draft_layout_is_separate_and_can_be_deleted(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             draft_path = Path(temp_dir) / 'location_map_layout.draft.json'
@@ -365,12 +385,18 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('id="applyZoom"', editor_html)
         self.assertIn('id="canvasWidth"', editor_html)
         self.assertIn('id="applyCanvasWidth"', editor_html)
+        self.assertIn('id="canvasHeight"', editor_html)
+        self.assertIn('id="applyCanvasHeight"', editor_html)
         self.assertIn('function applyZoomInput()', editor_html)
         self.assertIn('function applyCanvasWidth()', editor_html)
+        self.assertIn('function applyCanvasHeight()', editor_html)
         self.assertIn('minimumRight=Math.max(400', editor_html)
         self.assertIn('function itemRightEdge(it)', editor_html)
+        self.assertIn('function itemBottomEdge(it)', editor_html)
         self.assertIn('Math.abs(w*Math.cos(angle))+Math.abs(h*Math.sin(angle))', editor_html)
         self.assertIn('layout.items.map(itemRightEdge)', editor_html)
+        self.assertIn('layout.items.map(itemBottomEdge)', editor_html)
+        self.assertIn('canvasHeightInput.value=String(layout.canvas.height)', editor_html)
         self.assertNotIn('it.x+it.width))),applied', editor_html)
         self.assertIn('layout.canvas.width=applied', editor_html)
         self.assertIn('zoomPercentInput.value=String(Math.round(scale*100))', editor_html)
