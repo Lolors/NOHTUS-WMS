@@ -6,9 +6,12 @@ import pandas as pd
 
 from nohtus.export_app.services import folder_service
 from nohtus.export_app.views.실출고_입력 import (
+    distribute_group_quantity,
     inventory_selection_source,
     remaining_shipment_ids,
+    saved_inventory_source,
     selected_shipment_ids,
+    shipment_ids_from_group,
 )
 
 
@@ -45,6 +48,42 @@ class ShipmentIntakeInventorySafetyTests(unittest.TestCase):
 
         self.assertIsNone(folder)
         self.assertIn('denied', error)
+
+    def test_same_product_lot_and_expiry_are_shown_as_one_saved_row(self):
+        current = [
+            {
+                'id': 11, 'business_unit': '노투스팜', 'product_name': '제품A',
+                'lot_no': 'LOT-1', 'expiry_date': '2029-05-28', 'requested_qty': 2,
+            },
+            {
+                'id': 12, 'business_unit': '노투스팜', 'product_name': '제품A',
+                'lot_no': 'LOT-1', 'expiry_date': '2029-05-28', 'requested_qty': 3,
+            },
+        ]
+
+        result = saved_inventory_source(current)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]['_shipment_ids'], '11,12')
+        self.assertEqual(result.iloc[0]['선택수량'], 5)
+
+    def test_group_quantity_is_distributed_without_losing_trace_rows(self):
+        rows = [
+            {'id': 11, 'requested_qty': 2},
+            {'id': 12, 'requested_qty': 3},
+        ]
+
+        result = distribute_group_quantity(rows, 4)
+
+        self.assertEqual([row['id'] for row in result], [11, 12])
+        self.assertEqual([row['requested_qty'] for row in result], [2, 2])
+        self.assertEqual(shipment_ids_from_group('11,12'), [11, 12])
+
+    def test_domestic_delivery_folder_failure_is_a_warning_after_save(self):
+        source = Path('nohtus/export_app/views/국내배송.py').read_text(encoding='utf-8')
+
+        self.assertIn('folder_service.try_sync_case_folder(case_id)', source)
+        self.assertIn("delivery_folder_warning", source)
 
     def test_selected_shipment_ids_returns_only_checked_valid_ids(self):
         edited = pd.DataFrame([

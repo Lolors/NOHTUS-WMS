@@ -112,22 +112,43 @@ def remaining_shipment_ids(case_id: int, order_item_id: int, shipment_ids: list[
 
 
 def saved_inventory_source(current_rows: list[dict]) -> pd.DataFrame:
-    """모든 저장행을 한 표에서 수정하고 선택 삭제할 수 있게 만든다."""
-    return pd.DataFrame([
-        {
-            '_shipment_id': int(row['id']),
-            '_inventory_id': int(row['source_inventory_id']) if row.get('source_inventory_id') else None,
-            '_location': row.get('source_location') or row.get('location') or '',
-            '_product_name': row.get('product_name') or '',
-            '선택': False,
-            '사업장': row.get('business_unit') or '',
-            '제품명': row.get('product_name') or '',
-            '제조번호': row.get('lot_no') or '',
-            '유통기한': row.get('expiry_date') or '',
-            '선택수량': safe_number(row.get('requested_qty')),
-        }
-        for row in current_rows
-    ])
+    """같은 사업장·제품·제조번호·유통기한은 화면에서 한 행으로 합친다."""
+    grouped: dict[tuple[str, str, str, str], dict] = {}
+    for row in current_rows:
+        key = tuple(str(row.get(name) or '').strip() for name in (
+            'business_unit', 'product_name', 'lot_no', 'expiry_date'
+        ))
+        item = grouped.setdefault(key, {
+            '_shipment_ids': [], '_product_name': key[1],
+            '사업장': key[0], '제품명': key[1], '제조번호': key[2], '유통기한': key[3],
+            '선택수량': 0.0,
+        })
+        item['_shipment_ids'].append(int(row['id']))
+        item['선택수량'] += safe_number(row.get('requested_qty'))
+    result = []
+    for item in grouped.values():
+        item['_shipment_ids'] = ','.join(str(value) for value in item['_shipment_ids'])
+        result.append(item)
+    return pd.DataFrame(result)
+
+
+def shipment_ids_from_group(value: object) -> list[int]:
+    return [int(part) for part in str(value or '').split(',') if part.strip().isdigit()]
+
+
+def distribute_group_quantity(rows: list[dict], total: float) -> list[dict]:
+    remaining = max(0.0, safe_number(total))
+    result = []
+    for index, original in enumerate(rows):
+        item = dict(original)
+        quantity = remaining if index == len(rows) - 1 else min(
+            safe_number(original.get('requested_qty')), remaining
+        )
+        remaining -= quantity
+        if quantity > 0:
+            item['requested_qty'] = quantity
+            result.append(item)
+    return result
 
 
 def recommended_inventory_search_term(product_name: object) -> str:
@@ -423,9 +444,9 @@ def render() -> None:
                 st.caption('수량은 선택수량에서 수정하고, 삭제할 행은 아래 선택창에서 고르세요.')
                 delete_options = {
                     (
-                        f"#{int(row['_shipment_id'])} · {row['사업장']} · {row['제품명']} · "
+                        f"#{row['_shipment_ids']} · {row['사업장']} · {row['제품명']} · "
                         f"{row['제조번호'] or '-'} · {fmt_number(row['선택수량'])}EA"
-                    ): int(row['_shipment_id'])
+                    ): shipment_ids_from_group(row['_shipment_ids'])
                     for _, row in saved_source.iterrows()
                 }
                 delete_labels = st.multiselect(
@@ -433,7 +454,11 @@ def render() -> None:
                     list(delete_options),
                     key=f'delete_saved_inventory_{case_id}_{selected_order_id}',
                 )
-                selected_saved_ids = [delete_options[label] for label in delete_labels]
+                selected_saved_ids = [
+                    shipment_id
+                    for label in delete_labels
+                    for shipment_id in delete_options[label]
+                ]
                 delete_clicked = st.button(
                     '선택 행 삭제',
                     type='secondary',
@@ -511,9 +536,7 @@ def render() -> None:
                         disabled=['사업장', '제품명', '제조번호', '유통기한'],
                         column_order=['사업장', '제품명', '제조번호', '유통기한', '선택수량'],
                         column_config={
-                            '_shipment_id': None,
-                            '_inventory_id': None,
-                            '_location': None,
+                            '_shipment_ids': None,
                             '_product_name': None,
                             '선택수량': st.column_config.NumberColumn('선택수량', min_value=0, step=1, format='%g'),
                         },
@@ -639,13 +662,14 @@ def render() -> None:
                     current_by_shipment_id = {int(row['id']): dict(row) for row in current}
                     kept_rows = []
                     for _, row in active_saved.iterrows():
-                        shipment_id = int(row['_shipment_id'])
-                        original = current_by_shipment_id.get(shipment_id)
-                        if not original:
-                            continue
-                        item = dict(original)
-                        item['requested_qty'] = float(row['선택수량'])
-                        kept_rows.append(item)
+                        originals = [
+                            current_by_shipment_id[shipment_id]
+                            for shipment_id in shipment_ids_from_group(row['_shipment_ids'])
+                            if shipment_id in current_by_shipment_id
+                        ]
+                        kept_rows.extend(
+                            distribute_group_quantity(originals, float(row['선택수량']))
+                        )
 
                     picked_rows = [{
                         'inventory_id': int(row['_inventory_id']),

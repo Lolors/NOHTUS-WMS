@@ -73,6 +73,10 @@ def render_packed_details(case_id: int) -> None:
 def render() -> None:
     st.title('국내배송')
     st.caption('국내배송 방식, 수하인 정보와 송장 또는 배송기사 정보를 입력합니다.')
+    if message := st.session_state.pop('delivery_save_message', None):
+        st.success(message)
+    if warning := st.session_state.pop('delivery_folder_warning', None):
+        st.warning(warning)
 
     cases = [
         case for case in export_service.active_cases()
@@ -132,7 +136,13 @@ def render() -> None:
             consignee_name=consignee_name,
             consignee_address=consignee_address,
         )
-        folder = folder_service.sync_case_folder(case_id)
-        history_service.add(case_id, '국내배송 완료', f'{method} / {consignee_name} / {folder}')
-        st.success('저장했습니다.')
+        folder, folder_error = folder_service.try_sync_case_folder(case_id)
+        folder_detail = str(folder) if folder else f'폴더 동기화 보류: {folder_error}'
+        history_service.add(case_id, '국내배송 완료', f'{method} / {consignee_name} / {folder_detail}')
+        st.session_state['delivery_save_message'] = '배송정보를 저장하고 완료 처리했습니다.'
+        if folder_error:
+            st.session_state['delivery_folder_warning'] = (
+                '배송정보는 정상 저장됐지만 수출 폴더 이름 변경은 보류됐습니다. '
+                f'폴더를 사용 중인 프로그램을 닫은 뒤 다시 동기화하세요: {folder_error}'
+            )
         st.rerun()
