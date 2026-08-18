@@ -21,6 +21,7 @@ _NEW_CSS = r"""
   appearance:none;box-sizing:border-box;color:#0f172a;font-family:Inter,Segoe UI,Arial,'Noto Sans KR',sans-serif;
 }
 .map-stage .nw-zone{position:absolute;display:flex;align-items:center;justify-content:center;border:1.5px solid #64748b;border-radius:11px;background:#fff;font-size:17px;font-weight:900;cursor:pointer;box-shadow:0 3px 9px rgba(15,23,42,.05);}
+.map-stage .nw-zone>span{white-space:nowrap;word-break:keep-all;overflow-wrap:normal;}
 .map-stage .nw-zone.partitioned-rack{border-radius:0;box-shadow:none}.map-stage .nw-zone.partitioned-rack.group-x:not(.group-last){border-right:0}.map-stage .nw-zone.partitioned-rack.group-y:not(.group-last){border-bottom:0}.map-stage .nw-zone.partitioned-rack.group-first.group-x{border-radius:11px 0 0 11px}.map-stage .nw-zone.partitioned-rack.group-last.group-x{border-radius:0 11px 11px 0}.map-stage .nw-zone.partitioned-rack.group-first.group-y{border-radius:11px 11px 0 0}.map-stage .nw-zone.partitioned-rack.group-last.group-y{border-radius:0 0 11px 11px}.map-stage .nw-zone.partitioned-rack.group-first.group-last{border-radius:11px}
 .map-stage.saved-map-stage.map-pixel-projected .nw-zone{border-width:1px;font-size:var(--map-zone-font-size,17px);border-radius:var(--map-zone-radius,11px)}
 .map-stage.saved-map-stage.map-pixel-projected .nw-zone.partitioned-rack{border-radius:0}
@@ -276,7 +277,7 @@ let mapPanX=0;
 let mapPanY=0;
 let mapPointer=null;
 let mapDidPan=false;
-function collapseTouchingShapeBorders(stage){
+function separateTouchingShapeBorders(stage){
   const shapes=Array.from(stage.querySelectorAll('.map-shape-rounded_rect'))
     .filter(el=>!el.style.transform||el.style.transform==='rotate(0deg)'||el.style.transform==='rotate(360deg)');
   shapes.forEach((shape,index)=>{
@@ -289,8 +290,8 @@ function collapseTouchingShapeBorders(stage){
       const otherRight=otherLeft+other.offsetWidth,otherBottom=otherTop+other.offsetHeight;
       const sameHorizontalSpan=Math.abs(left-otherLeft)<=1&&Math.abs(right-otherRight)<=1;
       const sameVerticalSpan=Math.abs(top-otherTop)<=1&&Math.abs(bottom-otherBottom)<=1;
-      if(sameHorizontalSpan&&Math.abs(top-otherBottom)<=1){top=otherBottom-1;height=bottom-top;}
-      if(sameVerticalSpan&&Math.abs(left-otherRight)<=1){left=otherRight-1;width=right-left;}
+      if(sameHorizontalSpan&&Math.abs(top-otherBottom)<=1){top=otherBottom+1;height=bottom-top;}
+      if(sameVerticalSpan&&Math.abs(left-otherRight)<=1){left=otherRight+1;width=right-left;}
     }
     shape.style.setProperty('left',left+'px','important');
     shape.style.setProperty('top',top+'px','important');
@@ -322,12 +323,14 @@ function projectSavedMapToPixels(stage,scale){
     const [x,y,width,height]=geometry;
     const left=Math.round(x*scale),top=Math.round(y*scale);
     const right=Math.round((x+width)*scale),bottom=Math.round((y+height)*scale);
+    const partitionGapX=el.classList.contains('partitioned-rack')&&el.classList.contains('group-x')&&!el.classList.contains('group-last')?1:0;
+    const partitionGapY=el.classList.contains('partitioned-rack')&&el.classList.contains('group-y')&&!el.classList.contains('group-last')?1:0;
     el.style.setProperty('left',left+'px','important');
     el.style.setProperty('top',top+'px','important');
-    el.style.setProperty('width',Math.max(1,right-left)+'px','important');
-    el.style.setProperty('height',Math.max(1,bottom-top)+'px','important');
+    el.style.setProperty('width',Math.max(1,right-left-partitionGapX)+'px','important');
+    el.style.setProperty('height',Math.max(1,bottom-top-partitionGapY)+'px','important');
   });
-  collapseTouchingShapeBorders(stage);
+  separateTouchingShapeBorders(stage);
   stage.style.setProperty('--map-zone-font-size',Math.max(9,Math.round(17*scale))+'px');
   stage.style.setProperty('--map-zone-radius',Math.max(4,Math.round(11*scale))+'px');
   stage.style.setProperty('--map-dot-size',Math.max(5,Math.round(10*scale))+'px');
