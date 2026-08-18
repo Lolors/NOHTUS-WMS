@@ -47,11 +47,20 @@ def resolve_stock_rows(product_name: str, lot: str, exp_date: str) -> pd.DataFra
 
 
 def product_stock_rows(product_name: str) -> pd.DataFrame:
-    """선택한 표준제품명의 출고 가능한 실재고를 한 표로 반환한다."""
+    """선택한 제품의 일반 재고와 P의 미예약 잔량을 반환한다."""
     return wms_q(
-        """SELECT id, company, location, product_name, lot, exp_date, qty, warehouse_name
+        """SELECT inventory.id,inventory.company,inventory.location,inventory.product_name,
+                  inventory.lot,inventory.exp_date,
+                  CASE WHEN UPPER(TRIM(inventory.location))='P'
+                       THEN COALESCE(inventory.qty,0)-COALESCE((
+                           SELECT SUM(COALESCE(i.qty,0)) FROM export_waiting_items i
+                           JOIN export_waiting_orders o ON o.id=i.order_id
+                           WHERE i.waiting_inventory_id=inventory.id AND COALESCE(i.confirmed,0)=0
+                             AND o.status IN ('waiting','partial','confirmed')
+                       ),0) ELSE COALESCE(inventory.qty,0) END AS qty,
+                  inventory.warehouse_name
            FROM inventory
-           WHERE product_name=? AND qty>0 AND location<>'P'
+           WHERE inventory.product_name=? AND COALESCE(inventory.qty,0)>0
              AND NOT EXISTS (
                  SELECT 1
                  FROM products
@@ -59,7 +68,12 @@ def product_stock_rows(product_name: str) -> pd.DataFrame:
                    AND LOWER(TRIM(CAST(COALESCE(is_material, 0) AS TEXT)))
                        IN ('1', 'true', 'yes', 'y', 'o', 'v', '체크', '부자재')
              )
-           ORDER BY company, exp_date, lot, location""",
+             AND (UPPER(TRIM(inventory.location))<>'P' OR COALESCE(inventory.qty,0)>
+                  COALESCE((SELECT SUM(COALESCE(i.qty,0)) FROM export_waiting_items i
+                            JOIN export_waiting_orders o ON o.id=i.order_id
+                            WHERE i.waiting_inventory_id=inventory.id AND COALESCE(i.confirmed,0)=0
+                              AND o.status IN ('waiting','partial','confirmed')),0))
+           ORDER BY inventory.company,inventory.exp_date,inventory.lot,inventory.location""",
         (product_name,),
     )
 

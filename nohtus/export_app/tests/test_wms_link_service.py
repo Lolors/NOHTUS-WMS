@@ -521,6 +521,40 @@ class WmsLinkServiceTests(unittest.TestCase):
         self.assertEqual(self._wms_inventory_row("제품A")["qty"], 18)
         self.assertEqual(self._wms_p_qty("제품A"), 2)
 
+    def test_unreserved_p_stock_is_linked_without_increasing_physical_p_qty(self) -> None:
+        case_id, order_a, _ = self._create_case("EXP-LINK-P-AVAILABLE")
+        con = sqlite3.connect(self.wms_db_path)
+        try:
+            p_id = con.execute(
+                """INSERT INTO inventory(location,company,product_name,warehouse_name,lot,exp_date,qty,updated_at)
+                   VALUES('P','NOH','제품A','ERP-A','LOT-P','2028-01-01',5,'2026-01-01')"""
+            ).lastrowid
+            con.commit()
+        finally:
+            con.close()
+
+        wms_link_service.save_picked_inventory(
+            case_id=case_id,
+            order_item_id=order_a,
+            kept_rows=[],
+            picked_rows=[{
+                "inventory_id": p_id, "company": "NOH", "product_name": "제품A",
+                "warehouse_name": "ERP-A", "lot": "LOT-P", "exp_date": "2028-01-01",
+                "location": "P", "qty": 2.0,
+            }],
+        )
+
+        con = sqlite3.connect(self.wms_db_path)
+        try:
+            self.assertEqual(con.execute("SELECT qty FROM inventory WHERE id=?", (p_id,)).fetchone()[0], 5)
+            linked = con.execute(
+                """SELECT source_inventory_id,waiting_inventory_id,source_location,qty
+                   FROM export_waiting_items WHERE waiting_inventory_id=?""", (p_id,),
+            ).fetchone()
+        finally:
+            con.close()
+        self.assertEqual(linked, (p_id, p_id, "P", 2))
+
     def test_removing_broken_waiting_row_does_not_require_missing_p_inventory(self) -> None:
         case_id, order_a, order_b = self._create_case("EXP-LINK-BROKEN-DELETE")
         for order_id, inventory_id, product, lot, exp, location, qty in (

@@ -115,6 +115,15 @@ class WmsInventoryPickerServiceTests(unittest.TestCase):
         self.assertEqual(int(rows.iloc[0]["qty"]), 2)
         self.assertTrue(picker.reserved_product_stock_rows("제품C", "EXP-OTHER").empty)
 
+    def test_product_stock_rows_returns_only_unreserved_p_balance(self):
+        with sqlite3.connect(self.db_path, factory=self.connection_factory) as con:
+            con.execute("UPDATE inventory SET qty=5 WHERE id=6")
+        rows = picker.product_stock_rows("제품C")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(int(rows.iloc[0]["id"]), 6)
+        self.assertEqual(rows.iloc[0]["location"], "P")
+        self.assertEqual(int(rows.iloc[0]["qty"]), 3)
+
     def test_expiry_options_lists_distinct_dates_with_stock_only(self):
         options = picker.expiry_options("제품A")
         self.assertEqual(options, ["2027-01-01", "2027-06-01"])

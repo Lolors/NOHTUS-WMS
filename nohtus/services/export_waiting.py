@@ -210,9 +210,13 @@ def _resolve_source_row(cur, inventory_id, fallback=None, required_qty=0):
 
     if source_id:
         row = _dict_row(cur, "SELECT * FROM inventory WHERE id=?", (source_id,))
+        row_location = str((row or {}).get("location") or "").strip()
+        hinted_location = str(hint.get("location") or hint.get("source_location") or "").strip()
+        if row and row_location == P and hinted_location == P and _source_identity_matches(row, hint):
+            return row
         if (
             row
-            and str(row.get("location") or "").strip() != P
+            and row_location != P
             and _source_identity_matches(row, hint)
             and int(row.get("qty") or 0) >= required_qty
         ):
@@ -266,14 +270,36 @@ def _take_source(cur, inventory_id, qty, now, fallback=None):
         suffix = f" ({label})" if label else ""
         raise ValueError(f"재고 #{inventory_id}를 찾을 수 없습니다.{suffix}")
     available = int(s.get("qty") or 0)
+    if str(s.get("location") or "").strip() == P:
+        reserved = cur.execute(
+            """SELECT COALESCE(SUM(COALESCE(i.qty,0)),0)
+               FROM export_waiting_items i JOIN export_waiting_orders o ON o.id=i.order_id
+               WHERE i.waiting_inventory_id=? AND COALESCE(i.confirmed,0)=0
+                 AND o.status IN ('waiting','partial','confirmed')""",
+            (int(s.get("id") or 0),),
+        ).fetchone()[0]
+        available -= int(reserved or 0)
+        if qty <= 0 or qty > available:
+            raise ValueError(
+                f"P 로케이션의 {s.get('product_name','제품')} 미예약 재고가 부족합니다. "
+                f"요청 {qty}EA / 가능 {max(0, available)}EA"
+            )
+        s["_resolved_inventory_id"] = int(s.get("id") or 0)
+        s["_already_in_p"] = True
+        return s
     if qty <= 0 or qty > available:
         raise ValueError(f"{s.get('product_name','제품')} 재고 부족: 요청 {qty}EA / 현재 {available}EA")
-    if str(s.get("location") or "").strip() == P:
-        raise ValueError(f"{s.get('product_name','제품')}은 이미 수출대기 위치 P에 있습니다.")
     resolved_id = int(s.get("id") or 0)
     cur.execute("UPDATE inventory SET qty=?,updated_at=? WHERE id=?", (available - qty, now, resolved_id))
     s["_resolved_inventory_id"] = resolved_id
     return s
+
+
+def _place_source_in_p(cur, source, qty, now):
+    """일반 재고는 P로 이동하고, 이미 P인 미예약분은 수량을 더하지 않고 예약만 연결한다."""
+    if source.get("_already_in_p"):
+        return int(source.get("id") or 0), False
+    return _add(cur, source, P, qty, now, 0), True
 
 
 def _take_p(cur, item, now, qty=None):
@@ -447,13 +473,14 @@ def _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now
         hint = source_hints.get(source_id) or restored_source_rows.get(source_id)
         source = _take_source(cur, source_id, qty, now, hint)
         resolved_inventory_id = int(source.get("_resolved_inventory_id") or source.get("id") or source_id)
-        waiting_inventory_id = _add(cur, source, P, qty, now, 0)
+        waiting_inventory_id, moved_to_p = _place_source_in_p(cur, source, qty, now)
         cur.execute("""INSERT INTO export_waiting_items(order_id,source_inventory_id,waiting_inventory_id,company,product_name,
             warehouse_name,lot,exp_date,source_location,waiting_location,qty,moved_at,confirmed)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)""",
             (order_id,resolved_inventory_id,waiting_inventory_id,source.get("company", ""),source.get("product_name", ""),source.get("warehouse_name", "") or "",
              source.get("lot", "-") or "-",source.get("exp_date", "-") or "-",source.get("location", ""),P,qty,now))
-        insert_transaction_log(
+        if moved_to_p:
+            insert_transaction_log(
             cur,
             created_at=now,
             tx_type="위치이동",
@@ -466,8 +493,8 @@ def _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now
             to_company=source.get("company", ""),
             to_location=P,
             qty=qty,
-            memo=f"수출대기 수정 / 새 목록 재적재 / {title} / 수출번호: {export_no}",
-        )
+                memo=f"수출대기 수정 / 새 목록 재적재 / {title} / 수출번호: {export_no}",
+            )
 
 
 def _apply_confirmed_export_item_changes(
@@ -572,7 +599,7 @@ def _apply_confirmed_export_item_changes(
         hint = source_hints.get(source_id)
         source = _take_source(cur, source_id, qty, now, hint)
         resolved_inventory_id = int(source.get("_resolved_inventory_id") or source.get("id") or source_id)
-        waiting_inventory_id = _add(cur, source, P, qty, now, 0)
+        waiting_inventory_id, moved_to_p = _place_source_in_p(cur, source, qty, now)
         existing_waiting = _dict_row(
             cur,
             """SELECT id,qty FROM export_waiting_items
@@ -612,7 +639,8 @@ def _apply_confirmed_export_item_changes(
                     now,
                 ),
             )
-        insert_transaction_log(
+        if moved_to_p:
+            insert_transaction_log(
             cur,
             created_at=now,
             tx_type="위치이동",
@@ -625,8 +653,8 @@ def _apply_confirmed_export_item_changes(
             to_company=source.get("company", ""),
             to_location=P,
             qty=qty,
-            memo=f"수출확정 수정 / 추가 품목 수출대기 / {title} / 수출번호: {export_no}",
-        )
+                memo=f"수출확정 수정 / 추가 품목 수출대기 / {title} / 수출번호: {export_no}",
+            )
 
     remaining = cur.execute(
         "SELECT COUNT(*) FROM export_waiting_items WHERE order_id=? AND COALESCE(confirmed,0)=0",
@@ -723,16 +751,17 @@ def save_export_waiting_order(cart, *, country, buyer="", transport_method="미�
             for inventory_id, qty in grouped.items():
                 s = _take_source(cur, inventory_id, qty, now, source_hints.get(inventory_id))
                 resolved_inventory_id = int(s.get("_resolved_inventory_id") or s.get("id") or inventory_id)
-                waiting_inventory_id = _add(cur, s, P, qty, now, 0)
+                waiting_inventory_id, moved_to_p = _place_source_in_p(cur, s, qty, now)
                 cur.execute("""INSERT INTO export_waiting_items(order_id,source_inventory_id,waiting_inventory_id,company,product_name,
                     warehouse_name,lot,exp_date,source_location,waiting_location,qty,moved_at,confirmed)
                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)""",
                     (order_id,resolved_inventory_id,waiting_inventory_id,s.get("company", ""),s.get("product_name", ""),s.get("warehouse_name", "") or "",
                      s.get("lot", "-") or "-",s.get("exp_date", "-") or "-",s.get("location", ""),P,qty,now))
-                insert_transaction_log(cur, created_at=now, tx_type="위치이동", product_name=s.get("product_name", ""),
-                    warehouse_name=s.get("warehouse_name", "") or "", lot=s.get("lot", "-"), exp_date=s.get("exp_date", "-"),
-                    from_company=s.get("company", ""), from_location=s.get("location", ""), to_company=s.get("company", ""),
-                    to_location=P, qty=qty, memo=f"수출대기 등록 / {title} / 수출번호: {export_no}")
+                if moved_to_p:
+                    insert_transaction_log(cur, created_at=now, tx_type="위치이동", product_name=s.get("product_name", ""),
+                        warehouse_name=s.get("warehouse_name", "") or "", lot=s.get("lot", "-"), exp_date=s.get("exp_date", "-"),
+                        from_company=s.get("company", ""), from_location=s.get("location", ""), to_company=s.get("company", ""),
+                        to_location=P, qty=qty, memo=f"수출대기 등록 / {title} / 수출번호: {export_no}")
                 total += qty
         con.commit()
     return {"order_id":order_id,"row_count":len(grouped),"total_qty":total,"title":title}
