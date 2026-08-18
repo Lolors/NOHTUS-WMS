@@ -250,6 +250,22 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         filled_markup = _saved_layout_markup(layout)
         self.assertIn('border-radius:50%;background:repeating-linear-gradient(135deg,#abcdef', filled_markup)
 
+    def test_cad_door_shape_renders_leaf_and_swing_arc(self):
+        layout = initial_layout()
+        layout['items'].append({
+            'code': '__shape-door', 'label': '출입구', 'x': 100, 'y': 100,
+            'width': 90, 'height': 90, 'rotation': 90, 'company': '기타',
+            'kind': 'shape', 'shape_type': 'door', 'stroke': '#123456',
+            'stroke_style': 'dashed', 'fill_type': 'none', 'note': '',
+        })
+        markup = _saved_layout_markup(layout)
+        self.assertIn('class="map-shape map-shape-door"', markup)
+        self.assertIn('<line x1="2" y1="98" x2="2" y2="2"', markup)
+        self.assertIn('<path d="M 2 2 A 96 96 0 0 1 98 98"', markup)
+        self.assertIn('stroke="#123456"', markup)
+        self.assertIn('stroke-dasharray="7 5"', markup)
+        self.assertNotIn('data-loc="__shape-door"', markup)
+
     def test_editor_supports_shape_transform_and_new_location_setup(self):
         with (
             patch.object(location_map_editor, 'is_admin', return_value=True),
@@ -348,6 +364,11 @@ class LocationMapEditorIntegrationTests(unittest.TestCase):
         self.assertIn('data-add-shape="rounded_rect"', editor_html)
         self.assertIn('data-add-shape="line"', editor_html)
         self.assertIn('data-add-shape="circle"', editor_html)
+        self.assertIn('data-add-shape="door"', editor_html)
+        self.assertIn('출입구 (CAD 문 기호)', editor_html)
+        self.assertIn("door:[100,100,'출입구']", editor_html)
+        self.assertIn("if(shapeType==='door')", editor_html)
+        self.assertIn('A 96 96 0 0 1 98 98', editor_html)
         self.assertIn('function addMapShape(', editor_html)
         self.assertIn("kind:'shape'", editor_html)
         self.assertIn('border:1.5px solid #475569', editor_html)

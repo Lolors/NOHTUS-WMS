@@ -222,6 +222,19 @@ def _saved_layout_markup(layout: dict) -> str:
                     'stroke-linecap="round" stroke-linejoin="round"/></svg>'
                 )
                 continue
+            if shape_type == "door":
+                dash = ' stroke-dasharray="7 5"' if stroke_style == "dashed" else ""
+                items.append(
+                    f'<svg class="map-shape map-shape-door" aria-hidden="true" '
+                    'viewBox="0 0 100 100" preserveAspectRatio="none" '
+                    f'style="{style}position:absolute;overflow:visible;pointer-events:none;">'
+                    f'<line x1="2" y1="98" x2="2" y2="2" stroke="{stroke}" '
+                    f'stroke-width="2" vector-effect="non-scaling-stroke"{dash}/>'
+                    f'<path d="M 2 2 A 96 96 0 0 1 98 98" fill="none" stroke="{stroke}" '
+                    f'stroke-width="1.5" vector-effect="non-scaling-stroke"{dash}/>'
+                    '</svg>'
+                )
+                continue
             line_background = (
                 f"repeating-linear-gradient(to right,{stroke} 0 10px,transparent 10px 17px) "
                 "center/100% 1px no-repeat"
