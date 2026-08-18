@@ -26,6 +26,7 @@ FORM_KEYS = {
     'new_order_items',
     HISTORICAL_ORDER_EDITOR_KEY,
     'historical_box_items',
+    'historical_no_domestic_info',
     'historical_delivery_method',
     'historical_tracking_no',
     'historical_driver_name',
@@ -280,25 +281,36 @@ def render() -> None:
         historical_boxes = historical_box_editor(box_source, key=form_widget_key('historical_box_items'))
 
         st.markdown('#### 국내배송 정보')
-        receiver_cols = st.columns([1, 2])
-        consignee_name = receiver_cols[0].text_input('수하인명', key=form_widget_key('historical_consignee_name'))
-        consignee_address = receiver_cols[1].text_input('수하인주소', key=form_widget_key('historical_consignee_address'))
-        delivery_method = delivery_method_input(
-            key_prefix=form_widget_key('historical_delivery_method'),
+        no_domestic_info = st.checkbox(
+            '정보없음',
+            key=form_widget_key('historical_no_domestic_info'),
+            help='체크하면 국내배송 상세정보 없이 과거 수출 건을 등록합니다.',
         )
-        if is_courier_delivery(delivery_method):
-            tracking_no = st.text_input('송장번호', key=form_widget_key('historical_tracking_no'))
-            driver_name = ''
-            driver_phone = ''
-        elif delivery_method == '퀵배송':
-            delivery_cols = st.columns(2)
-            driver_name = delivery_cols[0].text_input('배송기사 이름', key=form_widget_key('historical_driver_name'))
-            driver_phone = delivery_cols[1].text_input('배송기사 연락처', key=form_widget_key('historical_driver_phone'))
-            tracking_no = ''
+        if no_domestic_info:
+            delivery_method = '정보없음'
+            tracking_no = driver_name = driver_phone = ''
+            consignee_name = consignee_address = ''
         else:
-            tracking_no = ''
-            driver_name = ''
-            driver_phone = ''
+            receiver_cols = st.columns([1, 2])
+            consignee_name = receiver_cols[0].text_input('수하인명', key=form_widget_key('historical_consignee_name'))
+            consignee_address = receiver_cols[1].text_input('수하인주소', key=form_widget_key('historical_consignee_address'))
+            delivery_method = delivery_method_input(
+                key_prefix=form_widget_key('historical_delivery_method'),
+            )
+            if is_courier_delivery(delivery_method):
+                tracking_no = st.text_input('송장번호', key=form_widget_key('historical_tracking_no'))
+                driver_name = ''
+                driver_phone = ''
+            elif delivery_method == '퀵배송':
+                delivery_cols = st.columns(2)
+                driver_name = delivery_cols[0].text_input('배송기사 이름', key=form_widget_key('historical_driver_name'))
+                driver_phone = delivery_cols[1].text_input('배송기사 연락처', key=form_widget_key('historical_driver_phone'))
+                tracking_no = ''
+            else:
+                tracking_no = ''
+                driver_name = ''
+                driver_phone = ''
+        # 국내배송 정보 유무와 관계없이 수출 문서는 첨부할 수 있다.
         attachment_uploads = historical_attachment_uploads(form_widget_key)
     else:
         historical_boxes = pd.DataFrame()

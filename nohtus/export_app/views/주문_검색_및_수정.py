@@ -342,15 +342,19 @@ def render() -> None:
         edited=historical_order_editor(historical_items(case_id),key=f'his_items_v2_{case_id}')
         st.markdown('#### CTN 정보'); boxes=historical_box_editor(box_items(case_id),key=f'his_boxes_v2_{case_id}')
         st.markdown('#### 국내배송 정보')
-        r=st.columns([1,2]); consignee=r[0].text_input('수하인명',value=detail['consignee_name'] or '',key=f'his_consignee_{case_id}'); address=r[1].text_input('수하인주소',value=detail['consignee_address'] or '',key=f'his_address_{case_id}')
         saved_method=txt(detail['domestic_method'])
-        method=delivery_method_input(saved_method=saved_method,key_prefix=f'his_method_{case_id}')
-        if is_courier_delivery(method):
-            tracking=st.text_input('송장번호',value=detail['tracking_no'] or '',key=f'his_tracking_{case_id}'); driver=phone=''
-        elif method=='퀵배송':
-            q=st.columns(2); driver=q[0].text_input('배송기사 이름',value=detail['driver_name'] or '',key=f'his_driver_{case_id}'); phone=q[1].text_input('배송기사 연락처',value=detail['driver_phone'] or '',key=f'his_phone_{case_id}'); tracking=''
+        no_domestic_info=st.checkbox('정보없음',value=saved_method=='정보없음',key=f'his_no_domestic_info_{case_id}',help='체크하면 국내배송 상세정보 없이 저장합니다.')
+        if no_domestic_info:
+            method='정보없음'; tracking=driver=phone=consignee=address=''
         else:
-            tracking=driver=phone=''
+            r=st.columns([1,2]); consignee=r[0].text_input('수하인명',value=detail['consignee_name'] or '',key=f'his_consignee_{case_id}'); address=r[1].text_input('수하인주소',value=detail['consignee_address'] or '',key=f'his_address_{case_id}')
+            method=delivery_method_input(saved_method=saved_method,key_prefix=f'his_method_{case_id}')
+            if is_courier_delivery(method):
+                tracking=st.text_input('송장번호',value=detail['tracking_no'] or '',key=f'his_tracking_{case_id}'); driver=phone=''
+            elif method=='퀵배송':
+                q=st.columns(2); driver=q[0].text_input('배송기사 이름',value=detail['driver_name'] or '',key=f'his_driver_{case_id}'); phone=q[1].text_input('배송기사 연락처',value=detail['driver_phone'] or '',key=f'his_phone_{case_id}'); tracking=''
+            else:
+                tracking=driver=phone=''
         if st.button('과거 수출 건 저장',type='primary',key=f'save_his_{case_id}'):
             if not country.strip(): st.error('국가는 필수입니다.')
             else:

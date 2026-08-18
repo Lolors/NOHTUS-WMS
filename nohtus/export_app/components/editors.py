@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pandas as pd
 import streamlit as st
 
 
@@ -49,6 +50,14 @@ def order_editor(dataframe, *, key: str, dynamic: bool = True):
 
 
 def historical_order_editor(dataframe, *, key: str):
+    dataframe = dataframe.copy()
+    # DB 값이 전부 비어 있으면 Streamlit이 열을 숫자/unknown 형식으로
+    # 추론해 첫 텍스트 입력을 되돌리는 경우가 있으므로 입력 열 형식을 고정한다.
+    for column in ('출고처', '제품명', '제조번호', '유효기간'):
+        if column not in dataframe.columns:
+            dataframe[column] = pd.Series('', index=dataframe.index, dtype='string')
+        else:
+            dataframe[column] = dataframe[column].fillna('').astype('string')
     return st.data_editor(
         dataframe,
         num_rows='dynamic',
