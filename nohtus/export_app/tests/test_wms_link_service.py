@@ -735,6 +735,30 @@ class WmsLinkServiceTests(unittest.TestCase):
         self.assertEqual(len(waiting_b), 1)
         self.assertEqual(int(waiting_b[0]["qty"]), 3)
 
+    def test_missing_wms_product_is_restored_from_canonical_case_rows(self) -> None:
+        wms_rows = [{
+            "source_inventory_id": 3, "company": "NOH", "product_name": "제품C",
+            "lot": "LOT-3", "exp_date": "2027-03-01", "qty": 2,
+        }]
+        canonical = [
+            {
+                "source_inventory_id": 1, "business_unit": "NOH", "product_name": "제품A",
+                "lot_no": "LOT-1", "expiry_date": "2027-01-01", "requested_qty": 5,
+                "source_location": "A1-01",
+            },
+            {
+                "source_inventory_id": 999, "business_unit": "NOH", "product_name": "제품C",
+                "lot_no": "LOT-3", "expiry_date": "2027-03-01", "requested_qty": 2,
+                "source_location": "A1-03",
+            },
+        ]
+
+        result = wms_link_service.missing_canonical_cart_rows(wms_rows, canonical, [])
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["제품명"], "제품A")
+        self.assertEqual(result[0]["요청수량"], 5)
+
     def test_stale_source_location_recovers_one_unique_relocated_inventory(self) -> None:
         con = sqlite3.connect(self.wms_db_path)
         try:

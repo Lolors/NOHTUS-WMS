@@ -196,6 +196,16 @@ def _waiting_rows_for_order(order_id: int) -> list[dict]:
     return df.to_dict("records") if not df.empty else []
 
 
+def _all_rows_for_order(order_id: int) -> list[dict]:
+    df = wms_q(
+        """SELECT source_inventory_id,company,product_name,warehouse_name,lot,exp_date,
+                  source_location,qty,COALESCE(confirmed,0) AS confirmed
+           FROM export_waiting_items WHERE order_id=? ORDER BY id""",
+        (int(order_id),),
+    )
+    return df.to_dict("records") if not df.empty else []
+
+
 def _cart_row_from_waiting_row(row: dict) -> dict:
     return {
         "id": int(row.get("source_inventory_id") or 0),
@@ -206,6 +216,49 @@ def _cart_row_from_waiting_row(row: dict) -> dict:
         "유통기한": row.get("exp_date") or "",
         "로케이션": row.get("source_location") or "",
     }
+
+
+def _stock_signature(row: dict) -> tuple[str, str, str, str]:
+    return (
+        _match_value(row.get("company") or row.get("business_unit") or row.get("사업장")),
+        _match_text(row.get("product_name") or row.get("제품명")),
+        _match_value(row.get("lot") or row.get("lot_no") or row.get("LOT")),
+        _match_date(row.get("exp_date") or row.get("expiry_date") or row.get("유통기한")),
+    )
+
+
+def missing_canonical_cart_rows(
+    wms_rows: list[dict], canonical_rows: list[dict], cart: list[dict]
+) -> list[dict]:
+    """WMS 연결에서 통째로 사라진 EXPORT 저장행만 복구 대상으로 돌려준다.
+
+    source id는 재고 이동/병합 뒤 달라질 수 있으므로 제품·제조번호·유통기한
+    서명으로 비교한다. 이미 같은 재고가 WMS에 있으면 오래된 미러 중복행은
+    다시 추가하지 않는다.
+    """
+    represented = {_stock_signature(row) for row in wms_rows}
+    represented.update(_stock_signature(row) for row in cart)
+    missing_by_signature: dict[tuple[str, str, str, str], dict] = {}
+    for row in canonical_rows:
+        if not row.get("source_inventory_id") or safe_quantity(row.get("requested_qty")) <= 0:
+            continue
+        signature = _stock_signature(row)
+        if not signature[1] or signature in represented:
+            continue
+        if signature not in missing_by_signature:
+            missing_by_signature[signature] = _cart_row_from_shipment_row(row)
+        else:
+            missing_by_signature[signature]["요청수량"] += safe_quantity(
+                row.get("requested_qty")
+            )
+    return list(missing_by_signature.values())
+
+
+def safe_quantity(value: object) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def authoritative_other_cart_rows(
@@ -304,6 +357,7 @@ def save_picked_inventory(*, case_id:int, order_item_id:int, kept_rows:list[dict
     other_rows=[row for row in case_rows if int(row["order_item_id"] or 0)!=int(order_item_id)]
     if editing_order_id:
         waiting_rows=_waiting_rows_for_order(editing_order_id)
+        all_wms_rows=_all_rows_for_order(editing_order_id)
         _fill_missing_source_links(all_kept_rows, waiting_rows)
         _fill_missing_source_links(other_rows, waiting_rows)
     linked_kept_rows=[row for row in all_kept_rows if row.get("source_inventory_id")]
@@ -317,6 +371,9 @@ def save_picked_inventory(*, case_id:int, order_item_id:int, kept_rows:list[dict
     if not editing_order_id:
         cart += [_cart_row_from_shipment_row(row) for row in linked_kept_rows]
         cart += [_cart_row_from_pick(pick) for pick in picked_rows]
+    else:
+        final_canonical_rows = other_rows + all_kept_rows
+        cart += missing_canonical_cart_rows(all_wms_rows, final_canonical_rows, cart)
 
     mirror_rows=[{"_id":row["id"],"business_unit":row.get("business_unit") or "","location":row.get("source_location") or row.get("location") or "","source_inventory_id":row.get("source_inventory_id"),"product_name":row.get("product_name") or "","lot_no":row.get("lot_no") or "","expiry_date":row.get("expiry_date") or "","requested_qty":float(row["requested_qty"] or 0)} for row in all_kept_rows]
     mirror_rows += [{"_id":None,"business_unit":pick.get("company") or "","location":pick.get("location") or "","source_inventory_id":int(pick["inventory_id"]),"product_name":pick.get("product_name") or "","lot_no":pick.get("lot") or "","expiry_date":pick.get("exp_date") or "","requested_qty":float(pick["qty"])} for pick in picked_rows]
