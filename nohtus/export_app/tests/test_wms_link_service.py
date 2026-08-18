@@ -735,6 +735,44 @@ class WmsLinkServiceTests(unittest.TestCase):
         self.assertEqual(len(waiting_b), 1)
         self.assertEqual(int(waiting_b[0]["qty"]), 3)
 
+    def test_stale_source_location_recovers_one_unique_relocated_inventory(self) -> None:
+        con = sqlite3.connect(self.wms_db_path)
+        try:
+            row = export_waiting_service._resolve_source_row(
+                con.cursor(),
+                999,
+                {
+                    "company": "NOH", "product_name": "제품A", "warehouse_name": "ERP-A",
+                    "lot": "LOT-1", "exp_date": "2027-01-01", "location": "REC",
+                },
+                required_qty=5,
+            )
+        finally:
+            con.close()
+        self.assertEqual(int(row["id"]), 1)
+        self.assertEqual(row["location"], "A1-01")
+
+    def test_stale_source_location_does_not_guess_between_multiple_rows(self) -> None:
+        con = sqlite3.connect(self.wms_db_path)
+        try:
+            con.execute(
+                """INSERT INTO inventory(id,location,company,product_name,warehouse_name,lot,exp_date,qty,updated_at)
+                   VALUES(3,'A1-03','NOH','제품A','ERP-A','LOT-1','2027-01-01',10,'2026-01-01')"""
+            )
+            con.commit()
+            row = export_waiting_service._resolve_source_row(
+                con.cursor(),
+                999,
+                {
+                    "company": "NOH", "product_name": "제품A", "warehouse_name": "ERP-A",
+                    "lot": "LOT-1", "exp_date": "2027-01-01", "location": "REC",
+                },
+                required_qty=5,
+            )
+        finally:
+            con.close()
+        self.assertIsNone(row)
+
 
 if __name__ == "__main__":
     unittest.main()

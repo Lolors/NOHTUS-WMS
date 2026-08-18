@@ -247,6 +247,26 @@ def _resolve_source_row(cur, inventory_id, fallback=None, required_qty=0):
     for candidate in candidates:
         if int(candidate.get("qty") or 0) >= required_qty:
             return candidate
+    if not candidates:
+        # 재고조사나 위치 이동으로 원본 ID와 로케이션이 함께 바뀐 구형 연결행은
+        # 완전 동일한 재고키가 다른 일반 로케이션에 단 하나만 있을 때만 복구한다.
+        relocated_sql = """SELECT * FROM inventory
+            WHERE company=? AND product_name=? AND IFNULL(lot,'-')=?
+              AND IFNULL(exp_date,'-')=? AND location<>? AND COALESCE(qty,0)>0"""
+        relocated_params = [company, product_name, lot, exp_date, P]
+        if warehouse_name:
+            relocated_sql += " AND IFNULL(warehouse_name,'')=?"
+            relocated_params.append(warehouse_name)
+        relocated_sql += " ORDER BY qty DESC,id"
+        relocated_rows = cur.execute(relocated_sql, tuple(relocated_params)).fetchall()
+        relocated_columns = [d[0] for d in cur.description]
+        relocated = [dict(zip(relocated_columns, row)) for row in relocated_rows]
+        eligible = [
+            row for row in relocated
+            if int(row.get("qty") or 0) >= required_qty
+        ]
+        if len(eligible) == 1:
+            return eligible[0]
     # 같은 재고키는 있지만 수량만 부족한 경우에는 행을 반환해 호출부가
     # 정확한 요청수량/현재수량 부족 안내를 표시하게 한다.
     return candidates[0] if candidates else None
