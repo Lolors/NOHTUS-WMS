@@ -759,6 +759,46 @@ class WmsLinkServiceTests(unittest.TestCase):
         self.assertEqual(result[0]["제품명"], "제품A")
         self.assertEqual(result[0]["요청수량"], 5)
 
+    def test_repair_retries_until_every_missing_product_is_linked(self) -> None:
+        row_a = {
+            "order_item_id": 10, "source_inventory_id": 1, "business_unit": "NOH",
+            "product_name": "제품A", "lot_no": "LOT-1",
+            "expiry_date": "2027-01-01", "requested_qty": 5,
+        }
+        row_b = {
+            "order_item_id": 20, "source_inventory_id": 2, "business_unit": "NOH",
+            "product_name": "제품B", "lot_no": "LOT-2",
+            "expiry_date": "2027-02-01", "requested_qty": 3,
+        }
+        signature_a = wms_link_service._stock_signature(row_a)
+        signature_b = wms_link_service._stock_signature(row_b)
+        with (
+            patch.object(
+                wms_link_service,
+                "_missing_saved_inventory_context",
+                side_effect=[
+                    (43, {signature_a, signature_b}),
+                    (43, {signature_a, signature_b}),
+                    (43, {signature_b}),
+                    (43, set()),
+                ],
+            ),
+            patch.object(
+                wms_link_service.shipment_service,
+                "list_case_items",
+                return_value=[row_a, row_b],
+            ),
+            patch.object(wms_link_service, "save_picked_inventory") as save,
+        ):
+            repaired = wms_link_service.repair_missing_saved_inventory("EXP-TEST")
+
+        self.assertEqual(repaired, 2)
+        self.assertEqual(save.call_count, 2)
+        self.assertEqual(
+            [call.kwargs["order_item_id"] for call in save.call_args_list],
+            [10, 20],
+        )
+
     def test_stale_source_location_recovers_one_unique_relocated_inventory(self) -> None:
         con = sqlite3.connect(self.wms_db_path)
         try:

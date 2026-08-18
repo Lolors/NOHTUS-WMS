@@ -255,6 +255,13 @@ def missing_canonical_cart_rows(
 
 
 def missing_saved_inventory_count(export_no: str) -> int:
+    _, missing = _missing_saved_inventory_context(export_no)
+    return len(missing)
+
+
+def _missing_saved_inventory_context(
+    export_no: str,
+) -> tuple[int | None, set[tuple[str, str, str, str]]]:
     normalized = str(export_no or "").strip()
     cases = export_db.rows(
         """SELECT id FROM export_cases
@@ -264,8 +271,9 @@ def missing_saved_inventory_count(export_no: str) -> int:
     )
     order_ids = _linkable_order_ids(normalized)
     if len(cases) != 1 or len(order_ids) != 1:
-        return 0
-    canonical = shipment_service.list_case_items(int(cases[0]["id"]))
+        return None, set()
+    case_id = int(cases[0]["id"])
+    canonical = shipment_service.list_case_items(case_id)
     wms_rows = _all_rows_for_order(order_ids[0])
     represented = {_stock_signature(row) for row in wms_rows}
     missing = {
@@ -276,42 +284,47 @@ def missing_saved_inventory_count(export_no: str) -> int:
         and _stock_signature(row)[1]
         and _stock_signature(row) not in represented
     }
-    return len(missing)
+    return case_id, missing
 
 
 def repair_missing_saved_inventory(export_no: str) -> int:
     normalized = str(export_no or "").strip()
-    cases = export_db.rows(
-        """SELECT id FROM export_cases
-           WHERE TRIM(export_no)=TRIM(?) AND case_type<>'historical'
-             AND status<>'취소' AND stage<>'취소' ORDER BY id""",
-        (normalized,),
-    )
-    if len(cases) != 1:
+    case_id, initial_missing = _missing_saved_inventory_context(normalized)
+    if case_id is None:
         raise ValueError("복구할 수출 건을 하나로 특정할 수 없습니다.")
-    case_id = int(cases[0]["id"])
-    rows = shipment_service.list_case_items(case_id)
-    order_item_ids = [int(row["order_item_id"]) for row in rows if row.get("order_item_id")]
-    if not order_item_ids:
-        raise ValueError("복구할 수출대기 저장 품목이 없습니다.")
-    order_item_id = order_item_ids[0]
-    kept_rows = [
-        dict(row) for row in rows
-        if int(row.get("order_item_id") or 0) == order_item_id
-    ]
-    before = missing_saved_inventory_count(normalized)
-    if before <= 0:
+    if not initial_missing:
         return 0
-    save_picked_inventory(
-        case_id=case_id,
-        order_item_id=order_item_id,
-        kept_rows=kept_rows,
-        picked_rows=[],
-    )
-    after = missing_saved_inventory_count(normalized)
-    if after:
-        raise ValueError(f"{after}개 품목 연결이 아직 복구되지 않았습니다.")
-    return before
+
+    for _ in range(len(initial_missing) + 1):
+        _, missing = _missing_saved_inventory_context(normalized)
+        if not missing:
+            return len(initial_missing)
+        rows = shipment_service.list_case_items(case_id)
+        target = next(
+            (
+                row for row in rows
+                if row.get("order_item_id") and _stock_signature(row) in missing
+            ),
+            None,
+        )
+        if target is None:
+            break
+        order_item_id = int(target["order_item_id"])
+        kept_rows = [
+            dict(row) for row in rows
+            if int(row.get("order_item_id") or 0) == order_item_id
+        ]
+        save_picked_inventory(
+            case_id=case_id,
+            order_item_id=order_item_id,
+            kept_rows=kept_rows,
+            picked_rows=[],
+        )
+
+    remaining = missing_saved_inventory_count(normalized)
+    if remaining:
+        raise ValueError(f"{remaining}개 품목 연결이 아직 복구되지 않았습니다.")
+    return len(initial_missing)
 
 
 def safe_quantity(value: object) -> float:
