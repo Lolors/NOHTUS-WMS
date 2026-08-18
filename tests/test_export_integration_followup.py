@@ -201,6 +201,24 @@ class ExportIntegrationFollowupTests(TestCase):
         cart = save_waiting.call_args.args[0]
         self.assertEqual([int(row["id"]) for row in cart], [22])
 
+    def test_stale_source_id_relinks_to_existing_p_inventory_without_new_move(self):
+        row = {
+            "source_inventory_id": 11765, "business_unit": "NOHTUS",
+            "product_name": "JS Tox", "lot_no": "LOT-1",
+            "expiry_date": "2027-11-03", "source_location": "R1",
+            "requested_qty": 20,
+        }
+        p_inventory = pd.DataFrame([{"id": 12199, "location": "P"}])
+        with (
+            patch.object(wms_link_edit_patch, "connect") as connect,
+            patch.object(wms_link_edit_patch, "wms_q", return_value=p_inventory),
+        ):
+            connect.return_value.__enter__.return_value.execute.return_value.fetchall.return_value = []
+            wms_link_edit_patch._fill_source_links([row], [])
+
+        self.assertEqual(row["source_inventory_id"], 12199)
+        self.assertEqual(row["source_location"], "P")
+
     def test_dashboard_orders_early_stages_before_domestic_delivery(self):
         cases = [
             {

@@ -58,9 +58,27 @@ def _fill_source_links(rows: list[dict], waiting_rows: list[dict]) -> None:
     여러 행이 공유할 수 있게 하며, WMS 대기행에서 못 찾으면 원래 재고 키로
     inventory를 직접 찾는다.
     """
+    source_ids = {
+        int(row.get('source_inventory_id') or 0)
+        for row in rows
+        if int(row.get('source_inventory_id') or 0) > 0
+    }
+    live_source_ids: set[int] = set()
+    if source_ids:
+        placeholders = ','.join('?' for _ in source_ids)
+        with connect() as con:
+            live_source_ids = {
+                int(found[0]) for found in con.execute(
+                    f'SELECT id FROM inventory WHERE id IN ({placeholders})',
+                    tuple(sorted(source_ids)),
+                ).fetchall()
+            }
+
     for row in rows:
-        if row.get('source_inventory_id'):
+        old_source_id = int(row.get('source_inventory_id') or 0)
+        if old_source_id in live_source_ids:
             continue
+        row['source_inventory_id'] = None
         matches = [
             waiting for waiting in waiting_rows
             if _match_text(waiting.get('product_name')) == _match_text(row.get('product_name'))
@@ -75,8 +93,8 @@ def _fill_source_links(rows: list[dict], waiting_rows: list[dict]) -> None:
             match = matches[0]
             row['source_inventory_id'] = source_id
             row['source_location'] = (
-                row.get('source_location') or row.get('location')
-                or match.get('source_location') or ''
+                match.get('waiting_location') or match.get('source_location')
+                or row.get('source_location') or row.get('location') or ''
             )
             continue
 
@@ -88,23 +106,33 @@ def _fill_source_links(rows: list[dict], waiting_rows: list[dict]) -> None:
         if not company or not product:
             continue
         params = [company, product]
-        clauses = ["company=?", "product_name=?", "UPPER(TRIM(COALESCE(location,'')))<>'P'"]
+        clauses = ["company=?", "product_name=?"]
         if lot:
             clauses.append("IFNULL(lot,'')=?")
             params.append(lot)
         if exp:
             clauses.append("IFNULL(exp_date,'')=?")
             params.append(exp)
-        if location and location.upper() != 'P':
-            clauses.append("location=?")
-            params.append(location)
         candidates = wms_q(
             f"SELECT id,location FROM inventory WHERE {' AND '.join(clauses)} ORDER BY id DESC",
             tuple(params),
         )
-        if len(candidates.index) == 1:
-            row['source_inventory_id'] = int(candidates.iloc[0]['id'])
-            row['source_location'] = str(candidates.iloc[0]['location'] or location)
+        if candidates.empty:
+            continue
+        p_candidates = candidates[
+            candidates['location'].fillna('').astype(str).str.strip().str.upper() == 'P'
+        ]
+        location_candidates = candidates[
+            candidates['location'].fillna('').astype(str).str.strip() == location
+        ] if location else candidates.iloc[0:0]
+        resolved = (
+            p_candidates.iloc[0] if len(p_candidates.index) == 1 else
+            location_candidates.iloc[0] if len(location_candidates.index) == 1 else
+            candidates.iloc[0] if len(candidates.index) == 1 else None
+        )
+        if resolved is not None:
+            row['source_inventory_id'] = int(resolved['id'])
+            row['source_location'] = str(resolved['location'] or location)
 
 
 def _rows_with_live_source_inventory(rows: list[dict]) -> list[dict]:
