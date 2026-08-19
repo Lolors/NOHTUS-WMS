@@ -327,10 +327,25 @@ def _append_history_keyword_filter(conditions, params, keyword):
         "memo",
     ]
     like = f"%{term}%"
-    conditions.append(
-        "(" + " OR ".join([f"IFNULL({col}, '') LIKE ?" for col in searchable_columns] + ["CAST(qty AS TEXT) LIKE ?", "CAST(final_stock AS TEXT) LIKE ?"]) + ")"
-    )
-    params.extend([like] * (len(searchable_columns) + 2))
+    or_clauses = [f"IFNULL({col}, '') LIKE ?" for col in searchable_columns] + [
+        "CAST(qty AS TEXT) LIKE ?",
+        "CAST(final_stock AS TEXT) LIKE ?",
+    ]
+    clause_params = [like] * (len(searchable_columns) + 2)
+
+    try:
+        matched_order_ids = q(
+            "SELECT id FROM outbound_orders WHERE COALESCE(title, '') LIKE ?",
+            (like,),
+        )["id"].astype(int).tolist()
+    except Exception:
+        matched_order_ids = []
+    if matched_order_ids:
+        or_clauses.append("(" + " OR ".join(["memo LIKE ?"] * len(matched_order_ids)) + ")")
+        clause_params.extend(f"%출고지시서 #{oid}%" for oid in matched_order_ids)
+
+    conditions.append("(" + " OR ".join(or_clauses) + ")")
+    params.extend(clause_params)
 
 
 def page_history():
@@ -344,7 +359,7 @@ def page_history():
     with filter_col1:
         company = st.selectbox("사업장", ["전체"] + COMPANIES, index=0, key="history_company")
     with filter_col2:
-        tx_label = st.selectbox("이력유형", ["전체", "입고", "출고지시", "출고지시취소", "패키지 생산", "이동", "재고조정", "재고정보수정", "전산재고"], index=0, key="history_tx_label")
+        tx_label = st.selectbox("이력유형", ["전체", "입고", "출고지시", "출고지시취소", "패키지 생산", "이동", "재고조정"], index=0, key="history_tx_label")
     with filter_col3:
         start_date = st.date_input("시작일", value=default_start, key="history_start_date")
     with filter_col4:
@@ -384,8 +399,6 @@ def page_history():
     if tx_label != "전체":
         if tx_label == "이동":
             conditions.append("tx_type IN ('위치이동','사업장이동','사업장+위치이동','비자료전환','이동')")
-        elif tx_label == "전산재고":
-            conditions.append("tx_type IN ('기준재고','전산재고')")
         else:
             conditions.append("tx_type=?")
             params.append(tx_label)
