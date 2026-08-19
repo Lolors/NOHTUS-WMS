@@ -82,12 +82,8 @@ def _order_items_summary(order_id, max_items=3):
 
 
 def _order_customer_summary(order_row):
-    """저장된 출고지시 목록에 선택 매출처를 표시하고 과거 데이터만 제목으로 보완한다."""
-    customer_name = str(getattr(order_row, "customer_name", "") or "").strip()
-    if customer_name:
-        return customer_name
-    title = str(getattr(order_row, "title", "") or "").strip()
-    return (title.split(" - ", 1)[0].strip() if title else "") or "-"
+    """선택한 매출처에 연결된 사업장을 표시한다."""
+    return str(getattr(order_row, "customer_company", "") or "").strip() or "-"
 
 
 def _load_orders():
@@ -95,7 +91,21 @@ def _load_orders():
         f"""
         SELECT DISTINCT o.id, o.created_at, o.order_date, COALESCE(o.title,'') AS title,
                COALESCE(o.customer_name,'') AS customer_name,
-               COALESCE(o.customer_company,'') AS customer_company,
+               COALESCE(
+                   NULLIF(TRIM(o.customer_company),''),
+                   CASE WHEN (
+                       SELECT COUNT(DISTINCT TRIM(c.company))
+                       FROM customers c
+                       WHERE TRIM(c.customer_name)=TRIM(COALESCE(o.customer_name,''))
+                         AND TRIM(COALESCE(c.company,''))<>''
+                   )=1 THEN (
+                       SELECT MAX(TRIM(c.company))
+                       FROM customers c
+                       WHERE TRIM(c.customer_name)=TRIM(COALESCE(o.customer_name,''))
+                         AND TRIM(COALESCE(c.company,''))<>''
+                   ) ELSE '' END,
+                   ''
+               ) AS customer_company,
                o.status
         FROM outbound_orders o
         JOIN outbound_order_items i ON o.id=i.order_id
