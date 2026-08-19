@@ -48,7 +48,10 @@ def _cached_active_orders(cache_token: tuple[str, int, int]) -> pd.DataFrame:
                         WHEN 'confirmed' THEN 2
                         ELSE 3
                     END,
-                    created_at, id"""
+                    CASE WHEN status = 'confirmed' THEN NULL ELSE created_at END,
+                    CASE WHEN status = 'confirmed' THEN NULL ELSE id END,
+                    CASE WHEN status = 'confirmed' THEN created_at END DESC,
+                    CASE WHEN status = 'confirmed' THEN id END DESC"""
     )
     if orders.empty:
         return orders
