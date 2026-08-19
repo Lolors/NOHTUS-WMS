@@ -177,6 +177,27 @@ def _rows_with_live_source_inventory(rows: list[dict]) -> list[dict]:
     ]
 
 
+def _waiting_rows_backed_by_canonical_rows(
+    waiting_rows: list[dict], canonical_rows: list[dict]
+) -> list[dict]:
+    """Keep WMS waiting rows that still have a matching EXPORT saved row.
+
+    A normal move to P can consume the original inventory row, so checking only
+    whether ``source_inventory_id`` still exists incorrectly drops valid saved
+    items.  Product/company/LOT/expiry is the durable identity shared by the WMS
+    waiting row and its EXPORT mirror.
+    """
+    signatures = {
+        link_service._stock_signature(row)
+        for row in canonical_rows
+        if float(row.get('requested_qty') or 0) > 0
+    }
+    return [
+        row for row in waiting_rows
+        if link_service._stock_signature(row) in signatures
+    ]
+
+
 def _empty_target_save(order_id: int, *, export_no: str, country: str, buyer: str, transport_method: str) -> dict:
     """마지막 저장행까지 삭제하는 경우 빈 cart 검증을 우회해 정상 원복한다."""
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -242,10 +263,25 @@ def _patched_save_picked_inventory(*, case_id: int, order_item_id: int, kept_row
 
     linked_kept = [row for row in all_kept_rows if row.get('source_inventory_id')]
     linked_other = [row for row in other_rows if row.get('source_inventory_id')]
-    canonical_rows = _rows_with_live_source_inventory(linked_other + linked_kept)
-    cart = link_service.cart_rows_after_selected_order_edit(
-        [], [], canonical_rows, list(picked_rows or [])
+    canonical_rows = linked_other + linked_kept
+    backed_waiting_rows = (
+        _waiting_rows_backed_by_canonical_rows(
+            waiting_rows, canonical_rows + current_rows
+        )
+        if editing_order_id else []
     )
+    if editing_order_id and waiting_rows:
+        cart = link_service.cart_rows_after_selected_order_edit(
+            backed_waiting_rows, current_rows, linked_kept, list(picked_rows or [])
+        )
+    else:
+        # A legacy order can have EXPORT mirrors before its WMS waiting rows
+        # exist. In that case the canonical rows are the complete target, not
+        # a delta against an empty WMS baseline.
+        canonical_live_rows = _rows_with_live_source_inventory(canonical_rows)
+        cart = link_service.cart_rows_after_selected_order_edit(
+            [], [], canonical_live_rows, list(picked_rows or [])
+        )
 
     mirror_rows = [
         {

@@ -9,7 +9,12 @@ from unittest.mock import patch
 
 import nohtus.services.export_waiting as export_waiting_service
 from nohtus.export_app import db
-from nohtus.export_app.services import shipment_service, stale_inventory_cleanup_service, wms_link_service
+from nohtus.export_app.services import (
+    shipment_service,
+    stale_inventory_cleanup_service,
+    wms_link_edit_patch,
+    wms_link_service,
+)
 from nohtus.export_app.utils.dates import now_text
 
 
@@ -882,6 +887,45 @@ class WmsLinkServiceTests(unittest.TestCase):
         self.assertEqual(len(cart), 1)
         self.assertEqual(int(cart[0]["id"]), 10)
         self.assertEqual(float(cart[0]["요청수량"]), 5.0)
+
+
+    def test_moved_source_row_is_not_orphan_when_mirror_still_exists(self) -> None:
+        waiting_rows = [{
+            "source_inventory_id": 101, "company": "NOH",
+            "product_name": "Existing product", "lot": "LOT-1",
+            "exp_date": "2029-01-01", "source_location": "A1-01", "qty": 6,
+        }]
+        canonical_rows = [{
+            "source_inventory_id": 101, "business_unit": "NOH",
+            "product_name": "Existing product", "lot_no": "LOT-1",
+            "expiry_date": "2029-01-01", "source_location": "A1-01",
+            "requested_qty": 6,
+        }]
+
+        backed = wms_link_edit_patch._waiting_rows_backed_by_canonical_rows(
+            waiting_rows, canonical_rows
+        )
+
+        self.assertEqual(backed, waiting_rows)
+
+    def test_true_orphan_waiting_row_is_not_retried(self) -> None:
+        waiting_rows = [{
+            "source_inventory_id": 101, "company": "NOH",
+            "product_name": "Orphan product", "lot": "LOT-X",
+            "exp_date": "2029-01-01", "source_location": "A1-01", "qty": 2,
+        }]
+        canonical_rows = [{
+            "source_inventory_id": 202, "business_unit": "NOH",
+            "product_name": "Saved product", "lot_no": "LOT-Y",
+            "expiry_date": "2029-01-01", "source_location": "REC",
+            "requested_qty": 10,
+        }]
+
+        backed = wms_link_edit_patch._waiting_rows_backed_by_canonical_rows(
+            waiting_rows, canonical_rows
+        )
+
+        self.assertEqual(backed, [])
 
 
 if __name__ == "__main__":
