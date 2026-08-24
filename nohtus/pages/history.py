@@ -498,30 +498,35 @@ def _history_order_group_keys(df):
     return keys
 
 
-def _style_history_order_groups(show, source_df):
-    """Alternate order-group backgrounds and draw a strong line between orders."""
-    keys = _history_order_group_keys(source_df)
-    if not keys or not any(keys):
-        return show.style
+def _history_type_background(tx_type, memo=""):
+    """Return the requested background color for a transaction type."""
+    tx_type = str(tx_type or "").strip()
+    memo = str(memo or "").strip()
+    if tx_type == "출고지시" or (
+        tx_type == "출고" and memo.startswith(EXPORT_CONFIRM_MEMO_PREFIX)
+    ):
+        return "#E7F5E9"
+    if tx_type in {"위치이동", "사업장이동", "사업장+위치이동", "비자료전환", "이동"}:
+        return "#F2F2F2"
+    return ""
 
-    group_numbers = {}
-    next_group = 0
-    for key in keys:
-        if key and key not in group_numbers:
-            group_numbers[key] = next_group
-            next_group += 1
+
+def _style_history_order_groups(show, source_df):
+    """Color by history type and draw a strong line between different orders."""
+    keys = _history_order_group_keys(source_df)
 
     styles = pd.DataFrame("", index=show.index, columns=show.columns)
     previous_key = None
-    for position, key in enumerate(keys):
-        if not key:
-            previous_key = None
-            continue
-        css = "background-color: #F2F2F2;" if group_numbers[key] % 2 == 0 else ""
-        if key != previous_key:
+    for position, (key, row) in enumerate(zip(keys, source_df.itertuples(index=False))):
+        background = _history_type_background(
+            getattr(row, "tx_type", ""),
+            getattr(row, "memo", ""),
+        )
+        css = f"background-color: {background};" if background else ""
+        if key and key != previous_key:
             css += " border-top: 3px solid #64748B;"
         styles.iloc[position, :] = css
-        previous_key = key
+        previous_key = key or None
 
     return show.style.apply(lambda _data: styles, axis=None)
 

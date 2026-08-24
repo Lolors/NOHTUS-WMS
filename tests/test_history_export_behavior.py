@@ -67,9 +67,21 @@ class HistoryExportBehaviorTests(unittest.TestCase):
         self.assertEqual(keys[0], keys[1])
         self.assertNotEqual(keys[1], keys[2])
 
+    def test_history_type_background_colors(self):
+        self.assertEqual(history._history_type_background("출고지시"), "#E7F5E9")
+        self.assertEqual(history._history_type_background("위치이동"), "#F2F2F2")
+        self.assertEqual(history._history_type_background("입고"), "")
+        self.assertEqual(
+            history._history_type_background(
+                "출고",
+                "수출확정 / JP-Buyer-항공 / 매출처 / 출고일자: 2026-08-24",
+            ),
+            "#E7F5E9",
+        )
+
     @unittest.skipUnless(importlib.util.find_spec("jinja2"), "pandas Styler requires Jinja2")
     def test_order_group_style_has_fill_and_separator_line(self):
-        rows = self._rows(3)
+        rows = self._rows(3, tx_type="출고지시")
         rows.loc[0, "memo"] = "출고지시서 #101 / 재고차감"
         rows.loc[1, "memo"] = "출고지시서 #101 / 재고차감"
         rows.loc[2, "memo"] = "출고지시서 #102 / 재고차감"
@@ -86,7 +98,7 @@ class HistoryExportBehaviorTests(unittest.TestCase):
         self.assertIn("background-color", second_row_css)
         self.assertNotIn("border-top", second_row_css)
         self.assertIn("border-top", third_row_css)
-        self.assertNotIn("background-color", third_row_css)
+        self.assertIn("background-color", third_row_css)
 
     def test_export_confirmation_is_displayed_as_outbound_instruction(self):
         rows = self._rows(
