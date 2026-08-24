@@ -21,7 +21,7 @@ ERP_NAME_COLUMN_BY_COMPANY = {
     "비자료": "bidata_name",
 }
 
-HISTORY_PAGE_SIZE = 20
+HISTORY_PAGE_SIZE = 10
 EXPORT_CONFIRM_MEMO_PREFIX = "수출확정 /"
 EXPORT_WORKFLOW_HIDDEN_MEMO_PREFIXES = (
     "수출대기 등록 /",
@@ -517,8 +517,7 @@ def _style_history_order_groups(show, source_df):
         if not key:
             previous_key = None
             continue
-        fill = "#F1F7FF" if group_numbers[key] % 2 == 0 else "#FFF9E8"
-        css = f"background-color: {fill};"
+        css = "background-color: #F2F2F2;" if group_numbers[key] % 2 == 0 else ""
         if key != previous_key:
             css += " border-top: 3px solid #64748B;"
         styles.iloc[position, :] = css

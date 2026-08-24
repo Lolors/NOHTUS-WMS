@@ -33,11 +33,11 @@ class HistoryExportBehaviorTests(unittest.TestCase):
             ]
         )
 
-    def test_history_page_size_is_doubled(self):
-        self.assertEqual(history.HISTORY_PAGE_SIZE, 20)
+    def test_history_page_size_is_ten(self):
+        self.assertEqual(history.HISTORY_PAGE_SIZE, 10)
 
-    def test_twenty_rows_expand_without_internal_ten_row_viewport(self):
-        self.assertEqual(history._history_table_height(20), "content")
+    def test_ten_rows_expand_without_internal_scroll(self):
+        self.assertEqual(history._history_table_height(10), "content")
 
     def test_same_order_gets_same_group_key_and_next_order_is_different(self):
         rows = self._rows(3)
@@ -83,8 +83,10 @@ class HistoryExportBehaviorTests(unittest.TestCase):
         third_row_css = dict(context[(2, 0)])
         self.assertIn("background-color", first_row_css)
         self.assertIn("border-top", first_row_css)
+        self.assertIn("background-color", second_row_css)
         self.assertNotIn("border-top", second_row_css)
         self.assertIn("border-top", third_row_css)
+        self.assertNotIn("background-color", third_row_css)
 
     def test_export_confirmation_is_displayed_as_outbound_instruction(self):
         rows = self._rows(
