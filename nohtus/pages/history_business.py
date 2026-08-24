@@ -245,13 +245,14 @@ def page_history():
         return deleted_count
 
     def patched_data_editor(data, *args, **kwargs):
-        if kwargs.get("key") == "history_admin_delete_editor" and isinstance(data, pd.DataFrame):
+        source_data = data if isinstance(data, pd.DataFrame) else getattr(data, "data", None)
+        if kwargs.get("key") == "history_admin_delete_editor" and isinstance(source_data, pd.DataFrame):
             disabled = kwargs.get("disabled")
             if isinstance(disabled, list):
                 kwargs["disabled"] = [c for c in disabled if c != "일시"]
             edited = original_data_editor(data, *args, **kwargs)
             try:
-                updated = _update_history_dates(data, edited)
+                updated = _update_history_dates(source_data, edited)
                 if updated:
                     st.success(f"이력 일시 {updated}건을 수정했습니다.")
                     st.rerun()

@@ -461,6 +461,55 @@ def _history_excel_bytes(show):
     return output.getvalue()
 
 
+def _history_table_height(row_count):
+    """Expand the table so every row on the current page is visible at once."""
+    return "content"
+
+
+def _history_order_group_keys(df):
+    """Return a stable order key only for rows that belong to an outbound order."""
+    keys = []
+    for row in df.itertuples(index=False):
+        memo = str(getattr(row, "memo", "") or "").strip()
+        order_match = re.search(r"출고지시서\s*#(\d+)", memo)
+        if order_match:
+            keys.append(f"outbound:{order_match.group(1)}")
+        elif memo.startswith(EXPORT_CONFIRM_MEMO_PREFIX):
+            keys.append(f"export:{memo}")
+        else:
+            keys.append("")
+    return keys
+
+
+def _style_history_order_groups(show, source_df):
+    """Alternate order-group backgrounds and draw a strong line between orders."""
+    keys = _history_order_group_keys(source_df)
+    if not keys or not any(keys):
+        return show.style
+
+    group_numbers = {}
+    next_group = 0
+    for key in keys:
+        if key and key not in group_numbers:
+            group_numbers[key] = next_group
+            next_group += 1
+
+    styles = pd.DataFrame("", index=show.index, columns=show.columns)
+    previous_key = None
+    for position, key in enumerate(keys):
+        if not key:
+            previous_key = None
+            continue
+        fill = "#F1F7FF" if group_numbers[key] % 2 == 0 else "#FFF9E8"
+        css = f"background-color: {fill};"
+        if key != previous_key:
+            css += " border-top: 3px solid #64748B;"
+        styles.iloc[position, :] = css
+        previous_key = key
+
+    return show.style.apply(lambda _data: styles, axis=None)
+
+
 def page_history():
     st.title("이력 조회")
 
@@ -579,6 +628,7 @@ def page_history():
 
     tx_ids = df["id"].astype(int).tolist() if "id" in df.columns else []
     show = _format_history_rows(df)
+    table_height = _history_table_height(len(show))
 
     all_filtered_df = q(f"""
         SELECT * FROM transactions
@@ -598,10 +648,12 @@ def page_history():
     if is_admin():
         admin_show = show.copy()
         admin_show.insert(0, "선택", False)
+        styled_admin_show = _style_history_order_groups(admin_show, df)
         edited = st.data_editor(
-            admin_show,
+            styled_admin_show,
             use_container_width=True,
             hide_index=True,
+            height=table_height,
             disabled=[c for c in admin_show.columns if c != "선택"],
             column_config={"선택": st.column_config.CheckboxColumn("선택")},
             key="history_admin_delete_editor",
@@ -660,7 +712,12 @@ def page_history():
                     except Exception as e:
                         st.error(str(e))
     else:
-        st.dataframe(show, use_container_width=True, hide_index=True)
+        st.dataframe(
+            _style_history_order_groups(show, df),
+            use_container_width=True,
+            hide_index=True,
+            height=table_height,
+        )
 
     st.markdown(
         """

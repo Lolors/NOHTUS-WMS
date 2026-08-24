@@ -1,4 +1,5 @@
 from io import BytesIO
+import importlib.util
 import sqlite3
 import unittest
 
@@ -34,6 +35,39 @@ class HistoryExportBehaviorTests(unittest.TestCase):
 
     def test_history_page_size_is_doubled(self):
         self.assertEqual(history.HISTORY_PAGE_SIZE, 20)
+
+    def test_twenty_rows_expand_without_internal_ten_row_viewport(self):
+        self.assertEqual(history._history_table_height(20), "content")
+
+    def test_same_order_gets_same_group_key_and_next_order_is_different(self):
+        rows = self._rows(3)
+        rows.loc[0, "memo"] = "출고지시서 #101 / 재고차감"
+        rows.loc[1, "memo"] = "출고지시서 #101 / 재고차감"
+        rows.loc[2, "memo"] = "출고지시서 #102 / 재고차감"
+
+        keys = history._history_order_group_keys(rows)
+
+        self.assertEqual(keys[0], keys[1])
+        self.assertNotEqual(keys[1], keys[2])
+
+    @unittest.skipUnless(importlib.util.find_spec("jinja2"), "pandas Styler requires Jinja2")
+    def test_order_group_style_has_fill_and_separator_line(self):
+        rows = self._rows(3)
+        rows.loc[0, "memo"] = "출고지시서 #101 / 재고차감"
+        rows.loc[1, "memo"] = "출고지시서 #101 / 재고차감"
+        rows.loc[2, "memo"] = "출고지시서 #102 / 재고차감"
+        shown = history._format_history_rows(rows)
+
+        styled = history._style_history_order_groups(shown, rows)
+        context = styled._compute().ctx
+
+        first_row_css = dict(context[(0, 0)])
+        second_row_css = dict(context[(1, 0)])
+        third_row_css = dict(context[(2, 0)])
+        self.assertIn("background-color", first_row_css)
+        self.assertIn("border-top", first_row_css)
+        self.assertNotIn("border-top", second_row_css)
+        self.assertIn("border-top", third_row_css)
 
     def test_export_confirmation_is_displayed_as_outbound_instruction(self):
         rows = self._rows(
