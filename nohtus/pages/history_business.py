@@ -31,6 +31,11 @@ def _display_row_to_tx_id(cur, row, used_ids):
     memo = str(row.get("메모") or "").strip()
     if not created_at or not tx_type or not product_name:
         return None
+    database_tx_type = (
+        "출고"
+        if tx_type == "출고지시" and memo.startswith(history_page.EXPORT_CONFIRM_MEMO_PREFIX)
+        else tx_type
+    )
     rows = cur.execute(
         """
         SELECT id
@@ -43,7 +48,7 @@ def _display_row_to_tx_id(cur, row, used_ids):
           AND IFNULL(memo, '')=?
         ORDER BY id DESC
         """,
-        (created_at, tx_type, product_name, lot, exp_date, memo),
+        (created_at, database_tx_type, product_name, lot, exp_date, memo),
     ).fetchall()
     for raw in rows:
         tx_id = int(raw[0])

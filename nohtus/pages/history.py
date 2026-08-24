@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from io import BytesIO
 from datetime import date, datetime
 
 import pandas as pd
@@ -19,6 +20,16 @@ ERP_NAME_COLUMN_BY_COMPANY = {
     "NOH": "erp_noh_name",
     "비자료": "bidata_name",
 }
+
+HISTORY_PAGE_SIZE = 20
+EXPORT_CONFIRM_MEMO_PREFIX = "수출확정 /"
+EXPORT_WORKFLOW_HIDDEN_MEMO_PREFIXES = (
+    "수출대기 등록 /",
+    "수출대기 수정 /",
+    "수출대기 취소 /",
+    "수출확정 수정 /",
+    "패킹완료 단계로 되돌리기 /",
+)
 
 
 def _norm(value, fallback="-"):
@@ -333,8 +344,124 @@ def _append_history_keyword_filter(conditions, params, keyword):
     params.extend([like] * (len(searchable_columns) + 2))
 
 
-def page_history():
+def _append_export_history_visibility_filter(conditions, params):
+    """Hide noisy export workflow logs while retaining them for stock consistency."""
+    hidden = []
+    for prefix in EXPORT_WORKFLOW_HIDDEN_MEMO_PREFIXES:
+        hidden.append("IFNULL(memo, '') LIKE ?")
+        params.append(f"{prefix}%")
+    conditions.append("NOT (" + " OR ".join(hidden) + ")")
+
+
+def _format_history_rows(df):
+    """Convert transaction rows into the common on-screen/Excel history layout."""
     from nohtus.services.closing import _infer_customer_from_title
+
+    show = df.copy()
+    if show.empty:
+        return pd.DataFrame()
+
+    final_values = []
+    qty_values = []
+    for row in show.itertuples():
+        tx_type = str(getattr(row, "tx_type", "") or "")
+        qty = int(getattr(row, "qty", 0) or 0)
+        qty_values.append(f"{qty:+d}" if tx_type in ["재고조정", "재고실사"] else str(qty))
+        final_stock_value = getattr(row, "final_stock", None)
+        final_values.append(
+            int(final_stock_value)
+            if final_stock_value is not None and not pd.isna(final_stock_value)
+            else ""
+        )
+
+    show["수량"] = qty_values
+    show["최종재고"] = final_values
+
+    order_customer_map = {}
+    try:
+        order_ids = []
+        if "memo" in show.columns:
+            for memo_text in show["memo"].fillna("").astype(str).tolist():
+                match = re.search(r"출고지시서\s*#(\d+)", memo_text)
+                if match:
+                    order_ids.append(int(match.group(1)))
+        order_ids = sorted(set(order_ids))
+        if order_ids:
+            placeholders = ",".join(["?"] * len(order_ids))
+            orders_df = q(
+                f"SELECT id, COALESCE(title, '') AS title, COALESCE(customer_name, '') AS customer_name "
+                f"FROM outbound_orders WHERE id IN ({placeholders})",
+                tuple(order_ids),
+            )
+            customers_df = q(
+                "SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC"
+            )
+            for row in orders_df.itertuples(index=False):
+                saved_customer = str(getattr(row, "customer_name", "") or "")
+                customer = saved_customer or _infer_customer_from_title(
+                    getattr(row, "title", ""), customers_df
+                )[0]
+                order_customer_map[int(getattr(row, "id"))] = customer
+    except Exception:
+        order_customer_map = {}
+
+    def _history_customer_from_memo(memo_text):
+        match = re.search(r"출고지시서\s*#(\d+)", str(memo_text or ""))
+        return order_customer_map.get(int(match.group(1)), "") if match else ""
+
+    show["매출처"] = (
+        show["memo"].apply(_history_customer_from_memo) if "memo" in show.columns else ""
+    )
+
+    # Final export confirmation is the only export-stage stock deduction shown to users.
+    if "tx_type" in show.columns and "memo" in show.columns:
+        export_confirmed = show["tx_type"].fillna("").eq("출고") & show["memo"].fillna("").str.startswith(
+            EXPORT_CONFIRM_MEMO_PREFIX
+        )
+        show.loc[export_confirmed, "tx_type"] = "출고지시"
+
+    if "exp_date" in show.columns:
+        show["exp_date"] = show["exp_date"].apply(display_date_only)
+    rename_cols = {
+        "created_at": "일시",
+        "actor": "사용자",
+        "tx_type": "이력유형",
+        "product_name": "제품명",
+        "lot": "LOT",
+        "exp_date": "유통기한",
+        "from_company": "출발사업장",
+        "from_location": "출발위치",
+        "to_company": "도착사업장",
+        "to_location": "도착위치",
+        "memo": "메모",
+    }
+    show = show.rename(columns=rename_cols)
+    wanted = [
+        "일시", "이력유형", "매출처", "제품명", "LOT", "유통기한", "출발사업장",
+        "출발위치", "도착사업장", "도착위치", "수량", "최종재고", "메모", "사용자",
+    ]
+    return show[[column for column in wanted if column in show.columns]]
+
+
+def _history_excel_bytes(show):
+    """Export every filtered history row, independent of screen pagination."""
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        show.to_excel(writer, sheet_name="이력조회", index=False)
+        worksheet = writer.sheets["이력조회"]
+        worksheet.freeze_panes = "A2"
+        worksheet.auto_filter.ref = worksheet.dimensions
+        for cell in worksheet[1]:
+            cell.font = cell.font.copy(bold=True, color="FFFFFF")
+            cell.fill = cell.fill.copy(fill_type="solid", fgColor="4472C4")
+        for column_cells in worksheet.columns:
+            values = [str(cell.value or "") for cell in column_cells[:300]]
+            width = min(max(max((len(value) for value in values), default=0) + 2, 10), 45)
+            worksheet.column_dimensions[column_cells[0].column_letter].width = width
+    return output.getvalue()
+
+
+def page_history():
     st.title("이력 조회")
 
     today = date.today()
@@ -384,13 +511,21 @@ def page_history():
     if tx_label != "전체":
         if tx_label == "이동":
             conditions.append("tx_type IN ('위치이동','사업장이동','사업장+위치이동','비자료전환','이동')")
+        elif tx_label == "출고지시":
+            conditions.append("(tx_type='출고지시' OR (tx_type='출고' AND IFNULL(memo, '') LIKE ?))")
+            params.append(f"{EXPORT_CONFIRM_MEMO_PREFIX}%")
         elif tx_label == "전산재고":
             conditions.append("tx_type IN ('기준재고','전산재고')")
         else:
             conditions.append("tx_type=?")
             params.append(tx_label)
     else:
-        conditions.append("tx_type NOT IN ('재고조사불러오기','ERP비교','출고','출고확정')")
+        conditions.append(
+            "(tx_type NOT IN ('재고조사불러오기','ERP비교','출고','출고확정') "
+            "OR (tx_type='출고' AND IFNULL(memo, '') LIKE ?))"
+        )
+        params.append(f"{EXPORT_CONFIRM_MEMO_PREFIX}%")
+    _append_export_history_visibility_filter(conditions, params)
     _append_history_keyword_filter(conditions, params, term)
     if customer_term.strip():
         matched_order_ids = []
@@ -423,7 +558,7 @@ def page_history():
         st.info("조회된 이력이 없습니다.")
         return
 
-    page_size = 10
+    page_size = HISTORY_PAGE_SIZE
     total_pages = max(1, (total_count + page_size - 1) // page_size)
     current_page = int(st.session_state.get("history_page", 1) or 1)
     current_page = max(1, min(current_page, total_pages))
@@ -442,64 +577,23 @@ def page_history():
     result_label = "검색결과" if term.strip() or customer_term.strip() else "총"
     st.caption(f"{result_label} {total_count:,}건 / {current_page:,}페이지/{total_pages:,}페이지 / 현재 {start_no:,}~{end_no:,}건 표시")
 
-    final_values = []
-    qty_values = []
-    for r in df.itertuples():
-        typ = str(getattr(r, "tx_type", "") or "")
-        qty = int(getattr(r, "qty", 0) or 0)
-        qty_values.append(f"{qty:+d}" if typ in ["재고조정", "재고실사"] else str(qty))
-        final_stock_value = getattr(r, "final_stock", None)
-        final_values.append(int(final_stock_value) if final_stock_value is not None and not pd.isna(final_stock_value) else "")
+    tx_ids = df["id"].astype(int).tolist() if "id" in df.columns else []
+    show = _format_history_rows(df)
 
-    show = df.copy()
-    tx_ids = show["id"].astype(int).tolist() if "id" in show.columns else []
-    show["수량"] = qty_values
-    show["최종재고"] = final_values
-
-    order_customer_map = {}
-    try:
-        order_ids = []
-        if "memo" in show.columns:
-            for memo_text in show["memo"].fillna("").astype(str).tolist():
-                m = re.search(r"출고지시서\s*#(\d+)", memo_text)
-                if m:
-                    order_ids.append(int(m.group(1)))
-        order_ids = sorted(set(order_ids))
-        if order_ids:
-            placeholders = ",".join(["?"] * len(order_ids))
-            orders_df = q(f"SELECT id, COALESCE(title, '') AS title, COALESCE(customer_name, '') AS customer_name FROM outbound_orders WHERE id IN ({placeholders})", tuple(order_ids))
-            customers_df = q("SELECT customer_name, manager FROM customers ORDER BY LENGTH(customer_name) DESC")
-            for r in orders_df.itertuples(index=False):
-                saved_customer = str(getattr(r, "customer_name", "") or "")
-                customer = saved_customer or _infer_customer_from_title(getattr(r, "title", ""), customers_df)[0]
-                order_customer_map[int(getattr(r, "id"))] = customer
-    except Exception:
-        order_customer_map = {}
-
-    def _history_customer_from_memo(memo_text):
-        m = re.search(r"출고지시서\s*#(\d+)", str(memo_text or ""))
-        return order_customer_map.get(int(m.group(1)), "") if m else ""
-
-    show["매출처"] = show["memo"].apply(_history_customer_from_memo) if "memo" in show.columns else ""
-
-    if "exp_date" in show.columns:
-        show["exp_date"] = show["exp_date"].apply(display_date_only)
-    rename_cols = {
-        "created_at": "일시",
-        "actor": "사용자",
-        "tx_type": "이력유형",
-        "product_name": "제품명",
-        "lot": "LOT",
-        "exp_date": "유통기한",
-        "from_company": "출발사업장",
-        "from_location": "출발위치",
-        "to_company": "도착사업장",
-        "to_location": "도착위치",
-        "memo": "메모",
-    }
-    show = show.rename(columns=rename_cols)
-    wanted = ["일시", "이력유형", "매출처", "제품명", "LOT", "유통기한", "출발사업장", "출발위치", "도착사업장", "도착위치", "수량", "최종재고", "메모", "사용자"]
-    show = show[[c for c in wanted if c in show.columns]]
+    all_filtered_df = q(f"""
+        SELECT * FROM transactions
+        {where}
+        ORDER BY id DESC
+    """, tuple(params))
+    all_filtered_show = _format_history_rows(all_filtered_df)
+    st.download_button(
+        "조회 기간 전체 이력 엑셀 다운로드",
+        data=_history_excel_bytes(all_filtered_show),
+        file_name=f"NOHTUS_이력조회_{start_date}_{end_date}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=False,
+        help="현재 페이지와 관계없이 지정 기간 및 검색 조건에 맞는 전체 이력을 내려받습니다.",
+    )
 
     if is_admin():
         admin_show = show.copy()
