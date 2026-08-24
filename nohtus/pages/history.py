@@ -560,7 +560,6 @@ def page_history():
         )
     with customer_col:
         customer_term = st.text_input("매출처 검색", placeholder="매출처명 일부 입력", key="history_customer_term")
-    st.caption("검색어는 현재 표시된 페이지가 아니라 설정한 기간의 전체 이력에 먼저 적용한 뒤, 검색 결과를 페이지로 나눠 표시합니다.")
 
     filter_key = f"{company}|{tx_label}|{start_date}|{end_date}|{term.strip()}|{customer_term.strip()}"
     if st.session_state.get("history_filter_key") != filter_key:
@@ -657,14 +656,21 @@ def page_history():
         ORDER BY id DESC
     """, tuple(params))
     all_filtered_show = _format_history_rows(all_filtered_df)
-    st.download_button(
-        "조회 기간 전체 이력 엑셀 다운로드",
-        data=_history_excel_bytes(all_filtered_show),
-        file_name=f"NOHTUS_이력조회_{start_date}_{end_date}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=False,
-        help="현재 페이지와 관계없이 지정 기간 및 검색 조건에 맞는 전체 이력을 내려받습니다.",
-    )
+    guide_col, download_col = st.columns([3.4, 1.6], vertical_alignment="center")
+    with guide_col:
+        st.caption(
+            "검색어는 현재 표시된 페이지가 아니라 설정한 기간의 전체 이력에 먼저 적용한 뒤, "
+            "검색 결과를 페이지로 나눠 표시합니다."
+        )
+    with download_col:
+        st.download_button(
+            "조회 기간 전체 이력 엑셀 다운로드",
+            data=_history_excel_bytes(all_filtered_show),
+            file_name=f"NOHTUS_이력조회_{start_date}_{end_date}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            help="현재 페이지와 관계없이 지정 기간 및 검색 조건에 맞는 전체 이력을 내려받습니다.",
+        )
 
     if is_admin():
         admin_show = show.copy()
