@@ -50,6 +50,23 @@ class HistoryExportBehaviorTests(unittest.TestCase):
         self.assertEqual(keys[0], keys[1])
         self.assertNotEqual(keys[1], keys[2])
 
+    def test_same_export_is_grouped_across_different_sales_destinations(self):
+        rows = self._rows(3, tx_type="출고")
+        rows.loc[0, "memo"] = (
+            "수출확정 / JP-Buyer-항공 / 노투스팜 수출처 / 출고일자: 2026-08-24"
+        )
+        rows.loc[1, "memo"] = (
+            "수출확정 / JP-Buyer-항공 / NOH 수출처 / 출고일자: 2026-08-24"
+        )
+        rows.loc[2, "memo"] = (
+            "수출확정 / JP-Buyer-항공 / NOH 수출처 / 출고일자: 2026-08-25"
+        )
+
+        keys = history._history_order_group_keys(rows)
+
+        self.assertEqual(keys[0], keys[1])
+        self.assertNotEqual(keys[1], keys[2])
+
     @unittest.skipUnless(importlib.util.find_spec("jinja2"), "pandas Styler requires Jinja2")
     def test_order_group_style_has_fill_and_separator_line(self):
         rows = self._rows(3)

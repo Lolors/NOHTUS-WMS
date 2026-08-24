@@ -466,6 +466,23 @@ def _history_table_height(row_count):
     return "content"
 
 
+def _export_history_group_key(memo):
+    """Group one export regardless of the selected sales company/customer."""
+    text = str(memo or "").strip()
+    if not text.startswith(EXPORT_CONFIRM_MEMO_PREFIX):
+        return ""
+
+    detail = text[len(EXPORT_CONFIRM_MEMO_PREFIX):]
+    shipment_marker = " / 출고일자: "
+    if shipment_marker in detail:
+        order_and_customer, shipment_date = detail.rsplit(shipment_marker, 1)
+        order_title = order_and_customer.split(" / ", 1)[0].strip()
+        return f"export:{order_title}|{shipment_date.strip()}"
+
+    # Older records without a shipment date still ignore the sales destination.
+    return f"export:{detail.split(' / ', 1)[0].strip()}"
+
+
 def _history_order_group_keys(df):
     """Return a stable order key only for rows that belong to an outbound order."""
     keys = []
@@ -475,7 +492,7 @@ def _history_order_group_keys(df):
         if order_match:
             keys.append(f"outbound:{order_match.group(1)}")
         elif memo.startswith(EXPORT_CONFIRM_MEMO_PREFIX):
-            keys.append(f"export:{memo}")
+            keys.append(_export_history_group_key(memo))
         else:
             keys.append("")
     return keys
