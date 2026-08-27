@@ -33,6 +33,13 @@ def inventory_selection_source(current_rows: list[dict], stock_rows: pd.DataFram
     """기존 연결과 검색 재고를 한 편집표로 합친다."""
     rows: dict[int, dict] = {}
     for current in current_rows:
+        # Older/manually-linked shipment rows can have no resolvable WMS stock
+        # (source_inventory_id is NULL) — this editor only manages rows tied to
+        # real inventory, so anything without one is left out rather than
+        # crashing. It is unaffected by whatever gets saved here, same as the
+        # save handler below (which already skips falsy source_inventory_id).
+        if current.get('source_inventory_id') is None:
+            continue
         inventory_id = int(current['source_inventory_id'])
         qty = safe_number(current['requested_qty'])
         if inventory_id in rows:
@@ -174,7 +181,11 @@ def edit_shipment_intake_dialog(
         """,
         unsafe_allow_html=True,
     )
-    st.caption('체크를 끄면 기존 입고가 삭제되고, 새 행을 체크하면 입고에 추가됩니다.')
+    st.caption(
+        '선택수량을 0으로 하거나 행을 삭제하면 기존 입고가 삭제되고, '
+        '새 행에 선택수량을 입력하면 입고에 추가됩니다. '
+        '행 왼쪽을 선택한 뒤 삭제(휴지통) 아이콘으로 행을 지울 수 있습니다.'
+    )
     search_key = f'wms_intake_modal_search_{case_id}_{order_item_id}'
     search_term = st.text_input(
         '제품 검색',
@@ -206,22 +217,35 @@ def edit_shipment_intake_dialog(
             source,
             hide_index=True,
             use_container_width=True,
+            num_rows='dynamic',
             disabled=['사업장', '제품명', '제조번호', '유통기한', '보유수량'],
-            column_order=['선택', '사업장', '제품명', '제조번호', '유통기한', '선택수량'],
+            column_order=['사업장', '제품명', '제조번호', '유통기한', '선택수량'],
             column_config={
                 '_inventory_id': None,
                 '_location': None,
                 '_product_name': None,
                 '로케이션': None,
                 '보유수량': None,
-                '선택': st.column_config.CheckboxColumn('선택'),
+                '선택': None,
                 '선택수량': st.column_config.NumberColumn(
                     '선택수량', min_value=0, step=1, format='%g',
                 ),
             },
             key=f'wms_intake_modal_editor_{case_id}_{order_item_id}_{editor_product}',
         )
-        selected = edited[edited['선택']].copy() if not edited.empty else edited
+        # num_rows="dynamic" lets a row be deleted with the trash icon, but it also
+        # lets a brand-new blank row be added via "+"; such a row has no
+        # _inventory_id to save against, so drop anything without one before use.
+        if not edited.empty:
+            edited = edited[pd.to_numeric(edited['_inventory_id'], errors='coerce').notna()].copy()
+        # No "선택" checkbox column anymore: the table's own row-select + trash
+        # icon handles removal, and a positive 선택수량 is what marks a row as
+        # actually wanted (existing rows start out at their current qty, new
+        # search rows start at 0 until the user types a quantity).
+        selected = (
+            edited[pd.to_numeric(edited['선택수량'], errors='coerce').fillna(0) > 0].copy()
+            if not edited.empty else edited
+        )
         selected_qty = (
             float(pd.to_numeric(selected['선택수량'], errors='coerce').fillna(0).sum())
             if not selected.empty else 0.0
@@ -236,12 +260,11 @@ def edit_shipment_intake_dialog(
     if not save_clicked:
         return
     invalid = selected[
-        (pd.to_numeric(selected['선택수량'], errors='coerce').fillna(0) <= 0)
-        | (pd.to_numeric(selected['선택수량'], errors='coerce').fillna(0)
-           > pd.to_numeric(selected['보유수량'], errors='coerce').fillna(0))
+        pd.to_numeric(selected['선택수량'], errors='coerce').fillna(0)
+        > pd.to_numeric(selected['보유수량'], errors='coerce').fillna(0)
     ] if not selected.empty else selected
     if not invalid.empty:
-        st.error('선택수량은 1 이상, 보유수량 이하여야 합니다.')
+        st.error('선택수량은 보유수량 이하여야 합니다.')
         return
 
     current_by_inventory: dict[int, dict] = {}
@@ -291,13 +314,14 @@ def reopen_export_waiting_dialog(*, case_id: int, export_no: str) -> None:
     if confirm_col.button('수출대기로 되돌리기', type='primary', use_container_width=True):
         try:
             export_service.reopen_for_export_waiting(case_id)
-            folder_service.sync_case_folder(case_id)
-            history_service.add(case_id, '수출확정 취소', '수출대기 상태로 되돌림')
         except ValueError as exc:
             st.error(str(exc))
         else:
+            _, folder_error = folder_service.try_sync_case_folder(case_id)
+            history_service.add(case_id, '수출확정 취소', '수출대기 상태로 되돌림')
             st.session_state['shipment_intake_success_message'] = (
                 f'{export_no}을(를) 수출대기 상태로 되돌렸습니다.'
+                + (f' (폴더 저장 실패: {folder_error})' if folder_error else '')
             )
             st.rerun()
 
@@ -450,7 +474,7 @@ def render() -> None:
                 key=f'delete_legacy_{case_id}',
             ):
                 shipment_service.delete_unlinked(case_id)
-                folder_service.sync_case_folder(case_id)
+                folder_service.try_sync_case_folder(case_id)
                 history_service.add(case_id, '구형 미연결 입고 삭제', f'{unlinked_count}개 행')
                 st.success('구형 미연결 저장 데이터를 삭제했습니다.')
                 st.rerun()
@@ -518,9 +542,9 @@ def render() -> None:
             else:
                 st.session_state.pop(draft_key, None)
                 st.session_state[version_key] = editor_version + 1
-                folder_service.sync_case_folder(case_id)
+                _, folder_error = folder_service.try_sync_case_folder(case_id)
                 history_service.add(case_id, '출고 단계 주문목록 수정', f'{len(numbered_orders)}개 행')
-                st.success('주문목록을 저장했습니다.')
+                st.success('주문목록을 저장했습니다.' + (f' (폴더 저장 실패: {folder_error})' if folder_error else ''))
                 st.rerun()
 
     with right:

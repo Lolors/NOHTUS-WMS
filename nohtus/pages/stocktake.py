@@ -126,6 +126,21 @@ def _update_inventory_and_product_mappings(
                 (product_name, lot, exp_date, int(inv_id)),
             )
 
+            # Stock already saved to 수출대기 (moved to location P) keeps its own
+            # product_name/lot/exp_date snapshot in export_waiting_items rather
+            # than reading live inventory — without this it would stay frozen
+            # at whatever it was the moment it was saved there. Match on either
+            # id column since a P row can be tracked as the original source or
+            # as the inventory row currently sitting at P.
+            con.execute(
+                """
+                UPDATE export_waiting_items
+                SET product_name=?, lot=?, exp_date=?
+                WHERE waiting_inventory_id=? OR source_inventory_id=?
+                """,
+                (product_name, lot, exp_date, int(inv_id), int(inv_id)),
+            )
+
             kept_ids = set()
             for _, mapping in mapping_rows.iterrows():
                 values = {
@@ -201,7 +216,34 @@ def _update_inventory_and_product_mappings(
             con.rollback()
             raise
 
-    return product_name, lot, exp_date, len(mapping_rows)
+    propagation_error = _propagate_master_edit_to_shipment_items(int(inv_id), product_name, lot, exp_date)
+
+    return product_name, lot, exp_date, len(mapping_rows), propagation_error
+
+
+def _propagate_master_edit_to_shipment_items(inv_id, product_name, lot, exp_date):
+    """수출대기 제품에 이미 입고 연결된 행이 있으면 제품명/LOT/유통기한을 같이 맞춘다.
+
+    수출 DB(shipment_items)는 별도 연결이라 위 재고/제품매칭 트랜잭션과 하나로
+    묶을 수 없다. 이 재고 행을 근거로 입고 연결된 행(source_inventory_id)만
+    골라서 스냅샷 텍스트를 갱신한다. 재고/제품매칭 수정 자체는 이미 반영된
+    뒤이므로, 여기서 실패해도 예외를 던지지 않고 경고 메시지만 돌려준다.
+    """
+    from nohtus.export_app import db as export_db
+    from nohtus.export_app.utils.dates import now_text
+
+    try:
+        export_db.execute(
+            """
+            UPDATE shipment_items
+            SET product_name=?, lot_no=?, expiry_date=?, updated_at=?
+            WHERE source_inventory_id=?
+            """,
+            (product_name, lot, exp_date, now_text(), inv_id),
+        )
+    except Exception as exc:
+        return f"제품마스터는 수정됐지만 수출대기 제품 반영에 실패했습니다: {exc}"
+    return ""
 
 
 @st.dialog("제품마스터 수정", width="large")
@@ -246,13 +288,16 @@ def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
         key=f"stock_master_save_{inv_id}",
     ):
         try:
-            saved_product, saved_lot, saved_exp, mapping_count = _update_inventory_and_product_mappings(
+            saved_product, saved_lot, saved_exp, mapping_count, propagation_error = _update_inventory_and_product_mappings(
                 int(inv_id), new_product_name, new_lot, new_exp, edited_mappings
             )
-            st.session_state["_stock_master_success_msg"] = (
+            success_msg = (
                 f"제품마스터 수정 완료: {saved_product} / {saved_lot} / "
                 f"{display_date_only(saved_exp)} / 매칭 {mapping_count}행"
             )
+            if propagation_error:
+                success_msg += f" ({propagation_error})"
+            st.session_state["_stock_master_success_msg"] = success_msg
             st.session_state["_stock_master_focus_product"] = saved_product
             st.rerun()
         except Exception as exc:

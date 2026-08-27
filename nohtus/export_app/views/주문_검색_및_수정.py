@@ -378,7 +378,7 @@ def render() -> None:
                 try: save_historical(case_id,edited,boxes,(country.strip(),buyer.strip(),transport,note.strip(),str(ship_date)),(method,tracking.strip(),driver.strip(),phone.strip(),consignee.strip(),address.strip()))
                 except ValueError as e: st.error(str(e))
                 else:
-                    order_service.clear_editable_cases_cache(); folder_service.sync_case_folder(case_id); history_service.add_history(case_id,'과거 수출 건 전체 수정',f'{len(edited)}행'); st.success('저장했습니다.'); st.rerun()
+                    order_service.clear_editable_cases_cache(); _,folder_error=folder_service.try_sync_case_folder(case_id); history_service.add_history(case_id,'과거 수출 건 전체 수정',f'{len(edited)}행'); st.success('저장했습니다.'+(f' (폴더 저장 실패: {folder_error})' if folder_error else '')); st.rerun()
     else:
         st.markdown('### 주문 수정')
         a=st.columns(4)
@@ -403,7 +403,7 @@ def render() -> None:
                 actual_ship_date=str(actual_ship_date) if actual_ship_date else '',
             )
             order_service.clear_editable_cases_cache()
-            folder_service.sync_case_folder(case_id)
+            folder_service.try_sync_case_folder(case_id)
             st.rerun()
         existing=order_service.get_order_items_dataframe(case_id)
         if existing.empty:
@@ -414,7 +414,7 @@ def render() -> None:
         existing.insert(1, '행번호', range(1, len(existing) + 1))
         edited=order_editor(existing,key=f'orders_edit_v2_{case_id}')
         if st.button('주문 목록 저장',type='primary'):
-            order_service.save_order_items(case_id,edited); folder_service.sync_case_folder(case_id); st.rerun()
+            order_service.save_order_items(case_id,edited); folder_service.try_sync_case_folder(case_id); st.rerun()
 
     st.divider()
     action_left, action_right = st.columns([7, 3], gap='large')

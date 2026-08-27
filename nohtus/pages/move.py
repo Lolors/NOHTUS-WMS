@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import streamlit as st
 
-from nohtus.config import COMPANIES
+from nohtus.config import AREA_CONFIG, COMPANIES
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only
-from nohtus.locations import parse_location
+from nohtus.locations import expand_location_block, make_location, parse_location
 from nohtus.services.inventory import move_inventory
 from nohtus.services.products import product_options
 
@@ -40,8 +40,9 @@ def _save_destination_mapping(company, product, erp_name):
 
 
 def page_move():
-    from nohtus.ui.location_picker import location_picker
+    from nohtus.ui.location_picker import location_picker, render_location_range_grid_picker_button
     from nohtus.services.inbound import product_mapping_name_for
+    from inbound_map import render_move_quick_location_map
     st.title("이동 등록")
     st.caption("제품 → 유통기한 → LOT/제조번호를 선택하면 출발 재고가 자동 표시됩니다.")
 
@@ -73,12 +74,15 @@ def page_move():
         if exp_df.empty:
             st.info("현재 재고가 0이 아닌 유통기한이 없습니다.")
             return
-        exp = st.selectbox(
-            "유통기한",
-            exp_df["exp_date"].tolist(),
-            format_func=display_date_only,
-            key=f"move_exp_{product}",
-        )
+
+        exp_col, lot_col = st.columns(2)
+        with exp_col:
+            exp = st.selectbox(
+                "유통기한",
+                exp_df["exp_date"].tolist(),
+                format_func=display_date_only,
+                key=f"move_exp_{product}",
+            )
 
         lot_df = q(
             "SELECT DISTINCT lot FROM inventory "
@@ -88,11 +92,12 @@ def page_move():
         if lot_df.empty:
             st.info("선택한 유통기한에 재고가 0이 아닌 LOT/제조번호가 없습니다.")
             return
-        lot = st.selectbox(
-            "LOT/제조번호",
-            lot_df["lot"].tolist(),
-            key=f"move_lot_{product}_{exp}",
-        )
+        with lot_col:
+            lot = st.selectbox(
+                "LOT/제조번호",
+                lot_df["lot"].tolist(),
+                key=f"move_lot_{product}_{exp}",
+            )
 
     src_df = q("""SELECT id, company AS 출발사업장, location AS 출발위치, qty AS 현재수량, warehouse_name AS 전산상명칭
                   FROM inventory
@@ -151,7 +156,56 @@ def page_move():
                     st.session_state["_move_auto_loc_key"] = auto_key
                 st.caption(f"기존 위치 자동 선택: {preferred_loc} ({preferred_qty}EA)")
 
+    st.markdown("---")
+    st.markdown("#### 도착 위치 선택")
+    st.caption("도면에서 위치를 클릭하면 오른쪽 구역/라인/단이 그 위치로 바뀝니다.")
+    move_map_col, move_pos_col = st.columns([7.3, 2.7], gap="large")
+    with move_pos_col:
         to_location = location_picker("move", "A1")
+        range_end_on = st.checkbox(
+            "여러 칸 범위를 통째로 차지",
+            key="move_range_end_on",
+            help="한 제품이 여러 로케이션 칸을 통째로 차지할 때, 재고는 위 위치 하나로만 관리하면서 로케이션맵에는 범위 전체가 채워진 것으로 표시합니다.",
+        )
+        range_end_raw = st.session_state.get("_move_range_end_loc", "")
+        range_end_loc = ""
+        pick_target = "start"
+        if range_end_on:
+            render_location_range_grid_picker_button("move", parse_location(to_location)[0])
+            pick_label = st.radio(
+                "도면 클릭 시 지정할 위치",
+                ["도착 위치", "끝 위치"],
+                horizontal=True,
+                key="move_range_pick_target",
+            )
+            pick_target = "end" if pick_label == "끝 위치" else "start"
+            if range_end_raw:
+                clear_col, info_col = st.columns([1, 3])
+                with clear_col:
+                    if st.button("끝 위치 지우기", key="move_range_end_clear"):
+                        st.session_state["_move_range_end_loc"] = ""
+                        range_end_raw = ""
+                        st.rerun()
+                with info_col:
+                    st.caption(f"끝 위치(도면 클릭): {range_end_raw}")
+                # 도면은 구역/라인 단위로만 클릭이 가능하고 칸(단)까지는 구분되지
+                # 않으므로, 끝 위치의 단은 별도 선택으로 정확히 지정한다.
+                end_area, end_line, end_level = parse_location(range_end_raw)
+                end_levels = list(AREA_CONFIG.get(end_area, {}).get("levels") or [])
+                if end_area != parse_location(to_location)[0]:
+                    st.warning("끝 위치가 도착 위치와 같은 구역이 아닙니다. 도면에서 같은 구역 안의 칸을 클릭하세요.")
+                elif end_levels:
+                    end_level = st.selectbox(
+                        "끝 단",
+                        end_levels,
+                        index=end_levels.index(end_level) if end_level in end_levels else 0,
+                        key="move_range_end_level",
+                    )
+                    range_end_loc = make_location(end_area, end_line, end_level)
+                else:
+                    range_end_loc = range_end_raw
+            else:
+                st.caption("도면에서 범위의 끝 칸을 클릭하세요.")
         qty = st.number_input("이동 수량", min_value=1, max_value=max_qty, value=min(1, max_qty), step=1)
         memo = st.text_input("메모", value="")
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
@@ -163,8 +217,13 @@ def page_move():
                         st.error(f"{to_company} ERP명을 입력해야 이동할 수 있습니다.")
                         return
                     _save_destination_mapping(to_company, product, dest_mapping_input)
-                move_inventory(src_id, to_company, to_location, int(qty), memo)
+                move_inventory(src_id, to_company, to_location, int(qty), memo, location_range_end=range_end_loc)
+                st.session_state["_move_range_end_loc"] = ""
                 st.success(f"이동 저장 완료: {product} / {qty}EA → {to_company} {to_location}")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
+
+    with move_map_col:
+        range_locations = expand_location_block(to_location, range_end_loc) if range_end_on else []
+        render_move_quick_location_map(pick_target=pick_target, range_locations=range_locations)

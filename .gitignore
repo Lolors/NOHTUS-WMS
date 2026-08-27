@@ -35,9 +35,13 @@ Thumbs.db
 # Local runtime data
 data/nohtus.db
 /data/product_images/
+/data/discrepancy_comic/
 data/export.db
 /data/export_uploads/
 data/export.db
 
 backups/
 .claude/launch.json
+data/export.db-shm
+data/export.db-shm
+/data/.recovery_backups

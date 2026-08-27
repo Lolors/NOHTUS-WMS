@@ -282,10 +282,10 @@ class ExportIntegrationFollowupTests(TestCase):
         self.assertLess(duplicate_guard, first_row_use)
         self.assertIn("주문 병합으로 하나로 합치거나", source)
 
-    def test_export_sales_registration_is_after_shipment_intake(self):
+    def test_export_sales_registration_is_right_after_box_packing(self):
         navigation = Path("nohtus/navigation.py").read_text(encoding="utf-8")
-        self.assertLess(navigation.index('"수출대기 저장"'), navigation.index('"수출확정 매출 등록"'))
-        self.assertLess(navigation.index('"수출확정 매출 등록"'), navigation.index('"박스 패킹"'))
+        self.assertLess(navigation.index('"수출대기 저장"'), navigation.index('"박스 패킹"'))
+        self.assertLess(navigation.index('"박스 패킹"'), navigation.index('"수출확정 매출 등록"'))
 
         application = Path("nohtus/application.py").read_text(encoding="utf-8")
         self.assertIn('elif menu == "수출확정 매출 등록": page_export_sales_registration()', application)

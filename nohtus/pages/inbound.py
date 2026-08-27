@@ -10,6 +10,8 @@ from datetime import date, datetime
 
 import streamlit as st
 
+from nohtus.config import AREA_CONFIG
+from nohtus.locations import expand_location_block, make_location, parse_location
 from nohtus.dates import normalize_exp_date
 from nohtus.services.inventory import add_inventory
 from nohtus.services.products import product_options
@@ -32,15 +34,16 @@ FIRST_PRODUCT_DRAFT_KEYS = [
 ]
 
 
-def _has_first_product_draft():
-    """최초 등록 입력값이 하나라도 남아 있으면 입력 영역을 계속 열어둔다."""
-    return any(str(st.session_state.get(k) or "").strip() for k in FIRST_PRODUCT_DRAFT_KEYS)
+def _on_first_product_toggle():
+    """체크 해제 시 표준제품명/ERP명/제품코드 입력값도 함께 지운다.
 
-
-def _keep_first_product_section_open_if_needed():
-    """도면 클릭 후 rerun되어도 최초 등록 체크/입력칸이 접히지 않게 한다."""
-    if bool(st.session_state.get("inbound_first_product")) or _has_first_product_draft():
-        st.session_state["inbound_first_product"] = True
+    이 콜백 없이는 체크를 해제해도 남아있는 입력값 때문에 다음 렌더에서
+    다시 체크된 것처럼 보이는 문제가 있었다(입력값이 남아있으면 계속 열어두는
+    로직이 해제 자체를 무시했기 때문).
+    """
+    if not st.session_state.get("inbound_first_product"):
+        for key in FIRST_PRODUCT_DRAFT_KEYS:
+            st.session_state.pop(key, None)
 
 
 def _erp_choice_label(value):
@@ -102,11 +105,10 @@ def _apply_selected_inbound_date(*, company, product, warehouse, lot, exp, locat
 
 
 def page_inbound():
-    from nohtus.ui.location_picker import inbound_location_picker
+    from nohtus.ui.location_picker import inbound_location_picker, render_location_range_grid_picker_button
     from inbound_map import render_inbound_quick_location_map
 
     _apply_inbound_location_pending()
-    _keep_first_product_section_open_if_needed()
     st.title("입고 등록")
 
     inbound_date = st.date_input(
@@ -138,11 +140,11 @@ def page_inbound():
             inbound_product_term = st.text_input("제품 검색", placeholder="제품명, ERP명, 비자료명, 별칭 일부 입력", key="inbound_product_term")
         with first_col:
             st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-            first_product = st.checkbox("최초 등록", key="inbound_first_product")
-
-        if not first_product and _has_first_product_draft():
-            st.session_state["inbound_first_product"] = True
-            first_product = True
+            first_product = st.checkbox(
+                "최초 등록",
+                key="inbound_first_product",
+                on_change=_on_first_product_toggle,
+            )
 
         products = product_options(inbound_product_term)
         product_list = products["standard_name"].dropna().astype(str).drop_duplicates().tolist() if not products.empty else []
@@ -193,11 +195,53 @@ def page_inbound():
 
     st.markdown("---")
     map_col, pos_col = st.columns([7.3, 2.7], gap="large")
-    with map_col:
-        render_inbound_quick_location_map()
     with pos_col:
         st.markdown("#### 입고 위치")
         loc = inbound_location_picker("REC")
+        range_end_on = st.checkbox(
+            "여러 칸 범위를 통째로 차지",
+            key="inbound_range_end_on",
+            help="한 제품이 여러 로케이션 칸을 통째로 차지할 때, 재고는 위 위치 하나로만 관리하면서 로케이션맵에는 범위 전체가 채워진 것으로 표시합니다.",
+        )
+        range_end_raw = st.session_state.get("_inbound_range_end_loc", "")
+        range_end_loc = ""
+        pick_target = "start"
+        if range_end_on:
+            render_location_range_grid_picker_button("inbound", parse_location(loc)[0])
+            pick_label = st.radio(
+                "도면 클릭 시 지정할 위치",
+                ["시작 위치", "끝 위치"],
+                horizontal=True,
+                key="inbound_range_pick_target",
+            )
+            pick_target = "end" if pick_label == "끝 위치" else "start"
+            if range_end_raw:
+                clear_col, info_col = st.columns([1, 3])
+                with clear_col:
+                    if st.button("끝 위치 지우기", key="inbound_range_end_clear"):
+                        st.session_state["_inbound_range_end_loc"] = ""
+                        range_end_raw = ""
+                        st.rerun()
+                with info_col:
+                    st.caption(f"끝 위치(도면 클릭): {range_end_raw}")
+                # 도면은 구역/라인 단위로만 클릭이 가능하고 칸(단)까지는 구분되지
+                # 않으므로, 끝 위치의 단은 별도 선택으로 정확히 지정한다.
+                end_area, end_line, end_level = parse_location(range_end_raw)
+                end_levels = list(AREA_CONFIG.get(end_area, {}).get("levels") or [])
+                if end_area != parse_location(loc)[0]:
+                    st.warning("끝 위치가 시작 위치와 같은 구역이 아닙니다. 도면에서 같은 구역 안의 칸을 클릭하세요.")
+                elif end_levels:
+                    end_level = st.selectbox(
+                        "끝 단",
+                        end_levels,
+                        index=end_levels.index(end_level) if end_level in end_levels else 0,
+                        key="inbound_range_end_level",
+                    )
+                    range_end_loc = make_location(end_area, end_line, end_level)
+                else:
+                    range_end_loc = range_end_raw
+            else:
+                st.caption("도면에서 범위의 끝 칸을 클릭하세요.")
         qty = st.number_input("수량", min_value=1, step=1, key="inbound_qty")
         memo = st.text_input("메모", value="", key="inbound_memo")
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
@@ -221,7 +265,8 @@ def page_inbound():
                     inbound_memo = " / ".join(memo_parts) if memo_parts else "입고 등록"
                     normalized_lot = normalize_blank(lot)
                     normalized_exp = normalize_exp_date(exp)
-                    add_inventory(company, product, wh, normalized_lot, normalized_exp, loc, int(qty), inbound_memo)
+                    add_inventory(company, product, wh, normalized_lot, normalized_exp, loc, int(qty), inbound_memo,
+                                 location_range_end=range_end_loc)
                     _apply_selected_inbound_date(
                         company=company,
                         product=product,
@@ -234,5 +279,10 @@ def page_inbound():
                         inbound_date=inbound_date,
                     )
                     save_msg.success(f"입고 저장 완료: {inbound_date.strftime('%Y-%m-%d')} / {company} / {product} / {wh} / {loc} / {qty}EA")
+                    st.session_state["_inbound_range_end_loc"] = ""
                 except Exception as e:
                     save_msg.error(str(e))
+
+    with map_col:
+        range_locations = expand_location_block(loc, range_end_loc) if range_end_on else []
+        render_inbound_quick_location_map(pick_target=pick_target, range_locations=range_locations)

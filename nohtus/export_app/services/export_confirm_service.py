@@ -48,7 +48,7 @@ def _cached_active_orders(cache_token: tuple[str, int, int]) -> pd.DataFrame:
                         WHEN 'confirmed' THEN 2
                         ELSE 3
                     END,
-                    created_at, id"""
+                    export_no DESC"""
     )
     if orders.empty:
         return orders
@@ -101,7 +101,7 @@ def order_items(order_id: int) -> pd.DataFrame:
                   COALESCE(confirmed,0) AS confirmed,confirmed_company AS 확정사업장,
                   confirmed_customer_name AS 확정매출처,confirmed_at AS 확정일시
            FROM export_waiting_items WHERE order_id=?
-           ORDER BY COALESCE(confirmed,0),company,product_name,lot,exp_date,source_location""",
+           ORDER BY COALESCE(confirmed,0),id DESC""",
         (int(order_id),),
     )
     if not df.empty:

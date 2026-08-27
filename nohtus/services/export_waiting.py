@@ -680,7 +680,19 @@ def _apply_confirmed_export_item_changes(
         "SELECT COUNT(*) FROM export_waiting_items WHERE order_id=? AND COALESCE(confirmed,0)=0",
         (int(order_id),),
     ).fetchone()[0]
-    status = "partial" if int(remaining or 0) else "confirmed"
+    total = cur.execute(
+        "SELECT COUNT(*) FROM export_waiting_items WHERE order_id=?",
+        (int(order_id),),
+    ).fetchone()[0]
+    # A confirmed order whose last item(s) just got removed (e.g. deleting every
+    # row in the intake editor) has zero items left, not zero *unconfirmed*
+    # items — that must not read as "confirmed" or the next save on this order
+    # trips the "수정할 수출확정 품목을 찾을 수 없습니다" guard above, since it
+    # requires at least one confirmed item to edit against.
+    if int(total or 0) == 0:
+        status = "waiting"
+    else:
+        status = "partial" if int(remaining or 0) else "confirmed"
     cur.execute(
         "UPDATE export_waiting_orders SET status=?,updated_at=? WHERE id=?",
         (status, now, int(order_id)),

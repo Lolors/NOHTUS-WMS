@@ -18,25 +18,25 @@ class ClosingSelectedCustomerTests(unittest.TestCase):
             ]
         )
 
-    def test_saved_customer_company_wins_over_title(self):
-        company, manager = _outbound_customer_from_saved_or_title(
+    def test_saved_customer_name_wins_over_title(self):
+        customer, manager = _outbound_customer_from_saved_or_title(
             "선택 매출처",
             "제목 매출처 - 제품A",
             self.customers,
             "노투스팜",
         )
 
-        self.assertEqual(company, "노투스팜")
+        self.assertEqual(customer, "선택 매출처")
         self.assertEqual(manager, "선택 담당자")
 
-    def test_legacy_blank_customer_falls_back_to_title_customer_company(self):
-        company, manager = _outbound_customer_from_saved_or_title(
+    def test_legacy_blank_customer_falls_back_to_title_customer_name(self):
+        customer, manager = _outbound_customer_from_saved_or_title(
             "",
             "제목 매출처 - 제품A",
             self.customers,
         )
 
-        self.assertEqual(company, "노투스")
+        self.assertEqual(customer, "제목 매출처")
         self.assertEqual(manager, "제목 담당자")
 
     @patch("nohtus.pages.closing.q")
@@ -62,7 +62,7 @@ class ClosingSelectedCustomerTests(unittest.TestCase):
         rows = _scheduled_outbound_business_log("2026-08-18", self.customers)
 
         self.assertEqual(rows[0]["사업장"], "NOH")
-        self.assertEqual(rows[0]["거래처(매출처/입고처)"], "노투스팜")
+        self.assertEqual(rows[0]["거래처(매출처/입고처)"], "선택 매출처")
         self.assertEqual(rows[0]["담당자"], "선택 담당자")
 
 

@@ -62,6 +62,12 @@ def init_db():
     inventory_cols = {r[1] for r in cur.execute("PRAGMA table_info(inventory)").fetchall()}
     if "is_shippable" not in inventory_cols:
         cur.execute("ALTER TABLE inventory ADD COLUMN is_shippable INTEGER NOT NULL DEFAULT 1")
+    if "location_range_end" not in inventory_cols:
+        # 한 제품이 실제로는 여러 로케이션(구역-라인-단) 범위를 통째로 차지하지만
+        # 어느 칸에서 실제로 빠지는지 관리하고 싶지 않을 때, location(시작 칸)에서
+        # 이 칸(끝 칸)까지의 전체 블록을 로케이션맵에 "채워짐"으로 표시하는 데 쓴다.
+        # 실제 수량/이동/피킹 로직은 그대로 location 하나만 기준으로 동작한다.
+        cur.execute("ALTER TABLE inventory ADD COLUMN location_range_end TEXT")
     cur.execute("""
     CREATE TABLE IF NOT EXISTS transactions(
         id INTEGER PRIMARY KEY AUTOINCREMENT,

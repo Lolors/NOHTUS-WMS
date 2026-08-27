@@ -157,12 +157,15 @@ def render() -> None:
     if return_to_packing:
         try:
             export_service.return_domestic_to_packing_complete(case_id)
-            folder_service.sync_case_folder(case_id)
-            history_service.add(case_id, '단계 되돌리기', '국내배송 → 패킹 완료')
         except ValueError as exc:
             st.error(str(exc))
         else:
-            st.success('패킹완료 단계로 되돌렸습니다. 수출대기 저장과 박스 패킹에서 다시 선택할 수 있습니다.')
+            _, folder_error = folder_service.try_sync_case_folder(case_id)
+            history_service.add(case_id, '단계 되돌리기', '국내배송 → 패킹 완료')
+            st.success(
+                '패킹완료 단계로 되돌렸습니다. 수출대기 저장과 박스 패킹에서 다시 선택할 수 있습니다.'
+                + (f' (폴더 저장 실패: {folder_error})' if folder_error else '')
+            )
             st.rerun()
 
     if open_folder:

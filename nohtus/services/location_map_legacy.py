@@ -12,6 +12,8 @@ import streamlit.components.v1 as components
 from nohtus.config import AREA_CONFIG, SPECIAL_LOCATIONS
 from nohtus.db import q
 from nohtus.dates import display_date_only
+from nohtus.locations import expand_location_block
+from nohtus.services.location_map_layout import load_location_map_layout
 
 def get_product_image_path(product_name):
     df = q("SELECT image_path FROM products WHERE standard_name=?", (product_name,))
@@ -26,7 +28,8 @@ def _loc_group_from_df(df):
     data = {}
     for r in df.itertuples():
         loc = str(r.location)
-        data.setdefault(loc, []).append({
+        range_end = str(getattr(r, "location_range_end", "") or "")
+        entry = {
             "id": int(r.id),
             "company": str(r.company),
             "product_name": str(r.product_name),
@@ -34,7 +37,11 @@ def _loc_group_from_df(df):
             "lot": str(r.lot or "-"),
             "exp_date": display_date_only(r.exp_date),
             "qty": int(r.qty),
-        })
+        }
+        # 실제 재고는 location 하나만 기준으로 관리하지만, location_range_end가
+        # 있으면 그 범위 전체 칸을 로케이션맵에서 "채워짐"으로 함께 표시한다.
+        for block_loc in expand_location_block(loc, range_end):
+            data.setdefault(block_loc, []).append(entry)
     return data
 
 
@@ -42,13 +49,37 @@ def render_location_map():
     """새로고침 없는 로케이션 맵.
     Streamlit 버튼/링크 대신 components.html 내부 JavaScript로 오른쪽 상세패널만 갱신한다.
     """
-    df = q("SELECT id, company, product_name, warehouse_name, lot, exp_date, location, qty FROM inventory WHERE qty>0 ORDER BY location, company, product_name")
+    df = q("SELECT id, company, product_name, warehouse_name, lot, exp_date, location, location_range_end, qty FROM inventory WHERE qty>0 ORDER BY location, company, product_name")
     loc_data = _loc_group_from_df(df)
     tx = q("""SELECT created_at, tx_type, product_name, lot, exp_date, from_location, to_location, qty
               FROM transactions ORDER BY id DESC LIMIT 300""")
     tx_data = tx.to_dict("records") if not tx.empty else []
     selected_loc = st.session_state.get("selected_location", "")
-    payload = json.dumps({"inventory": loc_data, "tx": tx_data, "selected_location": selected_loc}, ensure_ascii=False)
+    layout_items = load_location_map_layout().get("items", [])
+    layout_company = {
+        item.get("code"): item.get("company")
+        for item in layout_items
+        if item.get("kind") == "location" and item.get("code") and item.get("company")
+    }
+    # A name the admin explicitly set in the editor's "세부정보 표시 이름" field,
+    # separate from "label" (the text drawn on the map cell itself). Used to
+    # let the editor override the detail-panel name for zones whose name is
+    # otherwise a hardcoded string in zoneName() below (Q/X1/X2/REC/P/... etc).
+    layout_label = {
+        item.get("code"): item.get("detail_label")
+        for item in layout_items
+        if item.get("code") and item.get("detail_label")
+    }
+    payload = json.dumps(
+        {
+            "inventory": loc_data,
+            "tx": tx_data,
+            "selected_location": selected_loc,
+            "layout_company": layout_company,
+            "layout_label": layout_label,
+        },
+        ensure_ascii=False,
+    )
 
     def dot(loc):
         if loc == "N":
@@ -205,13 +236,21 @@ const inventory = DATA.inventory || {{}};
 const txData = DATA.tx || [];
 const specialLocations = ["오른쪽 창고", "사무실(4층)"];
 const initialSelectedLocation = DATA.selected_location || "";
-function zoneName(loc){{
+const layoutCompany = DATA.layout_company || {{}};
+const layoutLabel = DATA.layout_label || {{}};
+function zoneName(loc, rows){{
+  const area=(loc||'').split('-')[0];
+  const customLabel = layoutLabel[loc] || layoutLabel[area];
+  if(customLabel) return customLabel;
   if((loc||'')==='홍보물랙') return '홍보물랙';
   if(specialLocations.includes(loc||'')) return '기타 위치';
-  const area=(loc||'').split('-')[0];
-  if(['A1','A2','B1','B2','C1'].includes(area)) return '노투스팜';
-  if(['C2','D1'].includes(area)) return '노투스';
-  if(area==='E1') return 'NOH';
+  if(['A1','A2','B1','B2','C1','C2','D1','E1'].includes(area)){{
+    const companies=Array.from(new Set((rows||[]).map(r=>r.company).filter(Boolean)));
+    if(companies.length) return companies.join(', ');
+    const p=(loc||'').split('-');
+    const cellCode=p.length>=2 ? p[0]+'-'+p[1] : loc;
+    return layoutCompany[cellCode] || layoutCompany[loc] || '-';
+  }}
   if(area==='Q') return '유통기간임박';
   if(area==='F1') return '비자료';
   if(area==='X1') return '폐기';
@@ -367,7 +406,7 @@ function showDetail(loc){{
   const d=document.getElementById('detail');
   let title=loc;
   const p=loc.split('-'); if(p.length>=2) title=p[0]+'-'+p[1];
-  if(!rows.length){{d.innerHTML=`<div class="side-title">${{esc(title)}}</div><div class="zone-pill">${{esc(zoneName(loc))}}</div><div class="caption">현재 이 로케이션에는 표시할 재고가 없습니다.</div>`; return;}}
+  if(!rows.length){{d.innerHTML=`<div class="side-title">${{esc(title)}}</div><div class="zone-pill">${{esc(zoneName(loc, rows))}}</div><div class="caption">현재 이 로케이션에는 표시할 재고가 없습니다.</div>`; return;}}
   const total=rows.reduce((a,b)=>a+(b.qty||0),0);
   const order={{'1단':0,'2단':1,'3단':2,'단 구분 없음':9}};
   rows.sort((a,b)=>{{return (order[levelLabel(a.location)]??5)-(order[levelLabel(b.location)]??5) || a.company.localeCompare(b.company) || a.product_name.localeCompare(b.product_name);}});
@@ -375,7 +414,7 @@ function showDetail(loc){{
   rows.forEach(r=>{{const lvl=levelLabel(r.location); if(!grouped[lvl]) grouped[lvl]=[]; grouped[lvl].push(r);}});
   const levels=['1단','2단','3단'].filter(l=>grouped[l]);
   Object.keys(grouped).forEach(l=>{{if(!levels.includes(l)) levels.push(l);}});
-  let html=`<div class="side-title">${{esc(title)}}</div><div class="zone-pill">${{esc(zoneName(loc))}}</div><div class="metric"><div class="caption">현재 총재고</div><div class="n">${{total}} EA</div></div>`;
+  let html=`<div class="side-title">${{esc(title)}}</div><div class="zone-pill">${{esc(zoneName(loc, rows))}}</div><div class="metric"><div class="caption">현재 총재고</div><div class="n">${{total}} EA</div></div>`;
   if(levels.length>1){{
     html+=`<div class="level-tabs">${{levels.map((lvl,i)=>`<button class="level-tab ${{i===0?'active':''}}" type="button" data-level-tab="${{esc(lvl)}}">${{esc(lvl)}}</button>`).join('')}}</div>`;
   }}

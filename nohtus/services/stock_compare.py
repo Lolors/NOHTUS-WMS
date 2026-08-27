@@ -55,6 +55,26 @@ def _ensure_ignored_problem_table():
                 "ALTER TABLE stock_compare_ignored_problems "
                 "ADD COLUMN reason TEXT NOT NULL DEFAULT ''"
             )
+        if "wms_qty" not in columns:
+            con.execute(
+                "ALTER TABLE stock_compare_ignored_problems "
+                "ADD COLUMN wms_qty INTEGER NOT NULL DEFAULT 0"
+            )
+        if "compare_qty" not in columns:
+            con.execute(
+                "ALTER TABLE stock_compare_ignored_problems "
+                "ADD COLUMN compare_qty INTEGER NOT NULL DEFAULT 0"
+            )
+        if "diff" not in columns:
+            con.execute(
+                "ALTER TABLE stock_compare_ignored_problems "
+                "ADD COLUMN diff INTEGER NOT NULL DEFAULT 0"
+            )
+        if "updated_at" not in columns:
+            con.execute(
+                "ALTER TABLE stock_compare_ignored_problems "
+                "ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''"
+            )
         con.commit()
 
 
@@ -80,7 +100,8 @@ def list_ignored_problems():
             """
             SELECT id AS ID, issue_type AS 구분, company AS 사업장,
                    product_name AS 표준제품명, expiry AS 유통기한,
-                   reason AS 차이원인, created_at AS 무시등록일시
+                   reason AS 차이원인, created_at AS 무시등록일시,
+                   wms_qty AS WMS수량, compare_qty AS ERP수량, diff AS 차이
             FROM stock_compare_ignored_problems
             ORDER BY created_at DESC, id DESC
             """,
@@ -95,22 +116,105 @@ def add_ignored_problems(problem_rows, reason=""):
     if not reason:
         raise ValueError("차이 원인을 입력하세요.")
     _ensure_ignored_problem_table()
-    keys = {_issue_key(row) for _, row in problem_rows.iterrows()}
-    keys = {key for key in keys if key[0] and key[2]}
-    rows = [(*key, reason) for key in sorted(keys)]
+
+    def qty(row, column):
+        value = pd.to_numeric(row.get(column), errors="coerce")
+        return 0 if pd.isna(value) else int(value)
+
+    by_key = {}
+    for _, row in problem_rows.iterrows():
+        key = _issue_key(row)
+        if not key[0] or not key[2]:
+            continue
+        wms_qty = qty(row, "WMS수량")
+        compare_qty = qty(row, "비교수량")
+        by_key[key] = (wms_qty, compare_qty, wms_qty - compare_qty)
+    rows = [(*key, reason, *values) for key, values in sorted(by_key.items())]
     with connect() as con:
         con.executemany(
             """
             INSERT INTO stock_compare_ignored_problems(
-                issue_type, company, product_name, expiry, reason
-            ) VALUES(?,?,?,?,?)
+                issue_type, company, product_name, expiry, reason,
+                wms_qty, compare_qty, diff, updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
             ON CONFLICT(issue_type, company, product_name, expiry)
-            DO UPDATE SET reason=excluded.reason
+            DO UPDATE SET reason=excluded.reason, wms_qty=excluded.wms_qty,
+                compare_qty=excluded.compare_qty, diff=excluded.diff,
+                updated_at=excluded.updated_at
             """,
             rows,
         )
         con.commit()
     return len(rows)
+
+
+def _refresh_ignored_quantities(erp_result, gm_result):
+    """비교를 새로 실행할 때마다 무시 목록의 WMS/비교 수량과 차이를 최신 값으로 갱신한다."""
+    ignored = list_ignored_problems()
+    if ignored.empty:
+        return
+
+    erp_lookup = {}
+    if erp_result is not None and not erp_result.empty:
+        for r in erp_result.itertuples(index=False):
+            erp_lookup[(str(r.사업장).strip(), str(r.표준제품명).strip())] = (
+                int(r.WMS수량), int(r.ERP수량), int(r.차이),
+            )
+    gm_lookup = {}
+    if gm_result is not None and not gm_result.empty:
+        for r in gm_result.itertuples(index=False):
+            gm_lookup[(str(r.표준제품명).strip(), str(r.유통기한).strip())] = (
+                int(r.WMS수량), int(r.실사수량), int(r.차이),
+            )
+
+    updates = []
+    for _, row in ignored.iterrows():
+        issue_type = str(row["구분"]).strip()
+        company = str(row["사업장"]).strip()
+        product = str(row["표준제품명"]).strip()
+        expiry = str(row["유통기한"]).strip()
+        if issue_type == "ERP 불일치":
+            values = erp_lookup.get((company, product))
+        elif issue_type == "실사 불일치":
+            values = gm_lookup.get((product, expiry))
+        else:
+            values = None
+        if values is None:
+            continue
+        updates.append((*values, int(row["ID"])))
+
+    if not updates:
+        return
+    with connect() as con:
+        con.executemany(
+            """
+            UPDATE stock_compare_ignored_problems
+            SET wms_qty=?, compare_qty=?, diff=?, updated_at=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            updates,
+        )
+        con.commit()
+
+
+def ignored_erp_diffs():
+    """사업장+표준제품명이 완전히 일치하는 ERP 무시 항목의 차이/사유를 반환한다."""
+    ignored = list_ignored_problems()
+    if ignored.empty:
+        return {}
+    ignored = ignored[ignored["구분"] == "ERP 불일치"]
+    result = {}
+    for _, row in ignored.iterrows():
+        company = str(row.get("사업장") or "").strip()
+        product = str(row.get("표준제품명") or "").strip()
+        if not company or not product:
+            continue
+        diff = row.get("차이")
+        result[(company, product)] = {
+            "diff": 0 if pd.isna(diff) else int(diff),
+            "reason": str(row.get("차이원인") or "").strip(),
+        }
+    return result
 
 
 def update_ignored_problem_reasons(reason_updates):
@@ -207,6 +311,7 @@ def compare_stock_files(nohtuspharm_file=None, noh_file=None, nohtus_file=None, 
         import_issues.extend(gm_issues)
         gm_result = _compare_gmmedic(gm_mapped)
 
+    _refresh_ignored_quantities(erp_result, gm_result)
     all_problems = _build_problem_list(erp_result, gm_result, import_issues)
     problems = filter_ignored_problems(all_problems)
     return {

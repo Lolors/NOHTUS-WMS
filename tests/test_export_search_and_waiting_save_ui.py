@@ -60,9 +60,9 @@ class ExportSearchAndWaitingSaveUiTests(TestCase):
         self.assertIn("summary_col, edit_col = st.columns([4, 1])", source)
         self.assertIn("if current_state == '입고 완료':", source)
         self.assertIn("'입고 수정'", source)
-        self.assertIn("column_order=['선택', '사업장', '제품명', '제조번호', '유통기한', '선택수량']", source)
+        self.assertIn("column_order=['사업장', '제품명', '제조번호', '유통기한', '선택수량']", source)
         self.assertIn("inventory_selection_source(current_rows, stock_rows)", source)
-        self.assertIn("체크를 끄면 기존 입고가 삭제", source)
+        self.assertIn("선택수량을 0으로 하거나 행을 삭제하면 기존 입고가 삭제", source)
 
     def test_split_p_inventory_rows_are_shown_once_with_their_total_quantity(self):
         current = [

@@ -498,16 +498,24 @@ def _history_order_group_keys(df):
     return keys
 
 
-def _history_type_background(tx_type, memo=""):
-    """Return the requested background color for a transaction type."""
+def _history_type_background(tx_type, memo="", shade=0):
+    """Return the requested background color for a transaction type.
+
+    `shade` alternates between two tones of the same color family so that
+    consecutive groups of the same type (e.g. two different 출고지시서 numbers
+    back-to-back) are still visually distinguishable, not just separated by
+    the border line.
+    """
     tx_type = str(tx_type or "").strip()
     memo = str(memo or "").strip()
     if tx_type == "출고지시" or (
         tx_type == "출고" and memo.startswith(EXPORT_CONFIRM_MEMO_PREFIX)
     ):
-        return "#E7F5E9"
+        return "#E7F5E9" if shade == 0 else "#CFEAD6"
+    if tx_type == "입고":
+        return "#FFF3C4" if shade == 0 else "#FCE9A0"
     if tx_type in {"위치이동", "사업장이동", "사업장+위치이동", "비자료전환", "이동"}:
-        return "#F2F2F2"
+        return "#F2F2F2" if shade == 0 else "#E4E4E4"
     return ""
 
 
@@ -516,11 +524,17 @@ def _style_history_order_groups(show, source_df):
     keys = _history_order_group_keys(source_df)
 
     styles = pd.DataFrame("", index=show.index, columns=show.columns)
+    group_shades = {}
     previous_key = None
     for position, (key, row) in enumerate(zip(keys, source_df.itertuples(index=False))):
+        if key:
+            shade = group_shades.setdefault(key, len(group_shades) % 2)
+        else:
+            shade = 0
         background = _history_type_background(
             getattr(row, "tx_type", ""),
             getattr(row, "memo", ""),
+            shade,
         )
         css = f"background-color: {background};" if background else ""
         if key and key != previous_key:
@@ -611,14 +625,19 @@ def page_history():
         except Exception:
             matched_order_ids = []
         matched_order_ids = sorted(set(matched_order_ids))
-        if matched_order_ids:
-            order_clauses = []
-            for oid in matched_order_ids:
-                order_clauses.append("memo LIKE ?")
-                params.append(f"%출고지시서 #{oid}%")
-            conditions.append("(" + " OR ".join(order_clauses) + ")")
-        else:
-            conditions.append("1=0")
+        # 국내 출고지시는 메모에 매출처명이 직접 안 남고 주문번호만 있어서 위의
+        # outbound_orders 역추적이 필요하다. 하지만 수출확정 메모는
+        # "수출확정 / {title} / {매출처명} / 출고일자: ..." 처럼 매출처명을
+        # 그대로 담고 있는데, 이 함수가 그 경우를 전혀 보지 않고 도메스틱
+        # 주문이 하나도 안 걸리면 곧장 1=0으로 전체를 막아버려서 수출 매출처
+        # 검색이 항상 빈 결과로 나왔다. 메모 직접 검색을 항상 같이 걸어서
+        # 수출 쪽도 잡히게 한다.
+        customer_clauses = ["memo LIKE ?"]
+        params.append(f"%{customer_term.strip()}%")
+        for oid in matched_order_ids:
+            customer_clauses.append("memo LIKE ?")
+            params.append(f"%출고지시서 #{oid} %")
+        conditions.append("(" + " OR ".join(customer_clauses) + ")")
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     total_df = q(f"SELECT COUNT(*) AS cnt FROM transactions {where}", tuple(params))
@@ -637,7 +656,7 @@ def page_history():
     df = q(f"""
         SELECT * FROM transactions
         {where}
-        ORDER BY id DESC
+        ORDER BY created_at DESC, id DESC
         LIMIT ? OFFSET ?
     """, tuple(params + [page_size, offset]))
 
@@ -653,7 +672,7 @@ def page_history():
     all_filtered_df = q(f"""
         SELECT * FROM transactions
         {where}
-        ORDER BY id DESC
+        ORDER BY created_at DESC, id DESC
     """, tuple(params))
     all_filtered_show = _format_history_rows(all_filtered_df)
     guide_col, download_col = st.columns([3.4, 1.6], vertical_alignment="center")

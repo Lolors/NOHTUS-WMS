@@ -334,12 +334,11 @@ def render() -> None:
     if create_case:
         attachment_storage_error = ''
         if is_historical and any(attachment_uploads.values()):
+            # An unset 내 폴더 위치 is not an error here: folder_service.storage_root()
+            # already falls back to the app's own upload folder in that case. Only a
+            # path the user *did* configure needs validating before we rely on it.
             configured_root = db.get_setting('shared_root').strip()
-            if not configured_root:
-                attachment_storage_error = (
-                    '첨부파일을 저장하려면 먼저 수출 → 내 폴더에서 내 폴더 위치를 지정하세요.'
-                )
-            else:
+            if configured_root:
                 storage_ok, storage_message = folder_service.test_storage_root(configured_root)
                 if not storage_ok:
                     attachment_storage_error = (
@@ -408,6 +407,7 @@ def render() -> None:
                 stage=stage,
                 status=status,
             )
+            folder_error = ''
             if is_historical:
                 order_service.create_historical_case_details(
                     case_id,
@@ -423,20 +423,30 @@ def render() -> None:
                 )
                 for category, uploaded_files in attachment_uploads.items():
                     for uploaded in uploaded_files:
-                        folder_service.save_uploaded_file(
-                            case_id,
-                            uploaded.name,
-                            uploaded.getvalue(),
-                            category,
-                        )
+                        try:
+                            folder_service.save_uploaded_file(
+                                case_id,
+                                uploaded.name,
+                                uploaded.getvalue(),
+                                category,
+                            )
+                        except OSError as exc:
+                            folder_error = folder_error or str(exc)
             else:
                 order_service.create_order_items(case_id, valid_orders)
-            folder_service.sync_case_folder(case_id)
+            # A folder/attachment write failure here (unreachable USB, locked
+            # workbook, etc.) must not lose the case/order data already saved
+            # to the DB above. Surface it as a warning instead of crashing.
+            _, sync_error = folder_service.try_sync_case_folder(case_id)
+            folder_error = folder_error or sync_error
             history_detail = f'{export_no} / 제품 {len(valid_orders)}개'
             if is_historical:
                 history_detail += f' / CTN {len(valid_boxes)}개 / {delivery_method} / {consignee_name}'
             history_service.add_history(case_id, '수출 건 생성', history_detail)
             st.session_state['order_case_id'] = case_id
-            st.session_state['new_case_success_message'] = f'{export_no} 생성 완료'
+            st.session_state['new_case_success_message'] = (
+                f'{export_no} 생성 완료'
+                + (f' (폴더 저장 중 문제가 발생했습니다: {folder_error})' if folder_error else '')
+            )
             st.session_state['reset_new_case_form_pending'] = True
             st.rerun()

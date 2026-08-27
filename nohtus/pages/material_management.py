@@ -523,6 +523,8 @@ def _render_bom_tab():
 
 
 def _render_package_production_tab():
+    if st.session_state.pop("_package_production_reset", False):
+        st.session_state.pop("package_production_confirm", None)
     finished_df = bom_finished_products()
     finished = finished_df["finished_product"].astype(str).tolist() if not finished_df.empty else []
     if not finished:
@@ -580,7 +582,7 @@ def _render_package_production_tab():
         ):
             try:
                 execute_package_production(finished_product, production_qty)
-                st.session_state["package_production_confirm"] = False
+                st.session_state["_package_production_reset"] = True
                 st.success(f"{finished_product} {int(production_qty)}개 생산을 반영하고 BOM 부자재 재고를 차감했습니다.")
                 st.rerun()
             except ValueError as exc:

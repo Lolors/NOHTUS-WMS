@@ -40,10 +40,7 @@ def location_picker(prefix, default_area="A1", stock_only=False):
         area = st.selectbox("구역", areas, index=areas.index(default_area), key=f"{prefix}_area{widget_suffix}")
 
     cfg = AREA_CONFIG.get(area, {"lines": [], "levels": []})
-    if area == "Q":
-        lines = []
-        levels = []
-    elif stock_only:
+    if stock_only:
         lines = sorted({parse_location(x)[1] for x in locs if parse_location(x)[0] == area and parse_location(x)[1]})
         levels = []
     else:
@@ -60,7 +57,7 @@ def location_picker(prefix, default_area="A1", stock_only=False):
             st.selectbox("라인", ["선택 없음"], key=f"{prefix}_line_disabled{widget_suffix}", disabled=True)
             line = ""
 
-    if area != "Q" and stock_only:
+    if stock_only:
         if line:
             levels = sorted({parse_location(x)[2] for x in locs if parse_location(x)[0] == area and parse_location(x)[1] == line and parse_location(x)[2]})
         else:
@@ -89,7 +86,6 @@ def inbound_location_picker(default_area="REC"):
 
     운영 규칙:
     - 라인/단이 있는 구역은 "선택 없음"을 표시하지 않는다.
-    - 라인만 있는 구역(Q 등)은 라인만 선택한다.
     - 라인/단이 없는 구역(REC/P/R1/R2/N 등)에만 선택 없음/비활성 표시가 나온다.
     """
     defaults = st.session_state.get("_inbound_picker_defaults", {}) or {}
@@ -113,10 +109,7 @@ def inbound_location_picker(default_area="REC"):
         )
 
     cfg = AREA_CONFIG.get(area, {"lines": [], "levels": []})
-    if area == "Q":
-        lines = []
-    else:
-        lines = list(cfg.get("lines", []))
+    lines = list(cfg.get("lines", []))
     with c2:
         if lines:
             if line_default not in lines:
@@ -126,7 +119,7 @@ def inbound_location_picker(default_area="REC"):
             st.selectbox("라인", ["선택 없음"], key=f"inbound_line_disabled_{token}", disabled=True)
             line = ""
 
-    levels = [] if area == "Q" else list(cfg.get("levels", []))
+    levels = list(cfg.get("levels", []))
     with c3:
         if levels:
             if level_default not in levels:
@@ -140,3 +133,75 @@ def inbound_location_picker(default_area="REC"):
     st.session_state["_inbound_selected_loc"] = loc
     st.session_state["_inbound_picker_defaults"] = {"area": area, "line": line, "level": level}
     return loc
+
+
+def render_location_range_grid_picker_button(prefix, area, *, key=None):
+    """"칸 그림으로 범위 선택" 버튼과, 열려 있는 동안 계속 떠 있어야 하는 모달을 함께 그린다.
+
+    st.dialog는 그 함수를 호출한 런에서만 여는 게 아니라, 열려 있어야 하는 동안
+    매 런마다 다시 호출해줘야 계속 떠 있는다(다이얼로그 내부 위젯 클릭 한 번마다
+    Streamlit이 전체 스크립트를 다시 실행하기 때문). 그래서 버튼 클릭 자체가 아니라
+    세션 상태 플래그로 "지금 열려 있어야 하는지"를 기억해뒀다가, 이 함수가 호출될
+    때마다(=페이지가 다시 그려질 때마다) 그 플래그를 보고 다이얼로그를 다시 띄운다.
+    """
+    open_key = f"_{prefix}_grid_dialog_open"
+    area_key = f"_{prefix}_grid_dialog_area"
+    if st.button("칸 그림으로 범위 선택", key=key or f"{prefix}_grid_open", use_container_width=True):
+        cfg = AREA_CONFIG.get(area, {})
+        if not cfg.get("lines") or not cfg.get("levels"):
+            st.toast(f"{area} 구역은 라인/단이 없어 그림으로 범위를 선택할 수 없습니다.")
+        else:
+            st.session_state[open_key] = True
+            st.session_state[area_key] = area
+
+    if st.session_state.get(open_key):
+        dialog_area = st.session_state.get(area_key) or area
+        cfg = AREA_CONFIG.get(dialog_area, {})
+        lines = list(cfg.get("lines") or [])
+        levels = list(cfg.get("levels") or [])
+        if lines and levels:
+            _location_range_grid_dialog(prefix, dialog_area, lines, levels)
+        else:
+            st.session_state[open_key] = False
+
+
+@st.dialog("칸 범위 선택", width="large")
+def _location_range_grid_dialog(prefix, area, lines, levels):
+    from nohtus.ui.shelf_range_picker import render_shelf_range_picker
+
+    sel_key = f"_{prefix}_shelf_sel"
+    initial = st.session_state.get(sel_key) or {"lineLo": 0, "lineHi": 0, "levelLo": 0, "levelHi": 0}
+
+    st.caption(f"{area} 구역 선반입니다. 파란 블록을 드래그해 옮기거나, 모서리를 끌어 범위를 늘리세요.")
+    selection = render_shelf_range_picker(lines, levels, initial=initial, height=420, key=f"{prefix}_shelf_range")
+    if selection:
+        st.session_state[sel_key] = selection
+
+    sel = st.session_state.get(sel_key) or initial
+    start_line, end_line = sel["startLine"], sel["endLine"]
+    start_level, end_level = sel["startLevel"], sel["endLevel"]
+    cell_count = (sel["lineHi"] - sel["lineLo"] + 1) * (sel["levelHi"] - sel["levelLo"] + 1)
+    st.info(f"선택 범위: {area}-{start_line}-{start_level} ~ {area}-{end_line}-{end_level} ({cell_count}칸)")
+
+    apply_col, reset_col, cancel_col = st.columns(3)
+    with apply_col:
+        if st.button("이 범위 적용", type="primary", use_container_width=True, key=f"{prefix}_grid_apply"):
+            st.session_state[f"_{prefix}_picker_defaults"] = {
+                "area": area, "line": start_line, "level": start_level,
+            }
+            st.session_state[f"_{prefix}_picker_token"] = int(
+                st.session_state.get(f"_{prefix}_picker_token", 0) or 0
+            ) + 1
+            st.session_state[f"_{prefix}_range_end_loc"] = make_location(area, end_line, end_level)
+            st.session_state.pop(sel_key, None)
+            st.session_state[f"_{prefix}_grid_dialog_open"] = False
+            st.rerun()
+    with reset_col:
+        if st.button("다시 선택", use_container_width=True, key=f"{prefix}_grid_reset"):
+            st.session_state.pop(sel_key, None)
+            st.rerun()
+    with cancel_col:
+        if st.button("취소", use_container_width=True, key=f"{prefix}_grid_cancel"):
+            st.session_state.pop(sel_key, None)
+            st.session_state[f"_{prefix}_grid_dialog_open"] = False
+            st.rerun()

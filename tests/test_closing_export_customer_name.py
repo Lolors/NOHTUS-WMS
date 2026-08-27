@@ -17,7 +17,7 @@ class ClosingExportCustomerNameTests(unittest.TestCase):
             '미국-글로우필 메디앤톡-해상',
         )
 
-    def test_regular_outbound_infers_registered_customer_company(self):
+    def test_regular_outbound_infers_registered_customer_name(self):
         row = pd.Series({
             '출고지시서ID': 7,
             '출고지시서제목': '글로우필 메디앤톡 제품A 외 2품목',
@@ -28,10 +28,10 @@ class ClosingExportCustomerNameTests(unittest.TestCase):
 
         self.assertEqual(
             _closing_customer_name(row, customers),
-            '노투스',
+            '글로우필 메디앤톡',
         )
 
-    def test_regular_outbound_uses_stored_customer_company(self):
+    def test_regular_outbound_uses_stored_customer_name(self):
         row = pd.Series({
             '출고지시서ID': 8,
             '출고지시서제목': '미국-글로우필 메디앤톡 제품A 외 2품목',
@@ -41,7 +41,7 @@ class ClosingExportCustomerNameTests(unittest.TestCase):
 
         self.assertEqual(
             _closing_customer_name(row, pd.DataFrame()),
-            '노투스팜',
+            '미국-글로우필 메디앤톡',
         )
 
 

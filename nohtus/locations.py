@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from .config import SPECIAL_LOCATIONS
+from .config import AREA_CONFIG, SPECIAL_LOCATIONS
 
 
 def make_location(area: str, line: str | None = None, level: str | None = None) -> str:
@@ -18,8 +18,6 @@ def make_location(area: str, line: str | None = None, level: str | None = None) 
     level = level or ""
 
     if area == "N" and line in SPECIAL_LOCATIONS:
-        return line
-    if area == "Q" and line in ["Q1", "Q2"]:
         return line
     if line and level:
         return f"{area}-{line}-{level}"
@@ -40,13 +38,54 @@ def parse_location(loc: str) -> tuple[str, str, str]:
     return area, line, level
 
 
+def expand_location_block(start: str, end: str) -> list[str]:
+    """Expand a start/end location pair into every code in that block.
+
+    A block covers the full line x level rectangle between the two corners
+    (matching how a product physically occupies a range of shelves), not a
+    depletion sequence. Falls back to ``[start]`` whenever ``end`` is empty,
+    in a different area, or either endpoint isn't a real line/level for that
+    area (special/bare locations, area-only codes, unknown lines, etc.).
+    """
+    start = (start or "").strip()
+    end = (end or "").strip()
+    if not start:
+        return []
+    if not end or end == start:
+        return [start]
+
+    start_area, start_line, start_level = parse_location(start)
+    end_area, end_line, end_level = parse_location(end)
+    if start_area != end_area or not start_line or not start_level or not end_line or not end_level:
+        return [start]
+
+    config = AREA_CONFIG.get(start_area)
+    if not config:
+        return [start]
+    lines = list(config.get("lines") or [])
+    levels = list(config.get("levels") or [])
+    if start_line not in lines or end_line not in lines or start_level not in levels or end_level not in levels:
+        return [start]
+
+    line_i, line_j = lines.index(start_line), lines.index(end_line)
+    level_i, level_j = levels.index(start_level), levels.index(end_level)
+    line_lo, line_hi = min(line_i, line_j), max(line_i, line_j)
+    level_lo, level_hi = min(level_i, level_j), max(level_i, level_j)
+
+    return [
+        make_location(start_area, line, level)
+        for line in lines[line_lo:line_hi + 1]
+        for level in levels[level_lo:level_hi + 1]
+    ]
+
+
 def location_picking_key(loc: str) -> tuple[int, int, int, int, str]:
     """Return a stable sort key for outbound picking order."""
     loc = (loc or "").strip()
     area, line, level = parse_location(loc)
     area_order = [
-        "REC", "A1", "A2", "B1", "B2", "C1", "C2", "D1", "E1", "F1",
-        "G1", "G2", "X1", "X2", "Q", "N", "홍보물랙", "T1", "T2", "P", "R1", "R2",
+        "REC", "A1", "B1", "C1", "D1", "E1", "F1",
+        "G1", "X1", "X2", "Q", "N", "홍보물랙", "T1", "T2", "P", "R1", "R2",
     ]
     try:
         area_idx = area_order.index(area)

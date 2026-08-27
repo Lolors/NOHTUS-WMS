@@ -70,7 +70,7 @@ class HistoryExportBehaviorTests(unittest.TestCase):
     def test_history_type_background_colors(self):
         self.assertEqual(history._history_type_background("출고지시"), "#E7F5E9")
         self.assertEqual(history._history_type_background("위치이동"), "#F2F2F2")
-        self.assertEqual(history._history_type_background("입고"), "")
+        self.assertEqual(history._history_type_background("입고"), "#FFF3C4")
         self.assertEqual(
             history._history_type_background(
                 "출고",

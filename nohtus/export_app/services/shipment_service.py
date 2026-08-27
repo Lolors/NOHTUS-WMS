@@ -128,32 +128,40 @@ def list_for_case(case_id: int):
 
 @db.backup_batch
 def cleanup_invalid_links(case_id: int) -> int:
-    invalid_rows = db.rows(
-        '''SELECT s.id
-           FROM shipment_items s
-           LEFT JOIN order_items o
-             ON o.id=s.order_item_id
-            AND o.case_id=s.case_id
-           WHERE s.case_id=?
-             AND s.order_item_id IS NOT NULL
-             AND o.id IS NULL''',
-        (case_id,),
-    )
-    if not invalid_rows:
+    """Detach shipment rows whose order item was deleted — never destroy them.
+
+    An order-item row edited in 주문 검색 및 수정 (product renamed, row removed,
+    a new one added) can get a new id, orphaning any shipment_items row that
+    still points at the old one. Deleting those outright (and unwinding their
+    WMS reservation) used to make already-picked/입고된 재고 vanish the moment
+    the order was edited, with no way to reconnect it — it just looked like
+    "수출대기 저장" fell out of sync. Unlinking (order_item_id=NULL) keeps the
+    row, its qty, and its WMS reservation exactly as they were; it shows up
+    under 미연결 for the user to re-link or explicitly delete instead.
+    """
+    invalid_ids = [
+        int(row['id'])
+        for row in db.rows(
+            '''SELECT s.id
+               FROM shipment_items s
+               LEFT JOIN order_items o
+                 ON o.id=s.order_item_id
+                AND o.case_id=s.case_id
+               WHERE s.case_id=?
+                 AND s.order_item_id IS NOT NULL
+                 AND o.id IS NULL''',
+            (case_id,),
+        )
+    ]
+    if not invalid_ids:
         return 0
-    ids = [int(row['id']) for row in invalid_rows]
-    db.executemany('DELETE FROM shipment_items WHERE id=?', [(shipment_id,) for shipment_id in ids])
-    db.execute(
-        '''DELETE FROM boxes
-           WHERE case_id=?
-             AND NOT EXISTS(
-                 SELECT 1 FROM shipment_items s
-                 WHERE s.case_id=boxes.case_id AND s.box_no=boxes.box_no
-             )''',
-        (case_id,),
+
+    db.executemany(
+        'UPDATE shipment_items SET order_item_id=NULL WHERE id=?',
+        [(shipment_id,) for shipment_id in invalid_ids],
     )
     sync_case_stage(case_id)
-    return len(ids)
+    return len(invalid_ids)
 
 
 @st.cache_data(show_spinner=False, persist='disk', max_entries=256)

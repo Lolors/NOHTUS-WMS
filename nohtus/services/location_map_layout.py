@@ -86,6 +86,7 @@ def _clean_layout(layout: dict) -> dict:
         cleaned.append({
             "code": code,
             "label": str(raw.get("label") or code).strip() or code,
+            "detail_label": str(raw.get("detail_label") or "").strip(),
             "x": max(0, int(raw.get("x") or 0)),
             "y": max(0, int(raw.get("y") or 0)),
             "width": max(36, int(raw.get("width") or 80)),

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import os
-from datetime import date, timedelta
+import shutil
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import streamlit as st
@@ -11,6 +12,7 @@ from nohtus.export_app.services import export_service, folder_service, history_s
 
 
 RECENT_FOLDER_DAYS = 14
+QUARTER_FOLDER_DAYS = 90
 
 
 def browse_folder() -> str:
@@ -82,31 +84,50 @@ def render() -> None:
         st.markdown('#### 수출 폴더 관리')
         st.caption(
             f'기본 갱신은 최근 {RECENT_FOLDER_DAYS}일 수출 건만 처리합니다. '
-            '전체 파일 갱신에 직접 동의한 경우에만 취소되지 않은 모든 수출 건의 폴더를 현재 구조로 맞추고, '
-            '수출진행내역.xlsx를 현재 DB의 주문·출고·CTN 정보로 완전히 새로 생성합니다. '
+            '최근 3개월 또는 전체 갱신에 동의하면 해당 범위의 취소되지 않은 모든 수출 건의 폴더를 '
+            '현재 구조로 맞추고, 수출진행내역.xlsx를 현재 DB의 주문·출고·CTN 정보로 완전히 새로 생성합니다. '
             '사진·CI·Shipping Mark·기타 파일은 유지합니다.'
         )
-        folder_confirm = st.checkbox(
-            '전체 수출 폴더를 이동·이름 변경하고 엑셀을 모두 재생성하는 것에 동의합니다.',
-            key='folder_sync_confirm',
+        scope_recent, scope_quarter, scope_all = (
+            f'최근 {RECENT_FOLDER_DAYS}일',
+            '최근 3개월',
+            '전체 (취소 제외 모든 수출 건)',
         )
-        sync_button_label = (
-            '수출 폴더 및 엑셀 전체 재생성'
-            if folder_confirm
-            else f'최근 {RECENT_FOLDER_DAYS}일 폴더 및 엑셀 갱신'
+        sync_scope = st.radio(
+            '갱신 범위',
+            [scope_recent, scope_quarter, scope_all],
+            horizontal=True,
+            key='folder_sync_scope',
         )
+        needs_confirm = sync_scope != scope_recent
+        folder_confirm = True
+        if needs_confirm:
+            folder_confirm = st.checkbox(
+                f'{sync_scope} 수출 폴더를 이동·이름 변경하고 엑셀을 모두 재생성하는 것에 동의합니다.',
+                key='folder_sync_confirm',
+            )
+        sync_button_label = {
+            scope_recent: f'최근 {RECENT_FOLDER_DAYS}일 폴더 및 엑셀 갱신',
+            scope_quarter: '최근 3개월 폴더 및 엑셀 재생성',
+            scope_all: '수출 폴더 및 엑셀 전체 재생성',
+        }[sync_scope]
 
         if st.button(
             sync_button_label,
             type='primary',
             use_container_width=True,
+            disabled=needs_confirm and not folder_confirm,
         ):
             folder_service.hide_existing_internal_items()
             all_cases = export_service.list_cases(include_cancelled=False)
-            if folder_confirm:
+            if sync_scope == scope_all:
                 target_cases = list(all_cases)
             else:
-                cutoff = date.today() - timedelta(days=RECENT_FOLDER_DAYS)
+                # RECENT_FOLDER_DAYS counts today itself, so the cutoff is
+                # (days - 1) back to cover exactly that many calendar days,
+                # not one extra.
+                days = RECENT_FOLDER_DAYS if sync_scope == scope_recent else QUARTER_FOLDER_DAYS
+                cutoff = date.today() - timedelta(days=days - 1)
                 target_cases = [
                     case for case in all_cases
                     if (reference_date := _case_reference_date(case)) is not None
@@ -116,8 +137,14 @@ def render() -> None:
             successes: list[str] = []
             skipped: list[str] = []
             failures: list[str] = []
+            gather_errors: list[str] = []
+            gather_root: Path | None = None
             drive_corruption_detected = False
-            range_text = '전체 수출' if folder_confirm else f'최근 {RECENT_FOLDER_DAYS}일 수출'
+            range_text = {
+                scope_recent: f'최근 {RECENT_FOLDER_DAYS}일 수출',
+                scope_quarter: '최근 3개월 수출',
+                scope_all: '전체 수출',
+            }[sync_scope]
             progress = st.progress(0, text=f'{range_text} 폴더와 엑셀을 갱신하고 있습니다.')
             total = max(len(target_cases), 1)
             for index, case in enumerate(target_cases, start=1):
@@ -125,6 +152,18 @@ def render() -> None:
                     folder, changed = folder_service.sync_case_folder_if_changed(int(case['id']))
                     if changed:
                         successes.append(f"{case['export_no']} → {folder}")
+                        # Collect every folder that actually changed into one
+                        # top-level folder so it can be swapped into the
+                        # shared drive as a single batch, instead of having
+                        # to hunt each one down inside the 국가/연도/월 tree.
+                        if gather_root is None:
+                            gather_root = folder_service.storage_root() / (
+                                f'갱신폴더_{datetime.now():%Y%m%d_%H%M%S}'
+                            )
+                        try:
+                            shutil.copytree(folder, gather_root / folder.name, dirs_exist_ok=True)
+                        except Exception as copy_exc:
+                            gather_errors.append(f"{case['export_no']}: {copy_exc}")
                     else:
                         skipped.append(str(case['export_no']))
                 except Exception as exc:
@@ -137,13 +176,24 @@ def render() -> None:
             if successes:
                 history_service.add_history(
                     None,
-                    '수출 폴더 및 엑셀 전체 재생성' if folder_confirm else f'최근 {RECENT_FOLDER_DAYS}일 수출 폴더 갱신',
+                    f'{sync_button_label}',
                     f'{range_text} {len(successes)}건 재생성 / {len(skipped)}건 변경 없음 / {len(failures)}건 실패 / 취소 건 제외',
                 )
                 st.success(
                     f'{range_text} {len(successes)}건의 폴더를 동기화하고 '
                     f'수출진행내역.xlsx를 새로 생성했습니다. 변경 없음 {len(skipped)}건은 건너뛰었습니다.'
                 )
+                if gather_root is not None:
+                    st.info(
+                        f'이번에 바뀐 폴더 {len(successes)}건을 아래 위치 하나에 모아뒀습니다. '
+                        '공유폴더에는 이 폴더 안의 항목만 바꿔치기하면 됩니다.\n\n'
+                        f'{gather_root}'
+                    )
+                if gather_errors:
+                    st.warning(
+                        '일부 폴더는 모음 폴더로 복사하지 못했습니다 (원래 위치의 폴더는 정상 갱신됨).\n\n'
+                        + '\n'.join(f'- {item}' for item in gather_errors)
+                    )
             elif skipped and not failures:
                 st.info(f'{range_text} {len(skipped)}건 모두 변경사항이 없어 재생성을 건너뛰었습니다.')
             elif not failures:

@@ -432,7 +432,8 @@ function setApprovedMapZoom(nextZoom){
 }
 function installApprovedMapPan(){
   const scroll=document.querySelector('.map-scroll');
-  if(!scroll)return;
+  if(!scroll||scroll.__panInstalled)return;
+  scroll.__panInstalled=true;
   document.getElementById('mapZoomIn')?.addEventListener('click',()=>setApprovedMapZoom(mapZoomFactor+.25));
   document.getElementById('mapZoomOut')?.addEventListener('click',()=>setApprovedMapZoom(mapZoomFactor-.25));
   document.getElementById('mapZoomFit')?.addEventListener('click',()=>setApprovedMapZoom(1));

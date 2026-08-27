@@ -8,6 +8,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from nohtus.db import q
+from nohtus.pages.discrepancy_comic import render_discrepancy_comic_panel
+from nohtus.services.stock_compare import ignored_erp_diffs
 
 COMPANIES = ["노투스팜", "NOH", "노투스"]
 OWN_PRODUCTS = [
@@ -29,7 +31,7 @@ ALL_OWN_PRODUCTS = list(dict.fromkeys(
     for product in OWN_PRODUCTS_BY_COMPANY[company]
 ))
 INBOUND_TYPES = {"입고", "출고지시취소"}
-OUTBOUND_TYPES = {"출고지시", "출고지시수정", "출고", "출고확정"}
+OUTBOUND_TYPES = {"출고지시", "출고지시수정", "출고지시 재차감", "출고", "출고확정"}
 MOVE_TYPES = {"사업장이동", "사업장+위치이동", "비자료전환", "이동"}
 
 
@@ -114,7 +116,18 @@ def _fmt_delta(value) -> str:
     return "-"
 
 
-def _company_table(company: str, delta_map: dict[tuple[str, str], int]) -> pd.DataFrame:
+def _ignored_diff_text(company: str, product: str, ignored_diffs: dict) -> str:
+    entry = ignored_diffs.get((company, product))
+    if not entry:
+        return "-"
+    return entry["reason"] or "-"
+
+
+def _company_table(
+    company: str,
+    delta_map: dict[tuple[str, str], int],
+    ignored_diffs: dict,
+) -> pd.DataFrame:
     products = OWN_PRODUCTS_BY_COMPANY[company]
     base = pd.DataFrame({"표준제품명": products})
     current = _company_current_stock(company)
@@ -126,7 +139,10 @@ def _company_table(company: str, delta_map: dict[tuple[str, str], int]) -> pd.Da
     out["현재수량"] = out["현재수량"].fillna(0).astype(int)
     out["증감"] = out["표준제품명"].map(lambda p: int(delta_map.get((company, p), 0) or 0))
     out["전일수량"] = out["현재수량"] - out["증감"]
-    out = out[["표준제품명", "전일수량", "증감", "현재수량"]]
+    out["실물vs전산 차이 원인"] = out["표준제품명"].map(
+        lambda p: _ignored_diff_text(company, p, ignored_diffs)
+    )
+    out = out[["표준제품명", "전일수량", "증감", "현재수량", "실물vs전산 차이 원인"]]
     out["전일수량"] = out["전일수량"].map(_fmt_qty)
     out["증감"] = out["증감"].map(_fmt_delta)
     out["현재수량"] = out["현재수량"].map(_fmt_qty)
@@ -139,43 +155,112 @@ def _table_html(df: pd.DataFrame) -> str:
     for _, row in df.iterrows():
         cells = []
         for col in df.columns:
-            cls = "name" if col == "표준제품명" else "num"
+            if col == "표준제품명":
+                cls = "name"
+            elif col == "실물vs전산 차이 원인":
+                cls = "note"
+            else:
+                cls = "num"
             cells.append(f"<td class='{cls}'>{escape(str(row[col]))}</td>")
         rows.append("<tr>" + "".join(cells) + "</tr>")
     return """
     <table tabindex='-1'>
-      <colgroup><col class='col-name'><col class='col-num'><col class='col-num'><col class='col-num'></colgroup>
+      <colgroup><col class='col-name'><col class='col-num'><col class='col-num'><col class='col-num'><col class='col-note'></colgroup>
       <thead><tr>{head}</tr></thead>
       <tbody>{body}</tbody>
     </table>
     """.format(head=head, body="".join(rows))
 
 
-def _report_html(delta_map: dict[tuple[str, str], int]) -> str:
+def _report_html(delta_map: dict[tuple[str, str], int], ignored_diffs: dict) -> str:
     cards = []
     for company in COMPANIES:
-        cards.append(f"<section><h2>{escape(company)}</h2>{_table_html(_company_table(company, delta_map))}</section>")
+        table = _company_table(company, delta_map, ignored_diffs)
+        cards.append(f"<section><h2>{escape(company)}</h2>{_table_html(table)}</section>")
+    file_name = f"자사제품_조회_{_today_text()}.jpg"
     return f"""
     <!doctype html><html lang='ko'><head><meta charset='utf-8'>
+    <script src='https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'></script>
     <style>
       html,body,*{{caret-color:transparent!important;}}
-      body{{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;cursor:default;user-select:none;overflow:hidden;}}
-      .grid{{display:flex;flex-direction:column;gap:26px;align-items:flex-start;justify-content:flex-start;width:100%;}}
-      section{{width:38vw;min-width:520px;box-sizing:border-box;overflow-x:auto;}}
+      body{{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a;cursor:default;user-select:none;overflow:visible;}}
+      .toolbar{{display:flex;justify-content:flex-start;padding:0 0 12px 0;}}
+      .dl-btn{{appearance:none;border:1px solid #cbd5e1;background:#f8fafc;color:#0f172a;font-size:13px;font-weight:600;padding:8px 14px;border-radius:6px;cursor:pointer;user-select:none;}}
+      .dl-btn:hover{{background:#eef2f7;}}
+      .dl-btn:disabled{{opacity:.6;cursor:default;}}
+      .grid{{display:flex;flex-direction:column;gap:26px;align-items:flex-start;justify-content:flex-start;width:100%;background:transparent;}}
+      section{{width:56vw;min-width:720px;box-sizing:border-box;overflow-x:auto;}}
       h2{{text-align:center;font-size:32px;font-weight:600;margin:0 0 10px 0;line-height:1.2;}}
       table{{border-collapse:collapse;table-layout:fixed;width:100%;background:white;font-size:13px;outline:0;}}
       .col-name{{width:150px;}}
       .col-num{{width:72px;}}
+      .col-note{{width:260px;}}
       th,td{{border:1px solid #e5e7eb;padding:6px 6px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
       th{{background:#f8fafc;color:#334155;font-weight:800;text-align:center;}}
       td.name{{text-align:center;}}
       td.num{{text-align:center;}}
+      td.note{{text-align:left;color:#b45309;white-space:normal;}}
       @media(max-width:768px){{.grid{{display:block;width:100%;}}section{{width:100%;min-width:0;margin-bottom:28px;}}body{{overflow:auto;}}}}
-    </style></head><body tabindex='-1'><div class='grid'>{''.join(cards)}</div></body></html>
+    </style></head><body tabindex='-1'>
+    <div class='toolbar'><button id='dl-btn' class='dl-btn' type='button'>JPG로 다운로드</button></div>
+    <div class='grid' id='capture-target'>{''.join(cards)}</div>
+    <script>
+      document.getElementById('dl-btn').addEventListener('click', function () {{
+        var btn = this;
+        var target = document.getElementById('capture-target');
+        btn.disabled = true;
+        var originalText = btn.textContent;
+        btn.textContent = '다운로드 준비 중...';
+        var sections = target.querySelectorAll('section');
+        var contentWidth = Math.ceil(Math.max.apply(null,
+          Array.prototype.map.call(sections, function (el) {{ return el.getBoundingClientRect().width; }})
+        ));
+        html2canvas(target, {{
+          backgroundColor: '#ffffff', scale: 2, useCORS: true,
+          width: contentWidth, height: target.scrollHeight,
+        }}).then(function (canvas) {{
+          var dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+          var link = document.createElement('a');
+          link.href = dataUrl;
+          link.download = {file_name!r};
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }}).catch(function (err) {{
+          alert('이미지 생성에 실패했습니다: ' + err);
+        }}).finally(function () {{
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }});
+      }});
+
+      function resizeToContent() {{
+        try {{
+          var frame = window.frameElement;
+          if (frame) {{
+            frame.style.height = document.documentElement.scrollHeight + 'px';
+          }}
+        }} catch (e) {{}}
+      }}
+      window.addEventListener('load', resizeToContent);
+      window.addEventListener('resize', resizeToContent);
+      resizeToContent();
+      setTimeout(resizeToContent, 300);
+    </script>
+    </body></html>
     """
 
 
 def page_own_product_status():
     st.title("자사제품 조회")
-    st.caption(f"기준일자: {_today_text()} · 전일수량 = 현재수량 - 금일 입고/출고/사업장 이동 증감")
-    components.html(_report_html(_today_delta_map()), height=900, scrolling=False)
+    st.caption(
+        f"기준일자: {_today_text()} · 전일수량 = 현재수량 - 금일 입고/출고/사업장 이동 증감 · "
+        "실물vs전산 차이 원인 = 재고실사 데이터비교의 무시목록(사업장+표준제품명 완전일치)에 등록된 ERP 차이"
+    )
+    table_col, comic_col = st.columns([2, 1])
+    with table_col:
+        components.html(
+            _report_html(_today_delta_map(), ignored_erp_diffs()), height=960, scrolling=False
+        )
+    with comic_col:
+        render_discrepancy_comic_panel()

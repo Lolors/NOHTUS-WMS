@@ -241,17 +241,19 @@ def insert_transaction_log(cur, *, created_at, tx_type, product_name, warehouse_
     )
 
 
-def add_inventory(company, product, warehouse, lot, exp, location, qty, memo="입고 등록"):
+def add_inventory(company, product, warehouse, lot, exp, location, qty, memo="입고 등록", location_range_end=None):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    range_end = (location_range_end or "").strip() or None
     with connect() as con:
         cur = con.cursor()
         row = cur.execute("""SELECT id, qty FROM inventory WHERE company=? AND product_name=? AND IFNULL(warehouse_name,'')=? AND lot=? AND exp_date=? AND location=?""",
                           (company, product, warehouse or "", lot, exp, location)).fetchone()
         if row:
-            cur.execute("UPDATE inventory SET qty=?, updated_at=? WHERE id=?", (int(row[1] or 0) + int(qty), now, row[0]))
+            cur.execute("UPDATE inventory SET qty=?, updated_at=?, location_range_end=COALESCE(?,location_range_end) WHERE id=?",
+                       (int(row[1] or 0) + int(qty), now, range_end, row[0]))
         else:
-            cur.execute("""INSERT INTO inventory(company,product_name,warehouse_name,lot,exp_date,location,qty,updated_at)
-                           VALUES(?,?,?,?,?,?,?,?)""", (company, product, warehouse, lot, exp, location, int(qty), now))
+            cur.execute("""INSERT INTO inventory(company,product_name,warehouse_name,lot,exp_date,location,qty,updated_at,location_range_end)
+                           VALUES(?,?,?,?,?,?,?,?,?)""", (company, product, warehouse, lot, exp, location, int(qty), now, range_end))
         insert_transaction_log(cur, created_at=now, tx_type="입고", product_name=product, warehouse_name=warehouse,
                                lot=lot, exp_date=exp, from_company=None, from_location=None,
                                to_company=company, to_location=location, qty=qty, memo=memo)
@@ -317,9 +319,10 @@ def adjust_inventory(inventory_id, actual_qty, reason, memo=""):
         return before_qty, actual_qty, diff
 
 
-def move_inventory(src_id, to_company, to_location, qty, memo=""):
+def move_inventory(src_id, to_company, to_location, qty, memo="", location_range_end=None):
     """재고 이동. 사업장 이동 시 전산상명칭은 도착 사업장 기준으로 다시 계산한다."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    range_end = (location_range_end or "").strip() or None
     with connect() as con:
         cur = con.cursor()
         src = cur.execute("SELECT * FROM inventory WHERE id=?", (src_id,)).fetchone()
@@ -339,10 +342,11 @@ def move_inventory(src_id, to_company, to_location, qty, memo=""):
         row = cur.execute("""SELECT id, qty FROM inventory WHERE company=? AND product_name=? AND IFNULL(warehouse_name,'')=? AND lot=? AND exp_date=? AND location=?""",
                           (to_company, product_name, dest_warehouse or "", src["lot"], src["exp_date"], to_location)).fetchone()
         if row:
-            cur.execute("UPDATE inventory SET qty=?, updated_at=? WHERE id=?", (int(row[1] or 0)+qty, now, row[0]))
+            cur.execute("UPDATE inventory SET qty=?, updated_at=?, location_range_end=COALESCE(?,location_range_end) WHERE id=?",
+                       (int(row[1] or 0)+qty, now, range_end, row[0]))
         else:
-            cur.execute("""INSERT INTO inventory(company,product_name,warehouse_name,lot,exp_date,location,qty,updated_at)
-                           VALUES(?,?,?,?,?,?,?,?)""", (to_company, product_name, dest_warehouse, src["lot"], src["exp_date"], to_location, qty, now))
+            cur.execute("""INSERT INTO inventory(company,product_name,warehouse_name,lot,exp_date,location,qty,updated_at,location_range_end)
+                           VALUES(?,?,?,?,?,?,?,?,?)""", (to_company, product_name, dest_warehouse, src["lot"], src["exp_date"], to_location, qty, now, range_end))
 
         from_company = src["company"]
         tx_type = "위치이동" if from_company == to_company else "사업장+위치이동"

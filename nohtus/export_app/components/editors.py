@@ -11,6 +11,8 @@ def order_editor(dataframe, *, key: str, dynamic: bool = True):
     dataframe = dataframe.copy()
     if '1단위당 EA' not in dataframe.columns:
         dataframe['1단위당 EA'] = 1.0
+    if '제품명' in dataframe.columns:
+        dataframe['제품명'] = dataframe['제품명'].fillna('').astype('string')
     return st.data_editor(
         dataframe,
         num_rows='dynamic' if dynamic else 'fixed',
@@ -22,7 +24,10 @@ def order_editor(dataframe, *, key: str, dynamic: bool = True):
         column_config={
             '_id': None,
             '행번호': st.column_config.NumberColumn('행', format='%d', width='small'),
-            '제품명': st.column_config.TextColumn('제품명', required=True),
+            # 빈 입력행을 시작점으로 쓰므로 required=True를 지정하면 다른
+            # 텍스트/숫자 셀을 먼저 편집해 Enter를 누를 때 행 전체가 무효화된다.
+            # 제품명 필수 검증은 저장 시점(order_service.save_order_items)에 처리한다.
+            '제품명': st.column_config.TextColumn('제품명'),
             '수량': st.column_config.NumberColumn('수량', min_value=0.0, step=1.0, width=30),
             '단위': st.column_config.SelectboxColumn(
                 '단위',

@@ -40,44 +40,25 @@ def _safe_text(value, default=""):
 
 
 def _closing_customer_name(row, customers_df=None):
-    """수출대기는 제목을, 일반 출고는 선택 매출처의 사업장을 표시한다."""
+    """수출대기는 제목을, 일반 출고는 실제 거래처명(매출처/입고처)을 표시한다."""
     title = _safe_text(row.get("출고지시서제목", ""))
     stored_customer = _safe_text(row.get("저장매출처", ""))
-    stored_company = _safe_text(row.get("저장매출처사업장", ""))
     try:
         order_id = int(row.get("출고지시서ID", 0) or 0)
     except (TypeError, ValueError):
         order_id = 0
     if order_id < 0:
         return title
-    if stored_company:
-        return stored_company
-    customer_name = stored_customer or _infer_customer_from_title(title, customers_df)[0]
-    return _customer_company_from_master(customer_name, customers_df)
-
-
-def _customer_company_from_master(customer_name, customers_df):
-    """거래처명이 한 사업장에만 연결될 때 그 사업장을 반환한다."""
-    name = _safe_text(customer_name)
-    if not name or customers_df is None or customers_df.empty or "company" not in customers_df.columns:
-        return ""
-    matched = customers_df[
-        customers_df["customer_name"].astype(str).str.strip() == name
-    ]
-    companies = [
-        _safe_text(value) for value in matched["company"].tolist()
-        if _safe_text(value)
-    ]
-    unique_companies = list(dict.fromkeys(companies))
-    return unique_companies[0] if len(unique_companies) == 1 else ""
+    if stored_customer:
+        return stored_customer
+    return _infer_customer_from_title(title, customers_df)[0]
 
 
 def _outbound_customer_from_saved_or_title(customer_name, title, customers_df, customer_company=""):
-    """출고지시에 선택한 매출처의 사업장과 담당자를 반환한다."""
+    """출고지시에 선택한 실제 거래처명과 담당자를 반환한다."""
     saved_customer = _safe_text(customer_name)
     if not saved_customer:
-        inferred_customer, manager = _infer_customer_from_title(title, customers_df)
-        return _customer_company_from_master(inferred_customer, customers_df), manager
+        return _infer_customer_from_title(title, customers_df)
 
     manager = ""
     if customers_df is not None and not customers_df.empty:
@@ -91,8 +72,7 @@ def _outbound_customer_from_saved_or_title(customer_name, title, customers_df, c
                 matched = company_match
         if not matched.empty:
             manager = _safe_text(matched.iloc[0].get("manager"))
-    company = _safe_text(customer_company) or _customer_company_from_master(saved_customer, customers_df)
-    return company, manager
+    return saved_customer, manager
 
 
 def _today_outbound_final_stock_map(items):
@@ -470,7 +450,7 @@ def page_closing():
                     axis=1,
                 )
             except Exception:
-                items["매출처"] = items["저장매출처사업장"].apply(_safe_text)
+                items["매출처"] = items["저장매출처"].apply(_safe_text)
             _render_today_outbound_html(items)
             btn_left, btn_mid, btn_right = st.columns([3, 2, 3])
             with btn_mid:
