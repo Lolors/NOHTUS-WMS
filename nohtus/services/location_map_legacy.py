@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 from nohtus.config import AREA_CONFIG, SPECIAL_LOCATIONS
 from nohtus.db import q
 from nohtus.dates import display_date_only
-from nohtus.locations import expand_row_range
+from nohtus.locations import REVERSED_LINE_RANGES, expand_row_range
 from nohtus.services.location_map_layout import load_location_map_layout
 
 def get_product_image_path(product_name):
@@ -99,6 +99,7 @@ def render_location_map():
             "layout_company": layout_company,
             "layout_label": layout_label,
             "area_config": area_config,
+            "reversed_line_ranges": REVERSED_LINE_RANGES,
         },
         ensure_ascii=False,
     )
@@ -265,7 +266,16 @@ const initialSelectedLocation = DATA.selected_location || "";
 const layoutCompany = DATA.layout_company || {{}};
 const layoutLabel = DATA.layout_label || {{}};
 const areaConfig = DATA.area_config || {{}};
+const reversedLineRanges = DATA.reversed_line_ranges || {{}};
 const RACK_GROUP_SIZE = 3;
+// 같은 알파벳 구역 안에서 두 줄 선반이 마주보는 경우, 뒷줄은 번호가 클수록
+// 왼쪽에 오도록(오름차순의 반대로) 그려야 실제 배치와 맞는다.
+function lineGroupIsReversed(area, cols){{
+  const range = reversedLineRanges[area];
+  if (!range || !cols || !cols.length) return false;
+  const first = parseInt(cols[0], 10);
+  return Number.isFinite(first) && first >= range[0] && first <= range[1];
+}}
 function zoneName(loc, rows){{
   const area=(loc||'').split('-')[0];
   const customLabel = layoutLabel[loc] || layoutLabel[area];
@@ -373,7 +383,11 @@ function miniRackHtml(occupiedCells){{
   if(!touchedIdx.length) return {{html:'', lines:[]}};
   const anchorIdx=Math.min(...touchedIdx);
   const groupStart=Math.floor(anchorIdx / RACK_GROUP_SIZE) * RACK_GROUP_SIZE;
-  const cols=areaLines.slice(groupStart, groupStart + RACK_GROUP_SIZE);
+  let cols=areaLines.slice(groupStart, groupStart + RACK_GROUP_SIZE);
+  // 이 랙 묶음이 "뒷줄"(마주보는 두 줄 중 번호가 큰 쪽)이면 왼쪽→오른쪽
+  // 그리는 순서를 뒤집는다 — 실제 창고에서는 뒷줄이 번호 오름차순과 반대로
+  // 배치돼 있기 때문이다(저장되는 라인 값 자체는 바뀌지 않는다).
+  if(lineGroupIsReversed(area, cols)) cols=cols.slice().reverse();
   const occSet=new Set(occupiedCells);
   const rowsHtml=areaLevels.slice().reverse().map(level=>{{
     const cellsHtml=cols.map(line=>{{
@@ -382,7 +396,12 @@ function miniRackHtml(occupiedCells){{
     }}).join('');
     return `<div class="mini-rack-row"><span class="mini-rack-level">${{esc(level)}}단</span><span class="mini-rack-cells">${{cellsHtml}}</span></div>`;
   }}).join('');
-  const rangeLabel = cols.length>1 ? `${{area}}-${{cols[0]}}~${{cols[cols.length-1]}}` : `${{area}}-${{cols[0]}}`;
+  // 라벨은 그림칸(cols, 랙 3라인 전체)이 아니라 실제로 채워진 라인만 기준으로
+  // 써야 한다 — cols로 쓰면 범위를 1칸으로 줄여도 랙 전체 구간("A1-13~15")이
+  // 그대로 남아 있는 것처럼 보여서, 마치 이전의 더 큰 범위가 아직도 선택돼
+  // 있는 것 같은 착시를 일으킨다.
+  const touchedSorted=touchedIdx.slice().sort((a,b)=>a-b).map(i=>areaLines[i]);
+  const rangeLabel = touchedSorted.length>1 ? `${{area}}-${{touchedSorted[0]}}~${{touchedSorted[touchedSorted.length-1]}}` : `${{area}}-${{touchedSorted[0]}}`;
   const html=`<div class="mini-rack">${{rowsHtml}}<div class="mini-rack-label">${{esc(rangeLabel)}}</div></div>`;
   // 메인 맵 하이라이트는 실제로 점유한 라인만 켠다(랙 전체 3라인 창이 아니라).
   // 미니 랙은 같은 랙 단위를 보여주려고 3라인을 다 그리지만, 안 채워진 라인까지

@@ -40,7 +40,7 @@ def _save_destination_mapping(company, product, erp_name):
 
 
 def page_move():
-    from nohtus.ui.location_picker import location_picker, render_location_range_grid_picker_button
+    from nohtus.ui.location_picker import move_location_picker
     from nohtus.services.inbound import product_mapping_name_for
     from nohtus.services.move_bridge_runtime import _apply_move_prefill_pending
     from inbound_map import render_move_quick_location_map
@@ -175,61 +175,42 @@ def page_move():
             st.warning(f"{product}을 {to_company}로 이동시키기 위해서는 {to_company} ERP에 등록된 해당 제품의 제품명이 필요합니다.")
             dest_mapping_input = st.text_input(label, key=f"move_dest_erp_{src_id}_{to_company}_{product}").strip()
 
-        existing_loc_df = q("""SELECT location, SUM(qty) AS qty
-                              FROM inventory
-                              WHERE company=? AND product_name=? AND qty>0
-                              GROUP BY location
-                              ORDER BY qty DESC, location
-                              LIMIT 1""", (to_company, product))
-        if not existing_loc_df.empty:
-            preferred_loc = str(existing_loc_df.iloc[0]["location"] or "").strip()
-            preferred_qty = int(existing_loc_df.iloc[0]["qty"] or 0)
-            if preferred_loc:
-                auto_key = f"{src_id}|{to_company}|{product}|{preferred_loc}"
-                if st.session_state.get("_move_auto_loc_key") != auto_key:
-                    area, line, level = parse_location(preferred_loc)
-                    st.session_state["_move_picker_defaults"] = {"area": area, "line": line, "level": level}
-                    st.session_state["_move_picker_token"] = int(st.session_state.get("_move_picker_token", 0) or 0) + 1
-                    st.session_state["_move_auto_loc_key"] = auto_key
-                st.caption(f"기존 위치 자동 선택: {preferred_loc} ({preferred_qty}EA)")
+        if to_company == src_company:
+            # 같은 사업장 안에서 옮기는(가장 흔한) 경우는 그 제품이 지금
+            # 있는 바로 그 위치(다중 영역이면 대표 로케이션 코드)를 기본으로
+            # 보여준다 — 도착 위치를 고를 때 "지금 어디 있는지"부터 보이는
+            # 게 자연스럽다.
+            preferred_loc = str(src_row["출발위치"] or "").strip()
+            preferred_label = "현재 위치"
+            preferred_qty = max_qty
+        else:
+            existing_loc_df = q("""SELECT location, SUM(qty) AS qty
+                                  FROM inventory
+                                  WHERE company=? AND product_name=? AND qty>0
+                                  GROUP BY location
+                                  ORDER BY qty DESC, location
+                                  LIMIT 1""", (to_company, product))
+            preferred_loc = str(existing_loc_df.iloc[0]["location"] or "").strip() if not existing_loc_df.empty else ""
+            preferred_label = "기존 위치 자동 선택"
+            preferred_qty = int(existing_loc_df.iloc[0]["qty"] or 0) if not existing_loc_df.empty else 0
+        if preferred_loc:
+            auto_key = f"{src_id}|{to_company}|{preferred_loc}"
+            if st.session_state.get("_move_auto_loc_key") != auto_key:
+                area, line, level = parse_location(preferred_loc)
+                st.session_state["_move_picker_defaults"] = {"area": area, "line": line, "level": level}
+                st.session_state["_move_picker_token"] = int(st.session_state.get("_move_picker_token", 0) or 0) + 1
+                st.session_state["_move_auto_loc_key"] = auto_key
+            st.caption(f"{preferred_label}: {preferred_loc} ({preferred_qty}EA)")
 
     st.markdown("---")
     st.markdown("#### 도착 위치 선택")
     st.caption("도면에서 위치를 클릭하면 오른쪽 구역/라인/단이 그 위치로 바뀝니다.")
     move_map_col, move_pos_col = st.columns([7.3, 2.7], gap="large")
     with move_pos_col:
-        to_location = location_picker("move", "A1")
-        range_end_on = st.checkbox(
-            "여러 칸 범위를 통째로 차지",
-            key="move_range_end_on",
-            help="한 제품이 여러 로케이션 칸을 통째로 차지할 때, 재고는 위 위치 하나로만 관리하면서 로케이션맵에는 범위 전체가 채워진 것으로 표시합니다.",
-        )
-        to_area, to_line, _to_level = parse_location(to_location)
-        if not range_end_on:
-            # 체크를 끄면 "범위 없음"으로 완전히 되돌린다. 꺼도 값이 남아있으면
-            # 나중에 다시 켰을 때 지금 위치와 상관없는 옛 범위가 그대로
-            # 되살아나 마치 "안 지워진다"처럼 보인다.
-            st.session_state["_move_range_cells"] = []
-            st.session_state.pop("_move_range_cells_area", None)
-        elif st.session_state.get("_move_range_cells_area") != to_area:
-            # 도착 위치의 구역이 바뀌면 이전 구역 기준 범위는 더 이상 의미가
-            # 없으므로 함께 비운다.
-            st.session_state["_move_range_cells"] = []
-            st.session_state["_move_range_cells_area"] = to_area
-        range_cells = st.session_state.get("_move_range_cells") or [] if range_end_on else []
-        if range_end_on:
-            render_location_range_grid_picker_button("move", to_area, to_line)
-            if range_cells:
-                clear_col, info_col = st.columns([1, 3])
-                with clear_col:
-                    if st.button("범위 지우기", key="move_range_end_clear"):
-                        st.session_state["_move_range_cells"] = []
-                        range_cells = []
-                        st.rerun()
-                with info_col:
-                    st.caption(f"추가로 채워질 칸 ({len(range_cells)}개): " + ", ".join(sorted(range_cells)))
-            else:
-                st.caption("위 버튼으로 범위를 선택하세요.")
+        to_location = move_location_picker("A1")
+        # 여러 칸 범위 선택은 위 선반 그림에서 직접 이어서 클릭/드래그하면 되므로
+        # 별도 체크박스/버튼 없이 move_location_picker가 채운 값을 그대로 쓴다.
+        range_cells = st.session_state.get("_move_range_cells") or []
         qty = st.number_input("이동 수량", min_value=1, max_value=max_qty, value=min(1, max_qty), step=1)
         memo = st.text_input("메모", value="")
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
@@ -254,5 +235,4 @@ def page_move():
                 st.error(str(e))
 
     with move_map_col:
-        range_locations = ([to_location] + list(range_cells)) if range_end_on else []
-        render_move_quick_location_map(range_locations=range_locations)
+        render_move_quick_location_map(range_locations=[to_location] + list(range_cells))

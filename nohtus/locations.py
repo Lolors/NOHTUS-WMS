@@ -80,6 +80,32 @@ def expand_location_block(start: str, end: str) -> list[str]:
     ]
 
 
+REVERSED_LINE_RANGES = {
+    # 같은 알파벳 구역 안에서 두 줄 선반이 통로를 사이에 두고 마주보는 경우,
+    # 앞줄은 왼쪽부터 라인 번호가 커지지만 뒷줄은 반대로 오른쪽부터 커진다
+    # (뒷줄에서 번호가 작을수록 오른쪽, 클수록 왼쪽). (구역, 뒷줄 시작 번호,
+    # 뒷줄 끝 번호) — 이 범위 안의 라인을 그림으로 그릴 때는 왼쪽→오른쪽 순서를
+    # 뒤집어야 실제 창고 배치와 맞는다.
+    "A1": (10, 15),
+    "B1": (7, 12),
+    "D1": (7, 12),
+}
+
+
+def line_group_is_reversed(area: str, lines: list[str]) -> bool:
+    """이 구역의 이 라인 묶음(같은 랙 3라인)이 "뒷줄"(역방향)에 해당하는지 판단한다."""
+    if not lines:
+        return False
+    line_range = REVERSED_LINE_RANGES.get(area)
+    if not line_range:
+        return False
+    try:
+        first = int(lines[0])
+    except (TypeError, ValueError):
+        return False
+    return line_range[0] <= first <= line_range[1]
+
+
 def expand_row_range(location, location_range_cells=None, location_range_end=None) -> list[str]:
     """재고 행 하나가 실제로 차지하는 모든 칸(자기 자신 포함)을 계산한다.
 

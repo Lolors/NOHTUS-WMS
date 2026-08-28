@@ -131,10 +131,26 @@ def _load_order_summaries(order_ids) -> dict[int, dict[str, str]]:
             ) ORDER BY order_id, first_id""",
         ids,
     )
-    result = {order_id: {"products": "-"} for order_id in ids}
+    # 지시서 하나에 담긴 제품들이 서로 다른 사업장 재고에서 나올 수 있다(예:
+    # 노투스팜 재고와 NOH 재고를 한 지시서에 함께 담는 경우). 목록의 "매출처"
+    # 칸이 그 중 하나만 대표로 보여주면 나머지 사업장 제품이 빠진 것처럼
+    # 보이므로, 실제로 담긴 모든 사업장을 처음 등장한 순서대로 모아둔다.
+    companies = saved_v2.q(
+        f"""SELECT order_id, company FROM (
+                SELECT order_id, TRIM(company) AS company, MIN(id) AS first_id
+                FROM outbound_order_items
+                WHERE order_id IN ({placeholders}) AND TRIM(COALESCE(company,''))<>''
+                GROUP BY order_id, TRIM(company)
+            ) ORDER BY order_id, first_id""",
+        ids,
+    )
+    result = {order_id: {"products": "-", "companies": ""} for order_id in ids}
     for order_id, group in products.groupby("order_id", sort=False):
         values = [f"{row.product_name or '-'} * {int(row.qty or 0)}" for row in group.itertuples(index=False)]
         result[int(order_id)]["products"] = ", ".join(values[:3]) + (f" 외 {len(values)-3}품목" if len(values) > 3 else "")
+    for order_id, group in companies.groupby("order_id", sort=False):
+        names = [str(row.company or "").strip() for row in group.itertuples(index=False)]
+        result[int(order_id)]["companies"] = ", ".join(dict.fromkeys(name for name in names if name))
     return result
 
 
@@ -196,7 +212,9 @@ def _render_saved_orders(orders_df, selected_order_id, summaries=None):
         oid = int(getattr(r, "id"))
         created = str(getattr(r, "order_date", "") or getattr(r, "created_at", ""))[:10]
         summary = summaries.get(oid, {})
-        customer_text = _order_customer_summary(r)
+        # 담긴 제품들의 실제 사업장이 여러 개면 그 전부를 콤마로 이어 보여주고,
+        # 사업장 정보가 없는(옛) 지시서만 저장된 대표 매출처 값으로 되돌아간다.
+        customer_text = summary.get("companies") or _order_customer_summary(r)
         display_no = str(getattr(r, "display_no", "") or getattr(r, "daily_no", "") or oid)
         order_title = str(getattr(r, "title", "") or "").strip() or summary.get("products") or _order_items_summary(oid)
         selected = int(selected_order_id or 0) == oid

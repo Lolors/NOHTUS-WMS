@@ -6,77 +6,7 @@ import streamlit as st
 
 from nohtus.config import AREA_CONFIG
 from nohtus.db import q
-from nohtus.locations import expand_row_range, make_location, parse_location
-
-
-def location_picker(prefix, default_area="A1", stock_only=False):
-    """구역/라인/단 선택.
-    입고 등록과 같은 조합 규칙을 사용한다.
-    - 라인/단이 있는 구역은 선택 없음 없이 실제 값만 표시한다.
-    - Q 구역은 라인/단 선택 없이 Q로 고정한다.
-    - 라인/단이 없는 특수 구역만 비활성 선택 없음으로 표시한다.
-    """
-    picker_defaults = st.session_state.get(f"_{prefix}_picker_defaults", {}) or {}
-    widget_suffix = ""
-    if picker_defaults:
-        # 외부 값으로 기본 위치를 바꿔야 하는 화면은 token suffix로 위젯을 재생성한다.
-        # inbound: 도면 클릭값 반영 / move: 도착 사업장의 기존 재고 위치 자동 반영
-        if prefix in ["inbound", "move"]:
-            widget_suffix = f"_{st.session_state.get(f'_{prefix}_picker_token', 0)}"
-        default_area = picker_defaults.get("area") or default_area
-
-    if stock_only:
-        stock_df = q("SELECT DISTINCT location FROM inventory WHERE qty>0 ORDER BY location")
-        locs = stock_df["location"].tolist()
-        areas = sorted({parse_location(x)[0] for x in locs}) or ["A1"]
-    else:
-        locs = []
-        areas = list(AREA_CONFIG.keys())
-    if default_area not in areas:
-        default_area = areas[0]
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        area = st.selectbox("구역", areas, index=areas.index(default_area), key=f"{prefix}_area{widget_suffix}")
-
-    cfg = AREA_CONFIG.get(area, {"lines": [], "levels": []})
-    if stock_only:
-        lines = sorted({parse_location(x)[1] for x in locs if parse_location(x)[0] == area and parse_location(x)[1]})
-        levels = []
-    else:
-        lines = list(cfg.get("lines", []))
-        levels = list(cfg.get("levels", []))
-
-    default_line = str(picker_defaults.get("line", "") or "") if picker_defaults else ""
-    with c2:
-        if lines:
-            if default_line not in lines:
-                default_line = lines[0]
-            line = st.selectbox("라인", lines, index=lines.index(default_line), key=f"{prefix}_line{widget_suffix}")
-        else:
-            st.selectbox("라인", ["선택 없음"], key=f"{prefix}_line_disabled{widget_suffix}", disabled=True)
-            line = ""
-
-    if stock_only:
-        if line:
-            levels = sorted({parse_location(x)[2] for x in locs if parse_location(x)[0] == area and parse_location(x)[1] == line and parse_location(x)[2]})
-        else:
-            levels = sorted({parse_location(x)[2] for x in locs if parse_location(x)[0] == area and parse_location(x)[2]})
-
-    default_level = str(picker_defaults.get("level", "") or "") if picker_defaults else ""
-    with c3:
-        if levels:
-            if default_level not in levels:
-                default_level = levels[0]
-            level = st.selectbox("단", levels, index=levels.index(default_level), key=f"{prefix}_level{widget_suffix}")
-        else:
-            st.selectbox("단", ["선택 없음"], key=f"{prefix}_level_disabled{widget_suffix}", disabled=True)
-            level = ""
-
-    if prefix == "inbound":
-        st.session_state["_inbound_selected_loc"] = make_location(area, line, level)
-    st.session_state[f"_{prefix}_picker_defaults"] = {"area": area, "line": line, "level": level}
-    return make_location(area, line, level)
+from nohtus.locations import expand_row_range, line_group_is_reversed, make_location, parse_location
 
 
 def inbound_location_picker(default_area="REC"):
@@ -121,9 +51,18 @@ def inbound_location_picker(default_area="REC"):
     if lines and levels:
         with c2:
             st.caption("선반 그림에서 칸을 클릭/드래그로 고르세요 ↓")
+        line, level = _area_grid_picker("inbound", area, lines, levels, line_default, level_default, token, label="입고 위치")
+    elif lines:
+        # N(기타 위치)처럼 라인 목록 자체가 실물 칸이 아니라 이름 있는 특수
+        # 위치들("오른쪽 창고" 등)이라 단 개념이 없는 구역이다. 단만 비활성으로
+        # 두고, 라인은 그 특수 위치 중 하나를 고르는 평범한 선택 상자로 보여준다.
+        with c2:
+            if line_default not in lines:
+                line_default = lines[0]
+            line = st.selectbox("라인", lines, index=lines.index(line_default), key=f"inbound_line_{token}")
         with c3:
-            st.caption("(도면에서 라인을 먼저 클릭해도 됩니다)")
-        line, level = _inbound_grid_picker(area, lines, levels, line_default, level_default, token)
+            st.selectbox("단", ["선택 없음"], key=f"inbound_level_disabled_{token}", disabled=True)
+            level = ""
     else:
         with c2:
             st.selectbox("라인", ["선택 없음"], key=f"inbound_line_disabled_{token}", disabled=True)
@@ -138,7 +77,67 @@ def inbound_location_picker(default_area="REC"):
     return loc
 
 
-def _inbound_occupied_rows(area):
+def move_location_picker(default_area="A1"):
+    """이동 등록의 도착 위치 선택기 — 입고 등록과 같은 3x3 선반 그림으로 고른다."""
+    defaults = st.session_state.get("_move_picker_defaults", {}) or {}
+    area_default = str(defaults.get("area") or default_area or "A1")
+    line_default = str(defaults.get("line") or "")
+    level_default = str(defaults.get("level") or "")
+    token = int(st.session_state.get("_move_picker_token", 0) or 0)
+
+    areas = [area for area in AREA_CONFIG if area != "N"] + (["N"] if "N" in AREA_CONFIG else [])
+    if area_default not in areas:
+        area_default = default_area if default_area in areas else areas[0]
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        area = st.selectbox(
+            "구역",
+            areas,
+            index=areas.index(area_default),
+            key=f"move_area_{token}",
+            format_func=lambda value: "기타 위치" if value == "N" else value,
+        )
+
+    if st.session_state.get("_move_range_cells_area") != area:
+        # 구역이 바뀌면 이전 구역 기준으로 고른 범위는 더 이상 의미가 없으므로
+        # 함께 비운다(그대로 두면 새 구역에서도 옛 범위가 섞여 나온다).
+        st.session_state["_move_range_cells"] = []
+        st.session_state["_move_range_cells_area"] = area
+
+    cfg = AREA_CONFIG.get(area, {"lines": [], "levels": []})
+    lines = list(cfg.get("lines", []))
+    levels = list(cfg.get("levels", []))
+
+    if lines and levels:
+        with c2:
+            st.caption("선반 그림에서 칸을 클릭/드래그로 고르세요 ↓")
+        line, level = _area_grid_picker("move", area, lines, levels, line_default, level_default, token, label="도착 위치")
+    elif lines:
+        # N(기타 위치)처럼 라인 목록 자체가 실물 칸이 아니라 이름 있는 특수
+        # 위치들("오른쪽 창고" 등)이라 단 개념이 없는 구역이다. 단만 비활성으로
+        # 두고, 라인은 그 특수 위치 중 하나를 고르는 평범한 선택 상자로 보여준다.
+        with c2:
+            if line_default not in lines:
+                line_default = lines[0]
+            line = st.selectbox("라인", lines, index=lines.index(line_default), key=f"move_line_{token}")
+        with c3:
+            st.selectbox("단", ["선택 없음"], key=f"move_level_disabled_{token}", disabled=True)
+            level = ""
+    else:
+        with c2:
+            st.selectbox("라인", ["선택 없음"], key=f"move_line_disabled_{token}", disabled=True)
+            line = ""
+        with c3:
+            st.selectbox("단", ["선택 없음"], key=f"move_level_disabled_{token}", disabled=True)
+            level = ""
+
+    loc = make_location(area, line, level)
+    st.session_state["_move_picker_defaults"] = {"area": area, "line": line, "level": level}
+    return loc
+
+
+def _area_occupied_rows(area):
     """이 구역에서 재고가 있는 행들을 범위(location_range_cells)까지 펼쳐서 반환한다.
 
     (행, 그 행이 실제로 차지하는 칸 목록) 튜플의 리스트. 대표 위치만 보면
@@ -157,24 +156,29 @@ def _inbound_occupied_rows(area):
     return result
 
 
-def _inbound_grid_picker(area, lines, levels, line_default, level_default, token):
+def _area_grid_picker(prefix, area, lines, levels, line_default, level_default, token, *, label):
     """구역의 실제 랙(3라인) 그림을 보여주고, 칸을 클릭/드래그로 라인+단(+범위)을 고르게 한다.
 
-    메인 로케이션 맵/이동 등록의 "칸 범위 선택"과 같은 그림 컴포넌트를 그대로
-    써서 한 칸만 클릭하면 그 칸이 입고 위치가 되고, 여러 칸을 이어서 고르면
-    처음 고른 칸이 입고 위치, 나머지는 함께 채워지는 범위가 된다. 이미 재고가
-    있는 칸(범위로 채워진 칸 포함)은 점선으로 표시하고, 고른 칸에 이미 있는
-    재고도 바로 아래에 보여준다.
+    입고 등록과 이동 등록이 함께 쓴다(prefix로 세션 상태 키를 구분). 메인
+    로케이션 맵과 같은 그림 컴포넌트를 그대로 써서 한 칸만 클릭하면 그 칸이
+    대표 위치가 되고, 여러 칸을 이어서 고르면 처음 고른 칸이 대표 위치,
+    나머지는 함께 채워지는 범위가 된다. 이미 재고가 있는 칸(범위로 채워진
+    칸 포함)은 점선으로 표시하고, 고른 칸에 이미 있는 재고도 바로 아래에
+    보여준다.
     """
     from nohtus.ui.shelf_range_picker import render_shelf_range_picker
+
+    range_key = f"_{prefix}_range_cells"
+    defaults_key = f"_{prefix}_picker_defaults"
+    reset_token_key = f"_{prefix}_shelf_reset_token"
 
     if line_default not in lines:
         line_default = lines[0]
     if level_default not in levels:
         level_default = levels[0]
-    rack_lines = _rack_line_group(lines, line_default)
+    rack_lines = _display_rack_lines(area, lines, line_default)
 
-    occupied_rows = _inbound_occupied_rows(area)
+    occupied_rows = _area_occupied_rows(area)
     occupied_cells = [
         {"lineIdx": li, "levelIdx": lv}
         for li, rline in enumerate(rack_lines)
@@ -188,14 +192,14 @@ def _inbound_grid_picker(area, lines, levels, line_default, level_default, token
     # 함께 저장돼버리는 문제가 있었다 — 여기서 매번 걸러내 세션 값 자체를
     # 정리한다.
     extra_cells = [
-        extra for extra in (st.session_state.get("_inbound_range_cells") or [])
+        extra for extra in (st.session_state.get(range_key) or [])
         if parse_location(extra)[0] == area and parse_location(extra)[1] in rack_lines and parse_location(extra)[2] in levels
     ]
-    st.session_state["_inbound_range_cells"] = extra_cells
+    st.session_state[range_key] = extra_cells
 
-    # 초기 선택 = [입고 위치 자신] + [범위로 함께 채워질 칸들], 이 순서 그대로
+    # 초기 선택 = [대표 위치 자신] + [범위로 함께 채워질 칸들], 이 순서 그대로
     # 그림 컴포넌트에 씨앗값으로 넘긴다 — 맨 앞이 "대표 위치"라는 규칙을
-    # 유지해야 다시 열었을 때도 어떤 칸이 입고 위치인지 헷갈리지 않는다.
+    # 유지해야 다시 열었을 때도 어떤 칸이 대표 위치인지 헷갈리지 않는다.
     initial = []
     if line_default in rack_lines:
         initial.append({"lineIdx": rack_lines.index(line_default), "levelIdx": levels.index(level_default)})
@@ -203,22 +207,32 @@ def _inbound_grid_picker(area, lines, levels, line_default, level_default, token
         extra_area, extra_line, extra_level = parse_location(extra)
         initial.append({"lineIdx": rack_lines.index(extra_line), "levelIdx": levels.index(extra_level)})
 
+    shelf_reset_token = int(st.session_state.get(reset_token_key, 0) or 0)
     selection = render_shelf_range_picker(
         rack_lines, levels, initial=initial, occupied=occupied_cells, exclusive_click=True, height=260,
-        key=f"inbound_shelf_{token}_{area}",
+        key=f"{prefix}_shelf_{token}_{area}_{shelf_reset_token}",
     )
     if selection is not None:
         cells = selection.get("cells") or []
         if cells:
             # 클릭/드래그로 고른 순서 그대로 온다: 맨 처음 고른 칸이 대표
-            # 입고 위치, 나머지가 범위다. 전부 지워버린 경우(빈 선택)는
-            # 입고 위치가 하나도 없다는 뜻이라 무시하고 기존 선택을 유지한다.
+            # 위치, 나머지가 범위다. 전부 지워버린 경우(빈 선택)는 대표
+            # 위치가 하나도 없다는 뜻이라 무시하고 기존 선택을 유지한다.
             primary, *rest = cells
             line, level = primary["line"], primary["level"]
-            st.session_state["_inbound_picker_defaults"] = {"area": area, "line": line, "level": level}
-            st.session_state["_inbound_range_cells"] = [
+            st.session_state[defaults_key] = {"area": area, "line": line, "level": level}
+            st.session_state[range_key] = [
                 make_location(area, c["line"], c["level"]) for c in rest
             ]
+            # 그림 컴포넌트는 서버를 한 번 거칠 때마다 칸을 다시 만들면서 "이번
+            # 클릭이 반영되기 전" initial로 다시 시드하므로(내부 JS 상태가 다음
+            # 렌더까지 안 남는다), 곧바로 또 클릭하면 방금 고른 칸이 누락된
+            # 것처럼 취급된다. st.rerun()만 부르면 같은 key의 이번 클릭 값이
+            # 안 사라져 무한 리런에 빠지므로, key에 들어가는 리셋 토큰을 먼저
+            # 올려 완전히 새 위젯으로 만든 뒤 rerun한다 — 그래야 지금 막 갱신한
+            # cells를 initial로 받아 정확하게 다시 마운트된다.
+            st.session_state[reset_token_key] = shelf_reset_token + 1
+            st.rerun()
         else:
             line = line_default if line_default in rack_lines else rack_lines[0]
             level = level_default
@@ -226,7 +240,7 @@ def _inbound_grid_picker(area, lines, levels, line_default, level_default, token
         line = line_default if line_default in rack_lines else rack_lines[0]
         level = level_default
 
-    selected_locs = [make_location(area, line, level)] + list(st.session_state.get("_inbound_range_cells") or [])
+    selected_locs = [make_location(area, line, level)] + list(st.session_state.get(range_key) or [])
     info_lines = []
     for loc in selected_locs:
         matches = [r for r, occupied in occupied_rows if loc in occupied]
@@ -234,7 +248,7 @@ def _inbound_grid_picker(area, lines, levels, line_default, level_default, token
             parts = [f"{r.product_name} {int(r.qty)}EA (LOT {r.lot or '-'})" for r in matches]
             info_lines.append(f"{loc}: " + ", ".join(parts))
     if len(selected_locs) > 1:
-        st.caption(f"입고 위치 {selected_locs[0]} + 범위 {len(selected_locs) - 1}칸 ({', '.join(sorted(selected_locs[1:]))})")
+        st.caption(f"{label} {selected_locs[0]} + 범위 {len(selected_locs) - 1}칸 ({', '.join(sorted(selected_locs[1:]))})")
     if info_lines:
         st.info("이미 있는 재고\n" + "\n".join(info_lines))
     else:
@@ -262,109 +276,15 @@ def _rack_line_group(lines, current_line):
     return lines[group_start:group_start + _RACK_LINE_GROUP_SIZE]
 
 
-def render_location_range_grid_picker_button(prefix, area, current_line=None, *, key=None):
-    """"칸 그림으로 범위 선택" 버튼과, 열려 있는 동안 계속 떠 있어야 하는 모달을 함께 그린다.
+def _display_rack_lines(area, lines, current_line):
+    """선반 그림에 왼쪽→오른쪽 순서로 그릴 라인 목록.
 
-    st.dialog는 그 함수를 호출한 런에서만 여는 게 아니라, 열려 있어야 하는 동안
-    매 런마다 다시 호출해줘야 계속 떠 있는다(다이얼로그 내부 위젯 클릭 한 번마다
-    Streamlit이 전체 스크립트를 다시 실행하기 때문). 그래서 버튼 클릭 자체가 아니라
-    세션 상태 플래그로 "지금 열려 있어야 하는지"를 기억해뒀다가, 이 함수가 호출될
-    때마다(=페이지가 다시 그려질 때마다) 그 플래그를 보고 다이얼로그를 다시 띄운다.
+    같은 알파벳 구역 안에서 두 줄이 마주보는 구조(예: A1 앞줄 01~09 / 뒷줄
+    10~15)에서는 뒷줄이 번호 오름차순과 반대로(번호가 클수록 왼쪽) 배치돼
+    있으므로, 그 랙 묶음이면 화면에 그릴 순서만 뒤집는다 — 저장되는 실제
+    라인 값 자체는 그대로다.
     """
-    open_key = f"_{prefix}_grid_dialog_open"
-    area_key = f"_{prefix}_grid_dialog_area"
-    lines_key = f"_{prefix}_grid_dialog_lines"
-    if st.button("칸 그림으로 범위 선택", key=key or f"{prefix}_grid_open", use_container_width=True):
-        cfg = AREA_CONFIG.get(area, {})
-        all_lines = list(cfg.get("lines") or [])
-        if not all_lines or not cfg.get("levels"):
-            st.toast(f"{area} 구역은 라인/단이 없어 그림으로 범위를 선택할 수 없습니다.")
-        else:
-            # 이전에 열었을 때 적용/취소 없이 닫았을 수도 있으니(예: 모달의 X
-            # 버튼), 매번 새로 열 때는 이전 선택이 남아있지 않도록 확실히 비운다.
-            # 세션 값만 지우는 게 아니라 컴포넌트 key에 들어가는 토큰도 올려서,
-            # 그림 컴포넌트 쪽 내부 JS 상태(closure)까지 완전히 새로 만들어지게
-            # 한다 — key가 그대로면 Streamlit이 기존 컴포넌트 인스턴스를 그대로
-            # 재사용해 이전 클릭이 남긴 내부 상태가 섞여 나올 수 있기 때문이다.
-            st.session_state.pop(f"_{prefix}_shelf_sel", None)
-            st.session_state[f"_{prefix}_shelf_reset_token"] = int(
-                st.session_state.get(f"_{prefix}_shelf_reset_token", 0) or 0
-            ) + 1
-            st.session_state[open_key] = True
-            st.session_state[area_key] = area
-            st.session_state[lines_key] = _rack_line_group(all_lines, current_line)
-
-    if st.session_state.get(open_key):
-        dialog_area = st.session_state.get(area_key) or area
-        cfg = AREA_CONFIG.get(dialog_area, {})
-        lines = st.session_state.get(lines_key) or _rack_line_group(list(cfg.get("lines") or []), current_line)
-        levels = list(cfg.get("levels") or [])
-        if lines and levels:
-            _location_range_grid_dialog(prefix, dialog_area, lines, levels)
-        else:
-            st.session_state[open_key] = False
-
-
-def _on_shelf_dialog_dismiss():
-    """모달을 적용/취소 버튼이 아니라 X(또는 Esc)로 닫았을 때도 선택 상태를 비운다.
-
-    안 그러면 다음에 이 버튼을 눌렀을 때 지난번 그리다 만 선택이 그대로 남아
-    있어서, 새로 클릭해도 옛 칸이 계속 같이 붙어 나오는 것처럼 보인다.
-    """
-    prefix = st.session_state.pop("_shelf_dialog_active_prefix", None)
-    if prefix:
-        st.session_state.pop(f"_{prefix}_shelf_sel", None)
-        st.session_state[f"_{prefix}_shelf_reset_token"] = int(
-            st.session_state.get(f"_{prefix}_shelf_reset_token", 0) or 0
-        ) + 1
-        st.session_state[f"_{prefix}_grid_dialog_open"] = False
-
-
-@st.dialog("칸 범위 선택", width="small", on_dismiss=_on_shelf_dialog_dismiss)
-def _location_range_grid_dialog(prefix, area, lines, levels):
-    from nohtus.ui.shelf_range_picker import render_shelf_range_picker
-
-    st.session_state["_shelf_dialog_active_prefix"] = prefix
-    sel_key = f"_{prefix}_shelf_sel"
-    reset_token = int(st.session_state.get(f"_{prefix}_shelf_reset_token", 0) or 0)
-    cells = st.session_state.get(sel_key) or []
-
-    st.caption(f"{area} 구역 선반입니다. 칸을 클릭하면 선택되고, 누른 채 끌면 지나간 칸이 모두 붓칠하듯 선택됩니다(직사각형이 아니어도 됨). 선택된 칸을 드래그 없이 다시 클릭하면 그 칸만 해제됩니다.")
-    initial = [{"lineIdx": c["lineIdx"], "levelIdx": c["levelIdx"]} for c in cells]
-    # key에 리셋 토큰을 넣어서, 다시 열거나/다시 선택할 때마다 그림 컴포넌트를
-    # 완전히 새 인스턴스로 만든다. key가 그대로면 내부 JS의 이전 클릭 상태가
-    # 남아있다가 다음 선택에 섞여 들어올 수 있다.
-    selection = render_shelf_range_picker(
-        lines, levels, initial=initial, height=420, key=f"{prefix}_shelf_range_{reset_token}"
-    )
-    if selection is not None:
-        cells = selection.get("cells") or []
-        st.session_state[sel_key] = cells
-
-    if cells:
-        labels = sorted(f"{area}-{c['line']}-{c['level']}" for c in cells)
-        st.info(f"선택 범위 ({len(cells)}칸): " + ", ".join(labels))
-    else:
-        st.caption("칸을 클릭하거나 드래그해 범위를 선택하세요.")
-
-    apply_col, reset_col, cancel_col = st.columns(3)
-    with apply_col:
-        if st.button("이 범위 적용", type="primary", use_container_width=True, key=f"{prefix}_grid_apply", disabled=not cells):
-            st.session_state[f"_{prefix}_range_cells"] = [
-                make_location(area, c["line"], c["level"]) for c in cells
-            ]
-            st.session_state.pop(sel_key, None)
-            st.session_state[f"_{prefix}_shelf_reset_token"] = reset_token + 1
-            st.session_state[f"_{prefix}_grid_dialog_open"] = False
-            st.rerun()
-    with reset_col:
-        if st.button("다시 선택", use_container_width=True, key=f"{prefix}_grid_reset"):
-            st.session_state.pop(sel_key, None)
-            st.session_state[f"_{prefix}_shelf_reset_token"] = reset_token + 1
-            st.rerun()
-    with cancel_col:
-        if st.button("취소", use_container_width=True, key=f"{prefix}_grid_cancel"):
-            st.session_state.pop(sel_key, None)
-            st.session_state[f"_{prefix}_shelf_reset_token"] = reset_token + 1
-            st.session_state[f"_{prefix}_grid_dialog_open"] = False
-            st.rerun()
+    rack_lines = _rack_line_group(lines, current_line)
+    if line_group_is_reversed(area, rack_lines):
+        return list(reversed(rack_lines))
+    return rack_lines
