@@ -29,8 +29,6 @@ def _load_patched_product_groups(original_product_groups, session_state=None, ma
         "_AVAILABLE_ONLY_KEY": lmb._AVAILABLE_ONLY_KEY,
         "_EXCLUDE_MATERIALS_KEY": lmb._EXCLUDE_MATERIALS_KEY,
         "_normalized_location": lmb._normalized_location,
-        "_is_non_counted_location": lmb._is_non_counted_location,
-        "_SPECIAL_SORT_PREFIX": lmb._SPECIAL_SORT_PREFIX,
         "material_products": set(material_products or []),
         "original_product_groups": original_product_groups,
     }
@@ -39,8 +37,8 @@ def _load_patched_product_groups(original_product_groups, session_state=None, ma
 
 class LocationMapProductClickFilterTests(unittest.TestCase):
     """제품명을 클릭했을 때 로케이션맵이 재고 분포를 만드는 patched_product_groups()의
-    실제 필터링/집계 로직을 검증한다. 체크박스 상태에 따라 P 재고와 메뉴에 등록된 부자재를
-    빼고 재계산하고, 홍보물랙처럼 집계 제외 로케이션은 별도로 처리해야 한다."""
+    실제 필터링/집계 로직을 검증한다. 체크박스 상태에 따라 P 재고와 메뉴에 등록된
+    부자재를 빼고 재계산해야 한다."""
 
     def test_p_location_excluded_when_available_only_checked(self):
         captured = {}
@@ -93,13 +91,13 @@ class LocationMapProductClickFilterTests(unittest.TestCase):
             {"location": "A1-01", "qty": 5, "company": "NOH"},
             {"location": "G1-01", "qty": 2, "company": "NOH"},
             {"location": "G2-01", "qty": 1, "company": "NOH"},
-            {"location": "홍보물랙", "qty": 4, "company": "NOH"},
+            {"location": "다용도랙", "qty": 4, "company": "NOH"},
         ])
         patched("제품", inv_df)
 
         self.assertEqual(
             captured["inv_df"]["location"].tolist(),
-            ["A1-01", "G1-01", "G2-01", "홍보물랙"],
+            ["A1-01", "G1-01", "G2-01", "다용도랙"],
         )
 
     def test_material_locations_kept_when_unchecked(self):
@@ -158,27 +156,7 @@ class LocationMapProductClickFilterTests(unittest.TestCase):
         groups = patched("제품", pd.DataFrame(columns=["location", "qty", "company"]))
         self.assertEqual(len(groups), 1)
 
-    def test_non_counted_location_zeroed_and_excluded_from_total_qty(self):
-        fixed_rows = pd.DataFrame([
-            {"location": "A1-01", "qty": 5, "company": "NOH"},
-            {"location": "홍보물랙", "qty": 100, "company": "NOH"},
-        ])
-        patched = _load_patched_product_groups(
-            lambda product_name, inv_df: [{"rows": fixed_rows, "total_qty": 105}],
-        )
-        groups = patched("제품", fixed_rows)
-
-        group = groups[0]
-        self.assertEqual(group["total_qty"], 5)
-        rows = group["rows"]
-        self.assertEqual(rows["qty"].tolist(), [5, 0])
-        self.assertTrue(rows["location"].iloc[1].startswith(lmb._SPECIAL_SORT_PREFIX))
-        self.assertTrue(rows["company"].iloc[1].startswith(lmb._SPECIAL_SORT_PREFIX))
-        # 집계 대상 행은 건드리지 않는다.
-        self.assertEqual(rows["location"].iloc[0], "A1-01")
-        self.assertEqual(rows["company"].iloc[0], "NOH")
-
-    def test_group_without_non_counted_rows_is_left_unchanged(self):
+    def test_groups_pass_through_unchanged_when_materials_not_excluded(self):
         fixed_rows = pd.DataFrame([
             {"location": "A1-01", "qty": 5, "company": "NOH"},
         ])

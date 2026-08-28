@@ -1,16 +1,18 @@
+import sqlite3
+
 from nohtus.db import connect
 
 
-_PROMO_LOCATION_NORMALIZED = "N홍보물랙"
+_PROMO_LOCATION_VARIANTS = ("N홍보물랙", "홍보물랙")
 
 
 def _migrate_promo_rack_locations(cur):
-    """Move legacy N promo-rack references to the standalone promo rack.
+    """Move legacy promo-rack references to the multi-purpose rack that replaced it.
 
-    Normalizing whitespace, hyphens and underscores covers values used by older
-    picker versions (for example ``N-홍보물랙`` and ``N - 홍보물랙``).  The UPDATEs
-    are safe to run on every startup and keep both live inventory and textual
-    history/order references aligned without changing inventory row ids.
+    홍보물랙 구역은 폐지되어 다용도랙으로 통합됐다. 이 함수는 옛 피커 버전이 남긴
+    변형 표기(예: ``N-홍보물랙``, ``N - 홍보물랙``)와 예전 표준 표기 ``홍보물랙``
+    자체를 모두 ``다용도랙``으로 정규화한다. 매 시작 시 실행해도 안전하며,
+    재고 행 id를 바꾸지 않고 실사고/이력/주문 참조 텍스트까지 함께 맞춘다.
     """
     predicate = (
         "REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE({column},''))), ' ', ''), '-', ''), '_', '')=?"
@@ -21,10 +23,18 @@ def _migrate_promo_rack_locations(cur):
         ("transactions", "to_location"),
         ("outbound_order_items", "location"),
     ):
-        cur.execute(
-            f"UPDATE {table} SET {column}='홍보물랙' WHERE " + predicate.format(column=column),
-            (_PROMO_LOCATION_NORMALIZED,),
-        )
+        for variant in _PROMO_LOCATION_VARIANTS:
+            try:
+                cur.execute(
+                    f"UPDATE {table} SET {column}='다용도랙' WHERE " + predicate.format(column=column),
+                    (variant,),
+                )
+            except sqlite3.IntegrityError:
+                # inventory에는 (사업장,제품,ERP명,LOT,유통기한,위치) 유니크 제약이
+                # 있다. 아주 드물게 다용도랙에 이미 같은 조합의 행이 있으면 이
+                # 정규화 하나가 충돌할 수 있는데, 그 한 줄 때문에 앱 시작이
+                # 실패하면 안 되므로 건너뛴다(그 재고 행은 예전 위치명에 남는다).
+                pass
 
 def init_db():
     con = connect(); cur = con.cursor()

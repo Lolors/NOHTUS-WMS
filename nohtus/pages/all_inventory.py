@@ -10,21 +10,10 @@ from nohtus.db import q
 from nohtus.dates import display_date_only
 
 
-_NON_COUNTED_LOCATION = "홍보물랙"
-
-
-def _normalized_location(value):
-    return str(value or "").strip().upper().replace(" ", "")
-
-
-def _is_non_counted_location(value):
-    return _normalized_location(value) == _NON_COUNTED_LOCATION
-
-
 def _build_where(companies, product_term, erp_term, exclude_p=False, exclude_materials=True):
     normalized = "REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '')"
     where = [
-        f"(qty>0 OR {normalized} LIKE 'G1%' OR {normalized} LIKE 'G2%' OR {normalized} LIKE '%홍보물랙%')"
+        f"(qty>0 OR {normalized} LIKE 'G1%' OR {normalized} LIKE 'G2%')"
     ]
     params = []
     if companies:
@@ -69,20 +58,16 @@ def _build_query(companies, product_term, erp_term, exclude_p=False, exclude_mat
                qty AS 수량
         FROM inventory
         WHERE {where_sql}
-        ORDER BY
-            CASE WHEN REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '')='홍보물랙' THEN 1 ELSE 0 END,
-            company, location, product_name, warehouse_name, lot, exp_date, id
+        ORDER BY company, location, product_name, warehouse_name, lot, exp_date, id
     """
     return q(sql, tuple(params))
 
 
 def _summary_query(companies, product_term, erp_term, exclude_p=False, exclude_materials=True):
     where_sql, params = _build_where(companies, product_term, erp_term, exclude_p, exclude_materials)
-    counted_condition = "REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '')<>'홍보물랙'"
     total_df = q(
         f"""
-        SELECT COUNT(*) AS row_count,
-               COALESCE(SUM(CASE WHEN {counted_condition} THEN qty ELSE 0 END), 0) AS total_qty
+        SELECT COUNT(*) AS row_count, COALESCE(SUM(qty), 0) AS total_qty
         FROM inventory
         WHERE {where_sql}
         """,
@@ -90,8 +75,7 @@ def _summary_query(companies, product_term, erp_term, exclude_p=False, exclude_m
     )
     by_company = q(
         f"""
-        SELECT company AS 사업장,
-               COALESCE(SUM(CASE WHEN {counted_condition} THEN qty ELSE 0 END), 0) AS 수량
+        SELECT company AS 사업장, COALESCE(SUM(qty), 0) AS 수량
         FROM inventory
         WHERE {where_sql}
         GROUP BY company
@@ -161,7 +145,7 @@ def _render_summary(row_count, total_qty, by_company):
 
 def page_all_inventory():
     st.title("전체 조회")
-    st.caption("전체 재고를 사업장, 표준제품명, ERP명 기준으로 조회합니다. 홍보물랙은 수량 합계에서 제외됩니다.")
+    st.caption("전체 재고를 사업장, 표준제품명, ERP명 기준으로 조회합니다.")
 
     f1, f2, f3, f4 = st.columns([3, 2, 2, 3], gap="small")
     with f1:

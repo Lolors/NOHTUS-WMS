@@ -255,7 +255,7 @@ def _normalized_map_location(value):
 
 def _is_material_or_promo_location(value):
     normalized = _normalized_map_location(value)
-    return normalized.startswith("G1") or normalized.startswith("G2") or "홍보물랙" in normalized
+    return normalized.startswith("G1") or normalized.startswith("G2")
 
 
 def page_map_search_results(term, compact: bool = False):
@@ -282,7 +282,6 @@ def page_map_search_results(term, compact: bool = False):
         normalized_sql = "REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', ''), '-', ''), '_', '')"
         where.append(f"{normalized_sql} NOT LIKE 'G1%'")
         where.append(f"{normalized_sql} NOT LIKE 'G2%'")
-        where.append(f"{normalized_sql} NOT LIKE '%홍보물랙%'")
 
     inv = q(f"""
         SELECT id, company, product_name, warehouse_name, lot, exp_date, location, qty

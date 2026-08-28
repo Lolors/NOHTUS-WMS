@@ -22,24 +22,21 @@ def _normalized_stocktake_location_sql():
 
 
 def _is_zero_qty_exception_location(location):
-    """G1, G2, 홍보물랙은 수량이 0이어도 재고 행을 유지한다."""
+    """G1, G2는 수량이 0이어도 재고 행을 유지한다."""
     normalized = _normalize_stocktake_location(location)
-    return normalized.startswith("G1") or normalized.startswith("G2") or "홍보물랙" in normalized
+    return normalized.startswith("G1") or normalized.startswith("G2")
 
 
 def _zero_qty_exception_sql():
     """0이어도 실사/기준재고 양식에 남겨야 하는 로케이션 조건."""
     location = _normalized_stocktake_location_sql()
-    return (
-        f"{location} LIKE 'G1%' OR {location} LIKE 'G2%' "
-        f"OR {location} LIKE '%홍보물랙%'"
-    )
+    return f"{location} LIKE 'G1%' OR {location} LIKE 'G2%'"
 
 
 def current_baseline_stock_excel_bytes(exclude_zero=False):
     """현재 WMS 재고를 기준재고 업로드 양식에 채워서 내려받는다.
 
-    0 수량 제외 옵션을 사용해도 G1, G2, 홍보물랙 재고는 포함한다.
+    0 수량 제외 옵션을 사용해도 G1, G2 재고는 포함한다.
     """
     where_sql = f"WHERE qty>0 OR {_zero_qty_exception_sql()}" if exclude_zero else ""
     inv = q(
@@ -156,7 +153,7 @@ def full_inventory_excel_bytes(exclude_zero=True):
 def import_stock_survey_excel(uploaded_file, replace_current=True):
     """기준재고 엑셀을 현재 WMS 재고로 불러온다.
 
-    일반 로케이션의 0 수량 행은 제외하지만 G1, G2, 홍보물랙의 0 수량 행은
+    일반 로케이션의 0 수량 행은 제외하지만 G1, G2의 0 수량 행은
     DB에 저장하여 이후 실사 및 기준재고 양식에도 계속 나타나게 한다.
     """
     normal_df, issue_df = prepare_baseline_stock_dataframe(uploaded_file)

@@ -10,7 +10,7 @@ from nohtus.services.inventory import insert_transaction_log
 
 
 _TRUE_MATERIAL_VALUES = ("1", "true", "yes", "y", "o", "v", "체크", "부자재")
-MATERIAL_TYPES = ("패키지", "라벨", "트레이", "코팅타이벡", "배너", "브로슈어", "책자", "쇼핑백", "기타")
+MATERIAL_TYPES = ("패키지", "라벨", "트레이", "코팅타이벡", "배너", "브로슈어", "책자", "쇼핑백", "단상자", "기타")
 
 
 def ensure_bom_table():

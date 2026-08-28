@@ -12,16 +12,10 @@ from nohtus.db import q
 _ORIGINAL_MAP_SEARCH_RESULTS = location_map_page.page_map_search_results
 _AVAILABLE_ONLY_KEY = "map_search_available_only"
 _EXCLUDE_MATERIALS_KEY = "map_search_exclude_materials"
-_SPECIAL_SORT_PREFIX = "\uffff"
-_NON_COUNTED_LOCATION = "홍보물랙"
 
 
 def _normalized_location(value):
-    return str(value or "").strip().upper().replace(" ", "").lstrip(_SPECIAL_SORT_PREFIX)
-
-
-def _is_non_counted_location(value):
-    return _normalized_location(value) == _NON_COUNTED_LOCATION
+    return str(value or "").strip().upper().replace(" ", "")
 
 
 def _material_product_names() -> set[str]:
@@ -52,8 +46,7 @@ def _page_map_search_results_with_available_filter(term, compact: bool = False):
             sql_text = sql_text.replace(
                 "qty>0",
                 f"(qty>0 OR {normalized_location_sql} LIKE 'G1%' "
-                f"OR {normalized_location_sql} LIKE 'G2%' "
-                f"OR {normalized_location_sql} LIKE '%홍보물랙%')",
+                f"OR {normalized_location_sql} LIKE 'G2%')",
             )
 
         result = original_q(sql_text, params)
@@ -144,7 +137,6 @@ def page_map():
     original_product_groups = location_map_page._map_search_product_groups
     original_text_input = st.text_input
     original_button = st.button
-    original_markdown = st.markdown
     material_products = _material_product_names()
 
     st.markdown(
@@ -201,23 +193,6 @@ def page_map():
                 if group.get("rows") is not None and not group.get("rows").empty
             ]
 
-        for group in groups:
-            rows = group.get("rows")
-            if rows is None or rows.empty or "location" not in rows.columns:
-                continue
-            rows = rows.copy()
-            non_counted = rows["location"].apply(_is_non_counted_location)
-            if non_counted.any():
-                counted_qty = pd.to_numeric(rows.loc[~non_counted, "qty"], errors="coerce").fillna(0).sum()
-                group["total_qty"] = int(counted_qty)
-                rows.loc[non_counted, "qty"] = 0
-                rows.loc[non_counted, "location"] = (
-                    _SPECIAL_SORT_PREFIX + rows.loc[non_counted, "location"].astype(str)
-                )
-                rows.loc[non_counted, "company"] = (
-                    _SPECIAL_SORT_PREFIX + rows.loc[non_counted, "company"].astype(str)
-                )
-                group["rows"] = rows
         return groups
 
     def patched_text_input(label, *args, **kwargs):
@@ -249,32 +224,12 @@ def page_map():
             return False
         if isinstance(label, str) and label == "제품 사진\n(아래에서 업로드)":
             label = "클릭해서 업로드"
-        if isinstance(label, str) and label.startswith(_SPECIAL_SORT_PREFIX):
-            clean_label = label.lstrip(_SPECIAL_SORT_PREFIX)
-            clicked = original_button(clean_label, *args, **kwargs)
-            if clicked and clean_label == "N - 홍보물랙":
-                st.session_state["selected_location"] = clean_label
-            return clicked
         return original_button(label, *args, **kwargs)
-
-    def patched_markdown(body, *args, **kwargs):
-        if isinstance(body, str):
-            body = body.replace(_SPECIAL_SORT_PREFIX, "")
-            body = body.replace(
-                "<div class='dist-cell-qty'>0 EA</div>",
-                "<div class='dist-cell-qty'>측정 대상 아님</div>",
-            )
-            body = body.replace(
-                "<span class='company-total-blue'>0 EA</span>",
-                "<span class='company-total-blue'>측정 대상 아님</span>",
-            )
-        return original_markdown(body, *args, **kwargs)
 
     location_map_page.page_map_search_results = _page_map_search_results_with_available_filter
     location_map_page._map_search_product_groups = patched_product_groups
     st.text_input = patched_text_input
     st.button = patched_button
-    st.markdown = patched_markdown
     try:
         _page_map()
     finally:
@@ -282,5 +237,4 @@ def page_map():
         location_map_page._map_search_product_groups = original_product_groups
         st.text_input = original_text_input
         st.button = original_button
-        st.markdown = original_markdown
     _inject_gm_medic_special_location()

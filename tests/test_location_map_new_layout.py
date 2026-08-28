@@ -12,12 +12,12 @@ class LocationMapNewLayoutTests(unittest.TestCase):
 
     def test_promo_rack_is_one_standalone_click_target(self):
         markup = _map_markup()
-        self.assertEqual(markup.count('data-loc="홍보물랙"'), 1)
-        self.assertIn('data-loc="홍보물랙" style="left:18px;top:830px;width:290px', markup)
-        self.assertNotIn('data-special-loc="홍보물랙"', markup)
-        self.assertNotIn("홍보물랙", SPECIAL_LOCATIONS)
-        self.assertIn("홍보물랙", AREA_CONFIG)
-        self.assertNotIn("홍보물랙", AREA_CONFIG["N"]["lines"])
+        self.assertEqual(markup.count('data-loc="다용도랙"'), 1)
+        self.assertIn('data-loc="다용도랙" style="left:18px;top:830px;width:290px', markup)
+        self.assertNotIn('data-special-loc="다용도랙"', markup)
+        self.assertNotIn("다용도랙", SPECIAL_LOCATIONS)
+        self.assertIn("다용도랙", AREA_CONFIG)
+        self.assertNotIn("다용도랙", AREA_CONFIG["N"]["lines"])
 
     def test_gray_cart_is_not_an_n_location_or_map_menu_item(self):
         markup = _map_markup()

@@ -810,31 +810,6 @@
       "fill_color": "#dbe6f5"
     },
     {
-      "code": "홍보물랙",
-      "label": "홍보물랙",
-      "detail_label": "",
-      "x": 10,
-      "y": 890,
-      "width": 180,
-      "height": 62,
-      "rotation": 0,
-      "company": "특수",
-      "kind": "zone",
-      "note": "",
-      "group_id": "",
-      "group_style": "",
-      "group_axis": "",
-      "group_order": 0,
-      "group_count": 0,
-      "shape_type": "",
-      "stroke": "#475569",
-      "stroke_style": "solid",
-      "stroke_width": 3,
-      "path_points": [],
-      "fill_type": "company",
-      "fill_color": "#ffffff"
-    },
-    {
       "code": "R2",
       "label": "R2",
       "detail_label": "",
@@ -2183,6 +2158,31 @@
       "path_points": [],
       "fill_type": "company",
       "fill_color": "#ffffff"
+    },
+    {
+      "code": "다용도랙",
+      "label": "다용도랙",
+      "detail_label": "",
+      "x": 10,
+      "y": 860,
+      "width": 190,
+      "height": 80,
+      "rotation": 0,
+      "company": "기타",
+      "kind": "zone",
+      "note": "",
+      "group_id": "",
+      "group_style": "",
+      "group_axis": "",
+      "group_order": 0,
+      "group_count": 0,
+      "shape_type": "",
+      "stroke": "#475569",
+      "stroke_style": "solid",
+      "stroke_width": 3,
+      "path_points": [],
+      "fill_type": "solid",
+      "fill_color": "#f1f8b9"
     }
   ]
 }

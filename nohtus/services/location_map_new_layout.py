@@ -140,7 +140,7 @@ def _map_markup() -> str:
 
     p.append(_zone("N", "기타 위치", 1000, 740, 150, 92, "support", "nw-hatched"))
 
-    p.append(_zone("홍보물랙", "홍보물랙", 18, 830, 290, 62, "promo"))
+    p.append(_zone("다용도랙", "다용도랙", 18, 830, 290, 62, "promo"))
 
     p.append('<div class="nw-outline" style="left:410px;top:865px;width:520px;height:45px;border-right:0;border-bottom:0;"></div>')
     p.append('<div class="nw-outline" style="left:930px;top:775px;width:1px;height:90px;border-width:0 0 0 1.5px;"></div>')

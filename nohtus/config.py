@@ -34,7 +34,6 @@ AREA_CONFIG = {
     "R1": {"lines": [], "levels": []},
     "R2": {"lines": [], "levels": []},
     "N": {"lines": SPECIAL_LOCATIONS, "levels": []},
-    "홍보물랙": {"lines": [], "levels": []},
     "다용도랙": {"lines": [], "levels": []},
     "옷장1": {"lines": [], "levels": []},
     "옷장2": {"lines": [], "levels": []},
@@ -48,5 +47,5 @@ AREA_COLOR = {
     "D1": "blue",
     "E1": "pink", "Q": "pink",
     "F1": "bidata", "G1": "gray", "X1": "gray", "X2": "gray", "N": "gray",
-    "REC": "white", "P": "white", "R1": "white", "R2": "white", "T1": "white", "T2": "white", "홍보물랙": "white",
+    "REC": "white", "P": "white", "R1": "white", "R2": "white", "T1": "white", "T2": "white",
 }
