@@ -342,7 +342,7 @@ def _build_stocktake_result(ignored_result=None):
     baseline["실제수량"] = quantity.astype(int)
     baseline["차이"] = 0
 
-    if ignored_result is not None and not ignored_result.empty and not baseline.empty:
+    if ignored_result is not None and not ignored_result.empty:
         source = ignored_result.copy()
         required_columns = {"사업장", "표준제품명", "WMS수량", "ERP수량"}
         if required_columns.issubset(source.columns):
@@ -356,6 +356,7 @@ def _build_stocktake_result(ignored_result=None):
             baseline_company = baseline["사업장"].fillna("").astype(str).str.strip()
             baseline_product = baseline["표준제품명"].fillna("").astype(str).str.strip()
 
+            missing_rows = []
             for _, compared in source.iterrows():
                 company_value = compared["사업장"]
                 product_value = compared["표준제품명"]
@@ -364,10 +365,28 @@ def _build_stocktake_result(ignored_result=None):
                 matched_indexes = baseline.index[
                     (baseline_company == company) & (baseline_product == product)
                 ]
+                erp_quantity = int(compared["ERP수량"])
+                wms_quantity = int(compared["WMS수량"])
+
                 if matched_indexes.empty:
+                    # 무시 목록 제품이 현재 재고 테이블에 행이 없어도(예: 재고 소진)
+                    # 무시 목록 관리 화면의 모든 항목이 기준 재고 엑셀에 나타나도록 추가한다.
+                    missing_rows.append(
+                        {
+                            "사업장": company,
+                            "ERP제품코드": "",
+                            "ERP제품명": product,
+                            "표준제품명": product,
+                            "LOT/제조번호": "-",
+                            "유통기한": "-",
+                            "로케이션": "",
+                            "전산수량": erp_quantity,
+                            "실제수량": wms_quantity,
+                            "차이": wms_quantity - erp_quantity,
+                        }
+                    )
                     continue
 
-                erp_quantity = int(compared["ERP수량"])
                 actual_quantities = pd.to_numeric(
                     baseline.loc[matched_indexes, "실제수량"], errors="coerce"
                 ).fillna(0).astype(int)
@@ -377,6 +396,12 @@ def _build_stocktake_result(ignored_result=None):
                 baseline.loc[matched_indexes, "전산수량"] = allocated
                 baseline.loc[matched_indexes, "실제수량"] = actual_quantities
                 baseline.loc[matched_indexes, "차이"] = actual_quantities - allocated
+
+            if missing_rows:
+                baseline = pd.concat(
+                    [baseline, pd.DataFrame(missing_rows, columns=baseline.columns)],
+                    ignore_index=True,
+                )
 
     computerized = pd.to_numeric(baseline["전산수량"], errors="coerce")
     actual = pd.to_numeric(baseline["실제수량"], errors="coerce")
