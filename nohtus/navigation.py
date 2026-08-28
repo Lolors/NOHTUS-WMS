@@ -63,6 +63,8 @@ def apply_query_page_redirects():
             st.session_state["page"] = "로케이션 맵"
         elif st.query_params.get("inbound_loc", ""):
             st.session_state["page"] = "입고 등록"
+        elif st.query_params.get("move_inv_id", ""):
+            st.session_state["page"] = "이동 등록"
     except Exception:
         pass
 

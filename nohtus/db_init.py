@@ -63,11 +63,17 @@ def init_db():
     if "is_shippable" not in inventory_cols:
         cur.execute("ALTER TABLE inventory ADD COLUMN is_shippable INTEGER NOT NULL DEFAULT 1")
     if "location_range_end" not in inventory_cols:
-        # 한 제품이 실제로는 여러 로케이션(구역-라인-단) 범위를 통째로 차지하지만
-        # 어느 칸에서 실제로 빠지는지 관리하고 싶지 않을 때, location(시작 칸)에서
-        # 이 칸(끝 칸)까지의 전체 블록을 로케이션맵에 "채워짐"으로 표시하는 데 쓴다.
-        # 실제 수량/이동/피킹 로직은 그대로 location 하나만 기준으로 동작한다.
+        # 구버전: location(시작 칸)~이 칸(끝 칸) 사이의 직사각형 블록만 표현할 수
+        # 있었다. location_range_cells로 대체되었지만 기존 데이터 호환을 위해 컬럼은
+        # 남겨둔다(_loc_group_from_df가 location_range_cells가 없을 때만 이걸 본다).
         cur.execute("ALTER TABLE inventory ADD COLUMN location_range_end TEXT")
+    if "location_range_cells" not in inventory_cols:
+        # 한 제품이 실제로는 여러 로케이션(구역-라인-단) 칸을 통째로 차지하지만
+        # 어느 칸에서 실제로 빠지는지 관리하고 싶지 않을 때, location(기준 칸) 외에
+        # 함께 "채워짐"으로 표시할 칸들을 JSON 배열(예: ["A1-13-02","A1-14-03"])로
+        # 담아둔다. 직사각형이 아닌 임의 모양도 표현할 수 있다. 실제 수량/이동/피킹
+        # 로직은 그대로 location 하나만 기준으로 동작한다.
+        cur.execute("ALTER TABLE inventory ADD COLUMN location_range_cells TEXT")
     cur.execute("""
     CREATE TABLE IF NOT EXISTS transactions(
         id INTEGER PRIMARY KEY AUTOINCREMENT,

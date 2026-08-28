@@ -10,8 +10,6 @@ from datetime import date, datetime
 
 import streamlit as st
 
-from nohtus.config import AREA_CONFIG
-from nohtus.locations import expand_location_block, make_location, parse_location
 from nohtus.dates import normalize_exp_date
 from nohtus.services.inventory import add_inventory
 from nohtus.services.products import product_options
@@ -105,7 +103,7 @@ def _apply_selected_inbound_date(*, company, product, warehouse, lot, exp, locat
 
 
 def page_inbound():
-    from nohtus.ui.location_picker import inbound_location_picker, render_location_range_grid_picker_button
+    from nohtus.ui.location_picker import inbound_location_picker
     from inbound_map import render_inbound_quick_location_map
 
     _apply_inbound_location_pending()
@@ -198,50 +196,9 @@ def page_inbound():
     with pos_col:
         st.markdown("#### 입고 위치")
         loc = inbound_location_picker("REC")
-        range_end_on = st.checkbox(
-            "여러 칸 범위를 통째로 차지",
-            key="inbound_range_end_on",
-            help="한 제품이 여러 로케이션 칸을 통째로 차지할 때, 재고는 위 위치 하나로만 관리하면서 로케이션맵에는 범위 전체가 채워진 것으로 표시합니다.",
-        )
-        range_end_raw = st.session_state.get("_inbound_range_end_loc", "")
-        range_end_loc = ""
-        pick_target = "start"
-        if range_end_on:
-            render_location_range_grid_picker_button("inbound", parse_location(loc)[0])
-            pick_label = st.radio(
-                "도면 클릭 시 지정할 위치",
-                ["시작 위치", "끝 위치"],
-                horizontal=True,
-                key="inbound_range_pick_target",
-            )
-            pick_target = "end" if pick_label == "끝 위치" else "start"
-            if range_end_raw:
-                clear_col, info_col = st.columns([1, 3])
-                with clear_col:
-                    if st.button("끝 위치 지우기", key="inbound_range_end_clear"):
-                        st.session_state["_inbound_range_end_loc"] = ""
-                        range_end_raw = ""
-                        st.rerun()
-                with info_col:
-                    st.caption(f"끝 위치(도면 클릭): {range_end_raw}")
-                # 도면은 구역/라인 단위로만 클릭이 가능하고 칸(단)까지는 구분되지
-                # 않으므로, 끝 위치의 단은 별도 선택으로 정확히 지정한다.
-                end_area, end_line, end_level = parse_location(range_end_raw)
-                end_levels = list(AREA_CONFIG.get(end_area, {}).get("levels") or [])
-                if end_area != parse_location(loc)[0]:
-                    st.warning("끝 위치가 시작 위치와 같은 구역이 아닙니다. 도면에서 같은 구역 안의 칸을 클릭하세요.")
-                elif end_levels:
-                    end_level = st.selectbox(
-                        "끝 단",
-                        end_levels,
-                        index=end_levels.index(end_level) if end_level in end_levels else 0,
-                        key="inbound_range_end_level",
-                    )
-                    range_end_loc = make_location(end_area, end_line, end_level)
-                else:
-                    range_end_loc = range_end_raw
-            else:
-                st.caption("도면에서 범위의 끝 칸을 클릭하세요.")
+        # 여러 칸 범위 선택은 위 선반 그림에서 직접 이어서 클릭/드래그하면 되므로
+        # 별도 체크박스/버튼 없이 inbound_location_picker가 채운 값을 그대로 쓴다.
+        range_cells = st.session_state.get("_inbound_range_cells") or []
         qty = st.number_input("수량", min_value=1, step=1, key="inbound_qty")
         memo = st.text_input("메모", value="", key="inbound_memo")
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
@@ -266,7 +223,7 @@ def page_inbound():
                     normalized_lot = normalize_blank(lot)
                     normalized_exp = normalize_exp_date(exp)
                     add_inventory(company, product, wh, normalized_lot, normalized_exp, loc, int(qty), inbound_memo,
-                                 location_range_end=range_end_loc)
+                                 location_range_cells=range_cells)
                     _apply_selected_inbound_date(
                         company=company,
                         product=product,
@@ -279,10 +236,10 @@ def page_inbound():
                         inbound_date=inbound_date,
                     )
                     save_msg.success(f"입고 저장 완료: {inbound_date.strftime('%Y-%m-%d')} / {company} / {product} / {wh} / {loc} / {qty}EA")
-                    st.session_state["_inbound_range_end_loc"] = ""
+                    st.session_state["_inbound_range_cells"] = []
+                    st.session_state.pop("_inbound_range_cells_area", None)
                 except Exception as e:
                     save_msg.error(str(e))
 
     with map_col:
-        range_locations = expand_location_block(loc, range_end_loc) if range_end_on else []
-        render_inbound_quick_location_map(pick_target=pick_target, range_locations=range_locations)
+        render_inbound_quick_location_map(range_locations=[loc] + list(range_cells))

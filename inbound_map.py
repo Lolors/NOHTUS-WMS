@@ -261,12 +261,8 @@ def _get_component_renderer(extra_css: str = ""):
     return renderer
 
 
-def render_inbound_quick_location_map(pick_target="start", range_locations=None):
-    """메인 로케이션맵과 완전히 동일한 도면을 표시하고 클릭 위치를 Streamlit 상태로 직접 전달한다.
-
-    pick_target이 "end"이면 클릭 위치를 시작 위치 대신 범위의 끝 위치로 저장한다
-    (여러 칸 범위를 통째로 차지하는 제품의 끝 칸을 도면에서 직접 클릭해 지정할 때 사용).
-    """
+def render_inbound_quick_location_map(range_locations=None):
+    """메인 로케이션맵과 완전히 동일한 도면을 표시하고 클릭 위치를 Streamlit 상태로 직접 전달한다."""
     selected = st.session_state.get("_inbound_selected_loc", "") or "REC"
     try:
         from nohtus.db import q
@@ -287,7 +283,6 @@ def render_inbound_quick_location_map(pick_target="start", range_locations=None)
             "selected": selected,
             "inventory": inventory,
             "height": _QUICK_MAP_HEIGHT,
-            "pickTarget": pick_target,
             "selectedRange": list(range_locations or []),
         },
         # No `default=` here: giving "selection" a persistent state default made
@@ -302,16 +297,12 @@ def render_inbound_quick_location_map(pick_target="start", range_locations=None)
     selection = getattr(result, "selection", None) or {}
     clicked = str(selection.get("location", "") or "").strip() if isinstance(selection, dict) else ""
     event_id = selection.get("eventId") if isinstance(selection, dict) else None
-    click_target = str(selection.get("target", "") or "") if isinstance(selection, dict) else ""
     if clicked and event_id != st.session_state.get("_inbound_map_event_id"):
         st.session_state["_inbound_map_event_id"] = event_id
-        if click_target == "end":
-            st.session_state["_inbound_range_end_loc"] = clicked
-        else:
-            from nohtus.services.inbound_bridge_runtime import _apply_inbound_location_pending
+        from nohtus.services.inbound_bridge_runtime import _apply_inbound_location_pending
 
-            st.session_state["_pending_inbound_loc"] = clicked
-            _apply_inbound_location_pending()
+        st.session_state["_pending_inbound_loc"] = clicked
+        _apply_inbound_location_pending()
         # Without this, the map is re-sent this same run with the *pre-click*
         # selected location (computed above, before we knew about the click),
         # which briefly flashes the new pick then snaps back to the old one
@@ -321,12 +312,8 @@ def render_inbound_quick_location_map(pick_target="start", range_locations=None)
     return clicked
 
 
-def render_move_quick_location_map(pick_target="start", range_locations=None):
-    """이동 등록의 도착 재고 영역에서 참고용 도면을 보여주고, 클릭한 위치를 도착 위치 선택기에 반영한다.
-
-    pick_target이 "end"이면 클릭 위치를 도착 위치 대신 범위의 끝 위치로 저장한다
-    (여러 칸 범위를 통째로 차지하는 제품의 끝 칸을 도면에서 직접 클릭해 지정할 때 사용).
-    """
+def render_move_quick_location_map(range_locations=None):
+    """이동 등록의 도착 재고 영역에서 참고용 도면을 보여주고, 클릭한 위치를 도착 위치 선택기에 반영한다."""
     from nohtus.locations import make_location, parse_location
 
     defaults = st.session_state.get("_move_picker_defaults", {}) or {}
@@ -351,7 +338,6 @@ def render_move_quick_location_map(pick_target="start", range_locations=None):
             "selected": selected,
             "inventory": inventory,
             "height": _QUICK_MAP_HEIGHT,
-            "pickTarget": pick_target,
             "selectedRange": list(range_locations or []),
         },
         # See render_inbound_quick_location_map for why there's no `default=` here.
@@ -362,18 +348,14 @@ def render_move_quick_location_map(pick_target="start", range_locations=None):
     selection = getattr(result, "selection", None) or {}
     clicked = str(selection.get("location", "") or "").strip() if isinstance(selection, dict) else ""
     event_id = selection.get("eventId") if isinstance(selection, dict) else None
-    click_target = str(selection.get("target", "") or "") if isinstance(selection, dict) else ""
     if clicked and event_id != st.session_state.get("_move_map_event_id"):
         st.session_state["_move_map_event_id"] = event_id
-        if click_target == "end":
-            st.session_state["_move_range_end_loc"] = clicked
+        if clicked in ("Q1", "Q2", "Q"):
+            area, line, level = "Q", "", ""
         else:
-            if clicked in ("Q1", "Q2", "Q"):
-                area, line, level = "Q", "", ""
-            else:
-                area, line, level = parse_location(clicked)
-            st.session_state["_move_picker_defaults"] = {"area": area or "A1", "line": line or "", "level": level or ""}
-            st.session_state["_move_picker_token"] = int(st.session_state.get("_move_picker_token", 0) or 0) + 1
+            area, line, level = parse_location(clicked)
+        st.session_state["_move_picker_defaults"] = {"area": area or "A1", "line": line or "", "level": level or ""}
+        st.session_state["_move_picker_token"] = int(st.session_state.get("_move_picker_token", 0) or 0) + 1
         # See render_inbound_quick_location_map for why this rerun is needed:
         # otherwise the map briefly flashes the new pick then bounces back to
         # the old one, because this run already sent the map the pre-click

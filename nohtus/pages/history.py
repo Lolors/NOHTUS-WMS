@@ -12,6 +12,7 @@ from nohtus.auth import is_admin
 from nohtus.config import COMPANIES
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only
+from nohtus.services.closing import _infer_customer_from_title
 
 
 ERP_NAME_COLUMN_BY_COMPANY = {
@@ -355,7 +356,6 @@ def _append_export_history_visibility_filter(conditions, params):
 
 def _format_history_rows(df):
     """Convert transaction rows into the common on-screen/Excel history layout."""
-    from nohtus.services.closing import _infer_customer_from_title
 
     show = df.copy()
     if show.empty:

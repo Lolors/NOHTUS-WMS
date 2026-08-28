@@ -433,6 +433,11 @@ def page_map_search_results(term, compact: bool = False):
 
 def page_map():
     from nohtus.services.location_map import render_location_map
+    from nohtus.services.move_bridge_runtime import render_move_js_bridge
+    render_move_js_bridge()
+    move_toast = st.session_state.pop("_move_toast", "")
+    if move_toast:
+        st.toast(move_toast, icon="✅")
     if st.session_state.pop("_scroll_map_top", False):
         components.html("""<script>try { window.parent.scrollTo({top:0,left:0,behavior:'auto'}); } catch(e) {}</script>""", height=0, scrolling=False)
     st.markdown("""<style>div[data-testid="stVerticalBlock"]:has(#wms-top-anchor) {margin-top:-15px!important;}</style><div id='wms-top-anchor'></div>""", unsafe_allow_html=True)

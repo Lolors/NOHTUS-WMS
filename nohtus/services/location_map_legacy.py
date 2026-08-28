@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 from nohtus.config import AREA_CONFIG, SPECIAL_LOCATIONS
 from nohtus.db import q
 from nohtus.dates import display_date_only
-from nohtus.locations import expand_location_block
+from nohtus.locations import expand_row_range
 from nohtus.services.location_map_layout import load_location_map_layout
 
 def get_product_image_path(product_name):
@@ -24,11 +24,24 @@ def get_product_image_path(product_name):
     return str(full) if value and full.exists() else ""
 
 
+def _range_block_locations(loc, r):
+    """이 재고 행이 "채워짐"으로 함께 표시해야 할 추가 칸 목록(자기 자신 포함)을 만든다.
+
+    location_range_cells(신규, 임의 모양의 칸 목록 JSON)가 있으면 그대로 쓰고,
+    없으면 구버전 location_range_end(직사각형 끝 칸)를 직사각형으로 펼쳐 호환한다.
+    """
+    return expand_row_range(
+        loc,
+        getattr(r, "location_range_cells", None),
+        getattr(r, "location_range_end", None),
+    )
+
+
 def _loc_group_from_df(df):
     data = {}
     for r in df.itertuples():
         loc = str(r.location)
-        range_end = str(getattr(r, "location_range_end", "") or "")
+        occupied_cells = sorted(_range_block_locations(loc, r))
         entry = {
             "id": int(r.id),
             "company": str(r.company),
@@ -37,10 +50,14 @@ def _loc_group_from_df(df):
             "lot": str(r.lot or "-"),
             "exp_date": display_date_only(r.exp_date),
             "qty": int(r.qty),
+            # 이 재고 행이 실제로 차지하는 칸 전체(자기 자신 포함). 미니 랙을
+            # "로케이션 단위"가 아니라 "이 재고 행 단위"로 정확히 그리는 데 쓴다.
+            "primary_location": loc,
+            "occupied_cells": occupied_cells,
         }
-        # 실제 재고는 location 하나만 기준으로 관리하지만, location_range_end가
-        # 있으면 그 범위 전체 칸을 로케이션맵에서 "채워짐"으로 함께 표시한다.
-        for block_loc in expand_location_block(loc, range_end):
+        # 실제 재고는 location 하나만 기준으로 관리하지만, 범위 지정이 있으면 그
+        # 칸들 전체를 로케이션맵에서 "채워짐"으로 함께 표시한다.
+        for block_loc in occupied_cells:
             data.setdefault(block_loc, []).append(entry)
     return data
 
@@ -49,7 +66,7 @@ def render_location_map():
     """새로고침 없는 로케이션 맵.
     Streamlit 버튼/링크 대신 components.html 내부 JavaScript로 오른쪽 상세패널만 갱신한다.
     """
-    df = q("SELECT id, company, product_name, warehouse_name, lot, exp_date, location, location_range_end, qty FROM inventory WHERE qty>0 ORDER BY location, company, product_name")
+    df = q("SELECT id, company, product_name, warehouse_name, lot, exp_date, location, location_range_end, location_range_cells, qty FROM inventory WHERE qty>0 ORDER BY location, company, product_name")
     loc_data = _loc_group_from_df(df)
     tx = q("""SELECT created_at, tx_type, product_name, lot, exp_date, from_location, to_location, qty
               FROM transactions ORDER BY id DESC LIMIT 300""")
@@ -70,6 +87,10 @@ def render_location_map():
         for item in layout_items
         if item.get("code") and item.get("detail_label")
     }
+    area_config = {
+        area: {"lines": list(cfg.get("lines") or []), "levels": list(cfg.get("levels") or [])}
+        for area, cfg in AREA_CONFIG.items()
+    }
     payload = json.dumps(
         {
             "inventory": loc_data,
@@ -77,6 +98,7 @@ def render_location_map():
             "selected_location": selected_loc,
             "layout_company": layout_company,
             "layout_label": layout_label,
+            "area_config": area_config,
         },
         ensure_ascii=False,
     )
@@ -148,13 +170,17 @@ def render_location_map():
 .zone-pill{{display:inline-block;background:#e8f5ee;color:#15803d;font-weight:900;border-radius:10px;padding:6px 10px;margin:8px 0 12px;}}
 .metric{{background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:12px;margin-bottom:12px;}}
 .metric .n{{font-size:24px;font-weight:900;}}
-.level{{font-size:17px;font-weight:900;margin:14px 0 6px;}}
-.level-tabs{{display:flex;align-items:flex-end;gap:0;margin:8px 0 12px;border-bottom:2px solid #111827;}}
-.level-tab{{appearance:none;border:2px solid #111827;border-bottom:none;background:#f8fafc;color:#111827;font-weight:900;font-size:15px;padding:9px 18px;border-radius:11px 11px 0 0;margin-right:-1px;cursor:pointer;font-family:inherit;}}
-.level-tab.active{{background:#fff;transform:translateY(2px);padding-top:14px;padding-bottom:12px;}}
-.level-panel{{display:none;}}
-.level-panel.active{{display:block;}}
-.detail-card{{background:white;border:1px solid #dbe4f0;border-radius:14px;padding:12px;margin:8px 0;box-shadow:0 5px 16px rgba(15,23,42,.05);}}
+.detail-card{{background:white;border:1px solid #dbe4f0;border-radius:14px;padding:12px;margin:8px 0;box-shadow:0 5px 16px rgba(15,23,42,.05);cursor:pointer;transition:border-color .1s ease,box-shadow .1s ease;}}
+.detail-card:hover{{border-color:#93c5fd;}}
+.detail-card.card-pinned{{border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,.25);}}
+.mini-rack{{margin:8px 0;display:inline-block;}}
+.mini-rack-row{{display:flex;align-items:center;gap:6px;}}
+.mini-rack-level{{width:26px;font-size:11px;font-weight:800;color:#64748b;text-align:right;}}
+.mini-rack-cells{{display:flex;gap:3px;}}
+.mini-rack-cell{{width:16px;height:16px;border-radius:3px;border:1px solid #cbd5e1;background:#f8fafc;}}
+.mini-rack-cell.filled{{background:#16a34a;border-color:#166534;}}
+.mini-rack-label{{margin-top:4px;font-size:11px;color:#64748b;font-weight:700;padding-left:32px;}}
+.map-cell.line-soft,.zone.line-soft{{outline:3px solid rgba(37,99,235,.35)!important;box-shadow:0 0 0 2px rgba(37,99,235,.15)!important;z-index:3;}}
 .product-inline-detail{{margin:8px 0 14px 0;}}
 .card-top{{display:flex;justify-content:space-between;align-items:center;gap:8px;}} .company-badge{{display:inline-block;background:#f1f5f9;color:#475569;font-weight:500;border:1px solid #e2e8f0;border-radius:999px;padding:3px 8px;font-size:12px;}}
 .product-title{{font-weight:400;font-size:18px;line-height:1.25;margin-top:8px;margin-bottom:6px;color:#111827;}}
@@ -238,6 +264,8 @@ const specialLocations = ["오른쪽 창고", "사무실(4층)"];
 const initialSelectedLocation = DATA.selected_location || "";
 const layoutCompany = DATA.layout_company || {{}};
 const layoutLabel = DATA.layout_label || {{}};
+const areaConfig = DATA.area_config || {{}};
+const RACK_GROUP_SIZE = 3;
 function zoneName(loc, rows){{
   const area=(loc||'').split('-')[0];
   const customLabel = layoutLabel[loc] || layoutLabel[area];
@@ -262,13 +290,6 @@ function zoneName(loc, rows){{
   if(area==='G2') return '패키지 창고';
   if(area==='N') return '기타 위치';
   return '기타 보관 구역';
-}}
-function levelLabel(loc){{
-  if(specialLocations.includes(loc||'')) return '단 구분 없음';
-  const p=(loc||'').split('-');
-  if(p[0]==='X1' && p.length===2) return '1단';
-  if(p.length>=3 && /^\d+$/.test(p[2])) return parseInt(p[2],10)+'단';
-  return '단 구분 없음';
 }}
 function rowsFor(loc){{
   let rows=[];
@@ -305,32 +326,82 @@ function formatRecentHistory(tx, currentTotal){{
     return `<div class="tx-row">${{esc(shownDate)}} <b>[${{esc(type)}}]</b> ${{body}}</div>`;
   }}).join('');
 }}
+function rangeSummaryLabel(cells){{
+  const area=lineCode(cells[0]).split('-')[0];
+  const lines=Array.from(new Set(cells.map(c=>c.split('-')[1]||''))).filter(Boolean).sort();
+  const lineSpan = lines.length>1 ? `${{lines[0]}}~${{lines[lines.length-1]}}` : (lines[0]||'');
+  return `${{area}}-${{lineSpan}} (여러 위치, ${{cells.length}}칸)`;
+}}
 function productDetail(name){{
-  const all=[]; Object.values(inventory).forEach(arr=>arr.forEach(x=>{{ if(x.product_name===name) all.push(x); }}));
-  const total=all.reduce((a,b)=>a+(b.qty||0),0);
-  const locMap={{}}; const locCompanies={{}};
-  Object.entries(inventory).forEach(([loc,arr])=>arr.forEach(x=>{{
-    if(x.product_name===name){{
-      locMap[loc]=(locMap[loc]||0)+(x.qty||0);
-      if(!locCompanies[loc]) locCompanies[loc]=new Set();
-      locCompanies[loc].add(x.company||'-');
-    }}
-  }}));
-  const locRows=Object.entries(locMap).sort((a,b)=>a[0].localeCompare(b[0])).map(([loc,qty])=>{{
-    const comp=Array.from(locCompanies[loc]||[]).join(', ');
-    return `<button class="loc-link" type="button" data-jump-loc="${{esc(loc)}}"><span>${{esc(loc)}} <em style="font-style:normal;color:#64748b;font-size:12px;">${{esc(comp)}}</em></span><span>${{qty}} EA</span></button>`;
-  }}).join('');
+  // 재고 행 하나가 여러 칸(location_range_cells)에 걸쳐 있으면 rowsFor류
+  // 순회에서 칸 수만큼 중복 등장한다. id로 한 번만 세야 이 행의 실제 수량이
+  // 칸마다 반복 표시되지 않는다.
+  const rowsById={{}};
+  Object.values(inventory).forEach(arr=>arr.forEach(x=>{{ if(x.product_name===name) rowsById[x.id]=x; }}));
+  const rows=Object.values(rowsById);
+  const total=rows.reduce((a,b)=>a+(b.qty||0),0);
+  const locRows=rows
+    .slice()
+    .sort((a,b)=>(a.primary_location||'').localeCompare(b.primary_location||''))
+    .map(x=>{{
+      const cells=(x.occupied_cells && x.occupied_cells.length) ? x.occupied_cells : [x.primary_location];
+      const jumpLoc=x.primary_location || cells[0] || '';
+      const label = cells.length>1 ? rangeSummaryLabel(cells) : (jumpLoc || '-');
+      return `<button class="loc-link" type="button" data-jump-loc="${{esc(jumpLoc)}}"><span>${{esc(label)}} <em style="font-style:normal;color:#64748b;font-size:12px;">${{esc(x.company||'-')}}</em></span><span>${{Number(x.qty)||0}} EA</span></button>`;
+    }}).join('');
   const tx=txData.filter(t=>t.product_name===name).slice(0,5);
   return `<div class="prod-box"><div class="photo-box">📷</div><form class="prod-search-form" method="get" target="_top" action="" data-search-form="1"><input type="hidden" name="map_search_product" value="${{esc(name)}}"><button type="submit" class="prod-name-large prod-search-title" data-search-product="${{esc(name)}}">${{esc(name)}}</button></form><div class="detail-total-text"><span>창고 총재고</span><strong>${{total}} EA</strong></div><div class="metric loc-metric"><div class="caption">분산 로케이션</div>${{locRows||'<div class="muted">재고 위치가 없습니다.</div>'}}</div><h4 class="recent-title">최근 이력 5건</h4><div class="recent-list">${{formatRecentHistory(tx,total)}}</div></div>`;
 }}
+function occupiedKey(cells){{ return (cells||[]).slice().sort().join(','); }}
+function lineCode(loc){{
+  const p=(loc||'').split('-');
+  return p.length>=2 ? p[0]+'-'+p[1] : loc;
+}}
+// 메인 2D 맵은 라인(X축)까지만 표현하고 단(Y축)은 표현하지 않는다. 그래서
+// "이 위치를 포함하는 재고"가 실제로 어느 단에 얼마나 있는지는 재고 행 단위로
+// 작은 라인×단 그림(미니 랙)을 그려서 보여준다 — 로케이션 하나가 아니라
+// 이 재고 행이 실제로 차지하는 정확한 모양 그대로.
+function miniRackHtml(occupiedCells){{
+  if(!occupiedCells || !occupiedCells.length) return {{html:'', lines:[]}};
+  const area=lineCode(occupiedCells[0]).split('-')[0];
+  const cfg=areaConfig[area] || {{}};
+  const areaLines=cfg.lines || [];
+  const areaLevels=cfg.levels || [];
+  if(!areaLines.length || !areaLevels.length) return {{html:'', lines:[]}};
+  const touchedLines=Array.from(new Set(occupiedCells.map(c=>c.split('-')[1]||''))).filter(Boolean);
+  const touchedIdx=touchedLines.map(l=>areaLines.indexOf(l)).filter(i=>i>=0);
+  if(!touchedIdx.length) return {{html:'', lines:[]}};
+  const anchorIdx=Math.min(...touchedIdx);
+  const groupStart=Math.floor(anchorIdx / RACK_GROUP_SIZE) * RACK_GROUP_SIZE;
+  const cols=areaLines.slice(groupStart, groupStart + RACK_GROUP_SIZE);
+  const occSet=new Set(occupiedCells);
+  const rowsHtml=areaLevels.slice().reverse().map(level=>{{
+    const cellsHtml=cols.map(line=>{{
+      const filled=occSet.has(`${{area}}-${{line}}-${{level}}`);
+      return `<span class="mini-rack-cell${{filled ? ' filled' : ''}}"></span>`;
+    }}).join('');
+    return `<div class="mini-rack-row"><span class="mini-rack-level">${{esc(level)}}단</span><span class="mini-rack-cells">${{cellsHtml}}</span></div>`;
+  }}).join('');
+  const rangeLabel = cols.length>1 ? `${{area}}-${{cols[0]}}~${{cols[cols.length-1]}}` : `${{area}}-${{cols[0]}}`;
+  const html=`<div class="mini-rack">${{rowsHtml}}<div class="mini-rack-label">${{esc(rangeLabel)}}</div></div>`;
+  // 메인 맵 하이라이트는 실제로 점유한 라인만 켠다(랙 전체 3라인 창이 아니라).
+  // 미니 랙은 같은 랙 단위를 보여주려고 3라인을 다 그리지만, 안 채워진 라인까지
+  // 메인 맵에서 켜면 실제로 안 쓰는 라인도 점유한 것처럼 보이게 된다.
+  const lines=areaLines.filter(l=>touchedLines.includes(l)).map(line=>`${{area}}-${{line}}`);
+  return {{html, lines}};
+}}
 function productCardsHtml(rows){{
-  const products={{}};
+  const groups={{}};
   rows.forEach(r=>{{
-    const key=r.product_name||'-';
-    if(!products[key]) products[key]=[];
-    products[key].push(r);
+    const key=(r.product_name||'-') + '::' + occupiedKey(r.occupied_cells);
+    if(!groups[key]) groups[key]={{name:r.product_name||'-', occupied_cells:r.occupied_cells||[], itemsById:{{}}}};
+    // 한 재고 행이 여러 칸에 걸쳐 있으면(location_range_cells) rowsFor()가 그 칸
+    // 수만큼 같은 id를 중복해서 넘긴다. id로 한 번만 세야 수량이 곱절로 잡히지 않는다.
+    groups[key].itemsById[r.id]=r;
   }});
-  return Object.entries(products).map(([name,items])=>{{
+  return Object.values(groups).map(group=>{{
+    const {{name, occupied_cells}}=group;
+    const items=Object.values(group.itemsById);
     const total=items.reduce((a,b)=>a+(Number(b.qty)||0),0);
     const companies=Array.from(new Set(items.map(x=>x.company||'-'))).sort().join(', ');
     const lines=items
@@ -338,9 +409,10 @@ function productCardsHtml(rows){{
       .sort((a,b)=>String(a.exp_date||'').localeCompare(String(b.exp_date||'')) || String(a.lot||'').localeCompare(String(b.lot||'')) || String(a.company||'').localeCompare(String(b.company||'')))
       .map(x=>{{
         const companyInfo = companies.includes(',') ? `<span class="company-badge">${{esc(x.company||'-')}}</span> ` : '';
-        return `<div class="lot-exp">${{companyInfo}}${{Number(x.qty)||0}}EA&nbsp;&nbsp;${{esc(x.lot||'-')}} | ${{esc(cleanDate(x.exp_date||'-'))}}</div>`;
+        return `<div class="lot-exp">${{companyInfo}}${{Number(x.qty)||0}}EA&nbsp;&nbsp;${{esc(x.lot||'-')}} | ${{esc(cleanDate(x.exp_date||'-'))}}<button class="lot-move-btn" type="button" data-move-id="${{esc(x.id)}}" style="margin-left:8px;padding:1px 8px;font-size:11px;border-radius:6px;border:1px solid #2563eb;color:#2563eb;background:#eff6ff;cursor:pointer;">이동</button></div>`;
       }}).join('');
-    return `<div class="detail-card"><div class="card-top"><span class="product-title">${{esc(name)}}</span><span class="qty-text">${{total}} EA</span></div><div class="muted">사업장: ${{esc(companies||'-')}}</div>${{lines}}<button class="prod-btn" type="button" data-product="${{esc(name)}}">제품 상세 보기</button></div>`;
+    const rack=miniRackHtml(occupied_cells);
+    return `<div class="detail-card" data-occupied-lines="${{esc(rack.lines.join(','))}}"><div class="card-top"><span class="product-title">${{esc(name)}}</span><span class="qty-text">${{total}} EA</span></div><div class="muted">사업장: ${{esc(companies||'-')}}</div>${{rack.html}}${{lines}}<button class="prod-btn" type="button" data-product="${{esc(name)}}">제품 상세 보기</button></div>`;
   }}).join('');
 }}
 function cleanDate(v){{
@@ -360,6 +432,12 @@ function buildParentUrl(key, value, removeKey){{
   const url = new URL(parentBaseHref());
   url.searchParams.set(key, value);
   if(removeKey) url.searchParams.delete(removeKey);
+  return url.toString();
+}}
+function buildParentUrlMulti(setParams, removeKeys){{
+  const url = new URL(parentBaseHref());
+  Object.entries(setParams||{{}}).forEach(([k,v])=>url.searchParams.set(k,v));
+  (removeKeys||[]).forEach(k=>url.searchParams.delete(k));
   return url.toString();
 }}
 
@@ -397,7 +475,14 @@ function navigateTop(href){{
   document.body.appendChild(a);
   a.click();
 }}
+function highlightLines(lineCodes, on){{
+  if(!lineCodes || !lineCodes.length) return;
+  document.querySelectorAll('[data-loc]').forEach(el=>{{
+    if(lineCodes.includes(el.dataset.loc)) el.classList.toggle('line-soft', on);
+  }});
+}}
 function showDetail(loc){{
+  document.querySelectorAll('.line-soft').forEach(el=>el.classList.remove('line-soft'));
   document.querySelectorAll('[data-loc]').forEach(b=>{{
     const cellLoc = b.dataset.loc || '';
     b.classList.toggle('selected', cellLoc===loc || String(loc||'').startsWith(cellLoc+'-') || (cellLoc==='N' && specialLocations.includes(loc||'')));
@@ -407,37 +492,46 @@ function showDetail(loc){{
   let title=loc;
   const p=loc.split('-'); if(p.length>=2) title=p[0]+'-'+p[1];
   if(!rows.length){{d.innerHTML=`<div class="side-title">${{esc(title)}}</div><div class="zone-pill">${{esc(zoneName(loc, rows))}}</div><div class="caption">현재 이 로케이션에는 표시할 재고가 없습니다.</div>`; return;}}
-  const total=rows.reduce((a,b)=>a+(b.qty||0),0);
-  const order={{'1단':0,'2단':1,'3단':2,'단 구분 없음':9}};
-  rows.sort((a,b)=>{{return (order[levelLabel(a.location)]??5)-(order[levelLabel(b.location)]??5) || a.company.localeCompare(b.company) || a.product_name.localeCompare(b.product_name);}});
-  const grouped={{}};
-  rows.forEach(r=>{{const lvl=levelLabel(r.location); if(!grouped[lvl]) grouped[lvl]=[]; grouped[lvl].push(r);}});
-  const levels=['1단','2단','3단'].filter(l=>grouped[l]);
-  Object.keys(grouped).forEach(l=>{{if(!levels.includes(l)) levels.push(l);}});
-  let html=`<div class="side-title">${{esc(title)}}</div><div class="zone-pill">${{esc(zoneName(loc, rows))}}</div><div class="metric"><div class="caption">현재 총재고</div><div class="n">${{total}} EA</div></div>`;
-  if(levels.length>1){{
-    html+=`<div class="level-tabs">${{levels.map((lvl,i)=>`<button class="level-tab ${{i===0?'active':''}}" type="button" data-level-tab="${{esc(lvl)}}">${{esc(lvl)}}</button>`).join('')}}</div>`;
-  }}
-  levels.forEach((lvl,i)=>{{
-    html+=`<div class="level-panel ${{i===0?'active':''}}" data-level-panel="${{esc(lvl)}}">`;
-    if(levels.length===1) html+=`<div class="level">${{esc(lvl)}}</div>`;
-    html+=productCardsHtml(grouped[lvl]);
-    html+=`</div>`;
-  }});
+  // 단(段)별 탭으로 나누면 여러 단에 걸친 재고 행(location_range_cells)이
+  // 탭마다 중복 표시된다. 미니 랙이 이미 재고 행 하나당 정확한 단 점유
+  // 모양을 보여주므로, 탭 없이 이 위치를 포함하는 재고를 그대로 나열한다.
+  const groupCount=new Set(rows.map(r=>(r.product_name||'-') + '::' + occupiedKey(r.occupied_cells))).size;
+  let html=`<div class="side-title">${{esc(title)}}</div><div class="zone-pill">${{esc(zoneName(loc, rows))}}</div><div class="metric"><div class="caption">이 위치를 포함하는 재고</div><div class="n">${{groupCount}}건</div><div class="muted" style="margin-top:6px;">제품을 선택하면 점유 영역이 지도에 표시됩니다.</div></div>`;
+  html+=productCardsHtml(rows);
   d.innerHTML=html;
-  d.querySelectorAll('[data-level-tab]').forEach(tab=>tab.addEventListener('click',()=>{{
-    const lvl=tab.dataset.levelTab;
-    d.querySelectorAll('[data-level-tab]').forEach(x=>x.classList.toggle('active', x.dataset.levelTab===lvl));
-    d.querySelectorAll('[data-level-panel]').forEach(x=>x.classList.toggle('active', x.dataset.levelPanel===lvl));
-  }}));
-  d.querySelectorAll('[data-product]').forEach(btn=>btn.addEventListener('click',()=>{{
+  // 제품 카드에 마우스를 올리거나 탭하면, 그 제품이 실제로 차지하는 라인들만
+  // 메인 2D 맵에서 은은하게 강조한다. 메인 맵은 라인(X축)까지만 책임지고,
+  // 정확한 단(Y축) 점유 모양은 카드 안의 미니 랙이 보여준다.
+  d.querySelectorAll('[data-occupied-lines]').forEach(card=>{{
+    const lineCodes=(card.dataset.occupiedLines||'').split(',').filter(Boolean);
+    if(!lineCodes.length) return;
+    card.addEventListener('mouseenter', ()=>highlightLines(lineCodes, true));
+    card.addEventListener('mouseleave', ()=>{{ if(!card.classList.contains('card-pinned')) highlightLines(lineCodes, false); }});
+    card.addEventListener('click', (ev)=>{{
+      if(ev.target.closest('button')) return;
+      const wasPinned=card.classList.contains('card-pinned');
+      d.querySelectorAll('.card-pinned').forEach(other=>{{
+        if(other!==card){{ other.classList.remove('card-pinned'); highlightLines((other.dataset.occupiedLines||'').split(',').filter(Boolean), false); }}
+      }});
+      card.classList.toggle('card-pinned', !wasPinned);
+      highlightLines(lineCodes, !wasPinned);
+    }});
+  }});
+  d.querySelectorAll('[data-product]').forEach(btn=>btn.addEventListener('click',(ev)=>{{
+    ev.stopPropagation();
     const card=btn.closest('.detail-card');
     const old=card.nextElementSibling;
-    if(old && old.classList.contains('product-inline-detail')){{old.remove(); btn.disabled=false; return;}}
+    if(old && old.classList.contains('product-inline-detail')){{
+      // 같은 버튼을 다시 누르면 접는다(예전엔 여기서 버튼을 disabled로 만들어
+      // 다시 눌러도 이 분기에 아예 도달하지 못했다).
+      old.remove();
+      btn.textContent='제품 상세 보기';
+      return;
+    }}
     d.querySelectorAll('.product-inline-detail').forEach(x=>x.remove());
-    d.querySelectorAll('[data-product]').forEach(x=>x.disabled=false);
+    d.querySelectorAll('[data-product]').forEach(x=>x.textContent='제품 상세 보기');
     card.insertAdjacentHTML('afterend', `<div class="product-inline-detail">${{productDetail(btn.dataset.product)}}</div>`);
-    btn.disabled=true;
+    btn.textContent='접기';
     const box=card.nextElementSibling;
     box.querySelectorAll('[data-jump-loc]').forEach(j=>j.addEventListener('click',()=>showDetail(j.dataset.jumpLoc)));
     box.querySelectorAll('[data-search-product]').forEach(t=>t.addEventListener('click',(ev)=>{{
@@ -452,6 +546,30 @@ function showDetail(loc){{
       navigateTop(href);
     }}));
     setFormsToParent();
+  }}));
+  d.querySelectorAll('[data-move-id]').forEach(btn=>btn.addEventListener('click',(ev)=>{{
+    ev.preventDefault();
+    ev.stopPropagation();
+    const invId = btn.dataset.moveId || '';
+    if(!invId) return;
+    // 이 iframe은 sandbox에 allow-top-navigation이 없어 window.top.location.assign은
+    // 브라우저가 조용히 막는다(버튼을 눌러도 아무 반응이 없는 것처럼 보임). 그래서
+    // 최상위 페이지 이동 대신, 부모 문서(같은 출처라 DOM 접근은 허용됨)에 숨겨 그려둔
+    // 입력칸에 재고 id만 적어 넣어 그 on_change가 실제 화면 전환을 하게 한다.
+    try {{
+      const doc = window.parent.document;
+      const input = Array.from(doc.querySelectorAll('input')).find(x => (x.getAttribute('aria-label')||'')==='__map_move_inv_id_bridge');
+      if(input){{
+        input.focus();
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(input, invId);
+        input.dispatchEvent(new InputEvent('input', {{bubbles:true, inputType:'insertText', data:invId}}));
+        input.dispatchEvent(new Event('change', {{bubbles:true}}));
+        input.blur();
+        return;
+      }}
+    }} catch(e) {{}}
+    navigateTop(buildParentUrlMulti({{move_inv_id: invId}}, ['map_search_product', 'inbound_loc']));
   }}));
 }}
 function toggleSpecialMenu(forceClose=false){{
