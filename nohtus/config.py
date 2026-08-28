@@ -35,6 +35,7 @@ AREA_CONFIG = {
     "R2": {"lines": [], "levels": []},
     "N": {"lines": SPECIAL_LOCATIONS, "levels": []},
     "홍보물랙": {"lines": [], "levels": []},
+    "다용도랙": {"lines": [], "levels": []},
     "옷장1": {"lines": [], "levels": []},
     "옷장2": {"lines": [], "levels": []},
     "옷장3": {"lines": [], "levels": []},
