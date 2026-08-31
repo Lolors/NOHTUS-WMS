@@ -45,3 +45,6 @@ backups/
 data/export.db-shm
 data/export.db-shm
 /data/.recovery_backups
+/.tmp.driveupload
+/.tmp.driveupload
+/.tmp.driveupload
