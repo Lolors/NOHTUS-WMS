@@ -6,6 +6,9 @@ import nohtus.export_app.services.wms_link_service as link_service
 import nohtus.services.export_waiting as export_waiting_service
 from nohtus.db import connect, q as wms_q
 from nohtus.export_app.services import export_service, shipment_service
+from nohtus.services.export_waiting import STAGING_LOCATIONS
+
+_STAGING_PLACEHOLDERS = ",".join(f"'{loc}'" for loc in STAGING_LOCATIONS)
 
 
 def _editable_order_id(export_no: str) -> int | None:
@@ -116,7 +119,7 @@ def _fill_source_links(rows: list[dict], waiting_rows: list[dict]) -> None:
         candidates = wms_q(
             f"""SELECT id,location,COALESCE(qty,0) AS qty,
                        COALESCE(qty,0) - CASE
-                         WHEN UPPER(TRIM(COALESCE(location,'')))='P' THEN COALESCE((
+                         WHEN UPPER(TRIM(COALESCE(location,''))) IN ({_STAGING_PLACEHOLDERS}) THEN COALESCE((
                            SELECT SUM(COALESCE(i.qty,0))
                            FROM export_waiting_items i
                            JOIN export_waiting_orders o ON o.id=i.order_id
@@ -138,7 +141,7 @@ def _fill_source_links(rows: list[dict], waiting_rows: list[dict]) -> None:
         if sufficient.empty:
             continue
         p_candidates = sufficient[
-            sufficient['location'].fillna('').astype(str).str.strip().str.upper() == 'P'
+            sufficient['location'].fillna('').astype(str).str.strip().str.upper().isin(STAGING_LOCATIONS)
         ]
         location_candidates = sufficient[
             sufficient['location'].fillna('').astype(str).str.strip() == location
@@ -230,7 +233,7 @@ def _empty_target_save(order_id: int, *, export_no: str, country: str, buyer: st
     return {'order_id': int(order_id), 'row_count': 0, 'total_qty': 0, 'title': title}
 
 
-def _patched_save_picked_inventory(*, case_id: int, order_item_id: int, kept_rows: list[dict], picked_rows: list[dict]) -> dict:
+def _patched_save_picked_inventory(*, case_id: int, order_item_id: int, kept_rows: list[dict], picked_rows: list[dict], staging_location: str = 'P') -> dict:
     case = export_service.get_case(case_id)
     if case is None:
         raise ValueError('수출 건을 찾을 수 없습니다.')
@@ -333,6 +336,7 @@ def _patched_save_picked_inventory(*, case_id: int, order_item_id: int, kept_row
                 transport_method=transport_method,
                 export_no=export_no,
                 editing_order_id=editing_order_id,
+                staging_location=staging_location,
             )
         elif editing_order_id:
             result = _empty_target_save(

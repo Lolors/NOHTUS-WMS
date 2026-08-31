@@ -62,7 +62,7 @@ def _patched_update_confirmed_export_waiting_items(
         rows = cur.execute(
             f"""SELECT id,product_name,warehouse_name,lot,exp_date,company,qty,
                        confirmed_company,confirmed_customer_code,
-                       confirmed_customer_name,confirmed_at
+                       confirmed_customer_name,confirmed_at,waiting_location
                 FROM export_waiting_items
                 WHERE order_id=? AND id IN ({placeholders})
                   AND COALESCE(confirmed,0)=1
@@ -76,7 +76,7 @@ def _patched_update_confirmed_export_waiting_items(
     for row in rows:
         (
             item_id, product_name, warehouse_name, lot, exp_date, company, qty,
-            old_company, old_code, old_customer, old_confirmed_at,
+            old_company, old_code, old_customer, old_confirmed_at, waiting_location,
         ) = row
         old_item_date = _date_text(old_confirmed_at) or old_order_date
         before_by_id[int(item_id)] = {
@@ -90,6 +90,7 @@ def _patched_update_confirmed_export_waiting_items(
             "confirmed_customer_code": str(old_code or "").strip(),
             "confirmed_customer_name": str(old_customer or "").strip(),
             "order_date": old_item_date,
+            "waiting_location": str(waiting_location or "").strip() or "P",
         }
         if (
             str(old_company or "").strip() != requested_company
@@ -144,7 +145,7 @@ def _patched_update_confirmed_export_waiting_items(
                 from_company=before["confirmed_company"] or before["company"],
                 from_location="",
                 to_company=before["company"],
-                to_location="P",
+                to_location=before["waiting_location"],
                 qty=before["qty"],
                 memo=(
                     f"수출확정 출고내역 수정 / 기존 출고지시 취소 / {title} / "
@@ -155,6 +156,7 @@ def _patched_update_confirmed_export_waiting_items(
 
         # 수정 저장 값 재등록 이력도 같은 변경 품목만 기록한다.
         for item_id, product_name, warehouse_name, lot, exp_date, company, qty in after_rows:
+            before = before_by_id.get(int(item_id)) or {}
             insert_transaction_log(
                 cur,
                 created_at=now,
@@ -164,7 +166,7 @@ def _patched_update_confirmed_export_waiting_items(
                 lot=lot,
                 exp_date=exp_date,
                 from_company=company,
-                from_location="P",
+                from_location=before.get("waiting_location", "P"),
                 to_company=requested_company,
                 to_location="",
                 qty=int(qty or 0),

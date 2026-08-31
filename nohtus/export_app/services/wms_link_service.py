@@ -14,7 +14,9 @@ from nohtus.db import connect as wms_connect, q as wms_q
 from nohtus.export_app import db as export_db
 from nohtus.export_app.services import export_service, shipment_service
 from nohtus.export_app.utils.dates import now_text
-from nohtus.services.export_waiting import repair_p_inventory_links, save_export_waiting_order
+from nohtus.services.export_waiting import STAGING_LOCATIONS, repair_p_inventory_links, save_export_waiting_order
+
+_STAGING_PLACEHOLDERS = ",".join(f"'{loc}'" for loc in STAGING_LOCATIONS)
 
 TRANSPORT_MODE_TO_METHOD = {
     "AIR": "항공",
@@ -134,7 +136,7 @@ def restore_legacy_waiting_links(case_id: int) -> int:
                    i.source_location, i.qty, COALESCE(i.confirmed,0) AS confirmed
             FROM export_waiting_items i LEFT JOIN inventory p ON p.id=i.waiting_inventory_id
             WHERE i.order_id IN ({placeholders}) AND i.qty>0
-              AND (COALESCE(i.confirmed,0)=1 OR UPPER(TRIM(COALESCE(p.location,'')))='P')
+              AND (COALESCE(i.confirmed,0)=1 OR UPPER(TRIM(COALESCE(p.location,''))) IN ({_STAGING_PLACEHOLDERS}))
             ORDER BY i.order_id, i.id""", tuple(order_ids))
     if waiting.empty:
         return 0
@@ -457,7 +459,7 @@ def _fill_missing_source_links(rows: list[dict], waiting_rows: list[dict]) -> No
                 used.add(source_id)
 
 
-def save_picked_inventory(*, case_id:int, order_item_id:int, kept_rows:list[dict], picked_rows:list[dict]) -> dict:
+def save_picked_inventory(*, case_id:int, order_item_id:int, kept_rows:list[dict], picked_rows:list[dict], staging_location:str="P") -> dict:
     case=export_service.get_case(case_id)
     if case is None: raise ValueError("수출 건을 찾을 수 없습니다.")
     export_no=str(case["export_no"] or "").strip()
@@ -496,7 +498,7 @@ def save_picked_inventory(*, case_id:int, order_item_id:int, kept_rows:list[dict
     original_mirror_rows=[{"_id":row["id"],"business_unit":row.get("business_unit") or "","location":row.get("source_location") or row.get("location") or "","source_inventory_id":row.get("source_inventory_id"),"product_name":row.get("product_name") or "","lot_no":row.get("lot_no") or "","expiry_date":row.get("expiry_date") or "","requested_qty":float(row["requested_qty"] or 0)} for row in current_rows]
     total_qty=shipment_service.save_for_order(case_id,order_item_id,mirror_rows)
     try:
-        result=save_export_waiting_order(cart,country=country,buyer=str(case.get("buyer") or ""),transport_method=transport_method,export_no=export_no,editing_order_id=editing_order_id)
+        result=save_export_waiting_order(cart,country=country,buyer=str(case.get("buyer") or ""),transport_method=transport_method,export_no=export_no,editing_order_id=editing_order_id,staging_location=staging_location)
     except Exception:
         shipment_service.save_for_order(case_id,order_item_id,original_mirror_rows); raise
     sync_mirror_source_links(case_id, int(result["order_id"]))
