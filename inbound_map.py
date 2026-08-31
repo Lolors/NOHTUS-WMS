@@ -125,7 +125,7 @@ __SHARED_FIT_ZOOM_PAN_JS__
     parentElement.querySelectorAll('.map-stage [data-loc],.map-stage [data-special-loc]').forEach(el => {
       const value = locationOf(el);
       const selected = value === loc || (loc && loc.startsWith(value + '-')) ||
-        (value === 'N' && ['오른쪽 창고','사무실(4층)','지엠메딕'].includes(loc)) ||
+        (value === 'N' && ['오른쪽 창고','사무실(4층)','지엠메딕','거래처 창고'].includes(loc)) ||
         inRange(value);
       el.classList.toggle('selected', selected);
     });
@@ -138,7 +138,7 @@ __SHARED_FIT_ZOOM_PAN_JS__
   }
   function refreshDots() {
     parentElement.querySelectorAll('.map-stage .dynamic-stock-dot').forEach(el => el.remove());
-    const special = ['오른쪽 창고','사무실(4층)','지엠메딕'];
+    const special = ['오른쪽 창고','사무실(4층)','지엠메딕','거래처 창고'];
     const hasStock = loc => {
       if (loc === 'N') return special.some(key => (inventory[key] || []).some(row => Number(row.qty || 0) > 0));
       return Object.entries(inventory).some(([key, rows]) =>

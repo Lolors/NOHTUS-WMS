@@ -145,7 +145,7 @@ def _map_markup() -> str:
     p.append('<div class="nw-outline" style="left:410px;top:865px;width:520px;height:45px;border-right:0;border-bottom:0;"></div>')
     p.append('<div class="nw-outline" style="left:930px;top:775px;width:1px;height:90px;border-width:0 0 0 1.5px;"></div>')
 
-    p.append('<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button><button type="button" data-special-loc="지엠메딕">지엠메딕</button></div>')
+    p.append('<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button><button type="button" data-special-loc="지엠메딕">지엠메딕</button><button type="button" data-special-loc="거래처 창고">거래처 창고</button></div>')
     return '<div class="map-scroll"><div class="map-stage">' + ''.join(p) + '</div></div>' + _ZOOM_CONTROLS
 
 
@@ -279,7 +279,7 @@ def _saved_layout_markup(layout: dict) -> str:
     # from the shapes created in the editor.  Legacy fixed outlines would be
     # drawn on top of the user's design and create duplicate or stray lines.
     items.append(
-        '<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button><button type="button" data-special-loc="지엠메딕">지엠메딕</button></div>'
+        '<div class="special-menu" id="specialMenu"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button><button type="button" data-special-loc="지엠메딕">지엠메딕</button><button type="button" data-special-loc="거래처 창고">거래처 창고</button></div>'
     )
     return '<div class="map-scroll"><div class="map-stage saved-map-stage">' + ''.join(items) + '</div></div>' + _ZOOM_CONTROLS
 
