@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import datetime
 from io import BytesIO
 
@@ -90,7 +91,7 @@ def _update_inventory_identity(con, inventory_id, product_name, lot, exp_date, n
         (inventory_id,),
     ).fetchone()
     if not row:
-        return
+        return False
     company, _warehouse_name, location = row
     duplicates = con.execute(
         """SELECT id FROM inventory
@@ -107,6 +108,7 @@ def _update_inventory_identity(con, inventory_id, product_name, lot, exp_date, n
            WHERE id=?""",
         (product_name, lot, exp_date, now, inventory_id),
     )
+    return bool(duplicates)
 
 
 def _linked_waiting_items(con, inventory_id, current):
@@ -151,12 +153,12 @@ def _synchronize_export_waiting_master(con, inventory_id, current, product_name,
     ensure_export_waiting_tables(con.cursor())
     rows = _linked_waiting_items(con, inventory_id, current)
     if not rows:
-        _update_inventory_identity(con, inventory_id, product_name, lot, exp_date, now)
-        return
+        return _update_inventory_identity(con, inventory_id, product_name, lot, exp_date, now)
 
     selected_location = str(current[3] or "")
     related_item_ids = {int(row[0]) for row in rows}
     waiting_ids = {int(row[2]) for row in rows if int(row[2] or 0) > 0}
+    merged = False
 
     # 연결 ID가 없던 과거 엑셀 자료는 전체 재고키가 완전히 같은 P 행만 묶는다.
     # 동일 키의 P 행이 여러 개면 먼저 한 행으로 합쳐 참조 대상을 하나로 만든다.
@@ -176,6 +178,8 @@ def _synchronize_export_waiting_master(con, inventory_id, current, product_name,
         if not candidate_ids:
             continue
         keep_id = int(inventory_id) if selected_location == "P" and int(inventory_id) in candidate_ids else candidate_ids[0]
+        if any(candidate_id != keep_id for candidate_id in candidate_ids):
+            merged = True
         _merge_inventory_rows(con, keep_id, candidate_ids)
         con.execute(
             """UPDATE export_waiting_items
@@ -220,7 +224,9 @@ def _synchronize_export_waiting_master(con, inventory_id, current, product_name,
         (product_name, lot, exp_date, *sorted(related_item_ids)),
     )
     for linked_id in sorted(linked_inventory_ids):
-        _update_inventory_identity(con, linked_id, product_name, lot, exp_date, now)
+        if _update_inventory_identity(con, linked_id, product_name, lot, exp_date, now):
+            merged = True
+    return merged
 
 
 def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, exp_date, edited_mappings):
@@ -283,7 +289,7 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
 
         try:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            _synchronize_export_waiting_master(
+            merged = _synchronize_export_waiting_master(
                 con,
                 int(inv_id),
                 current,
@@ -361,11 +367,16 @@ def _update_inventory_and_product_mappings_business(inv_id, product_name, lot, e
                 con.execute(f"DELETE FROM products WHERE id IN ({placeholders})", delete_ids)
 
             con.commit()
+        except sqlite3.IntegrityError as exc:
+            con.rollback()
+            raise ValueError("수정 결과와 동일한 재고 또는 제품매칭 정보가 이미 존재합니다.") from exc
         except Exception:
             con.rollback()
             raise
 
-    return product_name, lot, exp_date, len(mapping_rows)
+    propagation_error = stocktake_page._propagate_master_edit_to_shipment_items(int(inv_id), product_name, lot, exp_date)
+
+    return product_name, lot, exp_date, len(mapping_rows), propagation_error, merged
 
 
 def import_stock_survey_excel_business(uploaded_file, replace_current=True):
