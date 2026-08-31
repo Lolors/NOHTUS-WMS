@@ -65,6 +65,38 @@ def _inventory_match_payload(item):
     }
 
 
+def _find_inventory_candidates(cur, *, product, company, location, lot, exp, wh):
+    """product/company(+location)로 후보 재고 행을 찾고, LOT/유통기한/전산상명칭으로 좁힌다."""
+    where = ["TRIM(COALESCE(product_name,''))=?", "TRIM(COALESCE(company,''))=?"]
+    params = [product, company]
+    if location:
+        where.append("TRIM(COALESCE(location,''))=?")
+        params.append(location)
+
+    rows = cur.execute(
+        f"SELECT * FROM inventory WHERE {' AND '.join(where)} ORDER BY id DESC",
+        params,
+    ).fetchall()
+    if not rows:
+        return []
+
+    cols = [d[0] for d in cur.description]
+    candidates = []
+    for row in rows:
+        src = dict(zip(cols, row))
+        if lot and _norm_blank(src.get('lot')) != lot:
+            continue
+        if exp and _norm_date(src.get('exp_date')) != exp:
+            continue
+        candidates.append(src)
+
+    if candidates and wh:
+        wh_matches = [src for src in candidates if _norm(src.get('warehouse_name')) == wh]
+        if wh_matches:
+            candidates = wh_matches
+    return candidates
+
+
 def _resolve_inventory_id(cur, item):
     """장바구니/저장행의 재고ID가 빠졌을 때 재고 고유 조건으로 inventory.id를 복구한다."""
     payload = _inventory_match_payload(item)
@@ -78,37 +110,19 @@ def _resolve_inventory_id(cur, item):
     if not product or not company or not location:
         return None
 
-    rows = cur.execute(
-        """
-        SELECT *
-        FROM inventory
-        WHERE TRIM(COALESCE(product_name,''))=?
-          AND TRIM(COALESCE(company,''))=?
-          AND TRIM(COALESCE(location,''))=?
-        ORDER BY id DESC
-        """,
-        (product, company, location),
-    ).fetchall()
-    if not rows:
-        return None
-
-    cols = [d[0] for d in cur.description]
-    candidates = []
-    for row in rows:
-        src = dict(zip(cols, row))
-        if lot and _norm_blank(src.get('lot')) != lot:
-            continue
-        if exp and _norm_date(src.get('exp_date')) != exp:
-            continue
-        candidates.append(src)
-
+    candidates = _find_inventory_candidates(
+        cur, product=product, company=company, location=location, lot=lot, exp=exp, wh=wh
+    )
+    if not candidates:
+        # 저장된 지시서의 로케이션은 그 사이 재고가 다른 칸으로 이동했으면 더
+        # 이상 실제 위치와 맞지 않을 수 있다. 사업장/제품/LOT/유통기한까지
+        # 정확히 일치하는 재고는 물리적으로 어느 칸에 있든 같은 재고 배치이므로,
+        # 로케이션 없이 다시 찾아 그 배치가 지금 있는 곳을 그대로 쓴다.
+        candidates = _find_inventory_candidates(
+            cur, product=product, company=company, location='', lot=lot, exp=exp, wh=wh
+        )
     if not candidates:
         return None
-
-    if wh:
-        wh_matches = [src for src in candidates if _norm(src.get('warehouse_name')) == wh]
-        if wh_matches:
-            candidates = wh_matches
 
     # 같은 조건의 중복 행이 있어도 재고 수정이 멈추지 않도록 최신 inventory row를 사용한다.
     candidates = sorted(candidates, key=lambda src: int(src.get('id') or 0), reverse=True)
