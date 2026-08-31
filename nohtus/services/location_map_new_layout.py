@@ -473,7 +473,7 @@ function installApprovedMapPan(){
 }
 function refreshApprovedMapDots(){
   document.querySelectorAll('.map-stage .dynamic-stock-dot').forEach(el=>el.remove());
-  const specialStockLocations=['오른쪽 창고','사무실(4층)','지엠메딕'];
+  const specialStockLocations=['오른쪽 창고','사무실(4층)','지엠메딕','거래처 창고'];
   const hasStock = (loc) => {
     if(loc==='N') return specialStockLocations.some(special => (inventory[special]||[]).some(row => Number(row.qty||0)>0));
     return Object.entries(inventory||{}).some(([key, rows]) => {

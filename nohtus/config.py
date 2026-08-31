@@ -8,7 +8,7 @@ DB_PATH = PROJECT_ROOT / "data" / "nohtus.db"
 
 COMPANIES = ["노투스팜", "노투스", "NOH", "비자료"]
 INBOUND_COMPANIES = COMPANIES + ["등록대기"]
-SPECIAL_LOCATIONS = ["오른쪽 창고", "사무실(4층)", "지엠메딕"]
+SPECIAL_LOCATIONS = ["오른쪽 창고", "사무실(4층)", "지엠메딕", "거래처 창고"]
 
 AREA_CONFIG = {
     # A1/B1/C1/D1/E1 라인 수는 로케이션맵 도면(data/location_map_layout.json)의
