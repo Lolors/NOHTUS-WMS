@@ -9,7 +9,7 @@ import nohtus.services.stocktake as stocktake_service
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only, normalize_exp_date
 from nohtus.services.inventory import insert_transaction_log
-from nohtus.services.export_waiting import ensure_export_waiting_tables
+from nohtus.services.export_waiting import STAGING_LOCATIONS, ensure_export_waiting_tables
 
 
 def full_inventory_excel_bytes_business(exclude_zero=True):
@@ -112,11 +112,17 @@ def _update_inventory_identity(con, inventory_id, product_name, lot, exp_date, n
 
 
 def _linked_waiting_items(con, inventory_id, current):
-    """선택 재고와 고유 ID 또는 과거의 완전한 재고키로 연결되는 미확정 수출대기를 찾는다."""
+    """선택 재고와 고유 ID 또는 과거의 완전한 재고키로 연결되는 미확정 수출대기를 찾는다.
+
+    고유 ID 연결이 없는 과거 데이터는 전체 재고키가 일치하는 P 행만 묶던
+    시절의 로직이 남아 있었는데, 수출대기 보관 위치가 P 외에 T1~T5까지
+    선택 가능해진 뒤에도 이 부분은 'P'만 확인해서 T1~T5에 있는 품목은
+    LOT/유통기한을 나중에 채워도 수출대기 쪽에 반영되지 않았다."""
     company, warehouse_name, location, _qty, old_lot, old_exp = current[1:]
     old_product_name = str(current[0] or "").strip()
+    staging_placeholders = ",".join("?" for _ in STAGING_LOCATIONS)
     return con.execute(
-        """
+        f"""
         SELECT id,source_inventory_id,waiting_inventory_id,company,product_name,
                COALESCE(warehouse_name,''),COALESCE(lot,'-'),COALESCE(exp_date,'-')
         FROM export_waiting_items
@@ -125,7 +131,7 @@ def _linked_waiting_items(con, inventory_id, current):
               source_inventory_id=?
               OR waiting_inventory_id=?
               OR (
-                  ?='P'
+                  ? IN ({staging_placeholders})
                   AND company=?
                   AND product_name=?
                   AND COALESCE(warehouse_name,'')=?
@@ -139,6 +145,7 @@ def _linked_waiting_items(con, inventory_id, current):
             int(inventory_id),
             int(inventory_id),
             location,
+            *STAGING_LOCATIONS,
             company,
             old_product_name,
             warehouse_name,
@@ -160,24 +167,30 @@ def _synchronize_export_waiting_master(con, inventory_id, current, product_name,
     waiting_ids = {int(row[2]) for row in rows if int(row[2] or 0) > 0}
     merged = False
 
-    # 연결 ID가 없던 과거 엑셀 자료는 전체 재고키가 완전히 같은 P 행만 묶는다.
-    # 동일 키의 P 행이 여러 개면 먼저 한 행으로 합쳐 참조 대상을 하나로 만든다.
+    # 연결 ID가 없던 과거 엑셀 자료는 전체 재고키가 완전히 같은 수출대기
+    # 보관 위치(P, T1~T5) 행만 묶는다. 동일 키의 행이 여러 개면 먼저 한
+    # 행으로 합쳐 참조 대상을 하나로 만든다.
+    staging_placeholders = ",".join("?" for _ in STAGING_LOCATIONS)
     for row in rows:
         item_id, _source_id, waiting_id, company, item_product, warehouse_name, item_lot, item_exp = row
         if int(waiting_id or 0) > 0:
             continue
         candidates = con.execute(
-            """SELECT id FROM inventory
-               WHERE location='P' AND company=? AND product_name=?
+            f"""SELECT id FROM inventory
+               WHERE location IN ({staging_placeholders}) AND company=? AND product_name=?
                  AND COALESCE(warehouse_name,'')=?
                  AND COALESCE(lot,'-')=? AND COALESCE(exp_date,'-')=?
                ORDER BY id""",
-            (company, item_product, warehouse_name, item_lot, item_exp),
+            (*STAGING_LOCATIONS, company, item_product, warehouse_name, item_lot, item_exp),
         ).fetchall()
         candidate_ids = [int(candidate[0]) for candidate in candidates]
         if not candidate_ids:
             continue
-        keep_id = int(inventory_id) if selected_location == "P" and int(inventory_id) in candidate_ids else candidate_ids[0]
+        keep_id = (
+            int(inventory_id)
+            if selected_location in STAGING_LOCATIONS and int(inventory_id) in candidate_ids
+            else candidate_ids[0]
+        )
         if any(candidate_id != keep_id for candidate_id in candidate_ids):
             merged = True
         _merge_inventory_rows(con, keep_id, candidate_ids)

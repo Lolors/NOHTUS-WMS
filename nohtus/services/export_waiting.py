@@ -463,6 +463,18 @@ def _waiting_inventory_matches_items(cur, order_id):
     )
 
 
+def _waiting_item_link_is_healthy(cur, item):
+    """이 품목이 가리키는 대기 재고(waiting_inventory_id)가 지금도 요청 수량만큼
+    실제로 남아 있는지 확인한다. 수량이 그대로인 품목을 건드리지 않고 넘어가려면,
+    먼저 연결이 멀쩡한지부터 확인해야 한다 — 이미 깨진 연결까지 그냥 넘기면
+    재고 정합성이 어긋난 채로 영영 고쳐지지 않는다."""
+    waiting_inventory_id = int(item.get("waiting_inventory_id") or 0)
+    if not waiting_inventory_id:
+        return False
+    row = cur.execute("SELECT qty FROM inventory WHERE id=?", (waiting_inventory_id,)).fetchone()
+    return bool(row) and int(row[0] or 0) >= int(item.get("qty") or 0)
+
+
 def _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now, title, export_no, target_location=P):
     current_items = _items(cur, order_id, confirmed=False)
     target_qty = {int(k): int(v) for k, v in dict(grouped).items() if int(v) > 0}
@@ -475,9 +487,21 @@ def _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now
         for item in current_items
     }
 
+    # 수량도 그대로고 연결도 멀쩡한 품목은 절대 건드리지 않는다 — 예전에는
+    # 매 저장마다 미확정 품목 전체를 원위치로 되돌렸다가 다시 꺼내 담았는데,
+    # 그 되돌리기/재적재 과정이 source_inventory_id의 원래 위치(T1~T5)를
+    # '수출대기 보관 위치'로 오인해 관계없는 품목까지 "재고를 찾을 수
+    # 없습니다" 오류로 저장을 막는 사고로 이어졌다. 다만 연결이 이미 깨진
+    # 품목은(예: 재고조사로 대기 재고가 원위치로 옮겨진 경우) 수량이 그대로여도
+    # 여전히 복구를 시도해야 한다.
+    remaining_target = dict(target_qty)
     restored_source_rows = {}
     for item in current_items:
         source_id = int(item.get("source_inventory_id") or 0)
+        old_qty = int(item.get("qty") or 0)
+        desired_qty = remaining_target.pop(source_id, 0)
+        if desired_qty == old_qty and _waiting_item_link_is_healthy(cur, item):
+            continue
         try:
             restored, moved_from_p = _restore_waiting_item(cur, item, now)
         except ValueError:
@@ -485,33 +509,34 @@ def _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now
             # 대기 위치와 원위치 양쪽에 재고가 없어도 깨진 대기 연결 자체는
             # 제거한다. 남겨 둘 수량이 있는 수정은 재고 정합성을 확인해야
             # 하므로 기존 부족 오류를 그대로 전파한다.
-            if target_qty.get(source_id, 0) > 0:
+            if desired_qty > 0:
                 raise
+            cur.execute("DELETE FROM export_waiting_items WHERE id=?", (int(item["id"]),))
             continue
         if restored:
             restored_source_rows[source_id] = restored
             source_hints[source_id] = restored
-        if not moved_from_p:
-            continue
-        insert_transaction_log(
-            cur,
-            created_at=now,
-            tx_type="위치이동",
-            product_name=item["product_name"],
-            warehouse_name=item.get("warehouse_name", ""),
-            lot=item.get("lot", "-"),
-            exp_date=item.get("exp_date", "-"),
-            from_company=item["company"],
-            from_location=str(item.get("waiting_location") or "").strip() or P,
-            to_company=item["company"],
-            to_location=item["source_location"],
-            qty=item["qty"],
-            memo=f"수출대기 수정 / 기존 품목 전체 원복 / {title} / 수출번호: {export_no}",
-        )
+        cur.execute("DELETE FROM export_waiting_items WHERE id=?", (int(item["id"]),))
+        if moved_from_p:
+            insert_transaction_log(
+                cur,
+                created_at=now,
+                tx_type="위치이동",
+                product_name=item["product_name"],
+                warehouse_name=item.get("warehouse_name", ""),
+                lot=item.get("lot", "-"),
+                exp_date=item.get("exp_date", "-"),
+                from_company=item["company"],
+                from_location=str(item.get("waiting_location") or "").strip() or P,
+                to_company=item["company"],
+                to_location=item["source_location"],
+                qty=item["qty"],
+                memo=f"수출대기 수정 / 변경된 품목 원복 / {title} / 수출번호: {export_no}",
+            )
+        if desired_qty > 0:
+            remaining_target[source_id] = desired_qty
 
-    cur.execute("DELETE FROM export_waiting_items WHERE order_id=?", (int(order_id),))
-
-    for source_id, qty in target_qty.items():
+    for source_id, qty in remaining_target.items():
         hint = source_hints.get(source_id) or restored_source_rows.get(source_id)
         source = _take_source(cur, source_id, qty, now, hint)
         resolved_inventory_id = int(source.get("_resolved_inventory_id") or source.get("id") or source_id)
