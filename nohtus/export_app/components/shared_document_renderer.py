@@ -225,7 +225,7 @@ html,body{{margin:0;padding:0;background:#f4f7fa;color:#172033;font-family:-appl
 .note-box{{width:100%;margin:6px auto 0;padding:5px 7px;border:1px solid #dce3eb;border-left:4px solid #294f71;border-radius:7px;font-size:8px}}
 @media print{{html,body{{width:210mm;height:297mm;background:#fff;padding:0}} .toolbar{{display:none!important}} .document{{width:198mm;max-width:none;margin:0 auto}} .header,th,.merged,.total-row td{{-webkit-print-color-adjust:exact;print-color-adjust:exact}}}}
 </style>{print_title_script}{jpg_download_script}</head><body>
-<div class="toolbar"><button class="download-jpg" onclick="downloadFinalDocumentJpg()">🖼 JPG 다운로드</button><button class="print" onclick="printFinalDocument()">🖨 출력하기</button></div>
+<div class="toolbar"><button class="download-jpg" onclick="downloadFinalDocumentJpg()">🖼️이미지 저장</button><button class="print" onclick="printFinalDocument()">🖨 출력하기</button></div>
 <div class="document"><div class="header"><div><div class="title">주문 정보 및 패킹 리스트</div><div class="sub">ORDER INFORMATION &amp; PACKING LIST</div></div><div class="number"><small>EXPORT NO.</small><br><b>{html.escape(case['export_no'])}</b></div></div>
 <div class="body"><div class="section"><span class="section-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg></span>EXPORT INFORMATION</div><div class="grid">
 <div class="cell"><div class="label">국가 / Country</div><div class="value">{html.escape(case['country'] or '-')}</div></div>
@@ -358,7 +358,7 @@ th{{background:#294f71;color:white;padding:7px 5px;text-align:center;font-weight
 .notice{{padding:10px 20px 14px;font-size:8.2px;color:#788493;border-top:1px solid #e0e6ed}}
 @media print{{html,body{{width:210mm;min-height:297mm;background:white;padding:0}} .toolbar{{display:none!important}} .sheet{{width:198mm;max-width:none;margin:0 auto;border:0;box-shadow:none}} .header{{padding:13px 15px 11px}} .title{{font-size:18px}} .meta{{margin:10px 8px}} .list-summary{{margin:0 8px 9px;gap:6px}} .summary-card{{padding:7px 9px}} .content{{padding:0 8px 12px}} .summary,table{{width:100%;max-width:none}} table{{font-size:10.5px}} th{{padding:5px 3px}} td{{padding:5px 4px}} .product{{padding-left:6px}} .qty,.unit{{padding-left:2px;padding-right:2px}} .notice{{padding:8px 15px 0}} .header,th{{-webkit-print-color-adjust:exact;print-color-adjust:exact}}}}
 </style>{jpg_download_script}</head><body>
-<div class="toolbar"><button class="download-jpg" onclick="downloadShipmentListJpg()">🖼 JPG 다운로드</button><button class="print" onclick="window.print()">🖨 출력하기</button></div>
+<div class="toolbar"><button class="download-jpg" onclick="downloadShipmentListJpg()">🖼️이미지 저장</button><button class="print" onclick="window.print()">🖨 출력하기</button></div>
 <div class="sheet"><div class="header"><div class="title">출고 예정 제품 리스트</div><div class="export-no">EXPORT NO.<b>{html.escape(case['export_no'] or '-')}</b></div></div>
 <div class="meta"><div><span class="label">국가 / Country</span><div class="value">{html.escape(case['country'] or '-')}</div></div><div><span class="label">바이어 / Buyer</span><div class="value">{html.escape(case['buyer'] or '-')}</div></div><div><span class="label">운송방식 / Transport</span><div class="value">{html.escape(case['transport_mode'] or '-')}</div></div></div>
 <div class="list-summary"><div class="summary-card">전체 품목 수 : {item_count}품목</div><div class="summary-card">출고수량 : {fmt_number(total_quantity)}</div></div>
