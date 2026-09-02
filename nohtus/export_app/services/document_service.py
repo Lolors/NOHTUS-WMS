@@ -54,7 +54,12 @@ def _aggregate_actual(rows) -> list[dict]:
 
 
 def _build_shipment_product_rows(order_rows, actual_rows) -> list[dict]:
-    """Use received details and fill each order's outstanding quantity from the order."""
+    """Use received details and fill each order's outstanding quantity from the order.
+
+    실제 저장된 재고(actual_rows)의 requested_qty는 항상 EA 단위지만, 주문의
+    단위(order['unit'])는 BOX 등 문서 단위일 수 있다. 이 둘을 그대로 섞으면
+    "80EA"가 "80BOX"로 잘못 표시된다. ea_per_document_unit으로 EA를 문서
+    단위로 환산한 뒤에만 주문 수량과 비교·합산한다."""
     actual_by_order: dict[int, list] = {}
     for row in actual_rows:
         order_item_id = row['order_item_id']
@@ -64,14 +69,23 @@ def _build_shipment_product_rows(order_rows, actual_rows) -> list[dict]:
 
     combined: list[dict] = []
     for order in order_rows:
+        try:
+            ea_per_unit = float(order['ea_per_document_unit'] or 1)
+        except (KeyError, IndexError, TypeError, ValueError):
+            ea_per_unit = 1.0
+        if ea_per_unit <= 0:
+            ea_per_unit = 1.0
+
         linked_actual = actual_by_order.get(int(order['id']), [])
         received_quantity = 0.0
         for row in linked_actual:
             quantity = float(row['requested_qty'] or 0)
             if quantity <= 0:
                 continue
-            combined.append(dict(row))
-            received_quantity += quantity
+            converted = dict(row)
+            converted['requested_qty'] = quantity / ea_per_unit
+            combined.append(converted)
+            received_quantity += quantity / ea_per_unit
 
         outstanding_quantity = max(float(order['quantity'] or 0) - received_quantity, 0.0)
         if outstanding_quantity > 0.000001:
@@ -90,7 +104,11 @@ def _build_shipment_product_rows(order_rows, actual_rows) -> list[dict]:
 def get_shipment_product_list_data(case_id: int) -> list[dict]:
     """Return a complete planned-shipment list using the freshest available data."""
     order_rows = db.rows(
-        '''SELECT id, product_name, quantity, unit
+        '''SELECT id, product_name, quantity, unit,
+                  CASE
+                      WHEN COALESCE(ea_per_document_unit, 0) > 0 THEN ea_per_document_unit
+                      ELSE 1
+                  END AS ea_per_document_unit
            FROM order_items
            WHERE case_id=?
            ORDER BY id''',

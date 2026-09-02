@@ -130,6 +130,31 @@ class SharedDocumentDataTests(unittest.TestCase):
         self.assertEqual(50.0, result[0]['requested_qty'])
         self.assertEqual('BOX', result[0]['unit'])
 
+    def test_shipment_product_list_converts_ea_to_document_box_quantity(self) -> None:
+        """실사용 버그: 출고 예정 제품 리스트는 저장된 실재고(EA)와 주문
+        단위(BOX)를 환산 없이 그대로 섞어서, 1BOX=2EA인 제품을 40BOX(80EA)
+        입고 저장하면 "80EA"가 "80BOX"로 잘못 표시됐다."""
+        orders = [
+            {
+                'id': 1, 'product_name': '성심 니들 18G*38mm (1*½")', 'quantity': 40,
+                'unit': 'BOX', 'ea_per_document_unit': 2,
+            },
+        ]
+        actual = [{
+            'order_item_id': 1,
+            'business_unit': '노투스',
+            'product_name': '성심 니들 18G*38mm (1*½")',
+            'lot_no': 'LOT-1',
+            'expiry_date': '2029-01-01',
+            'unit': 'BOX',
+            'requested_qty': 80,
+        }]
+
+        rows = _build_shipment_product_rows(orders, actual)
+
+        self.assertEqual(1, len(rows))
+        self.assertEqual(40.0, rows[0]['requested_qty'])
+        self.assertEqual('BOX', rows[0]['unit'])
 
 
 if __name__ == '__main__':
