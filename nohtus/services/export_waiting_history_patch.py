@@ -26,11 +26,34 @@ def _patched_apply_export_waiting_item_changes(
         before_qty[source_id] += int(item.get("qty") or 0)
         before_item.setdefault(source_id, item)
 
+    # 소스별 현재 행 개수를 세어, 수량이 그대로인 품목만 안전하게 건드리지 않고
+    # 넘어갈 수 있는지 판단한다(같은 source_id가 여러 행으로 쪼개져 있으면
+    # 어느 행이 그대로인지 알 수 없으므로 이 최적화를 적용하지 않는다).
+    source_id_counts = defaultdict(int)
+    for item in current_items:
+        source_id_counts[int(item.get("source_inventory_id") or 0)] += 1
+
     # 재고 정합성을 위해 내부적으로는 기존 목록을 전부 원복한 뒤 새 목록을 다시 적재한다.
     # 이 과정 자체는 이력에 남기지 않고, 아래에서 변경분만 별도로 기록한다.
+    unchanged_item_ids = []
     restored_source_rows = {}
     for item in current_items:
         source_id = int(item.get("source_inventory_id") or 0)
+        current_qty = int(item.get("qty") or 0)
+        # 수량이 바뀌지 않은 품목은 P<->원위치 왕복(복원 후 재적재)을 건너뛴다.
+        # 매 저장마다 안 바뀐 품목까지 왕복시키면, P 재고 연결이 끊어져 있을
+        # 때마다 실패하거나 "이미 원위치에 있다"는 조용한 폴백이 반복 발동해
+        # 실제로는 P로 옮겨진 적 없는 것처럼 원래 위치에 눌러앉는 사고로
+        # 이어진다.
+        if (
+            source_id
+            and source_id_counts[source_id] == 1
+            and target_qty.get(source_id, 0) == current_qty
+        ):
+            unchanged_item_ids.append(int(item["id"]))
+            target_qty.pop(source_id, None)
+            before_qty.pop(source_id, None)
+            continue
         try:
             restored, _ = export_waiting._restore_waiting_item(cur, item, now)
         except ValueError:
@@ -43,7 +66,14 @@ def _patched_apply_export_waiting_item_changes(
             restored_source_rows[source_id] = restored
             source_hints[source_id] = restored
 
-    cur.execute("DELETE FROM export_waiting_items WHERE order_id=?", (int(order_id),))
+    if unchanged_item_ids:
+        placeholders = ",".join("?" for _ in unchanged_item_ids)
+        cur.execute(
+            f"DELETE FROM export_waiting_items WHERE order_id=? AND id NOT IN ({placeholders})",
+            (int(order_id), *unchanged_item_ids),
+        )
+    else:
+        cur.execute("DELETE FROM export_waiting_items WHERE order_id=?", (int(order_id),))
 
     after_item = {}
     for source_id, qty in target_qty.items():
