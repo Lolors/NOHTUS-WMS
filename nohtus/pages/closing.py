@@ -467,6 +467,7 @@ def page_closing():
           AND tx_type NOT IN ('출고지시', '출고지시수정', '출고지시 재차감', '출고', '출고지시취소')
           AND COALESCE(tx_type, '') NOT LIKE '%이동%'
           AND COALESCE(tx_type, '') <> '재고조사불러오기'
+          AND COALESCE(memo, '') NOT LIKE '%패킹완료 단계로 되돌리기%'
         ORDER BY created_at, id
         """,
         (ds,),
