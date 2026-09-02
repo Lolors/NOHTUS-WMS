@@ -974,6 +974,42 @@ def merge_export_waiting_orders(source_order_id, target_order_id):
     }
 
 
+def _unreserved_staging_stock(cur, item, exclude_location):
+    """P/T1~T5는 수출대기 보관 위치이자 동시에 평범한 실물 선반 코드로도
+    쓰인다. 재고이동 등록으로 예약 재고가 자기 담당 보관 위치가 아닌 다른
+    보관 위치 코드(예: P 담당 예약인데 실물은 T2로 옮겨짐)로 옮겨지면,
+    "실물 위치가 아닌 곳(STAGING_LOCATIONS 전체)"만 뒤지는 일반 재해석
+    검색은 이걸 절대 찾지 못한다. 이 함수가 그 빈틈을 채운다: 같은 재고키를
+    가진 다른 보관 위치 재고 중, 다른 미확정 예약에 이미 잡혀 있지 않은
+    몫만 모아서 돌려준다."""
+    placeholders = ",".join("?" for _ in STAGING_LOCATIONS)
+    rows = cur.execute(
+        f"""SELECT id,COALESCE(qty,0) FROM inventory
+            WHERE company=? AND product_name=? AND IFNULL(warehouse_name,'')=?
+              AND IFNULL(lot,'-')=? AND IFNULL(exp_date,'-')=?
+              AND location IN ({placeholders}) AND location<>?
+              AND COALESCE(qty,0)>0""",
+        (
+            item.get("company", ""), item.get("product_name", ""), item.get("warehouse_name", "") or "",
+            item.get("lot", "-") or "-", item.get("exp_date", "-") or "-",
+            *STAGING_LOCATIONS, exclude_location,
+        ),
+    ).fetchall()
+    collected = []
+    for inventory_id, inventory_qty in rows:
+        reserved = cur.execute(
+            """SELECT COALESCE(SUM(i.qty),0) FROM export_waiting_items i
+               JOIN export_waiting_orders o ON o.id=i.order_id
+               WHERE i.waiting_inventory_id=? AND COALESCE(i.confirmed,0)=0
+                 AND o.status IN ('waiting','partial','confirmed') AND i.id<>?""",
+            (int(inventory_id), int(item.get("id") or 0)),
+        ).fetchone()[0]
+        free = int(inventory_qty or 0) - int(reserved or 0)
+        if free > 0:
+            collected.append((int(inventory_id), free))
+    return collected
+
+
 def repair_broken_waiting_reservations(export_no: str) -> dict:
     """일반 '이동 등록' 등으로 수출대기 예약 재고(P/T1~T5)가 몰래 다른
     위치로 옮겨져 waiting_location에 실제 수량이 부족해진 품목을 복구한다.
@@ -1016,7 +1052,41 @@ def repair_broken_waiting_reservations(export_no: str) -> dict:
                 try:
                     s = _take_source(cur, item.get("source_inventory_id"), qty, now, fallback=item)
                 except ValueError:
-                    failed.append(f"{item['product_name']} ({qty}EA)")
+                    collected = _unreserved_staging_stock(cur, item, staging_location)
+                    if sum(free for _, free in collected) < qty:
+                        failed.append(f"{item['product_name']} ({qty}EA)")
+                        continue
+                    remaining = qty
+                    from_locations = []
+                    for inventory_id, free in collected:
+                        if remaining <= 0:
+                            break
+                        take = min(free, remaining)
+                        row = cur.execute(
+                            "SELECT qty,location FROM inventory WHERE id=?", (inventory_id,)
+                        ).fetchone()
+                        cur.execute(
+                            "UPDATE inventory SET qty=?,updated_at=? WHERE id=?",
+                            (int(row[0] or 0) - take, now, inventory_id),
+                        )
+                        from_locations.append(str(row[1] or ""))
+                        remaining -= take
+                    waiting_inventory_id, _ = _place_source_in_staging(cur, item, qty, now, staging_location)
+                    cur.execute(
+                        """UPDATE export_waiting_items
+                           SET waiting_inventory_id=?,moved_at=?
+                           WHERE id=?""",
+                        (waiting_inventory_id, now, int(item["id"])),
+                    )
+                    insert_transaction_log(
+                        cur, created_at=now, tx_type="위치이동", product_name=item["product_name"],
+                        warehouse_name=item.get("warehouse_name", "") or "", lot=item.get("lot", "-"),
+                        exp_date=item.get("exp_date", "-"), from_company=item["company"],
+                        from_location="/".join(dict.fromkeys(from_locations)) or staging_location,
+                        to_company=item["company"], to_location=staging_location,
+                        qty=qty, memo=f"수출대기 예약 복구 / 다른 보관위치에서 통합 / 수출번호: {normalized}",
+                    )
+                    repaired.append(f"{item['product_name']} ({qty}EA)")
                     continue
                 resolved_inventory_id = int(s.get("_resolved_inventory_id") or s.get("id") or 0)
                 waiting_inventory_id, _ = _place_source_in_staging(cur, s, qty, now, staging_location)
