@@ -92,12 +92,13 @@ def _update_inventory_and_product_mappings(
 
     with connect() as con:
         current = con.execute(
-            "SELECT product_name FROM inventory WHERE id=?",
+            "SELECT product_name, company, location, warehouse_name, qty FROM inventory WHERE id=?",
             (int(inv_id),),
         ).fetchone()
         if not current:
             raise ValueError("수정할 재고를 찾을 수 없습니다.")
         old_product_name = str(current[0] or "").strip()
+        row_company, row_location, row_warehouse, row_qty = current[1], current[2], current[3], current[4]
 
         existing_rows = con.execute(
             """
@@ -117,14 +118,40 @@ def _update_inventory_and_product_mappings(
         }
 
         try:
-            con.execute(
+            # 새로 입력한 제품명/LOT/유통기한이 같은 사업장·전산상명칭·로케이션의
+            # 다른 재고행과 완전히 똑같아지면(유니크 제약 충돌), 그건 "이미 있는
+            # 같은 배치"라는 뜻이므로 오류로 막지 말고 그 행에 수량을 합친다.
+            # 이 행 자체는 남겨두되(다른 곳에서 이 재고ID를 참조할 수 있으므로)
+            # 수량만 0으로 비우고 제품명/LOT/유통기한은 옛 값 그대로 둔다.
+            merge_target = con.execute(
                 """
-                UPDATE inventory
-                SET product_name=?, lot=?, exp_date=?
-                WHERE id=?
+                SELECT id, qty FROM inventory
+                WHERE id<>? AND TRIM(COALESCE(product_name,''))=?
+                  AND TRIM(COALESCE(company,''))=TRIM(COALESCE(?,''))
+                  AND TRIM(COALESCE(warehouse_name,''))=TRIM(COALESCE(?,''))
+                  AND TRIM(COALESCE(lot,''))=?
+                  AND TRIM(COALESCE(exp_date,''))=?
+                  AND TRIM(COALESCE(location,''))=TRIM(COALESCE(?,''))
                 """,
-                (product_name, lot, exp_date, int(inv_id)),
-            )
+                (int(inv_id), product_name, row_company, row_warehouse, lot, exp_date, row_location),
+            ).fetchone()
+
+            if merge_target:
+                target_id, target_qty = int(merge_target[0]), int(merge_target[1] or 0)
+                con.execute(
+                    "UPDATE inventory SET qty=? WHERE id=?",
+                    (target_qty + int(row_qty or 0), target_id),
+                )
+                con.execute("UPDATE inventory SET qty=0 WHERE id=?", (int(inv_id),))
+            else:
+                con.execute(
+                    """
+                    UPDATE inventory
+                    SET product_name=?, lot=?, exp_date=?
+                    WHERE id=?
+                    """,
+                    (product_name, lot, exp_date, int(inv_id)),
+                )
 
             # Stock already saved to 수출대기 (moved to location P) keeps its own
             # product_name/lot/exp_date snapshot in export_waiting_items rather
@@ -218,7 +245,7 @@ def _update_inventory_and_product_mappings(
 
     propagation_error = _propagate_master_edit_to_shipment_items(int(inv_id), product_name, lot, exp_date)
 
-    return product_name, lot, exp_date, len(mapping_rows), propagation_error
+    return product_name, lot, exp_date, len(mapping_rows), propagation_error, bool(merge_target)
 
 
 def _propagate_master_edit_to_shipment_items(inv_id, product_name, lot, exp_date):
@@ -288,13 +315,19 @@ def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
         key=f"stock_master_save_{inv_id}",
     ):
         try:
-            saved_product, saved_lot, saved_exp, mapping_count, propagation_error = _update_inventory_and_product_mappings(
+            saved_product, saved_lot, saved_exp, mapping_count, propagation_error, merged = _update_inventory_and_product_mappings(
                 int(inv_id), new_product_name, new_lot, new_exp, edited_mappings
             )
-            success_msg = (
-                f"제품마스터 수정 완료: {saved_product} / {saved_lot} / "
-                f"{display_date_only(saved_exp)} / 매칭 {mapping_count}행"
-            )
+            if merged:
+                success_msg = (
+                    f"이미 같은 사업장/로케이션/LOT/유통기한의 재고가 있어 그쪽에 수량을 합쳤습니다: "
+                    f"{saved_product} / {saved_lot} / {display_date_only(saved_exp)} / 매칭 {mapping_count}행"
+                )
+            else:
+                success_msg = (
+                    f"제품마스터 수정 완료: {saved_product} / {saved_lot} / "
+                    f"{display_date_only(saved_exp)} / 매칭 {mapping_count}행"
+                )
             if propagation_error:
                 success_msg += f" ({propagation_error})"
             st.session_state["_stock_master_success_msg"] = success_msg
@@ -342,7 +375,7 @@ def _build_stocktake_result(ignored_result=None):
     baseline["실제수량"] = quantity.astype(int)
     baseline["차이"] = 0
 
-    if ignored_result is not None and not ignored_result.empty and not baseline.empty:
+    if ignored_result is not None and not ignored_result.empty:
         source = ignored_result.copy()
         required_columns = {"사업장", "표준제품명", "WMS수량", "ERP수량"}
         if required_columns.issubset(source.columns):
@@ -356,6 +389,7 @@ def _build_stocktake_result(ignored_result=None):
             baseline_company = baseline["사업장"].fillna("").astype(str).str.strip()
             baseline_product = baseline["표준제품명"].fillna("").astype(str).str.strip()
 
+            missing_rows = []
             for _, compared in source.iterrows():
                 company_value = compared["사업장"]
                 product_value = compared["표준제품명"]
@@ -364,10 +398,28 @@ def _build_stocktake_result(ignored_result=None):
                 matched_indexes = baseline.index[
                     (baseline_company == company) & (baseline_product == product)
                 ]
+                erp_quantity = int(compared["ERP수량"])
+                wms_quantity = int(compared["WMS수량"])
+
                 if matched_indexes.empty:
+                    # 무시 목록 제품이 현재 재고 테이블에 행이 없어도(예: 재고 소진)
+                    # 무시 목록 관리 화면의 모든 항목이 기준 재고 엑셀에 나타나도록 추가한다.
+                    missing_rows.append(
+                        {
+                            "사업장": company,
+                            "ERP제품코드": "",
+                            "ERP제품명": product,
+                            "표준제품명": product,
+                            "LOT/제조번호": "-",
+                            "유통기한": "-",
+                            "로케이션": "",
+                            "전산수량": erp_quantity,
+                            "실제수량": wms_quantity,
+                            "차이": wms_quantity - erp_quantity,
+                        }
+                    )
                     continue
 
-                erp_quantity = int(compared["ERP수량"])
                 actual_quantities = pd.to_numeric(
                     baseline.loc[matched_indexes, "실제수량"], errors="coerce"
                 ).fillna(0).astype(int)
@@ -377,6 +429,12 @@ def _build_stocktake_result(ignored_result=None):
                 baseline.loc[matched_indexes, "전산수량"] = allocated
                 baseline.loc[matched_indexes, "실제수량"] = actual_quantities
                 baseline.loc[matched_indexes, "차이"] = actual_quantities - allocated
+
+            if missing_rows:
+                baseline = pd.concat(
+                    [baseline, pd.DataFrame(missing_rows, columns=baseline.columns)],
+                    ignore_index=True,
+                )
 
     computerized = pd.to_numeric(baseline["전산수량"], errors="coerce")
     actual = pd.to_numeric(baseline["실제수량"], errors="coerce")

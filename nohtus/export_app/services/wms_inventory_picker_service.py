@@ -11,7 +11,10 @@ from __future__ import annotations
 import pandas as pd
 
 from nohtus.db import q as wms_q
+from nohtus.services.export_waiting import STAGING_LOCATIONS
 from nohtus.services.products import product_options
+
+_STAGING_PLACEHOLDERS = ",".join(f"'{loc}'" for loc in STAGING_LOCATIONS)
 
 
 def search_products(term: str = "") -> pd.DataFrame:
@@ -47,11 +50,11 @@ def resolve_stock_rows(product_name: str, lot: str, exp_date: str) -> pd.DataFra
 
 
 def product_stock_rows(product_name: str) -> pd.DataFrame:
-    """선택한 제품의 일반 재고와 P의 미예약 잔량을 반환한다."""
+    """선택한 제품의 일반 재고와 수출대기 위치(P, T1~T5)의 미예약 잔량을 반환한다."""
     return wms_q(
-        """SELECT inventory.id,inventory.company,inventory.location,inventory.product_name,
+        f"""SELECT inventory.id,inventory.company,inventory.location,inventory.product_name,
                   inventory.lot,inventory.exp_date,
-                  CASE WHEN UPPER(TRIM(inventory.location))='P'
+                  CASE WHEN UPPER(TRIM(inventory.location)) IN ({_STAGING_PLACEHOLDERS})
                        THEN COALESCE(inventory.qty,0)-COALESCE((
                            SELECT SUM(COALESCE(i.qty,0)) FROM export_waiting_items i
                            JOIN export_waiting_orders o ON o.id=i.order_id
@@ -68,7 +71,7 @@ def product_stock_rows(product_name: str) -> pd.DataFrame:
                    AND LOWER(TRIM(CAST(COALESCE(is_material, 0) AS TEXT)))
                        IN ('1', 'true', 'yes', 'y', 'o', 'v', '체크', '부자재')
              )
-             AND (UPPER(TRIM(inventory.location))<>'P' OR COALESCE(inventory.qty,0)>
+             AND (UPPER(TRIM(inventory.location)) NOT IN ({_STAGING_PLACEHOLDERS}) OR COALESCE(inventory.qty,0)>
                   COALESCE((SELECT SUM(COALESCE(i.qty,0)) FROM export_waiting_items i
                             JOIN export_waiting_orders o ON o.id=i.order_id
                             WHERE i.waiting_inventory_id=inventory.id AND COALESCE(i.confirmed,0)=0
@@ -90,7 +93,7 @@ def reserved_product_stock_rows(product_name: str, export_no: str) -> pd.DataFra
             "id", "company", "location", "product_name", "lot", "exp_date", "qty", "warehouse_name",
         ])
     return wms_q(
-        """SELECT i.source_inventory_id AS id,
+        f"""SELECT i.source_inventory_id AS id,
                   i.company,
                   i.source_location AS location,
                   i.product_name,
@@ -100,7 +103,7 @@ def reserved_product_stock_rows(product_name: str, export_no: str) -> pd.DataFra
                   i.warehouse_name
            FROM export_waiting_items i
            JOIN export_waiting_orders o ON o.id=i.order_id
-           JOIN inventory p ON p.id=i.waiting_inventory_id AND UPPER(TRIM(p.location))='P'
+           JOIN inventory p ON p.id=i.waiting_inventory_id AND UPPER(TRIM(p.location)) IN ({_STAGING_PLACEHOLDERS})
            WHERE TRIM(o.export_no)=TRIM(?)
              AND o.status IN ('waiting','partial')
              AND COALESCE(i.confirmed,0)=0

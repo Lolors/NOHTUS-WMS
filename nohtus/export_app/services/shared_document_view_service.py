@@ -63,8 +63,13 @@ def shipment_date(case) -> str:
 
 
 def default_document_period(reference: date | None = None) -> tuple[date, date]:
-    end_date = reference or date.today()
-    return end_date - timedelta(days=7), end_date
+    """최근 출고 건과, 며칠 뒤로 잡힌 국내배송 예정 건까지 기본 조회기간에 포함한다.
+
+    출고일을 오늘 이후 날짜로 입력한 건(예: 국내배송 예정일)이 예전엔 기본
+    조회기간(오늘까지)에서 통째로 빠져서, 저장은 멀쩡히 됐는데 화면에서
+    사라진 것처럼 보이는 혼란을 일으켰다."""
+    today = reference or date.today()
+    return today - timedelta(days=7), today + timedelta(days=7)
 
 
 def filter_and_sort_cases(

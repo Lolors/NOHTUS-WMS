@@ -326,6 +326,10 @@ def adjust_inventory(inventory_id, actual_qty, reason, memo=""):
 
 def move_inventory(src_id, to_company, to_location, qty, memo="", location_range_cells=None):
     """재고 이동. 사업장 이동 시 전산상명칭은 도착 사업장 기준으로 다시 계산한다."""
+    # 지연 import: export_waiting.py가 이 모듈의 insert_transaction_log를 가져다
+    # 쓰므로, 모듈 최상단에서 서로 import하면 순환 참조가 된다.
+    from nohtus.services.export_waiting import STAGING_LOCATIONS
+
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     # add_inventory와 같은 이유로 빈 리스트와 None을 구분해야 한다(범위를
     # 줄여서 빈 상태로 저장하는 경우도 유효한 갱신이어야 하기 때문).
@@ -340,6 +344,27 @@ def move_inventory(src_id, to_company, to_location, qty, memo="", location_range
         qty = int(qty)
         if qty <= 0 or qty > int(src["qty"] or 0):
             raise ValueError("이동 수량이 현재 재고보다 많거나 올바르지 않습니다.")
+
+        # P/T1~T5(수출대기 보관 위치)에 있는 재고는 수출대기 품목이 그 재고
+        # 행을 waiting_inventory_id로 직접 참조하고 있을 수 있다. 예약된
+        # 수량까지 일반 이동으로 옮겨버리면 그 참조가 다른 위치로 조용히
+        # 끊어져 수출대기/박스패킹/공유문서 화면이 서로 어긋난다(예약된
+        # 재고는 반드시 '입고 수정' 화면에서만 위치를 옮겨야 export_waiting_items의
+        # 위치 정보도 함께 갱신된다).
+        if str(src.get("location") or "").strip() in STAGING_LOCATIONS:
+            reserved = cur.execute(
+                """SELECT COALESCE(SUM(COALESCE(i.qty,0)),0)
+                   FROM export_waiting_items i JOIN export_waiting_orders o ON o.id=i.order_id
+                   WHERE i.waiting_inventory_id=? AND COALESCE(i.confirmed,0)=0
+                     AND o.status IN ('waiting','partial','confirmed')""",
+                (int(src_id),),
+            ).fetchone()[0]
+            movable = int(src["qty"] or 0) - int(reserved or 0)
+            if qty > movable:
+                raise ValueError(
+                    f"이 재고 중 {int(reserved or 0)}EA는 수출대기로 예약되어 있어 일반 이동으로 옮길 수 없습니다. "
+                    f"이동 가능 수량 {max(0, movable)}EA. 예약된 수량은 '수출대기 저장 → 입고 수정' 화면에서 위치를 옮기세요."
+                )
 
         product_name = src["product_name"]
         old_warehouse = src.get("warehouse_name") or ""

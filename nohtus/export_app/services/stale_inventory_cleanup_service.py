@@ -5,7 +5,7 @@ from datetime import datetime
 from nohtus.db import connect as wms_connect
 from nohtus.export_app import db as export_db
 from nohtus.export_app.services import export_service, shipment_service
-from nohtus.services.export_waiting import _add
+from nohtus.services.export_waiting import STAGING_LOCATIONS, _add
 
 
 def _same_text(left: object, right: object, default: str = '') -> bool:
@@ -40,7 +40,7 @@ def _matching_waiting_items(cur, order_id: int, row: dict) -> list[dict]:
     raw = cur.execute(
         f'''SELECT id,source_inventory_id,waiting_inventory_id,company,product_name,
                   IFNULL(warehouse_name,''),IFNULL(lot,'-'),IFNULL(exp_date,'-'),
-                  source_location,qty,COALESCE(confirmed,0)
+                  source_location,qty,COALESCE(confirmed,0),IFNULL(waiting_location,'P')
            FROM export_waiting_items
            WHERE order_id=? AND COALESCE(confirmed,0)=0{source_clause}
            ORDER BY id''',
@@ -48,7 +48,7 @@ def _matching_waiting_items(cur, order_id: int, row: dict) -> list[dict]:
     ).fetchall()
     keys = [
         'id','source_inventory_id','waiting_inventory_id','company','product_name',
-        'warehouse_name','lot','exp_date','source_location','qty','confirmed',
+        'warehouse_name','lot','exp_date','source_location','qty','confirmed','waiting_location',
     ]
     items = [dict(zip(keys, item)) for item in raw]
     matched = [
@@ -62,23 +62,25 @@ def _matching_waiting_items(cur, order_id: int, row: dict) -> list[dict]:
 
 
 def _matching_p_row(cur, item: dict):
+    staging_location = str(item.get('waiting_location') or '').strip() or 'P'
     waiting_inventory_id = int(item.get('waiting_inventory_id') or 0)
     if waiting_inventory_id:
         row = cur.execute(
-            "SELECT id,qty FROM inventory WHERE id=? AND UPPER(TRIM(COALESCE(location,'')))='P'",
-            (waiting_inventory_id,),
+            "SELECT id,qty FROM inventory WHERE id=? AND UPPER(TRIM(COALESCE(location,'')))=UPPER(?)",
+            (waiting_inventory_id, staging_location),
         ).fetchone()
         if row:
             return row
 
     rows = cur.execute(
         '''SELECT id,qty FROM inventory
-           WHERE UPPER(TRIM(COALESCE(location,'')))='P'
+           WHERE UPPER(TRIM(COALESCE(location,'')))=UPPER(?)
              AND company=? AND product_name=?
              AND IFNULL(warehouse_name,'')=?
              AND IFNULL(lot,'-')=? AND IFNULL(exp_date,'-')=?
            ORDER BY id''',
         (
+            staging_location,
             str(item.get('company') or ''),
             str(item.get('product_name') or ''),
             str(item.get('warehouse_name') or ''),
@@ -153,7 +155,7 @@ def _best_effort_cleanup_wms(*, export_no: str, rows: list[dict], now: str) -> N
                                     (current_p_qty - restore_qty, now, int(p_row[0])),
                                 )
                                 source_location = str(item.get('source_location') or '').strip()
-                                if source_location and source_location.upper() != 'P':
+                                if source_location and source_location.upper() not in STAGING_LOCATIONS:
                                     _add(con.cursor(), item, source_location, restore_qty, now, 1)
                     except Exception:
                         # 재고 ID가 이미 사라진 경우는 무시하고 연결기록 정리만 계속한다.
@@ -229,14 +231,14 @@ def reconcile_orphan_waiting_items(export_no: str) -> int:
         items = con.execute(
             '''SELECT id,source_inventory_id,waiting_inventory_id,company,product_name,
                       IFNULL(warehouse_name,''),IFNULL(lot,'-'),IFNULL(exp_date,'-'),
-                      source_location,qty,COALESCE(confirmed,0)
+                      source_location,qty,COALESCE(confirmed,0),IFNULL(waiting_location,'P')
                FROM export_waiting_items
                WHERE order_id=? ORDER BY COALESCE(confirmed,0) DESC,id''',
             (order_id,),
         ).fetchall()
         keys = [
             'id','source_inventory_id','waiting_inventory_id','company','product_name',
-            'warehouse_name','lot','exp_date','source_location','qty','confirmed',
+            'warehouse_name','lot','exp_date','source_location','qty','confirmed','waiting_location',
         ]
         confirmed_by_source: dict[int, int] = {}
         waiting_items: list[dict] = []
@@ -279,7 +281,7 @@ def reconcile_orphan_waiting_items(export_no: str) -> int:
                             (int(p_row[1] or 0) - restore_qty, now, int(p_row[0])),
                         )
                         source_location = str(item.get('source_location') or '').strip()
-                        if source_location and source_location.upper() != 'P':
+                        if source_location and source_location.upper() not in STAGING_LOCATIONS:
                             _add(con.cursor(), item, source_location, restore_qty, now, 1)
             except Exception:
                 # 실제 재고가 이미 삭제/이동된 경우에도 고아 연결 제거는 계속한다.

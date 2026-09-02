@@ -23,6 +23,7 @@ from nohtus.export_app.services.order_edit_service import (
 from nohtus.services.export_waiting import (
     cancel_export_waiting_order,
     confirm_export_waiting_items,
+    repair_broken_waiting_reservations,
     update_confirmed_export_waiting_items,
 )
 
@@ -95,23 +96,40 @@ def render_wms_confirmation_section(
 
     order_id = int(active_rows.iloc[0]['id'])
     order_title = str(active_rows.iloc[0]['title'] or export_no)
+
+    # 수동 버튼 없이 화면을 열 때마다 조용히 점검·복구한다. 실제로 뭔가
+    # 고쳤을 때만 안내하고, 저절로 못 고치는 진짜 재고 부족만 알린다.
+    try:
+        reservation_result = repair_broken_waiting_reservations(export_no)
+    except Exception:
+        reservation_result = {'repaired': [], 'failed': []}
+    if reservation_result['repaired']:
+        st.success(
+            '일반 재고 이동으로 위치가 어긋난 예약을 자동으로 복구했습니다: '
+            + ', '.join(reservation_result['repaired'])
+        )
+    if reservation_result['failed']:
+        st.error(
+            '자동 복구 실패(실제 재고를 어디서도 찾지 못함): '
+            + ', '.join(reservation_result['failed'])
+            + ' — 재고현황에서 해당 제품의 실제 수량/위치를 확인하세요.'
+        )
+
     missing_count = wms_link_service.missing_saved_inventory_count(export_no)
     if missing_count:
-        st.warning(
-            f'수출대기 저장에는 있지만 수출확정 목록에서 누락된 품목이 {missing_count}개 있습니다.'
-        )
-        if st.button(
-            f'누락 {missing_count}품목 연결 복구',
-            type='primary',
-            key=f'repair_missing_export_waiting_{order_id}_{missing_count}',
-        ):
-            try:
-                repaired = wms_link_service.repair_missing_saved_inventory(export_no)
-            except ValueError as exc:
-                st.error(str(exc))
-            else:
-                st.success(f'누락된 {repaired}개 품목 연결을 복구했습니다.')
-                st.rerun()
+        try:
+            wms_link_service.repair_missing_saved_inventory(export_no)
+        except ValueError:
+            pass
+        missing_count = wms_link_service.missing_saved_inventory_count(export_no)
+        if missing_count:
+            st.warning(
+                f'수출대기 저장에는 있지만 수출확정 목록에서 자동으로 연결하지 못한 '
+                f'품목이 {missing_count}개 있습니다. 수출대기 저장에서 해당 품목의 실재고 연결을 다시 확인하세요.'
+            )
+        else:
+            st.success('수출확정 목록에서 누락됐던 품목 연결을 자동으로 복구했습니다.')
+
     items = export_confirm_service.order_items(order_id)
     confirmed_count = int((items['confirmed'] == 1).sum()) if not items.empty else 0
     total_count = len(items)
@@ -472,11 +490,14 @@ def render() -> None:
                     for key in list(st.session_state):
                         if key in {'editable_case_table_v2', 'order_case_id'} or key.endswith(f'_{case_id}'):
                             st.session_state.pop(key, None)
-                    st.session_state['order_cancel_success_message'] = (
+                    success_message = (
                         f"{result['source_export_no']}의 주문 {result['order_count']}행과 "
                         f"입고 상세 {result['shipment_count']}행을 {result['target_export_no']}에 병합하고 "
                         '원본 주문을 취소했습니다.'
                     )
+                    if result.get('wms_reconcile_note'):
+                        success_message += f" {result['wms_reconcile_note']}"
+                    st.session_state['order_cancel_success_message'] = success_message
                     st.rerun()
         else:
             st.info('병합 대상으로 선택할 다른 수출 건이 없습니다.')
