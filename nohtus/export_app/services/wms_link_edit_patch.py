@@ -146,10 +146,16 @@ def _fill_source_links(rows: list[dict], waiting_rows: list[dict]) -> None:
         location_candidates = sufficient[
             sufficient['location'].fillna('').astype(str).str.strip() == location
         ] if location else sufficient.iloc[0:0]
+        # candidates는 이미 SQL where절에서 사업장/제품명/LOT/유통기한까지
+        # 정확히 일치하는 것만 걸러졌으므로, 후보가 여러 행이어도 전부 같은
+        # 재고키를 가진 완전히 동일한 재고다(예: 재고이동/조정으로 같은
+        # 재고가 여러 행으로 나뉜 경우). 어느 쪽을 고르든 결과가 같으므로
+        # "정확히 1개일 때만" 요구할 이유가 없다 - 그 조건 때문에 이미 같은
+        # 재고임이 확실한데도 자동 연결을 포기해 버리는 사고로 이어졌다.
         resolved = (
-            p_candidates.iloc[0] if len(p_candidates.index) == 1 else
-            location_candidates.iloc[0] if len(location_candidates.index) == 1 else
-            sufficient.iloc[0] if len(sufficient.index) == 1 else None
+            p_candidates.iloc[0] if not p_candidates.empty else
+            location_candidates.iloc[0] if not location_candidates.empty else
+            sufficient.iloc[0] if not sufficient.empty else None
         )
         if resolved is not None:
             row['source_inventory_id'] = int(resolved['id'])
