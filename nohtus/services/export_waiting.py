@@ -970,6 +970,70 @@ def merge_export_waiting_orders(source_order_id, target_order_id):
     }
 
 
+def repair_broken_waiting_reservations(export_no: str) -> dict:
+    """일반 '이동 등록' 등으로 수출대기 예약 재고(P/T1~T5)가 몰래 다른
+    위치로 옮겨져 waiting_location에 실제 수량이 부족해진 품목을 복구한다.
+
+    각 미확정 품목의 waiting_location에 실제로 요청수량만큼 재고가 있는지
+    확인하고, 부족하면 그 제품이 지금 실제로 있는 다른 위치(같은 사업장/
+    제품명/LOT/유통기한 조합)에서 다시 가져와 원래 waiting_location으로
+    재배치한다. 어디에도 충분한 재고가 없으면 손대지 않고 실패 목록으로
+    보고한다.
+    """
+    normalized = str(export_no or "").strip()
+    if not normalized:
+        return {"repaired": [], "failed": []}
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    repaired: list[str] = []
+    failed: list[str] = []
+    with connect() as con:
+        cur = con.cursor()
+        ensure_export_waiting_tables(cur)
+        orders = cur.execute(
+            """SELECT id FROM export_waiting_orders
+               WHERE TRIM(export_no)=TRIM(?) AND status IN ('waiting','partial','confirmed')""",
+            (normalized,),
+        ).fetchall()
+        for (order_id,) in orders:
+            for item in _items(cur, int(order_id), confirmed=False):
+                qty = int(item.get("qty") or 0)
+                if qty <= 0:
+                    continue
+                staging_location = str(item.get("waiting_location") or "").strip() or P
+                available = cur.execute(
+                    """SELECT COALESCE(SUM(qty),0) FROM inventory
+                       WHERE company=? AND product_name=? AND IFNULL(warehouse_name,'')=?
+                         AND IFNULL(lot,'-')=? AND IFNULL(exp_date,'-')=? AND location=?""",
+                    (item["company"], item["product_name"], item.get("warehouse_name", "") or "",
+                     item.get("lot", "-") or "-", item.get("exp_date", "-") or "-", staging_location),
+                ).fetchone()
+                if int(available[0] or 0) >= qty:
+                    continue  # 정상 예약: 손대지 않는다.
+                try:
+                    s = _take_source(cur, item.get("source_inventory_id"), qty, now, fallback=item)
+                except ValueError:
+                    failed.append(f"{item['product_name']} ({qty}EA)")
+                    continue
+                resolved_inventory_id = int(s.get("_resolved_inventory_id") or s.get("id") or 0)
+                waiting_inventory_id, _ = _place_source_in_staging(cur, s, qty, now, staging_location)
+                cur.execute(
+                    """UPDATE export_waiting_items
+                       SET source_inventory_id=?,waiting_inventory_id=?,source_location=?,moved_at=?
+                       WHERE id=?""",
+                    (resolved_inventory_id, waiting_inventory_id, s.get("location", ""), now, int(item["id"])),
+                )
+                insert_transaction_log(
+                    cur, created_at=now, tx_type="위치이동", product_name=item["product_name"],
+                    warehouse_name=item.get("warehouse_name", "") or "", lot=item.get("lot", "-"),
+                    exp_date=item.get("exp_date", "-"), from_company=s.get("company", ""),
+                    from_location=s.get("location", ""), to_company=item["company"], to_location=staging_location,
+                    qty=qty, memo=f"수출대기 예약 복구 / 수출번호: {normalized}",
+                )
+                repaired.append(f"{item['product_name']} ({qty}EA)")
+        con.commit()
+    return {"repaired": repaired, "failed": failed}
+
+
 def cancel_export_waiting_order(order_id):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with connect() as con:

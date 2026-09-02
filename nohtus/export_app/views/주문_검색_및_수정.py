@@ -23,6 +23,7 @@ from nohtus.export_app.services.order_edit_service import (
 from nohtus.services.export_waiting import (
     cancel_export_waiting_order,
     confirm_export_waiting_items,
+    repair_broken_waiting_reservations,
     update_confirmed_export_waiting_items,
 )
 
@@ -112,6 +113,25 @@ def render_wms_confirmation_section(
             else:
                 st.success(f'누락된 {repaired}개 품목 연결을 복구했습니다.')
                 st.rerun()
+    if st.button(
+        '예약 재고 위치 오류 점검·복구',
+        key=f'repair_broken_waiting_reservations_{order_id}',
+        help='일반 재고 이동 등록 등으로 수출대기 예약 재고(P/T1~T5)가 다른 위치로 옮겨져 '
+             '수출확정 시 "재고가 부족합니다" 오류가 나는 품목을 실제 재고 위치 기준으로 다시 예약합니다.',
+    ):
+        result = repair_broken_waiting_reservations(export_no)
+        if result['repaired']:
+            st.success('복구됨: ' + ', '.join(result['repaired']))
+        if result['failed']:
+            st.error(
+                '복구 실패(실제 재고를 어디서도 찾지 못함): ' + ', '.join(result['failed'])
+                + ' — 재고현황에서 해당 제품의 실제 수량/위치를 먼저 확인하세요.'
+            )
+        if not result['repaired'] and not result['failed']:
+            st.info('점검 결과 위치 오류가 있는 예약 품목이 없습니다.')
+        if result['repaired']:
+            st.rerun()
+
     items = export_confirm_service.order_items(order_id)
     confirmed_count = int((items['confirmed'] == 1).sum()) if not items.empty else 0
     total_count = len(items)
