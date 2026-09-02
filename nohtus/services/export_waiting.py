@@ -1052,11 +1052,16 @@ def repair_broken_waiting_reservations(export_no: str) -> dict:
                 try:
                     s = _take_source(cur, item.get("source_inventory_id"), qty, now, fallback=item)
                 except ValueError:
+                    # 이미 자기 담당 위치에 있는 몫(available)은 그대로 두고,
+                    # 부족한 만큼만 다른 보관위치 코드에서 끌어온다 - 24EA 중
+                    # 일부는 이미 P에, 나머지는 T4에 나뉘어 있는 경우처럼
+                    # 여러 곳에 걸쳐 있을 수 있다.
+                    shortfall = qty - int(available[0] or 0)
                     collected = _unreserved_staging_stock(cur, item, staging_location)
-                    if sum(free for _, free in collected) < qty:
+                    if sum(free for _, free in collected) < shortfall:
                         failed.append(f"{item['product_name']} ({qty}EA)")
                         continue
-                    remaining = qty
+                    remaining = shortfall
                     from_locations = []
                     for inventory_id, free in collected:
                         if remaining <= 0:
@@ -1071,7 +1076,10 @@ def repair_broken_waiting_reservations(export_no: str) -> dict:
                         )
                         from_locations.append(str(row[1] or ""))
                         remaining -= take
-                    waiting_inventory_id, _ = _place_source_in_staging(cur, item, qty, now, staging_location)
+                    # 이미 staging_location에 있던 available만큼은 그대로 두고,
+                    # 부족했던 shortfall만 새로 옮겨 담는다(qty 전체를 다시
+                    # 더하면 이미 있던 몫이 중복 가산된다).
+                    waiting_inventory_id, _ = _place_source_in_staging(cur, item, shortfall, now, staging_location)
                     cur.execute(
                         """UPDATE export_waiting_items
                            SET waiting_inventory_id=?,moved_at=?
@@ -1084,7 +1092,7 @@ def repair_broken_waiting_reservations(export_no: str) -> dict:
                         exp_date=item.get("exp_date", "-"), from_company=item["company"],
                         from_location="/".join(dict.fromkeys(from_locations)) or staging_location,
                         to_company=item["company"], to_location=staging_location,
-                        qty=qty, memo=f"수출대기 예약 복구 / 다른 보관위치에서 통합 / 수출번호: {normalized}",
+                        qty=shortfall, memo=f"수출대기 예약 복구 / 다른 보관위치에서 통합 / 수출번호: {normalized}",
                     )
                     repaired.append(f"{item['product_name']} ({qty}EA)")
                     continue

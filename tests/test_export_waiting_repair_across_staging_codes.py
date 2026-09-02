@@ -100,6 +100,42 @@ class RepairAcrossStagingCodesTests(unittest.TestCase):
         self.assertEqual(p_qty, 5)
         self.assertEqual(t2_qty, 0)
 
+    def test_repairs_when_quantity_is_split_between_own_location_and_another_staging_code(self):
+        # 24EA 중 4EA는 이미 자기 담당 위치(P)에 정상적으로 있고, 나머지
+        # 20EA는 재고이동으로 다른 보관위치 코드(T4)에 가 있다 - 사용자가
+        # 보고한 "REC에서 P로, 나중에 다시 T4로 옮겼다"는 시나리오처럼 여러
+        # 보관위치 코드에 걸쳐 나뉜 경우를 재현한다.
+        with sqlite3.connect(self.db_path) as con:
+            con.execute(
+                "INSERT INTO inventory VALUES(100,'노투스','오메가 PDT 장비','오메가 PDT 장비','-','-','P',4,'2026-09-01')"
+            )
+            con.execute(
+                "INSERT INTO inventory VALUES(101,'노투스','오메가 PDT 장비','오메가 PDT 장비','-','-','T4',20,'2026-09-01')"
+            )
+            con.commit()
+        order_id = self._seed()
+        with sqlite3.connect(self.db_path) as con:
+            con.execute(
+                "UPDATE export_waiting_items SET qty=24,waiting_inventory_id=100 WHERE order_id=?",
+                (order_id,),
+            )
+            con.commit()
+
+        result = export_waiting.repair_broken_waiting_reservations("EXP-2026-030")
+
+        self.assertEqual(result["failed"], [])
+        self.assertEqual(len(result["repaired"]), 1)
+        _, waiting_location, qty = self._item()
+        self.assertEqual(waiting_location, "P")
+        self.assertEqual(qty, 24)
+        with sqlite3.connect(self.db_path) as con:
+            p_qty = con.execute("SELECT qty FROM inventory WHERE location='P'").fetchone()[0]
+            t4_qty = con.execute("SELECT qty FROM inventory WHERE location='T4'").fetchone()[0]
+        # 기존에 P에 있던 4EA는 중복 가산 없이 그대로, T4의 20EA만 옮겨와서
+        # 합계 24EA가 되어야 한다.
+        self.assertEqual(p_qty, 24)
+        self.assertEqual(t4_qty, 0)
+
     def test_does_not_steal_stock_already_reserved_by_another_order(self):
         with sqlite3.connect(self.db_path) as con:
             con.execute(
