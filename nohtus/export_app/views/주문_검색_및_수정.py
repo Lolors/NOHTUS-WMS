@@ -472,11 +472,14 @@ def render() -> None:
                     for key in list(st.session_state):
                         if key in {'editable_case_table_v2', 'order_case_id'} or key.endswith(f'_{case_id}'):
                             st.session_state.pop(key, None)
-                    st.session_state['order_cancel_success_message'] = (
+                    success_message = (
                         f"{result['source_export_no']}의 주문 {result['order_count']}행과 "
                         f"입고 상세 {result['shipment_count']}행을 {result['target_export_no']}에 병합하고 "
                         '원본 주문을 취소했습니다.'
                     )
+                    if result.get('wms_reconcile_note'):
+                        success_message += f" {result['wms_reconcile_note']}"
+                    st.session_state['order_cancel_success_message'] = success_message
                     st.rerun()
         else:
             st.info('병합 대상으로 선택할 다른 수출 건이 없습니다.')

@@ -15,6 +15,94 @@
   },
   "items": [
     {
+      "code": "__shape-wall-1788163594278",
+      "label": "벽선",
+      "detail_label": "",
+      "x": 1340,
+      "y": 520,
+      "width": 400,
+      "height": 110,
+      "rotation": 0,
+      "company": "기타",
+      "kind": "shape",
+      "note": "",
+      "group_id": "",
+      "group_style": "",
+      "group_axis": "",
+      "group_order": 0,
+      "group_count": 0,
+      "shape_type": "polyline",
+      "stroke": "#b5b5b5",
+      "stroke_style": "solid",
+      "stroke_width": 3,
+      "path_points": [
+        [
+          400.0,
+          110.0
+        ],
+        [
+          140.0,
+          110.0
+        ],
+        [
+          140.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "fill_type": "none",
+      "fill_color": "#ffffff"
+    },
+    {
+      "code": "__shape-wall-1788163733102",
+      "label": "벽선",
+      "detail_label": "",
+      "x": 10,
+      "y": 660,
+      "width": 1140,
+      "height": 300,
+      "rotation": 0,
+      "company": "기타",
+      "kind": "shape",
+      "note": "",
+      "group_id": "",
+      "group_style": "",
+      "group_axis": "",
+      "group_order": 0,
+      "group_count": 0,
+      "shape_type": "polyline",
+      "stroke": "#b8b8b8",
+      "stroke_style": "solid",
+      "stroke_width": 3,
+      "path_points": [
+        [
+          1140.0,
+          0.0
+        ],
+        [
+          1140.0,
+          100.0
+        ],
+        [
+          440.0,
+          100.0
+        ],
+        [
+          440.0,
+          300.0
+        ],
+        [
+          0.0,
+          300.0
+        ]
+      ],
+      "fill_type": "none",
+      "fill_color": "#ffffff"
+    },
+    {
       "code": "옷장5",
       "label": "옷장5",
       "detail_label": "",
@@ -62,76 +150,6 @@
       "stroke_width": 3,
       "path_points": [],
       "fill_type": "company",
-      "fill_color": "#ffffff"
-    },
-    {
-      "code": "__shape-wall-1787040949543",
-      "label": "벽선",
-      "detail_label": "",
-      "x": 10,
-      "y": 520,
-      "width": 1730,
-      "height": 440,
-      "rotation": 0,
-      "company": "기타",
-      "kind": "shape",
-      "note": "",
-      "group_id": "",
-      "group_style": "",
-      "group_axis": "",
-      "group_order": 0,
-      "group_count": 0,
-      "shape_type": "polyline",
-      "stroke": "#c9c9c9",
-      "stroke_style": "solid",
-      "stroke_width": 3,
-      "path_points": [
-        [
-          1730.0,
-          120.0
-        ],
-        [
-          1540.0,
-          120.0
-        ],
-        [
-          1540.0,
-          0.0
-        ],
-        [
-          1330.0,
-          0.0
-        ],
-        [
-          1330.0,
-          140.0
-        ],
-        [
-          1140.0,
-          140.0
-        ],
-        [
-          1140.0,
-          240.0
-        ],
-        [
-          280.0,
-          240.0
-        ],
-        [
-          280.0,
-          440.0
-        ],
-        [
-          0.0,
-          440.0
-        ],
-        [
-          0.0,
-          432.0
-        ]
-      ],
-      "fill_type": "none",
       "fill_color": "#ffffff"
     },
     {
@@ -688,9 +706,9 @@
       "code": "P",
       "label": "P\n수출대기",
       "detail_label": "",
-      "x": 140,
-      "y": 800,
-      "width": 210,
+      "x": 305,
+      "y": 815,
+      "width": 200,
       "height": 80,
       "rotation": 90,
       "company": "특수",
@@ -2164,7 +2182,7 @@
       "label": "다용도랙",
       "detail_label": "",
       "x": 10,
-      "y": 860,
+      "y": 870,
       "width": 190,
       "height": 80,
       "rotation": 0,

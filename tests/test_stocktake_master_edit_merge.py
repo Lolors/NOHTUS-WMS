@@ -104,6 +104,41 @@ class StocktakeMasterEditMergeTests(unittest.TestCase):
         self.assertFalse(merged)
         self.assertEqual(self._inventory_rows(), [(1, "LOTA", 5)])
 
+    def test_lot_edit_propagates_to_waiting_item_staged_at_t_location_without_direct_link(self):
+        """수출대기 보관 위치가 P뿐 아니라 T1~T5까지 확장된 뒤에도, 고유 ID
+        연결이 없는(과거 엑셀 등으로 들어온) 수출대기 행은 실제 재고키가
+        일치하는 P 위치만 찾아 연결했다. T4에 있는 품목의 LOT/유통기한을
+        나중에 채워도 수출대기 쪽에 반영되지 않던 사고를 재현한다.
+
+        같은 재고키의 T4 행이 2개라 ensure_export_waiting_tables()의 자동
+        고유ID 복구(정확히 1행일 때만 복구)가 스스로는 못 붙잡는 경우를
+        일부러 만들어서, _linked_waiting_items의 위치 폴백 자체가 T4를
+        찾아내는지만 검증한다."""
+        self._seed([
+            (1, "노투스팜", "제품A", "제품A", "-", "-", "T4", 5, "2026-08-31"),
+            (2, "노투스팜", "제품A", "제품A", "-", "-", "T4", 3, "2026-08-31"),
+        ])
+        with sqlite3.connect(self.db_path) as con:
+            con.execute(
+                """INSERT INTO export_waiting_items(
+                       id, order_id, source_inventory_id, company, product_name,
+                       warehouse_name, lot, exp_date, source_location, waiting_location,
+                       qty, moved_at, confirmed, waiting_inventory_id
+                   ) VALUES(1, 1, NULL, '노투스팜', '제품A', '제품A', '-', '-', 'REC', 'T4', 5, '2026-08-31', 0, NULL)"""
+            )
+            con.commit()
+
+        stocktake_business._update_inventory_and_product_mappings_business(
+            1, "제품A", "LOT-NEW", "2028-05-01", _MAPPING_DF
+        )
+
+        with sqlite3.connect(self.db_path) as con:
+            waiting = con.execute(
+                "SELECT lot, exp_date FROM export_waiting_items WHERE id=1"
+            ).fetchone()
+        self.assertEqual(waiting[0], "LOT-NEW")
+        self.assertEqual(waiting[1], "2028-05-01")
+
 
 if __name__ == "__main__":
     unittest.main()

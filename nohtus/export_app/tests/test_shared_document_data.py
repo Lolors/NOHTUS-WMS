@@ -23,9 +23,12 @@ class SharedDocumentDataTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '출고일을 입력하세요'):
             export_service.update_actual_ship_date(17, '  ')
 
-    def test_default_document_period_is_one_week(self) -> None:
+    def test_default_document_period_spans_a_week_before_and_after_today(self) -> None:
+        """국내배송 예정일을 며칠 뒤로 입력해 저장해도 기본 조회기간에서
+        빠지지 않아야 한다 — 예전엔 오늘까지만 잡혀서 저장은 됐는데
+        화면에서 사라진 것처럼 보이는 혼란이 있었다."""
         self.assertEqual(
-            (date(2026, 7, 31), date(2026, 8, 7)),
+            (date(2026, 7, 31), date(2026, 8, 14)),
             default_document_period(date(2026, 8, 7)),
         )
 

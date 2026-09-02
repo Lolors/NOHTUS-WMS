@@ -495,11 +495,11 @@ def save_picked_inventory(*, case_id:int, order_item_id:int, kept_rows:list[dict
 
     mirror_rows=[{"_id":row["id"],"business_unit":row.get("business_unit") or "","location":row.get("source_location") or row.get("location") or "","source_inventory_id":row.get("source_inventory_id"),"product_name":row.get("product_name") or "","lot_no":row.get("lot_no") or "","expiry_date":row.get("expiry_date") or "","requested_qty":float(row["requested_qty"] or 0)} for row in all_kept_rows]
     mirror_rows += [{"_id":None,"business_unit":pick.get("company") or "","location":pick.get("location") or "","source_inventory_id":int(pick["inventory_id"]),"product_name":pick.get("product_name") or "","lot_no":pick.get("lot") or "","expiry_date":pick.get("exp_date") or "","requested_qty":float(pick["qty"])} for pick in picked_rows]
-    original_mirror_rows=[{"_id":row["id"],"business_unit":row.get("business_unit") or "","location":row.get("source_location") or row.get("location") or "","source_inventory_id":row.get("source_inventory_id"),"product_name":row.get("product_name") or "","lot_no":row.get("lot_no") or "","expiry_date":row.get("expiry_date") or "","requested_qty":float(row["requested_qty"] or 0)} for row in current_rows]
+    # WMS 재고 반영(save_export_waiting_order)이 실패할 수 있으므로, 되돌릴 수 없는
+    # EXPORT 미러 갱신(save_for_order — 박스 배정이 사라지는 삭제+재삽입을 포함)은
+    # WMS 쪽이 먼저 성공한 뒤에만 수행한다. 실패 시 아무 것도 건드리지 않으므로
+    # 별도 롤백이 필요 없다.
+    result=save_export_waiting_order(cart,country=country,buyer=str(case.get("buyer") or ""),transport_method=transport_method,export_no=export_no,editing_order_id=editing_order_id,staging_location=staging_location)
     total_qty=shipment_service.save_for_order(case_id,order_item_id,mirror_rows)
-    try:
-        result=save_export_waiting_order(cart,country=country,buyer=str(case.get("buyer") or ""),transport_method=transport_method,export_no=export_no,editing_order_id=editing_order_id,staging_location=staging_location)
-    except Exception:
-        shipment_service.save_for_order(case_id,order_item_id,original_mirror_rows); raise
     sync_mirror_source_links(case_id, int(result["order_id"]))
     return {"order_id":result["order_id"],"total_qty":total_qty,"row_count":len(mirror_rows)}
