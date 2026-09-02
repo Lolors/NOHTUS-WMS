@@ -48,7 +48,8 @@ class ExportDomesticStageGuardTests(unittest.TestCase):
         self.assertIn("str(case['case_type'] or '').strip() != 'historical'", source)
         self.assertIn("return_to_packing = is_domestic_delivery and action_cols[0].button", source)
         self.assertIn("action_cols = st.columns(4)", source)
-        self.assertLess(source.index("'패킹완료 단계로 되돌리기'"), source.index("'📂 폴더 열기'"))
+        self.assertLess(source.index("'패킹완료 단계로 되돌리기'"), source.index("'사진 정리'"))
+        self.assertNotIn("'📂 폴더 열기'", source)
         self.assertNotIn("'문서 단위 환산 설정'", source)
 
     def test_packing_explicitly_excludes_domestic_delivery(self):
