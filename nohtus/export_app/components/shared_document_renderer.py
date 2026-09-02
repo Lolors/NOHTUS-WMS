@@ -59,11 +59,22 @@ def render_document(case, packed, actual_rows=None) -> None:
 
     domestic_method = str(case['domestic_method'] or '').strip()
     is_hand_carry = domestic_method.replace(' ', '').casefold() in {'핸드캐리', 'handcarry'}
+    if domestic_method == '퀵배송':
+        carrier_cells = (
+            '<div class="cell"><div class="label">배송기사 이름</div>'
+            f'<div class="value">{html.escape(case["driver_name"] or "-")}</div></div>'
+            '<div class="cell"><div class="label">배송기사 연락처</div>'
+            f'<div class="value">{html.escape(case["driver_phone"] or "-")}</div></div>'
+        )
+    else:
+        carrier_cells = (
+            '<div class="cell"><div class="label">송장번호</div>'
+            f'<div class="value">{html.escape(case["tracking_no"] or "-")}</div></div>'
+        )
     domestic_delivery_cells = (
         '<div class="cell"><div class="label">국내배송 방식</div>'
         f'<div class="value">{html.escape(domestic_method or "-")}</div></div>'
-        '<div class="cell"><div class="label">송장번호</div>'
-        f'<div class="value">{html.escape(case["tracking_no"] or "-")}</div></div>'
+        + carrier_cells +
         '<div class="cell"><div class="label">수하인명</div>'
         f'<div class="value">{html.escape(case["consignee_name"] or "-")}</div></div>'
         '<div class="cell"><div class="label">수하인주소</div>'
