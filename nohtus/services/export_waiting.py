@@ -181,7 +181,14 @@ def _cart_source_hint(row):
 
 
 def _source_identity_matches(row, hint):
-    """장바구니가 가리키던 재고와 현재 ID 행이 같은 재고인지 확인한다."""
+    """장바구니가 가리키던 재고와 현재 ID 행이 같은 재고인지 확인한다.
+
+    위치는 비교하지 않는다 - 재고이동 등록 같은 정상적인 이동으로 실제
+    위치가 바뀌는 건 흔한 일이고, 이 함수는 항상 정확한 재고 id를 이미 알고
+    있는 상태에서 호출된다(같은 id면 같은 재고). 예전에는 위치까지 정확히
+    같아야만 같은 재고로 인정해서, 예약 이후 정상적으로 재고이동된 재고를
+    repair_broken_waiting_reservations가 "찾을 수 없음"으로 오판하는
+    원인이었다."""
     if not row:
         return False
     hint = hint or {}
@@ -200,10 +207,7 @@ def _source_identity_matches(row, hint):
         actual = str(row.get(row_key) or default).strip() or default
         if expected and actual != expected:
             return False
-    expected_location = str(
-        hint.get("location") or hint.get("source_location") or ""
-    ).strip()
-    return not expected_location or str(row.get("location") or "").strip() == expected_location
+    return True
 
 
 def _resolve_source_row(cur, inventory_id, fallback=None, required_qty=0):
