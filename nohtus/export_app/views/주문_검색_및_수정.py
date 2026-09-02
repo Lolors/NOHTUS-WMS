@@ -96,41 +96,39 @@ def render_wms_confirmation_section(
 
     order_id = int(active_rows.iloc[0]['id'])
     order_title = str(active_rows.iloc[0]['title'] or export_no)
+
+    # 수동 버튼 없이 화면을 열 때마다 조용히 점검·복구한다. 실제로 뭔가
+    # 고쳤을 때만 안내하고, 저절로 못 고치는 진짜 재고 부족만 알린다.
+    try:
+        reservation_result = repair_broken_waiting_reservations(export_no)
+    except Exception:
+        reservation_result = {'repaired': [], 'failed': []}
+    if reservation_result['repaired']:
+        st.success(
+            '일반 재고 이동으로 위치가 어긋난 예약을 자동으로 복구했습니다: '
+            + ', '.join(reservation_result['repaired'])
+        )
+    if reservation_result['failed']:
+        st.error(
+            '자동 복구 실패(실제 재고를 어디서도 찾지 못함): '
+            + ', '.join(reservation_result['failed'])
+            + ' — 재고현황에서 해당 제품의 실제 수량/위치를 확인하세요.'
+        )
+
     missing_count = wms_link_service.missing_saved_inventory_count(export_no)
     if missing_count:
-        st.warning(
-            f'수출대기 저장에는 있지만 수출확정 목록에서 누락된 품목이 {missing_count}개 있습니다.'
-        )
-        if st.button(
-            f'누락 {missing_count}품목 연결 복구',
-            type='primary',
-            key=f'repair_missing_export_waiting_{order_id}_{missing_count}',
-        ):
-            try:
-                repaired = wms_link_service.repair_missing_saved_inventory(export_no)
-            except ValueError as exc:
-                st.error(str(exc))
-            else:
-                st.success(f'누락된 {repaired}개 품목 연결을 복구했습니다.')
-                st.rerun()
-    if st.button(
-        '예약 재고 위치 오류 점검·복구',
-        key=f'repair_broken_waiting_reservations_{order_id}',
-        help='일반 재고 이동 등록 등으로 수출대기 예약 재고(P/T1~T5)가 다른 위치로 옮겨져 '
-             '수출확정 시 "재고가 부족합니다" 오류가 나는 품목을 실제 재고 위치 기준으로 다시 예약합니다.',
-    ):
-        result = repair_broken_waiting_reservations(export_no)
-        if result['repaired']:
-            st.success('복구됨: ' + ', '.join(result['repaired']))
-        if result['failed']:
-            st.error(
-                '복구 실패(실제 재고를 어디서도 찾지 못함): ' + ', '.join(result['failed'])
-                + ' — 재고현황에서 해당 제품의 실제 수량/위치를 먼저 확인하세요.'
+        try:
+            wms_link_service.repair_missing_saved_inventory(export_no)
+        except ValueError:
+            pass
+        missing_count = wms_link_service.missing_saved_inventory_count(export_no)
+        if missing_count:
+            st.warning(
+                f'수출대기 저장에는 있지만 수출확정 목록에서 자동으로 연결하지 못한 '
+                f'품목이 {missing_count}개 있습니다. 수출대기 저장에서 해당 품목의 실재고 연결을 다시 확인하세요.'
             )
-        if not result['repaired'] and not result['failed']:
-            st.info('점검 결과 위치 오류가 있는 예약 품목이 없습니다.')
-        if result['repaired']:
-            st.rerun()
+        else:
+            st.success('수출확정 목록에서 누락됐던 품목 연결을 자동으로 복구했습니다.')
 
     items = export_confirm_service.order_items(order_id)
     confirmed_count = int((items['confirmed'] == 1).sum()) if not items.empty else 0
