@@ -1,5 +1,6 @@
 """Service helpers."""
 from __future__ import annotations
+import sqlite3
 from nohtus.db import connect
 from nohtus.services.closing import dataframe_to_excel_bytes
 from datetime import datetime
@@ -10,6 +11,7 @@ from nohtus.db import q
 import streamlit as st
 from nohtus.services.inventory import insert_transaction_log
 from nohtus.dates import normalize_exp_date
+from nohtus.services.export_waiting import ensure_export_waiting_tables
 
 def match_erp_name(company, erp_name):
     """ERP명칭을 표준제품명으로 변환한다. 1건이면 자동, 여러 후보면 확인 필요."""
@@ -233,6 +235,7 @@ def update_inventory_metadata(inv_id, new_lot, new_exp, memo=''):
     with connect() as con:
         con.row_factory = sqlite3.Row
         cur = con.cursor()
+        ensure_export_waiting_tables(cur)
         src = cur.execute('SELECT * FROM inventory WHERE id=?', (int(inv_id),)).fetchone()
         if not src:
             raise ValueError('수정할 재고를 찾을 수 없습니다.')
@@ -247,8 +250,24 @@ def update_inventory_metadata(inv_id, new_lot, new_exp, memo=''):
             cur.execute('UPDATE inventory SET qty=?, updated_at=? WHERE id=?', (int(target['qty'] or 0) + qty, now, int(target['id'])))
             cur.execute('DELETE FROM inventory WHERE id=?', (int(inv_id),))
             merge_note = f" / 동일 재고행 #{int(target['id'])}에 수량 합산"
+            # 수출대기 품목이 이 재고행을 lot/유통기한으로 참조하고 있으면
+            # 병합 후 사라진 id 대신 합쳐진 재고행을 가리키도록 갱신한다.
+            # 그렇지 않으면 수출확정 시 옛 lot/유통기한으로 재고를 찾다가
+            # '재고가 부족합니다' 오류가 난다.
+            cur.execute(
+                "UPDATE export_waiting_items SET waiting_inventory_id=?,lot=?,exp_date=? WHERE waiting_inventory_id=?",
+                (int(target['id']), lot2, exp2, int(inv_id)),
+            )
         else:
             cur.execute('UPDATE inventory SET lot=?, exp_date=?, updated_at=? WHERE id=?', (lot2, exp2, now, int(inv_id)))
+            cur.execute(
+                "UPDATE export_waiting_items SET lot=?,exp_date=? WHERE waiting_inventory_id=?",
+                (lot2, exp2, int(inv_id)),
+            )
+        cur.execute(
+            "UPDATE export_waiting_items SET lot=?,exp_date=? WHERE source_inventory_id=? AND COALESCE(confirmed,0)=0",
+            (lot2, exp2, int(inv_id)),
+        )
         reason = f'재고정보수정: LOT {old_lot} → {lot2}, 유통기한 {old_exp} → {exp2}'
         if str(memo or '').strip():
             reason += f' / {str(memo).strip()}'
