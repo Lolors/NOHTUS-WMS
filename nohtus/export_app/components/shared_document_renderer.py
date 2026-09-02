@@ -23,13 +23,17 @@ def _pdf_document_title(case, today: date | None = None) -> str:
     return '_'.join([*parts, current_date.strftime('%y%m%d')])
 
 
-def _jpg_download_script(function_name: str, target_selector: str, filename: str) -> str:
-    """html2canvas로 지정한 영역을 캡처해 JPG로 저장하는 버튼용 스크립트를 만든다."""
+def _document_download_scripts(
+    jpg_function_name: str, pdf_function_name: str, target_selector: str, filename_stem: str
+) -> str:
+    """html2canvas로 지정한 영역을 캡처해 JPG/PDF로 저장하는 버튼용 스크립트를 만든다."""
     encoded_selector = json.dumps(target_selector, ensure_ascii=False)
-    encoded_filename = json.dumps(filename, ensure_ascii=False)
+    encoded_jpg_filename = json.dumps(f'{filename_stem}.jpg', ensure_ascii=False)
+    encoded_pdf_filename = json.dumps(f'{filename_stem}.pdf', ensure_ascii=False)
     return f'''<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
-function {function_name}() {{
+function {jpg_function_name}() {{
   const target = document.querySelector({encoded_selector});
   if (!target || typeof html2canvas === 'undefined') {{
     alert('이미지 캡처 기능을 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해주세요.');
@@ -37,11 +41,29 @@ function {function_name}() {{
   }}
   html2canvas(target, {{scale: 2, backgroundColor: '#ffffff', useCORS: true}}).then(function(canvas) {{
     const link = document.createElement('a');
-    link.download = {encoded_filename};
+    link.download = {encoded_jpg_filename};
     link.href = canvas.toDataURL('image/jpeg', 0.92);
     link.click();
   }}).catch(function() {{
     alert('JPG 저장에 실패했습니다. 다시 시도해주세요.');
+  }});
+}}
+function {pdf_function_name}() {{
+  const target = document.querySelector({encoded_selector});
+  if (!target || typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {{
+    alert('PDF 저장 기능을 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해주세요.');
+    return;
+  }}
+  html2canvas(target, {{scale: 2, backgroundColor: '#ffffff', useCORS: true}}).then(function(canvas) {{
+    const {{ jsPDF }} = window.jspdf;
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+    const widthMm = 210;
+    const heightMm = canvas.height * widthMm / canvas.width;
+    const pdf = new jsPDF({{orientation: 'portrait', unit: 'mm', format: [widthMm, heightMm]}});
+    pdf.addImage(imgData, 'JPEG', 0, 0, widthMm, heightMm);
+    pdf.save({encoded_pdf_filename});
+  }}).catch(function() {{
+    alert('PDF 저장에 실패했습니다. 다시 시도해주세요.');
   }});
 }}
 </script>'''
@@ -207,15 +229,15 @@ def render_document(case, packed, actual_rows=None) -> None:
     raw_document_title = _pdf_document_title(case)
     document_title = html.escape(raw_document_title)
     print_title_script = _print_title_script(raw_document_title)
-    jpg_download_script = _jpg_download_script(
-        'downloadFinalDocumentJpg', '.document', f'{raw_document_title}.jpg'
+    download_scripts = _document_download_scripts(
+        'downloadFinalDocumentJpg', 'downloadFinalDocumentPdf', '.document', raw_document_title
     )
     document = f'''<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{document_title}</title>
 <style>
 *{{box-sizing:border-box}} @page{{size:A4 portrait;margin:6mm}}
 html,body{{margin:0;padding:0;background:#f4f7fa;color:#172033;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",Arial,sans-serif}} body{{padding:8px}}
-.toolbar{{width:198mm;max-width:100%;margin:0 auto 10px;text-align:right}} .print{{border:0;border-radius:8px;background:#173b5f;color:#fff;font-weight:700;padding:10px 18px;cursor:pointer;margin-left:8px}} .download-jpg{{border:1px solid #173b5f;border-radius:8px;background:#fff;color:#173b5f;font-weight:700;padding:10px 18px;cursor:pointer}}
+.toolbar{{width:198mm;max-width:100%;margin:0 auto 10px;text-align:right}} .print{{border:0;border-radius:8px;background:#173b5f;color:#fff;font-weight:700;padding:10px 18px;cursor:pointer;margin-left:8px}} .download-jpg,.download-pdf{{border:1px solid #173b5f;border-radius:8px;background:#fff;color:#173b5f;font-weight:700;padding:10px 18px;cursor:pointer;margin-left:8px}} .download-jpg{{margin-left:0}}
 .document{{width:198mm;max-width:100%;margin:auto;background:#fff;border:0;border-radius:0;overflow:visible;box-shadow:none}}
 .header{{padding:16px 22px;background:linear-gradient(135deg,#173b5f,#245d88);color:#fff;display:flex;justify-content:space-between;gap:16px}} .title{{font-size:20px;font-weight:800}} .sub{{font-size:9px;opacity:.8}} .number{{text-align:right}}
 .body{{padding:12px 8px 10px}} .section{{font-size:13px;font-weight:800;color:#294f71;margin:0 0 4px;display:flex;align-items:center;gap:5px}} .section-icon{{width:18px;height:18px;border-radius:5px;background:#e8f1f8;color:#245d88;display:inline-flex;align-items:center;justify-content:center;flex:0 0 18px}} .section-icon svg{{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}}
@@ -224,8 +246,8 @@ html,body{{margin:0;padding:0;background:#f4f7fa;color:#172033;font-family:-appl
 .wrap{{width:100%;max-width:100%;margin:0 auto;overflow:hidden;border:1px solid #d8e0e8;border-radius:7px}} table{{border-collapse:collapse;width:100%;max-width:100%;min-width:0;table-layout:fixed;font-size:11.67px}} th{{background:#294f71;color:#fff;padding:6px 4px;text-align:center;white-space:nowrap;line-height:1.2}} td{{padding:6px 4px;border-right:1px solid #e0e6ed;border-bottom:1px solid #e0e6ed;vertical-align:middle;line-height:1.2;overflow-wrap:anywhere}} .product-name{{white-space:nowrap;font-size:10.8px;letter-spacing:-.15px}} tr{{break-inside:avoid}} .center{{text-align:center}} .right{{text-align:right}} .merged{{background:#f5f8fb;font-weight:700;white-space:nowrap}} .total-row td{{background:#eef3f8;font-weight:700}}
 .note-box{{width:100%;margin:6px auto 0;padding:5px 7px;border:1px solid #dce3eb;border-left:4px solid #294f71;border-radius:7px;font-size:8px}}
 @media print{{html,body{{width:210mm;height:297mm;background:#fff;padding:0}} .toolbar{{display:none!important}} .document{{width:198mm;max-width:none;margin:0 auto}} .header,th,.merged,.total-row td{{-webkit-print-color-adjust:exact;print-color-adjust:exact}}}}
-</style>{print_title_script}{jpg_download_script}</head><body>
-<div class="toolbar"><button class="download-jpg" onclick="downloadFinalDocumentJpg()">🖼️이미지 저장</button><button class="print" onclick="printFinalDocument()">🖨 출력하기</button></div>
+</style>{print_title_script}{download_scripts}</head><body>
+<div class="toolbar"><button class="download-jpg" onclick="downloadFinalDocumentJpg()">🖼️ JPG 저장</button><button class="download-pdf" onclick="downloadFinalDocumentPdf()">📄 PDF 저장</button><button class="print" onclick="printFinalDocument()">🖨 출력하기</button></div>
 <div class="document"><div class="header"><div><div class="title">주문 정보 및 패킹 리스트</div><div class="sub">ORDER INFORMATION &amp; PACKING LIST</div></div><div class="number"><small>EXPORT NO.</small><br><b>{html.escape(case['export_no'])}</b></div></div>
 <div class="body"><div class="section"><span class="section-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg></span>EXPORT INFORMATION</div><div class="grid">
 <div class="cell"><div class="label">국가 / Country</div><div class="value">{html.escape(case['country'] or '-')}</div></div>
@@ -338,8 +360,8 @@ def render_shipment_product_list(case, actual_rows) -> None:
     item_count = len(unique_products)
     total_quantity = sum(float(row['requested_qty'] or 0) for row in sorted_rows)
     raw_document_title = f'{_pdf_document_title(case)}_출고예정제품리스트'
-    jpg_download_script = _jpg_download_script(
-        'downloadShipmentListJpg', '.sheet', f'{raw_document_title}.jpg'
+    download_scripts = _document_download_scripts(
+        'downloadShipmentListJpg', 'downloadShipmentListPdf', '.sheet', raw_document_title
     )
 
     document = f'''<!doctype html>
@@ -347,7 +369,7 @@ def render_shipment_product_list(case, actual_rows) -> None:
 <style>
 *{{box-sizing:border-box}} @page{{size:A4 portrait;margin:15mm}}
 html,body{{margin:0;padding:0;background:#eef2f6;color:#172033;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",Arial,sans-serif}} body{{padding:10px}}
-.toolbar{{width:198mm;max-width:100%;margin:0 auto 10px;text-align:right}} .print{{border:0;border-radius:8px;background:#173b5f;color:white;font-weight:700;padding:10px 18px;cursor:pointer;margin-left:8px}} .download-jpg{{border:1px solid #173b5f;border-radius:8px;background:#fff;color:#173b5f;font-weight:700;padding:10px 18px;cursor:pointer}}
+.toolbar{{width:198mm;max-width:100%;margin:0 auto 10px;text-align:right}} .print{{border:0;border-radius:8px;background:#173b5f;color:white;font-weight:700;padding:10px 18px;cursor:pointer;margin-left:8px}} .download-jpg,.download-pdf{{border:1px solid #173b5f;border-radius:8px;background:#fff;color:#173b5f;font-weight:700;padding:10px 18px;cursor:pointer;margin-left:8px}} .download-jpg{{margin-left:0}}
 .sheet{{width:198mm;max-width:100%;margin:auto;background:white;border:1px solid #d7dee7;box-shadow:0 10px 28px rgba(30,45,70,.08)}}
 .header{{padding:18px 20px 15px;border-bottom:3px solid #234f75;display:flex;justify-content:space-between;gap:20px;align-items:flex-end}} .title{{font-size:21px;font-weight:850;color:#173b5f;letter-spacing:.02em}} .export-no{{text-align:right;font-size:9px;color:#758294}} .export-no b{{display:block;font-size:13px;color:#172033;margin-top:3px}}
 .meta{{display:grid;grid-template-columns:repeat(3,1fr);margin:13px 16px 12px;border:1px solid #dce3eb}} .meta div{{padding:7px 8px;border-right:1px solid #e3e8ee}} .meta div:last-child{{border-right:0}} .label{{font-size:12px;color:#7c8797}} .value{{font-size:14px;font-weight:700;margin-top:2px;word-break:break-word}}
@@ -357,8 +379,8 @@ table{{width:100%;max-width:100%;margin:0 auto;border-collapse:collapse;table-la
 th{{background:#294f71;color:white;padding:7px 5px;text-align:center;font-weight:750}} td{{padding:7px 6px;border-right:1px solid #dce3ea;border-bottom:1px solid #dce3ea;vertical-align:middle;line-height:1.35}} .center{{text-align:center}} .right{{text-align:right}} .product{{white-space:normal;overflow-wrap:anywhere;word-break:keep-all;font-weight:700;text-align:left;padding-left:9px}} .destination{{font-weight:700}} .merged{{background:#f5f8fb}} .lot,.expiry,.unit{{white-space:nowrap}} .qty{{white-space:nowrap;font-weight:650;padding-left:3px;padding-right:3px}} .unit{{padding-left:2px;padding-right:2px}} .empty{{text-align:center;color:#8993a0;padding:20px}}
 .notice{{padding:10px 20px 14px;font-size:8.2px;color:#788493;border-top:1px solid #e0e6ed}}
 @media print{{html,body{{width:210mm;min-height:297mm;background:white;padding:0}} .toolbar{{display:none!important}} .sheet{{width:198mm;max-width:none;margin:0 auto;border:0;box-shadow:none}} .header{{padding:13px 15px 11px}} .title{{font-size:18px}} .meta{{margin:10px 8px}} .list-summary{{margin:0 8px 9px;gap:6px}} .summary-card{{padding:7px 9px}} .content{{padding:0 8px 12px}} .summary,table{{width:100%;max-width:none}} table{{font-size:10.5px}} th{{padding:5px 3px}} td{{padding:5px 4px}} .product{{padding-left:6px}} .qty,.unit{{padding-left:2px;padding-right:2px}} .notice{{padding:8px 15px 0}} .header,th{{-webkit-print-color-adjust:exact;print-color-adjust:exact}}}}
-</style>{jpg_download_script}</head><body>
-<div class="toolbar"><button class="download-jpg" onclick="downloadShipmentListJpg()">🖼️이미지 저장</button><button class="print" onclick="window.print()">🖨 출력하기</button></div>
+</style>{download_scripts}</head><body>
+<div class="toolbar"><button class="download-jpg" onclick="downloadShipmentListJpg()">🖼️ JPG 저장</button><button class="download-pdf" onclick="downloadShipmentListPdf()">📄 PDF 저장</button><button class="print" onclick="window.print()">🖨 출력하기</button></div>
 <div class="sheet"><div class="header"><div class="title">출고 예정 제품 리스트</div><div class="export-no">EXPORT NO.<b>{html.escape(case['export_no'] or '-')}</b></div></div>
 <div class="meta"><div><span class="label">국가 / Country</span><div class="value">{html.escape(case['country'] or '-')}</div></div><div><span class="label">바이어 / Buyer</span><div class="value">{html.escape(case['buyer'] or '-')}</div></div><div><span class="label">운송방식 / Transport</span><div class="value">{html.escape(case['transport_mode'] or '-')}</div></div></div>
 <div class="list-summary"><div class="summary-card">전체 품목 수 : {item_count}품목</div><div class="summary-card">출고수량 : {fmt_number(total_quantity)}</div></div>
