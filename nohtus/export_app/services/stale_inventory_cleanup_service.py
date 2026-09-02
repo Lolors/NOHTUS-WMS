@@ -180,12 +180,27 @@ def _best_effort_cleanup_wms(*, export_no: str, rows: list[dict], now: str) -> N
         return
 
 
+def _row_signature(company: object, product_name: object, lot: object, exp_date: object) -> tuple[str, str, str, str]:
+    return (
+        str(company or '').strip(),
+        str(product_name or '').strip(),
+        str(lot or '').strip() or '-',
+        str(exp_date or '').strip() or '-',
+    )
+
+
 def reconcile_orphan_waiting_items(export_no: str) -> int:
     """EXPORT 저장행에서 삭제됐지만 WMS에 남은 미확정 행을 정리한다.
 
     shipment_items를 수출확정 전 목록의 기준으로 삼는다. 확정된 수량은 건드리지
-    않고, 원본 inventory id별로 저장 수량을 초과한 미확정 연결만 제거한다.
+    않고, 저장 수량을 초과한 미확정 연결만 제거한다.
     P 재고가 이미 없어도 연결행은 제거해 확정 단계에서 다시 차감하지 않는다.
+
+    shipment_items와 export_waiting_items를 원본 inventory id로 정확히
+    매칭하지 않고 (사업장,제품명,LOT,유통기한) 재고키로 매칭한다 — 박스
+    분할/복제나 재고 재해석(_take_source의 서명 기반 대체 매칭)으로 두 쪽의
+    id가 갈라지면, id 매칭은 정상 저장된 수량까지 "저장에서 사라진 초과분"
+    으로 오인해 WMS 예약을 통째로 지워버린다.
     """
     normalized_export_no = str(export_no or '').strip()
     if not normalized_export_no:
@@ -203,17 +218,17 @@ def reconcile_orphan_waiting_items(export_no: str) -> int:
         return 0
     case_id = int(cases[0]['id'])
     expected_rows = export_db.rows(
-        '''SELECT source_inventory_id,CAST(SUM(requested_qty) AS INTEGER) AS qty
+        '''SELECT business_unit,product_name,lot_no,expiry_date,
+                  CAST(SUM(requested_qty) AS INTEGER) AS qty
            FROM shipment_items
-           WHERE case_id=? AND source_inventory_id IS NOT NULL
-           GROUP BY source_inventory_id''',
+           WHERE case_id=?
+           GROUP BY business_unit,product_name,lot_no,expiry_date''',
         (case_id,),
     )
-    expected_total = {
-        int(row['source_inventory_id']): max(0, int(row['qty'] or 0))
-        for row in expected_rows
-        if int(row['source_inventory_id'] or 0) > 0
-    }
+    expected_total: dict[tuple[str, str, str, str], int] = {}
+    for row in expected_rows:
+        sig = _row_signature(row['business_unit'], row['product_name'], row['lot_no'], row['expiry_date'])
+        expected_total[sig] = expected_total.get(sig, 0) + max(0, int(row['qty'] or 0))
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     removed = 0
@@ -240,33 +255,34 @@ def reconcile_orphan_waiting_items(export_no: str) -> int:
             'id','source_inventory_id','waiting_inventory_id','company','product_name',
             'warehouse_name','lot','exp_date','source_location','qty','confirmed','waiting_location',
         ]
-        confirmed_by_source: dict[int, int] = {}
+        confirmed_by_sig: dict[tuple[str, str, str, str], int] = {}
         waiting_items: list[dict] = []
         for raw in items:
             item = dict(zip(keys, raw))
-            source_id = int(item.get('source_inventory_id') or 0)
-            if source_id <= 0:
+            if int(item.get('source_inventory_id') or 0) <= 0:
                 continue
+            sig = _row_signature(
+                item.get('company'), item.get('product_name'), item.get('lot'), item.get('exp_date')
+            )
+            item['_sig'] = sig
             if int(item.get('confirmed') or 0):
-                confirmed_by_source[source_id] = (
-                    confirmed_by_source.get(source_id, 0) + int(item.get('qty') or 0)
-                )
+                confirmed_by_sig[sig] = confirmed_by_sig.get(sig, 0) + int(item.get('qty') or 0)
             else:
                 waiting_items.append(item)
 
         allowed = {
-            source_id: max(0, qty - confirmed_by_source.get(source_id, 0))
-            for source_id, qty in expected_total.items()
+            sig: max(0, qty - confirmed_by_sig.get(sig, 0))
+            for sig, qty in expected_total.items()
         }
-        kept_by_source: dict[int, int] = {}
+        kept_by_sig: dict[tuple[str, str, str, str], int] = {}
         for item in waiting_items:
-            source_id = int(item['source_inventory_id'])
+            sig = item['_sig']
             item_qty = max(0, int(item.get('qty') or 0))
             keep_qty = min(
                 item_qty,
-                max(0, allowed.get(source_id, 0) - kept_by_source.get(source_id, 0)),
+                max(0, allowed.get(sig, 0) - kept_by_sig.get(sig, 0)),
             )
-            kept_by_source[source_id] = kept_by_source.get(source_id, 0) + keep_qty
+            kept_by_sig[sig] = kept_by_sig.get(sig, 0) + keep_qty
             excess_qty = item_qty - keep_qty
             if excess_qty <= 0:
                 continue
