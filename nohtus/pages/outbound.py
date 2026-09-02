@@ -700,6 +700,12 @@ def page_outbound():
                     },
                     key="out_manual_editor",
                 )
+                picked_qty = int(pd.to_numeric(edited.loc[edited["선택"] == True, "요청수량"], errors="coerce").fillna(0).sum())  # noqa: E712
+                if selected_product:
+                    df_total = q("SELECT COALESCE(SUM(qty),0) AS qty FROM inventory WHERE product_name=? AND qty>0", (selected_product,))
+                    product_total_qty = int(df_total.iloc[0]["qty"] or 0) if not df_total.empty else 0
+                    if picked_qty and picked_qty < product_total_qty:
+                        st.warning(f"선택한 수량 합계는 {picked_qty} EA이지만, 이 제품의 전체 재고는 {product_total_qty} EA입니다. 다른 LOT/유통기한/로케이션 행에도 재고가 남아 있을 수 있으니 확인하세요.")
                 if st.button("선택 재고 장바구니에 담기", type="primary", use_container_width=True):
                     pending_rows = _manual_pick_rows(pick_df, edited)
                     if not pending_rows:
