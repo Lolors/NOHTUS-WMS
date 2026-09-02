@@ -66,27 +66,13 @@ def render_photo_organizer(case_id: int) -> None:
 
     st.markdown('### 사진 정리')
     st.caption('각 영역에 사진을 드래그해 넣으세요. CTN은 번호 오름차순으로 표시됩니다.')
-    st.markdown(
-        '''
-        <style>
-        div[data-testid="stVerticalBlock"]:has(> div .photo-drop-anchor) {
-            border: 2px dashed #8a94a6;
-            border-radius: 12px;
-            padding: 14px 16px 8px;
-            margin: 8px 0 16px;
-            background: rgba(128, 128, 128, 0.05);
-        }
-        </style>
-        ''',
-        unsafe_allow_html=True,
-    )
 
     area_names = [*(f'CTN{number}' for number in box_numbers), '전체']
     uploads: dict[str, list] = {}
     tags: dict[str, list[str]] = {}
     for area_name in area_names:
         with st.container():
-            st.markdown(f'<div class="photo-drop-anchor"></div>#### {area_name}', unsafe_allow_html=True)
+            st.markdown(f'#### {area_name}')
             area_files = list(st.file_uploader(
                 f'{area_name} 사진',
                 type=['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'tif', 'tiff'],
