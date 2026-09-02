@@ -119,18 +119,6 @@ def render_wms_confirmation_section(
         st.progress(confirmed_count / total_count, text=f'{confirmed_count} / {total_count} 품목 확정')
 
     display_cols = ['출고사업장', '표준제품명', '출고사업장ERP명', 'LOT', '유통기한', '수량', '원래로케이션', '확정사업장', '확정매출처', '확정일시']
-    if not items.empty:
-        group_keys = ['표준제품명', 'LOT', '유통기한']
-        multi_row = items.groupby(group_keys, dropna=False).size()
-        if (multi_row > 1).any():
-            summary = (
-                items.groupby(group_keys, dropna=False)['수량']
-                .sum()
-                .reset_index()
-                .rename(columns={'수량': '합계수량'})
-            )
-            st.caption('같은 품목이 여러 로케이션(P/T1~T5 등)에 나뉘어 있어 아래 목록에 여러 줄로 표시됩니다. 실제 합계 수량은 아래를 확인하세요.')
-            st.dataframe(summary, hide_index=True, use_container_width=True)
     st.dataframe(items[display_cols], hide_index=True, use_container_width=True)
 
     confirmed_items = items[items['confirmed'] == 1].copy() if not items.empty else pd.DataFrame()
