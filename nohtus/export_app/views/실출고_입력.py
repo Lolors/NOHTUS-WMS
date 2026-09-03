@@ -19,6 +19,7 @@ from nohtus.export_app.services import (
     wms_inventory_picker_service,
 )
 from nohtus.export_app.utils.formatters import fmt_number
+from nohtus.services.export_waiting import STAGING_LOCATIONS
 
 
 from nohtus.export_app.services.shipment_intake_view_service import (
@@ -186,6 +187,13 @@ def edit_shipment_intake_dialog(
         '새 행에 선택수량을 입력하면 입고에 추가됩니다. '
         '행 왼쪽을 선택한 뒤 삭제(휴지통) 아이콘으로 행을 지울 수 있습니다.'
     )
+    staging_location = st.selectbox(
+        '새 재고 보관 위치',
+        STAGING_LOCATIONS,
+        key=f'wms_intake_modal_staging_location_{case_id}_{order_item_id}',
+        help='새로 추가하는 재고가 이동할 수출대기 위치입니다. 기본은 P이고, '
+        'P가 가득 찼거나 별도 보관이 필요하면 T1~T5 중에서 고를 수 있습니다.',
+    )
     search_key = f'wms_intake_modal_search_{case_id}_{order_item_id}'
     search_term = st.text_input(
         '제품 검색',
@@ -296,6 +304,7 @@ def edit_shipment_intake_dialog(
             order_item_id=order_item_id,
             kept_rows=kept_rows,
             picked_rows=picked_rows,
+            staging_location=staging_location,
         )
     except ValueError as exc:
         st.error(str(exc))
@@ -644,6 +653,13 @@ def render() -> None:
             summary_slot = st.empty()
 
             st.markdown('##### 재고 선택')
+            staging_location = st.selectbox(
+                '새 재고 보관 위치',
+                STAGING_LOCATIONS,
+                key=f'wms_pick_staging_location_{case_id}_{selected_order_id}',
+                help='새로 담는 재고가 이동할 수출대기 위치입니다. 기본은 P이고, '
+                'P가 가득 찼거나 별도 보관이 필요하면 T1~T5 중에서 고를 수 있습니다.',
+            )
             search_key = f'wms_pick_search_{case_id}_{selected_order_id}'
             recommended_search_term = recommended_inventory_search_term(selected_order_name)
             search_term = st.text_input(
@@ -776,6 +792,7 @@ def render() -> None:
                             order_item_id=selected_order_id,
                             kept_rows=kept_original_rows,
                             picked_rows=[],
+                            staging_location=staging_location,
                         )
                         leftovers = remaining_shipment_ids(
                             case_id, selected_order_id, selected_saved_ids
@@ -874,6 +891,7 @@ def render() -> None:
                             order_item_id=selected_order_id,
                             kept_rows=kept_rows,
                             picked_rows=merged_picks,
+                            staging_location=staging_location,
                         )
                     except ValueError as exc:
                         st.error(str(exc))

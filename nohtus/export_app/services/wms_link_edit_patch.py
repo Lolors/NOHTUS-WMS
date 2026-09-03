@@ -6,6 +6,9 @@ import nohtus.export_app.services.wms_link_service as link_service
 import nohtus.services.export_waiting as export_waiting_service
 from nohtus.db import connect, q as wms_q
 from nohtus.export_app.services import export_service, shipment_service
+from nohtus.services.export_waiting import STAGING_LOCATIONS
+
+_STAGING_PLACEHOLDERS = ",".join(f"'{loc}'" for loc in STAGING_LOCATIONS)
 
 
 def _editable_order_id(export_no: str) -> int | None:
@@ -116,7 +119,7 @@ def _fill_source_links(rows: list[dict], waiting_rows: list[dict]) -> None:
         candidates = wms_q(
             f"""SELECT id,location,COALESCE(qty,0) AS qty,
                        COALESCE(qty,0) - CASE
-                         WHEN UPPER(TRIM(COALESCE(location,'')))='P' THEN COALESCE((
+                         WHEN UPPER(TRIM(COALESCE(location,''))) IN ({_STAGING_PLACEHOLDERS}) THEN COALESCE((
                            SELECT SUM(COALESCE(i.qty,0))
                            FROM export_waiting_items i
                            JOIN export_waiting_orders o ON o.id=i.order_id
@@ -138,15 +141,21 @@ def _fill_source_links(rows: list[dict], waiting_rows: list[dict]) -> None:
         if sufficient.empty:
             continue
         p_candidates = sufficient[
-            sufficient['location'].fillna('').astype(str).str.strip().str.upper() == 'P'
+            sufficient['location'].fillna('').astype(str).str.strip().str.upper().isin(STAGING_LOCATIONS)
         ]
         location_candidates = sufficient[
             sufficient['location'].fillna('').astype(str).str.strip() == location
         ] if location else sufficient.iloc[0:0]
+        # candidates는 이미 SQL where절에서 사업장/제품명/LOT/유통기한까지
+        # 정확히 일치하는 것만 걸러졌으므로, 후보가 여러 행이어도 전부 같은
+        # 재고키를 가진 완전히 동일한 재고다(예: 재고이동/조정으로 같은
+        # 재고가 여러 행으로 나뉜 경우). 어느 쪽을 고르든 결과가 같으므로
+        # "정확히 1개일 때만" 요구할 이유가 없다 - 그 조건 때문에 이미 같은
+        # 재고임이 확실한데도 자동 연결을 포기해 버리는 사고로 이어졌다.
         resolved = (
-            p_candidates.iloc[0] if len(p_candidates.index) == 1 else
-            location_candidates.iloc[0] if len(location_candidates.index) == 1 else
-            sufficient.iloc[0] if len(sufficient.index) == 1 else None
+            p_candidates.iloc[0] if not p_candidates.empty else
+            location_candidates.iloc[0] if not location_candidates.empty else
+            sufficient.iloc[0] if not sufficient.empty else None
         )
         if resolved is not None:
             row['source_inventory_id'] = int(resolved['id'])
@@ -230,7 +239,7 @@ def _empty_target_save(order_id: int, *, export_no: str, country: str, buyer: st
     return {'order_id': int(order_id), 'row_count': 0, 'total_qty': 0, 'title': title}
 
 
-def _patched_save_picked_inventory(*, case_id: int, order_item_id: int, kept_rows: list[dict], picked_rows: list[dict]) -> dict:
+def _patched_save_picked_inventory(*, case_id: int, order_item_id: int, kept_rows: list[dict], picked_rows: list[dict], staging_location: str = 'P') -> dict:
     case = export_service.get_case(case_id)
     if case is None:
         raise ValueError('수출 건을 찾을 수 없습니다.')
@@ -333,6 +342,7 @@ def _patched_save_picked_inventory(*, case_id: int, order_item_id: int, kept_row
                 transport_method=transport_method,
                 export_no=export_no,
                 editing_order_id=editing_order_id,
+                staging_location=staging_location,
             )
         elif editing_order_id:
             result = _empty_target_save(

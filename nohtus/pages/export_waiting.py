@@ -7,6 +7,7 @@ import nohtus.pages.outbound as outbound_page
 from nohtus.db import connect, q
 from nohtus.pages.outbound_business import page_outbound as _page_outbound
 from nohtus.services.export_waiting import (
+    STAGING_LOCATIONS,
     TRANSPORT_METHODS,
     ensure_export_waiting_tables,
     repair_p_inventory_links,
@@ -40,18 +41,24 @@ def _load_editing_order():
                    COALESCE(s.warehouse_name,p.warehouse_name,i.warehouse_name,'') AS warehouse_name,
                    COALESCE(s.lot,p.lot,i.lot) AS LOT,
                    COALESCE(s.exp_date,p.exp_date,i.exp_date) AS 유통기한,
-                   i.qty AS 요청수량
+                   i.qty AS 요청수량,
+                   IFNULL(i.waiting_location,'P') AS waiting_location
             FROM export_waiting_items i
             LEFT JOIN inventory p
-              ON p.id=i.waiting_inventory_id AND p.location='P'
+              ON p.id=i.waiting_inventory_id AND p.location=IFNULL(i.waiting_location,'P')
             LEFT JOIN inventory s
-              ON s.id=i.source_inventory_id AND s.location<>'P'
+              ON s.id=i.source_inventory_id AND s.location<>IFNULL(i.waiting_location,'P')
             WHERE i.order_id=? ORDER BY i.id""", (int(order_id),))
     st.session_state["export_waiting_country"] = str(order.iloc[0]["country"] or "")
     st.session_state["export_waiting_buyer"] = str(order.iloc[0].get("buyer") or "") or "미지정"
     method = str(order.iloc[0].get("transport_method") or "").strip()
     st.session_state["export_waiting_transport_method"] = method if method in TRANSPORT_METHODS else "미지정"
     st.session_state["export_waiting_number"] = str(order.iloc[0]["export_no"] or "")
+    if not items.empty:
+        existing_location = str(items.iloc[0].get("waiting_location") or "").strip()
+        st.session_state["export_waiting_staging_location"] = (
+            existing_location if existing_location in STAGING_LOCATIONS else "P"
+        )
     st.session_state["outbound_cart"] = items.to_dict("records") if not items.empty else []
     st.session_state["_export_editing_order_status"] = str(order.iloc[0]["status"])
     st.session_state["out_cart_editor_token"] = int(st.session_state.get("out_cart_editor_token", 0) or 0) + 1
@@ -70,7 +77,7 @@ def _find_unmatched_p_item(order_id):
                   p.lot AS current_lot,p.exp_date AS current_exp_date
            FROM export_waiting_items i
            LEFT JOIN inventory p
-             ON p.id=i.waiting_inventory_id AND p.location='P'
+             ON p.id=i.waiting_inventory_id AND p.location=IFNULL(i.waiting_location,'P')
            WHERE i.order_id=? AND COALESCE(i.confirmed,0)=0
              AND (p.id IS NULL OR COALESCE(p.qty,0) < i.qty)
            ORDER BY i.id
@@ -85,7 +92,9 @@ def _p_inventory_candidates(term="", *, company="", required_qty=0):
     company = str(company or "").strip()
     required_qty = max(0, int(required_qty or 0))
     params = []
-    where = ["location='P'", "COALESCE(qty,0)>=?"]
+    staging_placeholders = ",".join("?" for _ in STAGING_LOCATIONS)
+    where = [f"location IN ({staging_placeholders})", "COALESCE(qty,0)>=?"]
+    params.extend(STAGING_LOCATIONS)
     params.append(required_qty)
     if company:
         where.append("company=?")
@@ -110,17 +119,18 @@ def _p_inventory_candidates(term="", *, company="", required_qty=0):
 
 
 def _apply_p_inventory_match(waiting_item_id, inventory_id):
+    staging_placeholders = ",".join("?" for _ in STAGING_LOCATIONS)
     with connect() as con:
         con.row_factory = None
         row = con.execute(
-            """SELECT company,product_name,IFNULL(warehouse_name,''),IFNULL(lot,'-'),
-                      IFNULL(exp_date,'-'),qty
-               FROM inventory WHERE id=? AND location='P'""",
-            (int(inventory_id),),
+            f"""SELECT company,product_name,IFNULL(warehouse_name,''),IFNULL(lot,'-'),
+                      IFNULL(exp_date,'-'),qty,location
+               FROM inventory WHERE id=? AND location IN ({staging_placeholders})""",
+            (int(inventory_id), *STAGING_LOCATIONS),
         ).fetchone()
         if not row:
-            raise ValueError("선택한 P 재고를 찾을 수 없습니다.")
-        company, product_name, warehouse_name, lot, exp_date, qty = row
+            raise ValueError("선택한 수출대기 재고를 찾을 수 없습니다.")
+        company, product_name, warehouse_name, lot, exp_date, qty, location = row
         waiting = con.execute(
             "SELECT qty,company FROM export_waiting_items WHERE id=?",
             (int(waiting_item_id),),
@@ -128,14 +138,14 @@ def _apply_p_inventory_match(waiting_item_id, inventory_id):
         if not waiting:
             raise ValueError("연결할 수출대기 품목을 찾을 수 없습니다.")
         if str(company or "").strip() != str(waiting[1] or "").strip():
-            raise ValueError("다른 사업장의 P 재고는 연결할 수 없습니다.")
+            raise ValueError("다른 사업장의 수출대기 재고는 연결할 수 없습니다.")
         if int(qty or 0) < int(waiting[0] or 0):
-            raise ValueError(f"선택한 P 재고가 부족합니다. 필요 {int(waiting[0] or 0)}EA / 현재 {int(qty or 0)}EA")
+            raise ValueError(f"선택한 수출대기 재고가 부족합니다. 필요 {int(waiting[0] or 0)}EA / 현재 {int(qty or 0)}EA")
         con.execute(
             """UPDATE export_waiting_items
-               SET waiting_inventory_id=?,company=?,product_name=?,warehouse_name=?,lot=?,exp_date=?
+               SET waiting_inventory_id=?,waiting_location=?,company=?,product_name=?,warehouse_name=?,lot=?,exp_date=?
                WHERE id=?""",
-            (int(inventory_id), company, product_name, warehouse_name, lot, exp_date, int(waiting_item_id)),
+            (int(inventory_id), location, company, product_name, warehouse_name, lot, exp_date, int(waiting_item_id)),
         )
         con.commit()
 
@@ -147,8 +157,9 @@ def _finish_export_save(result):
             "기존 확정 품목은 유지되고 추가 품목은 수출대기로 저장되었습니다."
         )
     else:
+        staging_location = str(st.session_state.get("export_waiting_staging_location") or "").strip() or "P"
         st.session_state["_outbound_last_success"] = (
-            f"수출대기 등록 완료: {result['title']} / 총 {result['total_qty']}EA → 로케이션 P"
+            f"수출대기 등록 완료: {result['title']} / 총 {result['total_qty']}EA → 로케이션 {staging_location}"
         )
     for key in [
         "export_waiting_number", "export_waiting_country", "export_waiting_buyer",
@@ -228,6 +239,7 @@ def _render_p_match_dialog():
                         transport_method=pending["transport_method"],
                         export_no=pending["export_no"],
                         editing_order_id=pending["editing_order_id"],
+                        staging_location=pending.get("staging_location", "P"),
                     )
                     _finish_export_save(result)
                     st.rerun()
@@ -286,6 +298,7 @@ def page_export_waiting():
         export_no = str(st.session_state.get("export_waiting_number") or "").strip()
         buyer = str(st.session_state.get("export_waiting_buyer") or "").strip() or "미지정"
         transport_method = str(st.session_state.get("export_waiting_transport_method") or "").strip() or "미지정"
+        staging_location = str(st.session_state.get("export_waiting_staging_location") or "").strip() or "P"
         if not country:
             raise ValueError("국가는 필수 입력값입니다.")
         if not export_no:
@@ -302,6 +315,7 @@ def page_export_waiting():
                 "transport_method": transport_method,
                 "export_no": export_no,
                 "editing_order_id": editing_order_id,
+                "staging_location": staging_location,
             }
             raise ValueError("제품명이 변경된 P 재고를 직접 연결해 주세요. 아래 검색창이 열렸습니다.")
         result = save_export_waiting_order(
@@ -311,6 +325,7 @@ def page_export_waiting():
             transport_method=transport_method,
             export_no=export_no,
             editing_order_id=editing_order_id,
+            staging_location=staging_location,
         )
         completed["done"] = True
         if st.session_state.get("_export_editing_order_status") == "confirmed":
@@ -319,7 +334,9 @@ def page_export_waiting():
                 "기존 확정 품목은 유지되고 추가 품목은 수출대기로 저장되었습니다."
             )
         else:
-            completed["message"] = f"수출대기 등록 완료: {result['title']} / 총 {result['total_qty']}EA → 로케이션 P"
+            completed["message"] = (
+                f"수출대기 등록 완료: {result['title']} / 총 {result['total_qty']}EA → 로케이션 {staging_location}"
+            )
         return int(result["order_id"])
 
     def patched_q(sql, params=()):
@@ -340,7 +357,7 @@ def page_export_waiting():
                 if st.session_state.get("_export_editing_order_status") == "confirmed":
                     body = "기존 확정 품목의 사업장·매출처는 그대로 유지됩니다. 추가한 품목만 수출대기로 저장되며, 저장된 수출대기 화면에서 사업장·매출처를 선택해 확정합니다."
                 else:
-                    body = "등록 완료 시 선택 재고는 같은 사업장의 P로 이동합니다. 국가는 필수이고 바이어와 운송방식은 미지정으로 둘 수 있습니다."
+                    body = "등록 완료 시 선택 재고는 같은 사업장의 지정한 보관 위치(기본 P)로 이동합니다. 국가는 필수이고 바이어와 운송방식은 미지정으로 둘 수 있습니다."
             else:
                 body = body.replace("출고지시", "수출대기")
         return original_caption(body, *args, **kwargs)
@@ -354,7 +371,9 @@ def page_export_waiting():
                     st.session_state["export_waiting_buyer"] = "미지정"
                 if "export_waiting_transport_method" not in st.session_state:
                     st.session_state["export_waiting_transport_method"] = "미지정"
-                c1, c2, c3, c4 = st.columns(4, gap="medium")
+                if "export_waiting_staging_location" not in st.session_state:
+                    st.session_state["export_waiting_staging_location"] = "P"
+                c1, c2, c3, c4, c5 = st.columns(5, gap="medium")
                 with c1:
                     original_text_input("국가 *", placeholder="필수 입력", key="export_waiting_country")
                 with c2:
@@ -363,6 +382,14 @@ def page_export_waiting():
                     st.selectbox("운송방식", TRANSPORT_METHODS, key="export_waiting_transport_method")
                 with c4:
                     original_text_input("수출번호 *", placeholder="필수 입력", key="export_waiting_number")
+                with c5:
+                    st.selectbox(
+                        "보관 위치",
+                        STAGING_LOCATIONS,
+                        key="export_waiting_staging_location",
+                        help="새로 담는 품목이 이동할 수출대기 위치입니다. 기본은 P이고, "
+                        "P가 가득 찼거나 별도 보관이 필요하면 T1~T5 중에서 고를 수 있습니다.",
+                    )
             return result
         if isinstance(body, str):
             body = body.replace("### 출고지시 장바구니", "### 수출대기 장바구니")

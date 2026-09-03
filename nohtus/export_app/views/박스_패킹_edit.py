@@ -55,7 +55,7 @@ def assign_repeated_ctns(
 ) -> list[dict]:
     item = db.row(
         """SELECT id, case_id, order_item_id, business_unit, location, product_name,
-                  lot_no, expiry_date, requested_qty, box_no, created_at
+                  lot_no, expiry_date, requested_qty, box_no, created_at, source_inventory_id
            FROM shipment_items
            WHERE id=? AND case_id=?""",
         (item_id, case_id),
@@ -109,8 +109,8 @@ def assign_repeated_ctns(
             db.execute(
                 """INSERT INTO shipment_items(
                        case_id, order_item_id, business_unit, location, product_name,
-                       lot_no, expiry_date, requested_qty, box_no, created_at, updated_at
-                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                       lot_no, expiry_date, requested_qty, box_no, source_inventory_id, created_at, updated_at
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     case_id,
                     item['order_item_id'],
@@ -121,6 +121,7 @@ def assign_repeated_ctns(
                     item['expiry_date'],
                     quantity,
                     box_no,
+                    item['source_inventory_id'],
                     item['created_at'] or now,
                     now,
                 ),

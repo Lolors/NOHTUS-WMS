@@ -73,12 +73,19 @@ def _page_map_search_results_with_available_filter(term, compact: bool = False):
         location_map_page.q = original_q
 
 
-def _inject_gm_medic_special_location():
-    components.html(
-        """
+def _inject_special_location_button(name):
+    """도면의 "기타 위치(N)" 특수 메뉴에 버튼을 하나 추가한다.
+
+    이 메뉴는 로케이션맵 도면(저장된 레이아웃/기본 레이아웃 양쪽)에 하드코딩된
+    HTML이라, SPECIAL_LOCATIONS에 새 항목을 추가해도 도면 자체에는 버튼이 안
+    생긴다. 도면 HTML을 두 곳(기본/저장 레이아웃)에서 직접 고치는 대신, 이미
+    떠 있는 도면에 버튼을 JS로 끼워 넣는 방식을 쓴다 — 레이아웃이 바뀌어도
+    깨지지 않는다.
+    """
+    script = """
         <script>
         (function(){
-          const SPECIAL = '지엠메딕';
+          const SPECIAL = '__SPECIAL_NAME__';
           function install(){
             try{
               const frames = Array.from(window.parent.document.querySelectorAll('iframe'));
@@ -126,7 +133,9 @@ def _inject_gm_medic_special_location():
           setTimeout(install, 1500);
         })();
         </script>
-        """,
+        """.replace("__SPECIAL_NAME__", name)
+    components.html(
+        script,
         height=0,
         scrolling=False,
     )
@@ -235,4 +244,5 @@ def page_map():
         location_map_page._map_search_product_groups = original_product_groups
         st.text_input = original_text_input
         st.button = original_button
-    _inject_gm_medic_special_location()
+    _inject_special_location_button("지엠메딕")
+    _inject_special_location_button("거래처 창고")

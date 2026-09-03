@@ -29,10 +29,13 @@ def _patched_update_confirmed_export_waiting_items(
 ):
     """확정 출고정보 수정 시 실제로 값이 바뀐 품목만 취소/재등록 이력을 남긴다.
 
-    화면에서 여러 품목을 선택했더라도 ERP 사업장·매출처·출고일자가 기존과
-    같은 품목은 이력을 만들지 않는다. 변경된 품목만 기존 출고지시취소 이력을
-    남긴 뒤 수정 저장된 값으로 출고지시 이력을 다시 기록한다. 재고 수량은
-    변경하지 않는다.
+    화면에서 여러 품목을 선택했더라도 ERP 사업장·매출처가 기존과 같은
+    품목은 이력을 만들지 않는다. 출고일자만 바뀐 경우도 재고 이동이
+    실제로 일어난 게 아니므로 "출고지시취소" 이력을 남기지 않는다 — 그런
+    출고지시취소는 실제로는 아무것도 취소된 게 없는데 이력조회에만
+    남아 혼란을 준다. ERP 사업장·코드·매출처 중 하나라도 바뀐 품목만
+    기존 출고지시취소 이력을 남긴 뒤 수정 저장된 값으로 출고지시 이력을
+    다시 기록한다. 재고 수량은 변경하지 않는다.
     """
     selected_ids = sorted({int(x) for x in (item_ids or [])})
     if not selected_ids:
@@ -62,7 +65,7 @@ def _patched_update_confirmed_export_waiting_items(
         rows = cur.execute(
             f"""SELECT id,product_name,warehouse_name,lot,exp_date,company,qty,
                        confirmed_company,confirmed_customer_code,
-                       confirmed_customer_name,confirmed_at
+                       confirmed_customer_name,confirmed_at,waiting_location
                 FROM export_waiting_items
                 WHERE order_id=? AND id IN ({placeholders})
                   AND COALESCE(confirmed,0)=1
@@ -76,7 +79,7 @@ def _patched_update_confirmed_export_waiting_items(
     for row in rows:
         (
             item_id, product_name, warehouse_name, lot, exp_date, company, qty,
-            old_company, old_code, old_customer, old_confirmed_at,
+            old_company, old_code, old_customer, old_confirmed_at, waiting_location,
         ) = row
         old_item_date = _date_text(old_confirmed_at) or old_order_date
         before_by_id[int(item_id)] = {
@@ -90,12 +93,12 @@ def _patched_update_confirmed_export_waiting_items(
             "confirmed_customer_code": str(old_code or "").strip(),
             "confirmed_customer_name": str(old_customer or "").strip(),
             "order_date": old_item_date,
+            "waiting_location": str(waiting_location or "").strip() or "P",
         }
         if (
             str(old_company or "").strip() != requested_company
             or str(old_code or "").strip() != requested_code
             or str(old_customer or "").strip() != requested_customer
-            or old_item_date != requested_date
         ):
             changed_ids.append(int(item_id))
 
@@ -144,7 +147,7 @@ def _patched_update_confirmed_export_waiting_items(
                 from_company=before["confirmed_company"] or before["company"],
                 from_location="",
                 to_company=before["company"],
-                to_location="P",
+                to_location=before["waiting_location"],
                 qty=before["qty"],
                 memo=(
                     f"수출확정 출고내역 수정 / 기존 출고지시 취소 / {title} / "
@@ -155,6 +158,7 @@ def _patched_update_confirmed_export_waiting_items(
 
         # 수정 저장 값 재등록 이력도 같은 변경 품목만 기록한다.
         for item_id, product_name, warehouse_name, lot, exp_date, company, qty in after_rows:
+            before = before_by_id.get(int(item_id)) or {}
             insert_transaction_log(
                 cur,
                 created_at=now,
@@ -164,7 +168,7 @@ def _patched_update_confirmed_export_waiting_items(
                 lot=lot,
                 exp_date=exp_date,
                 from_company=company,
-                from_location="P",
+                from_location=before.get("waiting_location", "P"),
                 to_company=requested_company,
                 to_location="",
                 qty=int(qty or 0),

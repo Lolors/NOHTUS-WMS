@@ -165,7 +165,7 @@ def assign_items(case_id: int, item_ids: list[int], box_no: int) -> None:
 def assign_partial_item(case_id: int, item_id: int, box_no: int, quantity: float) -> None:
     item = db.row(
         '''SELECT id, case_id, order_item_id, business_unit, location, product_name,
-                  lot_no, expiry_date, requested_qty, box_no, created_at
+                  lot_no, expiry_date, requested_qty, box_no, created_at, source_inventory_id
            FROM shipment_items
            WHERE id=? AND case_id=?''',
         (item_id, case_id),
@@ -196,8 +196,8 @@ def assign_partial_item(case_id: int, item_id: int, box_no: int, quantity: float
     db.execute(
         '''INSERT INTO shipment_items(
                case_id, order_item_id, business_unit, location, product_name,
-               lot_no, expiry_date, requested_qty, box_no, created_at, updated_at
-           ) VALUES (?,?,?,?,?,?,?,?,NULL,?,?)''',
+               lot_no, expiry_date, requested_qty, box_no, source_inventory_id, created_at, updated_at
+           ) VALUES (?,?,?,?,?,?,?,?,NULL,?,?,?)''',
         (
             case_id,
             item['order_item_id'],
@@ -207,6 +207,7 @@ def assign_partial_item(case_id: int, item_id: int, box_no: int, quantity: float
             item['lot_no'],
             item['expiry_date'],
             remaining_qty,
+            item['source_inventory_id'],
             item['created_at'] or now,
             now,
         ),
@@ -333,7 +334,7 @@ def clone_box(case_id: int, source_box_no: int, clone_count: int) -> list[int]:
 
     source_items = db.rows(
         '''SELECT s.order_item_id, s.business_unit, s.location, s.product_name, s.lot_no,
-                  s.expiry_date, s.requested_qty, s.created_at
+                  s.expiry_date, s.requested_qty, s.created_at, s.source_inventory_id
            FROM shipment_items s
            JOIN order_items o
              ON o.id=s.order_item_id
@@ -369,8 +370,8 @@ def clone_box(case_id: int, source_box_no: int, clone_count: int) -> list[int]:
             db.execute(
                 '''INSERT INTO shipment_items(
                        case_id, order_item_id, business_unit, location, product_name,
-                       lot_no, expiry_date, requested_qty, box_no, created_at, updated_at
-                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+                       lot_no, expiry_date, requested_qty, box_no, source_inventory_id, created_at, updated_at
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
                 (
                     case_id,
                     item['order_item_id'],
@@ -381,6 +382,7 @@ def clone_box(case_id: int, source_box_no: int, clone_count: int) -> list[int]:
                     item['expiry_date'],
                     float(item['requested_qty'] or 0),
                     target_box_no,
+                    item['source_inventory_id'],
                     item['created_at'] or now,
                     now,
                 ),

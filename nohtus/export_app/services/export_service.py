@@ -93,7 +93,19 @@ def return_domestic_to_packing_complete(case_id: int) -> None:
     if str(case['stage'] or '').strip() != '국내배송':
         raise ValueError('국내배송 단계인 주문만 패킹완료로 되돌릴 수 있습니다.')
 
-    return_confirmed_export_to_waiting(str(case['export_no'] or ''))
+    restored = return_confirmed_export_to_waiting(str(case['export_no'] or ''))
+    if not restored:
+        # return_confirmed_export_to_waiting은 되돌릴 확정 건을 못 찾으면
+        # 조용히 0을 반환한다(다른 곳에서는 이미 되돌린 뒤 재호출되는 정상적인
+        # 멱등 상황도 있어서다). 하지만 국내배송 단계까지 온 건은 반드시 실제로
+        # 확정된 WMS 재고가 있어야 하므로, 여기서 0이 나오면 단계만 앞서
+        # 진행시키지 않고 데이터 상태를 알린다 - 그래야 "되돌리기는 성공한
+        # 것처럼 보이는데 실제로는 재고가 원복되지 않은" 사고를 막을 수 있다.
+        raise ValueError(
+            f"수출번호 {case['export_no']}에 원복할 확정 재고를 WMS에서 찾지 못했습니다. "
+            "이미 다른 경로로 원복되었거나 데이터가 어긋나 있을 수 있으니 "
+            "재고현황과 수출확정 매출 등록 화면을 확인하세요."
+        )
 
     db.execute(
         "UPDATE export_cases SET stage='패킹 완료',status='진행중',updated_at=? WHERE id=?",

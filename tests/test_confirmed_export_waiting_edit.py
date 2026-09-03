@@ -387,6 +387,47 @@ class ConfirmedExportWaitingEditTests(unittest.TestCase):
         self.assertEqual(stock, 0)
         self.assertEqual(tx_count, 0)
 
+    def test_editing_order_after_confirmed_source_id_drifts_keeps_confirmed_stock_deducted(self):
+        """실사용 버그: 확정된 품목의 실재고가 이후 편집 과정에서 다른
+        inventory id로 재해석되면(제품/LOT/유통기한은 동일), 새 cart에
+        "옛 id"가 더는 없다는 이유만으로 확정 행이 통째로 삭제되고 재고가
+        원위치로 복원되어 버렸다 — 이미 판매 확정된 재고가 아무 통보 없이
+        "확정은 됐지만 재고는 안 깎인" 유령 상태가 되는 사고로 이어졌다.
+        서명(사업장/제품명/LOT/유통기한)이 같은 다른 id가 cart에 있으면
+        그 id로 옮겨 붙여서 확정 재고를 유지해야 한다."""
+        order_id = self._add_order()
+        with sqlite3.connect(self.db_path, factory=self.connection_factory) as con:
+            con.execute(
+                """INSERT INTO inventory(
+                       id,location,company,product_name,warehouse_name,lot,exp_date,qty,updated_at,is_shippable
+                   ) VALUES(20,'T4','NOH','제품','ERP-A','LOT-1','2027-01-01',3,'2026-01-01',1)"""
+            )
+
+        save_export_waiting_order(
+            [{
+                "id": 20, "사업장": "NOH", "제품명": "제품", "warehouse_name": "ERP-A",
+                "LOT": "LOT-1", "유통기한": "2027-01-01", "로케이션": "T4", "요청수량": 3,
+            }],
+            country="KR", buyer="Old Buyer", transport_method="항공", export_no="OLD-1",
+            editing_order_id=order_id,
+        )
+
+        with sqlite3.connect(self.db_path, factory=self.connection_factory) as con:
+            item = con.execute(
+                "SELECT source_inventory_id,qty,confirmed,confirmed_company FROM export_waiting_items WHERE order_id=?",
+                (order_id,),
+            ).fetchone()
+            inv10_qty = con.execute("SELECT qty FROM inventory WHERE id=10").fetchone()[0]
+            inv20_qty = con.execute("SELECT qty FROM inventory WHERE id=20").fetchone()[0]
+            cancel_tx_count = con.execute(
+                "SELECT COUNT(*) FROM transactions WHERE tx_type='출고지시취소'"
+            ).fetchone()[0]
+
+        self.assertEqual(item, (20, 3, 1, "ERP-NOH"))
+        self.assertEqual(inv10_qty, 0)
+        self.assertEqual(inv20_qty, 0)
+        self.assertEqual(cancel_tx_count, 0)
+
     def test_rejects_waiting_item_sales_history_edit(self):
         order_id = self._add_order(status="waiting")
         with sqlite3.connect(self.db_path, factory=self.connection_factory) as con:

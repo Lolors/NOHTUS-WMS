@@ -14,23 +14,44 @@ def _patched_apply_export_waiting_item_changes(
     now,
     title,
     export_no,
+    target_location=None,
 ):
-    """Rebuild P inventory safely, but record history only for actual changes."""
+    """Rebuild staging inventory safely, but record history only for actual changes."""
+    if target_location is None:
+        target_location = export_waiting.P
     current_items = export_waiting._items(cur, order_id, confirmed=False)
     target_qty = {int(k): int(v) for k, v in dict(grouped).items() if int(v) > 0}
 
     before_qty = defaultdict(int)
     before_item = {}
+    # 이미 있던 품목은 재저장할 때마다 target_location(기본 P)으로 슬쩍
+    # 옮겨가면 안 된다 — T3 등에 실제로 놓인 재고가 관계없는 수정 저장 한 번에
+    # 조용히 P로 되돌아가는 사고를 막기 위해, 기존 위치를 그대로 유지하고
+    # target_location은 이번에 새로 추가되는 품목에만 적용한다.
+    prior_location_by_source = {}
     for item in current_items:
         source_id = int(item.get("source_inventory_id") or 0)
         before_qty[source_id] += int(item.get("qty") or 0)
         before_item.setdefault(source_id, item)
+        prior_location_by_source.setdefault(
+            source_id, str(item.get("waiting_location") or "").strip() or export_waiting.P
+        )
 
-    # 재고 정합성을 위해 내부적으로는 기존 목록을 전부 원복한 뒤 새 목록을 다시 적재한다.
-    # 이 과정 자체는 이력에 남기지 않고, 아래에서 변경분만 별도로 기록한다.
+    # 수량도 그대로고 연결도 멀쩡한 품목은 절대 건드리지 않는다. 예전에는
+    # 저장할 때마다 미확정 품목 전체를 원복했다가 다시 담았는데,
+    # source_inventory_id의 원래 위치가 'T5'처럼 수출대기 보관 위치 코드와
+    # 우연히 겹치면 이미 소진된 원본 재고를 다시 찾으려다 "재고를 찾을 수
+    # 없습니다/재고가 부족합니다" 오류로 무관한 저장까지 막는 사고로
+    # 이어졌다. 다만 연결이 이미 깨진 품목은(재고조사 등으로 대기 재고가
+    # 원위치로 옮겨진 경우) 수량이 그대로여도 복구를 시도해야 한다.
     restored_source_rows = {}
     for item in current_items:
         source_id = int(item.get("source_inventory_id") or 0)
+        if (
+            int(target_qty.get(source_id, 0)) == int(item.get("qty") or 0)
+            and export_waiting._waiting_item_link_is_healthy(cur, item)
+        ):
+            continue
         try:
             restored, _ = export_waiting._restore_waiting_item(cur, item, now)
         except ValueError:
@@ -38,22 +59,27 @@ def _patched_apply_export_waiting_item_changes(
             # 이 품목을 삭제하는 경우에만 연결행을 정리한다.
             if target_qty.get(source_id, 0) > 0:
                 raise
+            cur.execute("DELETE FROM export_waiting_items WHERE id=?", (int(item["id"]),))
             continue
         if restored:
             restored_source_rows[source_id] = restored
             source_hints[source_id] = restored
-
-    cur.execute("DELETE FROM export_waiting_items WHERE order_id=?", (int(order_id),))
+        cur.execute("DELETE FROM export_waiting_items WHERE id=?", (int(item["id"]),))
 
     after_item = {}
+    after_location = {}
     for source_id, qty in target_qty.items():
+        if int(before_qty.get(source_id, 0)) == qty:
+            # 위에서 건드리지 않은 품목이므로 새로 적재할 필요가 없다.
+            continue
         hint = source_hints.get(source_id) or restored_source_rows.get(source_id)
         source = export_waiting._take_source(cur, source_id, qty, now, hint)
         resolved_inventory_id = int(
             source.get("_resolved_inventory_id") or source.get("id") or source_id
         )
-        waiting_inventory_id = export_waiting._add(
-            cur, source, export_waiting.P, qty, now, 0
+        item_target_location = prior_location_by_source.get(source_id, target_location)
+        waiting_inventory_id, _, actual_location = export_waiting._place_source_in_staging(
+            cur, source, qty, now, item_target_location
         )
         cur.execute(
             """INSERT INTO export_waiting_items(
@@ -71,12 +97,13 @@ def _patched_apply_export_waiting_item_changes(
                 source.get("lot", "-") or "-",
                 source.get("exp_date", "-") or "-",
                 source.get("location", ""),
-                export_waiting.P,
+                actual_location,
                 qty,
                 now,
             ),
         )
         after_item[source_id] = source
+        after_location[source_id] = actual_location
 
     # 삭제·감소·추가·증가된 수량만 이력에 남긴다.
     for source_id in sorted(set(before_qty) | set(target_qty)):
@@ -97,7 +124,7 @@ def _patched_apply_export_waiting_item_changes(
                 lot=item.get("lot", "-"),
                 exp_date=item.get("exp_date", "-"),
                 from_company=item.get("company", ""),
-                from_location=export_waiting.P,
+                from_location=str(item.get("waiting_location") or "").strip() or export_waiting.P,
                 to_company=item.get("company", ""),
                 to_location=item.get("source_location", ""),
                 qty=changed_qty,
@@ -121,7 +148,7 @@ def _patched_apply_export_waiting_item_changes(
                 from_company=item.get("company", ""),
                 from_location=item.get("location", ""),
                 to_company=item.get("company", ""),
-                to_location=export_waiting.P,
+                to_location=after_location.get(source_id, export_waiting.P),
                 qty=changed_qty,
                 memo=(
                     f"수출대기 수정 / 품목추가 또는 수량증가 / {title} / "
