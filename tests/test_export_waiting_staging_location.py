@@ -235,6 +235,39 @@ class ExportWaitingStagingLocationTests(unittest.TestCase):
         self.assertEqual(t3_qty, 4)
         self.assertEqual(p_qty, 3)
 
+    def test_waiting_location_reflects_where_stock_actually_already_sits(self):
+        """실사용 버그: 재고가 이미 T4처럼 다른 수출대기 위치 코드에 있으면
+        _take_source가 "이미 대기 위치에 있다"고 보고 실제로는 옮기지 않는데,
+        그런데도 waiting_location 컬럼에는 물리적으로 옮기지 않은 target
+        위치(P)가 그대로 기록됐다. 그 결과 export_waiting_items는 'P에
+        있다'고 주장하지만 실제 재고는 T4에 남아있어, 이후 자동 복구
+        로직이 "재고를 찾을 수 없다"고 오판하는 사고로 이어졌다."""
+        with sqlite3.connect(self.db_path, factory=self.connection_factory) as con:
+            con.execute(
+                """INSERT INTO inventory(
+                       id,location,company,product_name,warehouse_name,lot,exp_date,qty,updated_at,is_shippable
+                   ) VALUES(3,'T4','NOH','제품C','ERP-C','-','-',200,'2026-01-01',1)"""
+            )
+        result = save_export_waiting_order(
+            [{
+                "id": 3, "사업장": "NOH", "제품명": "제품C", "warehouse_name": "ERP-C",
+                "LOT": "-", "유통기한": "-", "로케이션": "T4", "요청수량": 200,
+            }],
+            country="KR", export_no="EXP-1",
+        )
+
+        with sqlite3.connect(self.db_path, factory=self.connection_factory) as con:
+            waiting_location = con.execute(
+                "SELECT waiting_location FROM export_waiting_items WHERE order_id=?",
+                (result["order_id"],),
+            ).fetchone()[0]
+            t4_qty = con.execute("SELECT COALESCE(SUM(qty),0) FROM inventory WHERE location='T4'").fetchone()[0]
+            p_qty = con.execute("SELECT COALESCE(SUM(qty),0) FROM inventory WHERE location='P'").fetchone()[0]
+
+        self.assertEqual(waiting_location, "T4")
+        self.assertEqual(t4_qty, 200)
+        self.assertEqual(p_qty, 0)
+
     def test_default_staging_location_is_still_p(self):
         result = save_export_waiting_order(self._cart(), country="KR", export_no="EXP-1")
 

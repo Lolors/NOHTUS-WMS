@@ -78,7 +78,7 @@ def _patched_apply_export_waiting_item_changes(
             source.get("_resolved_inventory_id") or source.get("id") or source_id
         )
         item_target_location = prior_location_by_source.get(source_id, target_location)
-        waiting_inventory_id, _ = export_waiting._place_source_in_staging(
+        waiting_inventory_id, _, actual_location = export_waiting._place_source_in_staging(
             cur, source, qty, now, item_target_location
         )
         cur.execute(
@@ -97,13 +97,13 @@ def _patched_apply_export_waiting_item_changes(
                 source.get("lot", "-") or "-",
                 source.get("exp_date", "-") or "-",
                 source.get("location", ""),
-                item_target_location,
+                actual_location,
                 qty,
                 now,
             ),
         )
         after_item[source_id] = source
-        after_location[source_id] = item_target_location
+        after_location[source_id] = actual_location
 
     # 삭제·감소·추가·증가된 수량만 이력에 남긴다.
     for source_id in sorted(set(before_qty) | set(target_qty)):

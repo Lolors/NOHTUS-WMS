@@ -331,10 +331,19 @@ def _take_source(cur, inventory_id, qty, now, fallback=None):
 
 def _place_source_in_staging(cur, source, qty, now, staging_location):
     """일반 재고는 지정한 수출대기 위치로 이동하고, 이미 그 위치의 미예약분은
-    수량을 더하지 않고 예약만 연결한다."""
+    수량을 더하지 않고 예약만 연결한다.
+
+    반환하는 세 번째 값은 예약이 실제로 놓인 위치다. 원본이 이미 다른
+    수출대기 위치 코드(예: T4)에 있던 경우 물리적으로 옮기지 않으므로,
+    이때는 staging_location이 아니라 원본이 실제로 있던 위치를 돌려준다.
+    이 값을 쓰지 않고 항상 staging_location을 waiting_location에 기록하면,
+    실제로는 T4에 있는 재고인데 export_waiting_items.waiting_location만
+    'P'로 잘못 기록되어 이후 자동 복구 로직이 "재고를 찾을 수 없다"고
+    오판하는 사고로 이어진다."""
     if source.get("_already_staged"):
-        return int(source.get("id") or 0), False
-    return _add(cur, source, staging_location, qty, now, 0), True
+        actual_location = str(source.get("location") or "").strip() or staging_location
+        return int(source.get("id") or 0), False, actual_location
+    return _add(cur, source, staging_location, qty, now, 0), True, staging_location
 
 
 def _take_p(cur, item, now, qty=None):
@@ -545,12 +554,12 @@ def _apply_export_waiting_item_changes(cur, order_id, grouped, source_hints, now
         source = _take_source(cur, source_id, qty, now, hint)
         resolved_inventory_id = int(source.get("_resolved_inventory_id") or source.get("id") or source_id)
         item_target_location = prior_location_by_source.get(source_id, target_location)
-        waiting_inventory_id, moved_to_p = _place_source_in_staging(cur, source, qty, now, item_target_location)
+        waiting_inventory_id, moved_to_p, actual_location = _place_source_in_staging(cur, source, qty, now, item_target_location)
         cur.execute("""INSERT INTO export_waiting_items(order_id,source_inventory_id,waiting_inventory_id,company,product_name,
             warehouse_name,lot,exp_date,source_location,waiting_location,qty,moved_at,confirmed)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)""",
             (order_id,resolved_inventory_id,waiting_inventory_id,source.get("company", ""),source.get("product_name", ""),source.get("warehouse_name", "") or "",
-             source.get("lot", "-") or "-",source.get("exp_date", "-") or "-",source.get("location", ""),item_target_location,qty,now))
+             source.get("lot", "-") or "-",source.get("exp_date", "-") or "-",source.get("location", ""),actual_location,qty,now))
         if moved_to_p:
             insert_transaction_log(
             cur,
@@ -681,7 +690,7 @@ def _apply_confirmed_export_item_changes(
         source = _take_source(cur, source_id, qty, now, hint)
         resolved_inventory_id = int(source.get("_resolved_inventory_id") or source.get("id") or source_id)
         item_target_location = prior_location_by_source.get(source_id, target_location)
-        waiting_inventory_id, moved_to_p = _place_source_in_staging(cur, source, qty, now, item_target_location)
+        waiting_inventory_id, moved_to_p, actual_location = _place_source_in_staging(cur, source, qty, now, item_target_location)
         existing_waiting = _dict_row(
             cur,
             """SELECT id,qty FROM export_waiting_items
@@ -695,7 +704,7 @@ def _apply_confirmed_export_item_changes(
                 (
                     int(existing_waiting.get("qty") or 0) + qty,
                     waiting_inventory_id,
-                    item_target_location,
+                    actual_location,
                     now,
                     int(existing_waiting["id"]),
                 ),
@@ -717,7 +726,7 @@ def _apply_confirmed_export_item_changes(
                     source.get("lot", "-") or "-",
                     source.get("exp_date", "-") or "-",
                     source.get("location", ""),
-                    item_target_location,
+                    actual_location,
                     qty,
                     now,
                 ),
@@ -856,12 +865,12 @@ def save_export_waiting_order(
             for inventory_id, qty in grouped.items():
                 s = _take_source(cur, inventory_id, qty, now, source_hints.get(inventory_id))
                 resolved_inventory_id = int(s.get("_resolved_inventory_id") or s.get("id") or inventory_id)
-                waiting_inventory_id, moved_to_p = _place_source_in_staging(cur, s, qty, now, staging_location)
+                waiting_inventory_id, moved_to_p, actual_location = _place_source_in_staging(cur, s, qty, now, staging_location)
                 cur.execute("""INSERT INTO export_waiting_items(order_id,source_inventory_id,waiting_inventory_id,company,product_name,
                     warehouse_name,lot,exp_date,source_location,waiting_location,qty,moved_at,confirmed)
                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)""",
                     (order_id,resolved_inventory_id,waiting_inventory_id,s.get("company", ""),s.get("product_name", ""),s.get("warehouse_name", "") or "",
-                     s.get("lot", "-") or "-",s.get("exp_date", "-") or "-",s.get("location", ""),staging_location,qty,now))
+                     s.get("lot", "-") or "-",s.get("exp_date", "-") or "-",s.get("location", ""),actual_location,qty,now))
                 if moved_to_p:
                     insert_transaction_log(cur, created_at=now, tx_type="위치이동", product_name=s.get("product_name", ""),
                         warehouse_name=s.get("warehouse_name", "") or "", lot=s.get("lot", "-"), exp_date=s.get("exp_date", "-"),
@@ -1079,12 +1088,12 @@ def repair_broken_waiting_reservations(export_no: str) -> dict:
                     # 이미 staging_location에 있던 available만큼은 그대로 두고,
                     # 부족했던 shortfall만 새로 옮겨 담는다(qty 전체를 다시
                     # 더하면 이미 있던 몫이 중복 가산된다).
-                    waiting_inventory_id, _ = _place_source_in_staging(cur, item, shortfall, now, staging_location)
+                    waiting_inventory_id, _, actual_location = _place_source_in_staging(cur, item, shortfall, now, staging_location)
                     cur.execute(
                         """UPDATE export_waiting_items
-                           SET waiting_inventory_id=?,moved_at=?
+                           SET waiting_inventory_id=?,waiting_location=?,moved_at=?
                            WHERE id=?""",
-                        (waiting_inventory_id, now, int(item["id"])),
+                        (waiting_inventory_id, actual_location, now, int(item["id"])),
                     )
                     insert_transaction_log(
                         cur, created_at=now, tx_type="위치이동", product_name=item["product_name"],
@@ -1097,12 +1106,12 @@ def repair_broken_waiting_reservations(export_no: str) -> dict:
                     repaired.append(f"{item['product_name']} ({qty}EA)")
                     continue
                 resolved_inventory_id = int(s.get("_resolved_inventory_id") or s.get("id") or 0)
-                waiting_inventory_id, _ = _place_source_in_staging(cur, s, qty, now, staging_location)
+                waiting_inventory_id, _, actual_location = _place_source_in_staging(cur, s, qty, now, staging_location)
                 cur.execute(
                     """UPDATE export_waiting_items
-                       SET source_inventory_id=?,waiting_inventory_id=?,source_location=?,moved_at=?
+                       SET source_inventory_id=?,waiting_inventory_id=?,source_location=?,waiting_location=?,moved_at=?
                        WHERE id=?""",
-                    (resolved_inventory_id, waiting_inventory_id, s.get("location", ""), now, int(item["id"])),
+                    (resolved_inventory_id, waiting_inventory_id, s.get("location", ""), actual_location, now, int(item["id"])),
                 )
                 insert_transaction_log(
                     cur, created_at=now, tx_type="위치이동", product_name=item["product_name"],
