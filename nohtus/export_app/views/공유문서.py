@@ -236,58 +236,44 @@ def render_photo_organizer(case_id: int) -> None:
         st.warning('박스 패킹에서 저장된 CTN이 없습니다.')
         return
 
-    st.markdown('### 사진 정리')
-    st.caption('각 영역에 사진을 드래그해 넣으세요. CTN은 번호 오름차순으로 표시됩니다.')
-    st.markdown(
-        '''
-        <style>
-        div[data-testid="stVerticalBlock"]:has(> div .photo-drop-anchor) {
-            border: 2px dashed #8a94a6;
-            border-radius: 12px;
-            padding: 14px 16px 8px;
-            margin: 8px 0 16px;
-            background: rgba(128, 128, 128, 0.05);
-        }
-        </style>
-        ''',
-        unsafe_allow_html=True,
-    )
+    st.subheader('사진 정리')
+    st.caption('각 CTN 영역에 사진을 넣으세요. CTN은 번호 오름차순으로 표시됩니다.')
 
     area_names = [*(f'CTN{number}' for number in box_numbers), '전체']
     uploads: dict[str, list] = {}
     tags: dict[str, list[str]] = {}
     for area_name in area_names:
-        with st.container():
-            st.markdown(f'<div class="photo-drop-anchor"></div>#### {area_name}', unsafe_allow_html=True)
-            area_files = list(st.file_uploader(
-                f'{area_name} 사진',
-                type=['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'tif', 'tiff'],
-                accept_multiple_files=True,
-                key=f'photo_organizer_files_{case_id}_{area_name}',
-                label_visibility='collapsed',
-            ) or [])
-            uploads[area_name] = area_files
-            area_tags: list[str] = []
-            if len(area_files) > 1:
-                st.caption('사진이 여러 장이면 각 사진의 태그를 선택하세요.')
-                for index, uploaded in enumerate(area_files):
-                    cols = st.columns([3, 2])
-                    cols[0].text_input(
-                        f'{area_name} 파일 {index + 1}',
-                        value=uploaded.name,
-                        disabled=True,
-                        key=f'photo_file_name_{case_id}_{area_name}_{index}',
-                        label_visibility='collapsed',
-                    )
-                    area_tags.append(cols[1].selectbox(
-                        f'{uploaded.name} 태그',
-                        photo_organizer_service.PHOTO_TAGS,
-                        key=f'photo_tag_{case_id}_{area_name}_{index}',
-                        label_visibility='collapsed',
-                    ))
-            elif area_files:
-                area_tags = ['내부']
-            tags[area_name] = area_tags
+        st.markdown(f'**{area_name}**')
+        area_files = list(st.file_uploader(
+            f'{area_name} 사진',
+            type=['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'tif', 'tiff'],
+            accept_multiple_files=True,
+            key=f'photo_organizer_files_{case_id}_{area_name}',
+            label_visibility='collapsed',
+        ) or [])
+        uploads[area_name] = area_files
+        area_tags: list[str] = []
+        if len(area_files) > 1:
+            st.caption('사진이 여러 장이면 각 사진의 태그를 선택하세요.')
+            for index, uploaded in enumerate(area_files):
+                cols = st.columns([3, 2])
+                cols[0].text_input(
+                    f'{area_name} 파일 {index + 1}',
+                    value=uploaded.name,
+                    disabled=True,
+                    key=f'photo_file_name_{case_id}_{area_name}_{index}',
+                    label_visibility='collapsed',
+                )
+                area_tags.append(cols[1].selectbox(
+                    f'{uploaded.name} 태그',
+                    photo_organizer_service.PHOTO_TAGS,
+                    key=f'photo_tag_{case_id}_{area_name}_{index}',
+                    label_visibility='collapsed',
+                ))
+        elif area_files:
+            area_tags = ['내부']
+        tags[area_name] = area_tags
+        st.divider()
 
     save_path_key = f'photo_organizer_save_path_{case_id}'
     if save_path_key not in st.session_state:
