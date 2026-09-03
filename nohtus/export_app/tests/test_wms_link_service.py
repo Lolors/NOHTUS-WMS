@@ -868,6 +868,45 @@ class WmsLinkServiceTests(unittest.TestCase):
             con.close()
         self.assertIsNone(row)
 
+    def test_fill_missing_source_links_links_every_ctn_split_row_to_the_same_stock(self) -> None:
+        """실사용 버그: 동일 CTN 나누기로 재고 1건이 5개 저장행(box_no)으로
+        쪼개졌는데, 그중 1개만 재고 연결(source_inventory_id)이 남고 나머지
+        4개는 연결이 안 된 채로 남아있는 경우를 재현한다. 후보가 유일하면
+        이미 한 행이 그 재고 id를 썼더라도, 같은 서명의 나머지 행에도
+        전부 그 재고 id를 연결해야 한다."""
+        rows = [
+            {"source_inventory_id": 13071, "product_name": "오메가 PDT 장비",
+             "business_unit": "노투스", "lot_no": "-", "expiry_date": "-"},
+            {"source_inventory_id": None, "product_name": "오메가 PDT 장비",
+             "business_unit": "노투스", "lot_no": "-", "expiry_date": "-"},
+            {"source_inventory_id": None, "product_name": "오메가 PDT 장비",
+             "business_unit": "노투스", "lot_no": "-", "expiry_date": "-"},
+            {"source_inventory_id": None, "product_name": "오메가 PDT 장비",
+             "business_unit": "노투스", "lot_no": "-", "expiry_date": "-"},
+        ]
+        waiting_rows = [{
+            "source_inventory_id": 13071, "product_name": "오메가 PDT 장비",
+            "company": "노투스", "lot": "-", "exp_date": "-", "source_location": "P",
+        }]
+
+        wms_link_service._fill_missing_source_links(rows, waiting_rows)
+
+        self.assertEqual([row["source_inventory_id"] for row in rows], [13071, 13071, 13071, 13071])
+
+    def test_fill_missing_source_links_does_not_guess_between_two_distinct_stocks(self) -> None:
+        rows = [
+            {"source_inventory_id": None, "product_name": "제품X", "business_unit": "NOH", "lot_no": "-", "expiry_date": "-"},
+            {"source_inventory_id": None, "product_name": "제품X", "business_unit": "NOH", "lot_no": "-", "expiry_date": "-"},
+        ]
+        waiting_rows = [
+            {"source_inventory_id": 1, "product_name": "제품X", "company": "NOH", "lot": "-", "exp_date": "-", "source_location": "P"},
+            {"source_inventory_id": 2, "product_name": "제품X", "company": "NOH", "lot": "-", "exp_date": "-", "source_location": "T2"},
+        ]
+
+        wms_link_service._fill_missing_source_links(rows, waiting_rows)
+
+        self.assertEqual([row["source_inventory_id"] for row in rows], [None, None])
+
     def test_deleting_one_order_keeps_other_order_quantity_for_shared_source(self) -> None:
         waiting_rows = [{
             "source_inventory_id": 10, "company": "NOH", "product_name": "제품A",

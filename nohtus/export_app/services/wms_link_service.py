@@ -441,13 +441,19 @@ def cart_rows_after_selected_order_edit(
 
 
 def _fill_missing_source_links(rows: list[dict], waiting_rows: list[dict]) -> None:
-    """구형/편집표 행에서 source_inventory_id가 빠졌다면 현재 WMS 대기행으로 복구한다."""
-    used: set[int] = set()
+    """구형/편집표 행에서 source_inventory_id가 빠졌다면 현재 WMS 대기행으로 복구한다.
+
+    동일 CTN 나누기 등으로 재고 1건이 여러 EXPORT 저장행(박스)에 걸쳐 있을 수
+    있다. 후보가 유일하면(서명이 겹치는 다른 재고 id가 없으면) 그 재고 id를
+    "먼저 연결한 행이 다 써버린 것"으로 취급해 제외하지 않고, 같은 서명을
+    가진 나머지 행에도 전부 이어서 연결한다 — 서명이 같은 재고 id가
+    여러 개라 어느 쪽인지 알 수 없는 경우에만(matches가 1개가 아니면)
+    추측하지 않고 건너뛴다."""
     for row in rows:
         if row.get("source_inventory_id"):
-            used.add(int(row["source_inventory_id"])); continue
-        matches = [w for w in waiting_rows if int(w.get("source_inventory_id") or 0) not in used
-                   and _match_text(w.get("product_name")) == _match_text(row.get("product_name"))
+            continue
+        matches = [w for w in waiting_rows
+                   if _match_text(w.get("product_name")) == _match_text(row.get("product_name"))
                    and (not _match_value(row.get("business_unit")) or _match_value(w.get("company")) == _match_value(row.get("business_unit")))
                    and _match_value(w.get("lot")) == _match_value(row.get("lot_no"))
                    and _match_date(w.get("exp_date")) == _match_date(row.get("expiry_date"))]
@@ -456,7 +462,6 @@ def _fill_missing_source_links(rows: list[dict], waiting_rows: list[dict]) -> No
             if source_id:
                 row["source_inventory_id"] = source_id
                 row["source_location"] = row.get("source_location") or row.get("location") or match.get("source_location") or ""
-                used.add(source_id)
 
 
 def save_picked_inventory(*, case_id:int, order_item_id:int, kept_rows:list[dict], picked_rows:list[dict], staging_location:str="P") -> dict:
