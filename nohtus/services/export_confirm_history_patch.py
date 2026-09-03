@@ -29,10 +29,13 @@ def _patched_update_confirmed_export_waiting_items(
 ):
     """확정 출고정보 수정 시 실제로 값이 바뀐 품목만 취소/재등록 이력을 남긴다.
 
-    화면에서 여러 품목을 선택했더라도 ERP 사업장·매출처·출고일자가 기존과
-    같은 품목은 이력을 만들지 않는다. 변경된 품목만 기존 출고지시취소 이력을
-    남긴 뒤 수정 저장된 값으로 출고지시 이력을 다시 기록한다. 재고 수량은
-    변경하지 않는다.
+    화면에서 여러 품목을 선택했더라도 ERP 사업장·매출처가 기존과 같은
+    품목은 이력을 만들지 않는다. 출고일자만 바뀐 경우도 재고 이동이
+    실제로 일어난 게 아니므로 "출고지시취소" 이력을 남기지 않는다 — 그런
+    출고지시취소는 실제로는 아무것도 취소된 게 없는데 이력조회에만
+    남아 혼란을 준다. ERP 사업장·코드·매출처 중 하나라도 바뀐 품목만
+    기존 출고지시취소 이력을 남긴 뒤 수정 저장된 값으로 출고지시 이력을
+    다시 기록한다. 재고 수량은 변경하지 않는다.
     """
     selected_ids = sorted({int(x) for x in (item_ids or [])})
     if not selected_ids:
@@ -96,7 +99,6 @@ def _patched_update_confirmed_export_waiting_items(
             str(old_company or "").strip() != requested_company
             or str(old_code or "").strip() != requested_code
             or str(old_customer or "").strip() != requested_customer
-            or old_item_date != requested_date
         ):
             changed_ids.append(int(item_id))
 
