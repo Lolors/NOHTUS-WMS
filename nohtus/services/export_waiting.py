@@ -180,6 +180,17 @@ def _cart_source_hint(row):
     }
 
 
+def _item_signature(row):
+    """재고 id가 달라도 같은 재고로 볼 수 있는 서명(사업장/제품명/LOT/유통기한)."""
+    row = row or {}
+    return (
+        str(row.get("company") or "").strip(),
+        str(row.get("product_name") or "").strip(),
+        str(row.get("lot") or "-").strip() or "-",
+        str(row.get("exp_date") or "-").strip() or "-",
+    )
+
+
 def _source_identity_matches(row, hint):
     """장바구니가 가리키던 재고와 현재 ID 행이 같은 재고인지 확인한다.
 
@@ -599,6 +610,20 @@ def _apply_confirmed_export_item_changes(
     if not current_items:
         raise ValueError("수정할 수출확정 품목을 찾을 수 없습니다.")
 
+    # cart는 매번 재고 id를 새로 resolve하므로, 확정 품목의 source_inventory_id가
+    # 그 사이 다른 id로 바뀔 수 있다(같은 제품이 여러 로케이션 코드를 오가며
+    # 재해석된 경우 등). 이때 옛 id가 cart에 없다는 이유만으로 "이 확정 품목을
+    # 줄이려는 것"으로 오인하면, 이미 판매 확정된 재고가 무관한 편집 한 번에
+    # 조용히 원위치로 복원되면서도 확정 표시만 그대로 남는 사고로 이어진다
+    # (실제로는 재고가 안 깎였는데 "확정됨"으로만 보이는 유령 상태). 서명
+    # (사업장/제품명/LOT/유통기한)이 같은 다른 id가 cart에 남아 있으면
+    # 그 id로 옮겨 붙여 확정 재고를 그대로 유지한다.
+    signature_targets: dict[tuple, list[int]] = {}
+    for inventory_id in remaining_target:
+        hint = source_hints.get(inventory_id)
+        if hint:
+            signature_targets.setdefault(_item_signature(hint), []).append(inventory_id)
+
     # 이미 미확정으로 대기 중인 품목의 증가분은, 새로 추가되는 품목과 달리
     # 원래 있던 위치(예: T3)에 그대로 더 쌓는다 — target_location(기본 P)은
     # 이번에 처음 담기는 품목에만 적용한다.
@@ -610,12 +635,56 @@ def _apply_confirmed_export_item_changes(
     for item in current_items:
         source_id = int(item.get("source_inventory_id") or 0)
         old_qty = int(item.get("qty") or 0)
-        kept_qty = min(old_qty, int(remaining_target.get(source_id, 0)))
+        matched_id = source_id if remaining_target.get(source_id, 0) > 0 else None
+        if matched_id is None:
+            for candidate_id in signature_targets.get(_item_signature(item), []):
+                if remaining_target.get(candidate_id, 0) > 0:
+                    matched_id = candidate_id
+                    break
+        kept_qty = min(old_qty, int(remaining_target.get(matched_id, 0))) if matched_id is not None else 0
         removed_qty = old_qty - kept_qty
-        remaining_target[source_id] = int(remaining_target.get(source_id, 0)) - kept_qty
+        if matched_id is not None:
+            remaining_target[matched_id] = int(remaining_target.get(matched_id, 0)) - kept_qty
 
         if kept_qty:
-            cur.execute("UPDATE export_waiting_items SET qty=? WHERE id=?", (kept_qty, int(item["id"])))
+            if matched_id is not None and matched_id != source_id:
+                # 재고 id만 갈아탄 게 아니라, 이미 판매 확정되어 있던 수량을
+                # 새 id의 실재고에서도 실제로 차감해야 한다 — 그렇지 않으면
+                # "확정됨" 표시만 있고 실제로는 아무 재고도 안 깎인 상태가 된다.
+                new_row = _dict_row(cur, "SELECT qty FROM inventory WHERE id=?", (matched_id,))
+                new_available = int((new_row or {}).get("qty") or 0)
+                if new_available < kept_qty:
+                    raise ValueError(
+                        f"{item.get('product_name','제품')} 재고 부족: 요청 {kept_qty}EA / 현재 {new_available}EA"
+                    )
+                cur.execute(
+                    "UPDATE inventory SET qty=?,updated_at=? WHERE id=?",
+                    (new_available - kept_qty, now, matched_id),
+                )
+                cur.execute(
+                    "UPDATE export_waiting_items SET source_inventory_id=?,qty=? WHERE id=?",
+                    (matched_id, kept_qty, int(item["id"])),
+                )
+                insert_transaction_log(
+                    cur,
+                    created_at=now,
+                    tx_type="출고지시",
+                    product_name=item["product_name"],
+                    warehouse_name=item.get("warehouse_name", ""),
+                    lot=item.get("lot", "-"),
+                    exp_date=item.get("exp_date", "-"),
+                    from_company=item["company"],
+                    from_location=source_hints.get(matched_id, {}).get("location", ""),
+                    to_company=str(item.get("confirmed_company") or item["company"]),
+                    to_location="",
+                    qty=kept_qty,
+                    memo=(
+                        f"수출확정 재고 재연결 / {title} / "
+                        f"{str(item.get('confirmed_customer_name') or '')} / 수출번호: {export_no}"
+                    ),
+                )
+            else:
+                cur.execute("UPDATE export_waiting_items SET qty=? WHERE id=?", (kept_qty, int(item["id"])))
         else:
             cur.execute("DELETE FROM export_waiting_items WHERE id=?", (int(item["id"]),))
 
