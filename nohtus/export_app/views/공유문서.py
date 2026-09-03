@@ -35,111 +35,6 @@ def open_selected_path(path: Path, label: str) -> None:
         st.error(f'{label}을(를) 열 수 없습니다: {exc}')
 
 
-def choose_local_folder(initial_path: Path) -> str | None:
-    """Show the native Windows folder picker used by this local desktop app."""
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes('-topmost', True)
-        selected = filedialog.askdirectory(initialdir=str(initial_path), title='사진 저장 경로 선택')
-        root.destroy()
-        return selected or None
-    except Exception as exc:
-        st.warning(f'폴더 선택 창을 열지 못했습니다: {exc}')
-        return None
-
-
-def choose_and_store_local_folder(state_key: str) -> None:
-    selected = choose_local_folder(Path(st.session_state.get(state_key) or Path.home()))
-    if selected:
-        st.session_state[state_key] = selected
-
-
-def render_photo_organizer(case_id: int) -> None:
-    box_numbers = photo_organizer_service.list_ctn_numbers(case_id)
-    if not box_numbers:
-        st.warning('박스 패킹에서 저장된 CTN이 없습니다.')
-        return
-
-    st.markdown('### 사진 정리')
-    st.caption('각 영역에 사진을 드래그해 넣으세요. CTN은 번호 오름차순으로 표시됩니다.')
-    st.markdown(
-        '''
-        <style>
-        div[data-testid="stVerticalBlock"]:has(> div .photo-drop-anchor) {
-            border: 2px dashed #8a94a6;
-            border-radius: 12px;
-            padding: 14px 16px 8px;
-            margin: 8px 0 16px;
-            background: rgba(128, 128, 128, 0.05);
-        }
-        </style>
-        ''',
-        unsafe_allow_html=True,
-    )
-
-    area_names = [*(f'CTN{number}' for number in box_numbers), '전체']
-    uploads: dict[str, list] = {}
-    tags: dict[str, list[str]] = {}
-    for area_name in area_names:
-        with st.container():
-            st.markdown(f'<div class="photo-drop-anchor"></div>#### {area_name}', unsafe_allow_html=True)
-            area_files = list(st.file_uploader(
-                f'{area_name} 사진',
-                type=['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'tif', 'tiff'],
-                accept_multiple_files=True,
-                key=f'photo_organizer_files_{case_id}_{area_name}',
-                label_visibility='collapsed',
-            ) or [])
-            uploads[area_name] = area_files
-            area_tags: list[str] = []
-            if len(area_files) > 1:
-                st.caption('사진이 여러 장이면 각 사진의 태그를 선택하세요.')
-                for index, uploaded in enumerate(area_files):
-                    cols = st.columns([3, 2])
-                    cols[0].text_input(
-                        f'{area_name} 파일 {index + 1}',
-                        value=uploaded.name,
-                        disabled=True,
-                        key=f'photo_file_name_{case_id}_{area_name}_{index}',
-                        label_visibility='collapsed',
-                    )
-                    area_tags.append(cols[1].selectbox(
-                        f'{uploaded.name} 태그',
-                        photo_organizer_service.PHOTO_TAGS,
-                        key=f'photo_tag_{case_id}_{area_name}_{index}',
-                        label_visibility='collapsed',
-                    ))
-            elif area_files:
-                area_tags = ['내부']
-            tags[area_name] = area_tags
-
-    save_path_key = f'photo_organizer_save_path_{case_id}'
-    if save_path_key not in st.session_state:
-        st.session_state[save_path_key] = str(photo_organizer_service.default_save_root())
-    path_cols = st.columns([4, 1])
-    save_path = path_cols[0].text_input('저장 경로', key=save_path_key)
-    path_cols[1].button(
-        '저장 경로 설정',
-        key=f'choose_photo_path_{case_id}',
-        use_container_width=True,
-        on_click=choose_and_store_local_folder,
-        args=(save_path_key,),
-    )
-
-    if st.button('정리 완료', key=f'complete_photo_organizer_{case_id}', type='primary', use_container_width=True):
-        try:
-            destination = photo_organizer_service.organize_photos(case_id, Path(save_path), uploads, tags)
-        except (OSError, ValueError) as exc:
-            st.error(str(exc))
-        else:
-            history_service.add(case_id, '사진 정리', str(destination))
-            st.success(f'사진 정리를 완료했습니다: {destination}')
-
-
 def render() -> None:
     st.title('공유용 자료')
     st.caption('수출 건을 선택한 뒤 필요한 자료를 출력하거나 관련 폴더를 열 수 있습니다.')
@@ -310,3 +205,108 @@ def render() -> None:
         if not is_final_document_available:
             st.caption('최종문서는 패킹 대기, 패킹 완료 또는 국내배송 단계에서 출력할 수 있습니다.')
         st.info('출력할 문서 종류를 선택하세요.')
+
+
+def choose_local_folder(initial_path: Path) -> str | None:
+    """Show the native Windows folder picker used by this local desktop app."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        selected = filedialog.askdirectory(initialdir=str(initial_path), title='사진 저장 경로 선택')
+        root.destroy()
+        return selected or None
+    except Exception as exc:
+        st.warning(f'폴더 선택 창을 열지 못했습니다: {exc}')
+        return None
+
+
+def choose_and_store_local_folder(state_key: str) -> None:
+    selected = choose_local_folder(Path(st.session_state.get(state_key) or Path.home()))
+    if selected:
+        st.session_state[state_key] = selected
+
+
+def render_photo_organizer(case_id: int) -> None:
+    box_numbers = photo_organizer_service.list_ctn_numbers(case_id)
+    if not box_numbers:
+        st.warning('박스 패킹에서 저장된 CTN이 없습니다.')
+        return
+
+    st.markdown('### 사진 정리')
+    st.caption('각 영역에 사진을 드래그해 넣으세요. CTN은 번호 오름차순으로 표시됩니다.')
+    st.markdown(
+        '''
+        <style>
+        div[data-testid="stVerticalBlock"]:has(> div .photo-drop-anchor) {
+            border: 2px dashed #8a94a6;
+            border-radius: 12px;
+            padding: 14px 16px 8px;
+            margin: 8px 0 16px;
+            background: rgba(128, 128, 128, 0.05);
+        }
+        </style>
+        ''',
+        unsafe_allow_html=True,
+    )
+
+    area_names = [*(f'CTN{number}' for number in box_numbers), '전체']
+    uploads: dict[str, list] = {}
+    tags: dict[str, list[str]] = {}
+    for area_name in area_names:
+        with st.container():
+            st.markdown(f'<div class="photo-drop-anchor"></div>#### {area_name}', unsafe_allow_html=True)
+            area_files = list(st.file_uploader(
+                f'{area_name} 사진',
+                type=['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'tif', 'tiff'],
+                accept_multiple_files=True,
+                key=f'photo_organizer_files_{case_id}_{area_name}',
+                label_visibility='collapsed',
+            ) or [])
+            uploads[area_name] = area_files
+            area_tags: list[str] = []
+            if len(area_files) > 1:
+                st.caption('사진이 여러 장이면 각 사진의 태그를 선택하세요.')
+                for index, uploaded in enumerate(area_files):
+                    cols = st.columns([3, 2])
+                    cols[0].text_input(
+                        f'{area_name} 파일 {index + 1}',
+                        value=uploaded.name,
+                        disabled=True,
+                        key=f'photo_file_name_{case_id}_{area_name}_{index}',
+                        label_visibility='collapsed',
+                    )
+                    area_tags.append(cols[1].selectbox(
+                        f'{uploaded.name} 태그',
+                        photo_organizer_service.PHOTO_TAGS,
+                        key=f'photo_tag_{case_id}_{area_name}_{index}',
+                        label_visibility='collapsed',
+                    ))
+            elif area_files:
+                area_tags = ['내부']
+            tags[area_name] = area_tags
+
+    save_path_key = f'photo_organizer_save_path_{case_id}'
+    if save_path_key not in st.session_state:
+        st.session_state[save_path_key] = str(photo_organizer_service.default_save_root())
+    path_cols = st.columns([4, 1])
+    save_path = path_cols[0].text_input('저장 경로', key=save_path_key)
+    path_cols[1].button(
+        '저장 경로 설정',
+        key=f'choose_photo_path_{case_id}',
+        use_container_width=True,
+        on_click=choose_and_store_local_folder,
+        args=(save_path_key,),
+    )
+
+    if st.button('정리 완료', key=f'complete_photo_organizer_{case_id}', type='primary', use_container_width=True):
+        try:
+            destination = photo_organizer_service.organize_photos(case_id, Path(save_path), uploads, tags)
+        except (OSError, ValueError) as exc:
+            st.error(str(exc))
+        else:
+            history_service.add(case_id, '사진 정리', str(destination))
+            st.success(f'사진 정리를 완료했습니다: {destination}')
