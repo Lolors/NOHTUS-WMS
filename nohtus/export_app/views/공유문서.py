@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import os
-import subprocess
-from pathlib import Path
-
 import streamlit as st
 from nohtus.export_app.services import export_service, folder_service, history_service, order_service
 from nohtus.export_app.services.shared_document_view_service import (
@@ -11,22 +7,6 @@ from nohtus.export_app.services.shared_document_view_service import (
     filter_and_sort_cases,
     format_case_option as build_case_option_label,
 )
-
-
-def open_selected_path(path: Path, label: str) -> None:
-    try:
-        path = Path(path)
-        if not path.exists():
-            st.error(f'{label} 경로가 없습니다: {path}')
-            return
-        activation_script = f'Start-Process -FilePath "{str(path).replace(chr(34), chr(34) * 2)}"'
-        subprocess.Popen(
-            ['powershell.exe', '-NoProfile', '-WindowStyle', 'Hidden', '-Command', activation_script],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception as exc:
-        st.error(f'{label}을(를) 열 수 없습니다: {exc}')
 
 
 def render() -> None:
@@ -126,18 +106,14 @@ def render() -> None:
         '패킹 완료',
         '국내배송',
     }
-    action_cols = st.columns(4)
+    action_cols = st.columns(3)
     return_to_packing = is_domestic_delivery and action_cols[0].button(
         '패킹완료 단계로 되돌리기',
         key=f'return_shared_document_to_packing_{case_id}',
         type='secondary',
         use_container_width=True,
     )
-    open_folder = action_cols[1].button(
-        '📂 폴더 열기',
-        use_container_width=True,
-    )
-    open_final_document = action_cols[2].button(
+    open_final_document = action_cols[1].button(
         '최종문서 출력하기',
         type='primary',
         use_container_width=True,
@@ -148,7 +124,7 @@ def render() -> None:
             else '패킹 대기, 패킹 완료 또는 국내배송 단계에서 최종문서를 출력할 수 있습니다.'
         ),
     )
-    open_shipment_products = action_cols[3].button(
+    open_shipment_products = action_cols[2].button(
         '출고 예정 제품 리스트',
         type='primary',
         use_container_width=True,
@@ -168,16 +144,9 @@ def render() -> None:
             )
             st.rerun()
 
-    if open_folder:
-        try:
-            case_folder = folder_service.ensure_case_folder(case_id)
-            open_selected_path(case_folder, '수출 폴더')
-        except Exception as exc:
-            st.warning(f'수출 폴더를 준비하지 못했습니다: {exc}')
-    else:
-        stored_folder_path = str(case['folder_path'] or '').strip()
-        if stored_folder_path:
-            st.caption(stored_folder_path)
+    stored_folder_path = str(case['folder_path'] or '').strip()
+    if stored_folder_path:
+        st.caption(stored_folder_path)
 
     if open_final_document:
         st.session_state['shared_document_view'] = 'final'

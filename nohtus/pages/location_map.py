@@ -4,9 +4,7 @@ Migrated from app.py. This module intentionally imports Streamlit because it
 contains page rendering code.
 """
 from __future__ import annotations
-import base64
 from html import escape
-import mimetypes
 from pathlib import Path
 import re
 
@@ -15,216 +13,11 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from nohtus.config import AREA_COLOR, AREA_CONFIG, COMPANIES
-from nohtus.db import exec_sql, q
+from nohtus.db import q
 from nohtus.dates import display_date_only
 from nohtus.locations import location_picking_key, parse_location
 from nohtus.pages.product_shortcuts import add_recent_product_view, is_favorite_product, toggle_favorite_product
 from nohtus.services.products import product_options
-
-
-_IMAGE_DIR = Path(__file__).resolve().parents[2] / "data" / "product_images"
-_THUMB_DIR = _IMAGE_DIR / "thumbs"
-_ALLOWED_IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
-_MAX_IMAGE_BYTES = 8 * 1024 * 1024
-_THUMB_SIZE = (500, 500)
-_THUMB_QUALITY = 78
-
-
-def _safe_product_image_stem(product_name: str) -> str:
-    stem = re.sub(r"[^0-9A-Za-z가-힣._-]+", "_", str(product_name or "").strip()).strip("._")
-    return stem[:80] or "product"
-
-
-def _image_data_uri(image_path: str) -> str:
-    path = Path(str(image_path or ""))
-    if not path.is_file():
-        return ""
-    try:
-        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-    except OSError:
-        return ""
-    mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
-    return f"data:{mime};base64,{encoded}"
-
-
-def _thumbnail_path_for(original_path: str | Path) -> Path:
-    original = Path(str(original_path or ""))
-    return _THUMB_DIR / f"{original.stem}.jpg"
-
-
-def _create_thumbnail(original_path: str | Path) -> str:
-    original = Path(str(original_path or ""))
-    if not original.is_file():
-        return ""
-    target = _thumbnail_path_for(original)
-    try:
-        from PIL import Image, ImageOps
-
-        _THUMB_DIR.mkdir(parents=True, exist_ok=True)
-        with Image.open(original) as image:
-            image = ImageOps.exif_transpose(image)
-            if image.mode not in ("RGB", "L"):
-                background = Image.new("RGB", image.size, "white")
-                alpha = image.getchannel("A") if "A" in image.getbands() else None
-                background.paste(image.convert("RGB"), mask=alpha)
-                image = background
-            else:
-                image = image.convert("RGB")
-            image = ImageOps.fit(image, _THUMB_SIZE, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
-            image.save(target, format="JPEG", quality=_THUMB_QUALITY, optimize=True)
-        return str(target)
-    except Exception:
-        return ""
-
-
-def _ensure_thumbnail(original_path: str | Path) -> str:
-    original = Path(str(original_path or ""))
-    if not original.is_file():
-        return ""
-    target = _thumbnail_path_for(original)
-    try:
-        if target.is_file():
-            from PIL import Image
-            with Image.open(target) as thumb:
-                correct_size = tuple(thumb.size) == _THUMB_SIZE
-            if correct_size and target.stat().st_mtime >= original.stat().st_mtime:
-                return str(target)
-    except Exception:
-        pass
-    return _create_thumbnail(original)
-
-
-def _ensure_existing_product_thumbnails() -> None:
-    rows = q("SELECT DISTINCT image_path FROM products WHERE COALESCE(image_path, '') <> ''")
-    if rows.empty:
-        return
-    project_root = Path(__file__).resolve().parents[2]
-    for value in rows["image_path"].dropna().astype(str).tolist():
-        original = Path(value)
-        if not original.is_absolute():
-            original = project_root / original
-        _ensure_thumbnail(original)
-
-
-def _save_product_image(product_name: str, uploaded_file) -> str:
-    if uploaded_file is None:
-        return ""
-    mime = str(getattr(uploaded_file, "type", "") or "").lower()
-    if mime not in _ALLOWED_IMAGE_TYPES:
-        raise ValueError("JPG, PNG, WEBP 형식만 업로드할 수 있습니다.")
-    data = uploaded_file.getvalue()
-    if not data:
-        raise ValueError("빈 파일은 업로드할 수 없습니다.")
-    if len(data) > _MAX_IMAGE_BYTES:
-        raise ValueError("사진은 8MB 이하만 등록할 수 있습니다.")
-
-    _IMAGE_DIR.mkdir(parents=True, exist_ok=True)
-    old = q("SELECT image_path FROM products WHERE standard_name=?", (product_name,))
-    old_path = str(old.iloc[0].get("image_path") or "") if not old.empty else ""
-    filename = f"{_safe_product_image_stem(product_name)}{_ALLOWED_IMAGE_TYPES[mime]}"
-    target = _IMAGE_DIR / filename
-    target.write_bytes(data)
-    _create_thumbnail(target)
-
-    relative_path = target.relative_to(Path(__file__).resolve().parents[2]).as_posix()
-    exec_sql("UPDATE products SET image_path=? WHERE standard_name=?", (relative_path, product_name))
-
-    if old_path and old_path != relative_path:
-        old_target = Path(__file__).resolve().parents[2] / old_path
-        old_thumb = _thumbnail_path_for(old_target)
-        for stale in (old_target, old_thumb):
-            try:
-                if stale.is_file() and stale.parent in {_IMAGE_DIR, _THUMB_DIR}:
-                    stale.unlink()
-            except OSError:
-                pass
-    return str(target)
-
-
-def _delete_product_image(product_name: str) -> None:
-    old = q("SELECT image_path FROM products WHERE standard_name=?", (product_name,))
-    old_path = str(old.iloc[0].get("image_path") or "") if not old.empty else ""
-    exec_sql("UPDATE products SET image_path='' WHERE standard_name=?", (product_name,))
-    if old_path:
-        target = Path(__file__).resolve().parents[2] / old_path
-        thumb = _thumbnail_path_for(target)
-        for candidate in (target, thumb):
-            try:
-                if candidate.is_file() and candidate.parent in {_IMAGE_DIR, _THUMB_DIR}:
-                    candidate.unlink()
-            except OSError:
-                pass
-
-
-@st.dialog("원본 제품 사진", width="large")
-def _product_original_image_dialog(product_name: str, img_path: str) -> None:
-    st.caption(product_name)
-    if img_path and Path(img_path).is_file():
-        st.image(img_path, use_container_width=True)
-    else:
-        st.info("원본 사진을 불러올 수 없습니다.")
-
-
-@st.dialog("제품 사진 관리", width="small")
-def _product_image_dialog(product_name: str, img_path: str) -> None:
-    st.markdown(
-        """
-        <style>
-        div[data-testid="stDialog"] > div[role="dialog"] {
-            border:1px solid #b8c2cf;
-            border-radius:10px;
-            box-shadow:0 24px 70px rgba(15,23,42,.35);
-        }
-        div[data-testid="stDialog"] div[data-testid="stFileUploader"] {
-            border-radius:8px;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.caption(product_name)
-    if img_path:
-        thumb_path = _ensure_thumbnail(img_path)
-        st.image(thumb_path or img_path, use_container_width=True)
-        if st.button("원본 사진 보기", key=f"view_original_dialog_{product_name}", use_container_width=True):
-            _product_original_image_dialog(product_name, img_path)
-    else:
-        st.info("현재 등록된 제품 사진이 없습니다.")
-
-    uploaded = st.file_uploader(
-        "JPG, PNG 또는 WEBP 사진 선택",
-        type=["jpg", "jpeg", "png", "webp"],
-        key=f"product_image_upload_dialog_{product_name}",
-    )
-    st.caption("사진은 최대 8MB까지 등록할 수 있습니다.")
-
-    save_col, delete_col = st.columns(2)
-    with save_col:
-        if st.button(
-            "사진 저장",
-            key=f"save_product_image_dialog_{product_name}",
-            use_container_width=True,
-            disabled=uploaded is None,
-            type="primary",
-        ):
-            try:
-                _save_product_image(product_name, uploaded)
-                st.success("제품 사진을 저장했습니다.")
-                st.rerun()
-            except ValueError as exc:
-                st.error(str(exc))
-            except Exception as exc:
-                st.error(f"사진 저장 중 오류가 발생했습니다: {exc}")
-    with delete_col:
-        if st.button(
-            "사진 삭제",
-            key=f"delete_product_image_dialog_{product_name}",
-            use_container_width=True,
-            disabled=not bool(img_path),
-        ):
-            _delete_product_image(product_name)
-            st.success("제품 사진을 삭제했습니다.")
-            st.rerun()
 
 
 def _map_search_warehouse_name(value):
@@ -260,12 +53,6 @@ def _is_material_or_promo_location(value):
 
 def page_map_search_results(term, compact: bool = False):
     """로케이션맵 > 제품명 검색 결과."""
-    try:
-        from nohtus.services.location_map import get_product_image_path
-    except Exception:
-        get_product_image_path = lambda _name: ""
-
-    _ensure_existing_product_thumbnails()
     term = (term or "").strip()
     st.markdown("### 제품 검색 결과")
     opts = product_options(term)
@@ -315,26 +102,6 @@ def page_map_search_results(term, compact: bool = False):
     st.markdown("""
     <style>
     .product-main-name{font-size:18px;font-weight:400;color:#111827;line-height:1.35;margin:14px 0 9px;word-break:keep-all;text-align:center;}
-    .product-photo-panel{width:250px;height:250px;max-width:100%;border:1.5px dashed #d6dee9;border-radius:20px;background:linear-gradient(180deg,#ffffff,#f8fafc);display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:600;font-size:20px;line-height:1.55;margin:0 auto 10px;overflow:hidden;}
-    div[class*="st-key-photo_upload_trigger_"] div[data-testid="stButton"] > button{width:250px;height:250px;max-width:100%;margin:0 auto 10px;border:1.5px dashed #d6dee9;border-radius:20px;background:linear-gradient(180deg,#ffffff,#f8fafc);color:#94a3b8;font-weight:600;font-size:20px;line-height:1.55;white-space:pre-line;display:flex;align-items:center;justify-content:center;box-shadow:none;}
-    div[class*="st-key-photo_upload_trigger_"] div[data-testid="stButton"] > button:hover{border-color:#94a3b8;color:#64748b;background:#f8fafc;}
-
-    div[class*="st-key-photo_display_"]{position:relative;width:250px;max-width:100%;margin:0 auto 10px;overflow:visible;}
-    div[class*="st-key-photo_display_"] > div[data-testid="stVerticalBlock"]{position:relative;width:100%;gap:0;}
-    div[class*="st-key-photo_display_"] .product-photo-frame{position:relative;width:100%;aspect-ratio:1/1;overflow:hidden;border-radius:20px;background:#f8fafc;box-shadow:inset 0 0 0 1px rgba(203,213,225,.55);}
-    div[class*="st-key-photo_display_"] .product-photo-frame img{width:100%;height:100%;object-fit:cover;object-position:center;display:block;}
-    div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){position:absolute!important;top:8px;width:36px!important;height:36px!important;z-index:20;opacity:0;pointer-events:none;transition:opacity .16s ease,transform .16s ease;transform:translateY(-2px);margin:0!important;}
-    div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(button[kind="secondary"]):nth-of-type(2){right:50px;}
-    div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(button[kind="secondary"]):nth-of-type(3){right:8px;}
-    div[class*="st-key-photo_display_"]:hover div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){opacity:1;pointer-events:auto;transform:translateY(0);}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"],
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{width:36px!important;height:36px!important;min-height:36px!important;}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{padding:0!important;border-radius:999px!important;border:1px solid rgba(255,255,255,.95)!important;background:rgba(15,23,42,.78)!important;color:#fff!important;box-shadow:0 3px 12px rgba(15,23,42,.34)!important;font-size:16px!important;line-height:1!important;display:flex!important;align-items:center!important;justify-content:center!important;text-align:center!important;}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button p,
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button span{display:flex!important;align-items:center!important;justify-content:center!important;width:100%!important;height:100%!important;margin:0!important;padding:0!important;line-height:1!important;text-align:center!important;transform:none!important;}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button:hover{background:rgba(15,23,42,.95)!important;transform:scale(1.05);}
-    @media (hover:none){div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){opacity:1;pointer-events:auto;transform:none;}}
-
     .total-card-small{width:50%;min-width:180px;border:1.5px solid #e5e7eb;border-radius:20px;padding:12px 17px;margin:4px auto 48px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;background:#fafafa;box-shadow:0 2px 8px rgba(15,23,42,.025);}
     .total-label{font-size:15px;font-weight:500;color:#6b7280;text-align:center;}.total-value{font-size:24px;font-weight:800;color:#111827;text-align:center;}
     .dist-header{font-size:18px;font-weight:800;color:#111827;margin:2px 0 12px;}.dist-rule{height:1px;background:#e5e7eb;margin:0 0 14px;}
@@ -344,7 +111,7 @@ def page_map_search_results(term, compact: bool = False):
     """, unsafe_allow_html=True)
 
     if compact:
-        st.markdown("""<style>.product-photo-panel{width:210px!important;height:210px!important;font-size:18px!important;border-radius:16px!important;}div[class*="st-key-photo_display_"]{width:210px!important;}div[class*="st-key-photo_display_"] .product-photo-frame{border-radius:16px!important;}.product-main-name{font-size:16px!important;}.total-card-small{width:72%!important;min-width:145px!important;margin-bottom:26px!important;padding:10px 12px!important;border-radius:16px!important;}</style>""", unsafe_allow_html=True)
+        st.markdown("""<style>.product-main-name{font-size:16px!important;}.total-card-small{width:72%!important;min-width:145px!important;margin-bottom:26px!important;padding:10px 12px!important;border-radius:16px!important;}</style>""", unsafe_allow_html=True)
 
     company_order = {"노투스팜": 0, "노투스": 1, "NOH": 2, "비자료": 3}
     card_columns = [0.78, 3.05] if compact else [0.95, 2.35]
@@ -361,32 +128,6 @@ def page_map_search_results(term, compact: bool = False):
         with st.container(border=True):
             left, right = st.columns(card_columns, gap="large")
             with left:
-                img_path = get_product_image_path(product_name)
-                photo_key = _safe_product_image_stem(product_name)
-                if img_path:
-                    thumb_path = _ensure_thumbnail(img_path)
-                    image_uri = _image_data_uri(thumb_path or img_path)
-                    with st.container(key=f"photo_display_{photo_key}"):
-                        if image_uri:
-                            st.markdown(
-                                f"<div class='product-photo-frame'><img src='{image_uri}' alt='{escape(product_name)}'></div>",
-                                unsafe_allow_html=True,
-                            )
-                        else:
-                            st.markdown("<div class='product-photo-panel'>제품 사진을 불러올 수 없습니다.</div>", unsafe_allow_html=True)
-                        if st.button("🔍", key=f"view_original_{product_name}", help="원본 사진 보기"):
-                            _product_original_image_dialog(product_name, img_path)
-                        if st.button("✎", key=f"open_product_image_dialog_{product_name}", help="사진 변경"):
-                            _product_image_dialog(product_name, img_path)
-                else:
-                    with st.container(key=f"photo_upload_trigger_{photo_key}"):
-                        if st.button(
-                            "제품 사진\n(아래에서 업로드)",
-                            key=f"open_product_image_dialog_{product_name}",
-                            use_container_width=True,
-                        ):
-                            _product_image_dialog(product_name, img_path)
-
                 st.markdown(f"<div class='product-main-name'>{escape(product_name)}</div>", unsafe_allow_html=True)
                 st.markdown(f"<div class='total-card-small'><span class='total-label'>총 재고</span><span class='total-value'>{total_qty} EA</span></div>", unsafe_allow_html=True)
 
