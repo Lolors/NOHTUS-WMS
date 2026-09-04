@@ -835,7 +835,8 @@ def _render_stock_adjustment():
             lot = st.selectbox("LOT/제조번호", lots, key=f"stock_adjust_lot_{product}")
 
             exp_df = lot_df[lot_df["lot"].fillna("-").astype(str) == lot].copy()
-            exps = exp_df["exp_date"].fillna("-").astype(str).drop_duplicates().tolist()
+            in_stock_exp_df = exp_df[pd.to_numeric(exp_df["qty"], errors="coerce").fillna(0) > 0]
+            exps = (in_stock_exp_df if not in_stock_exp_df.empty else exp_df)["exp_date"].fillna("-").astype(str).drop_duplicates().tolist()
             exp = st.selectbox("유통기한", exps, key=f"stock_adjust_exp_{product}_{lot}", format_func=display_date_only)
 
         target_df = exp_df[exp_df["exp_date"].fillna("-").astype(str) == exp].copy()
