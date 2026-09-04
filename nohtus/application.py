@@ -207,6 +207,46 @@ def page_export_waiting():
             outbound_page._days_ago_label = original_days_ago_label
 
 
+_APP_MODE_KEY = "_top_app_mode"
+
+
+def _render_app_mode_toggle() -> str:
+    """WMS ↔ 발주관리 전환용 상단 토글. 항상 사이드바 맨 위에 고정으로 그린다."""
+    mode = st.session_state.get(_APP_MODE_KEY, "wms")
+
+    st.sidebar.markdown(
+        """
+        <style>
+        div[class*="st-key-app_mode_toggle_row"] div[data-testid="stButton"] > button {
+            border-radius: 999px !important;
+            font-weight: 800;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.sidebar.container(key="app_mode_toggle_row"):
+        wms_col, om_col = st.columns(2)
+        if wms_col.button(
+            "🏭 WMS",
+            key="app_mode_btn_wms",
+            use_container_width=True,
+            type="primary" if mode == "wms" else "secondary",
+        ) and mode != "wms":
+            st.session_state[_APP_MODE_KEY] = "wms"
+            st.rerun()
+        if om_col.button(
+            "📦 발주관리",
+            key="app_mode_btn_order_management",
+            use_container_width=True,
+            type="primary" if mode == "order_management" else "secondary",
+        ) and mode != "order_management":
+            st.session_state[_APP_MODE_KEY] = "order_management"
+            st.rerun()
+    st.sidebar.markdown("<hr>", unsafe_allow_html=True)
+    return mode
+
+
 def main():
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     init_db()
@@ -247,6 +287,11 @@ def main():
 
     if mobile_view:
         page_mobile_stock_finder()
+        return
+
+    if _render_app_mode_toggle() == "order_management":
+        from nohtus.order_management_bridge import render_order_management
+        render_order_management()
         return
 
     allowed_pages = allowed_pages_for_current_user()
