@@ -898,7 +898,18 @@ def _render_stocktake_files():
         with file_left:
             st.markdown("#### 재고 실사용 엑셀")
             exclude_zero = bool(st.session_state.get("stocktake_exclude_zero", True))
-            excel_data = full_inventory_excel_bytes(exclude_zero=exclude_zero)
+            exclude_g = bool(st.session_state.get("stocktake_exclude_series_g", True))
+            exclude_x = bool(st.session_state.get("stocktake_exclude_series_x", True))
+            exclude_t = bool(st.session_state.get("stocktake_exclude_series_t", True))
+            exclude_n = bool(st.session_state.get("stocktake_exclude_series_n", True))
+            exclude_series = {
+                series
+                for series, checked in (
+                    ("G", exclude_g), ("X", exclude_x), ("T", exclude_t), ("N", exclude_n),
+                )
+                if checked
+            }
+            excel_data = full_inventory_excel_bytes(exclude_zero=exclude_zero, exclude_series=exclude_series)
             st.download_button(
                 "재고 실사용 엑셀 내려받기",
                 data=excel_data,
@@ -911,6 +922,12 @@ def _render_stocktake_files():
                 value=exclude_zero,
                 key="stocktake_exclude_zero",
             )
+            st.caption("체크된 계열은 실사용 엑셀에서 제외됩니다.")
+            series_col1, series_col2, series_col3, series_col4 = st.columns(4)
+            series_col1.checkbox("G계열(부자재)", value=exclude_g, key="stocktake_exclude_series_g")
+            series_col2.checkbox("X계열(폐기)", value=exclude_x, key="stocktake_exclude_series_x")
+            series_col3.checkbox("T계열(파렛트)", value=exclude_t, key="stocktake_exclude_series_t")
+            series_col4.checkbox("기타 위치(창고 외부)", value=exclude_n, key="stocktake_exclude_series_n")
 
         with file_right:
             st.markdown("#### 기준재고")

@@ -106,7 +106,23 @@ def current_baseline_stock_excel_bytes(exclude_zero=False):
     return _baseline_stock_excel_bytes_from_dataframe(pd.DataFrame(rows, columns=cols))
 
 
-def full_inventory_excel_bytes(exclude_zero=True):
+def location_series(location):
+    """로케이션의 계열(알파벳 구역군)을 반환한다: G/X/T/N, 해당 없으면 빈 문자열."""
+    normalized = _normalize_stocktake_location(location)
+    if normalized.startswith("G"):
+        return "G"
+    if normalized.startswith("X"):
+        return "X"
+    if normalized.startswith("T"):
+        return "T"
+    from nohtus.config import SPECIAL_LOCATIONS
+    if str(location or "").strip() in SPECIAL_LOCATIONS:
+        return "N"
+    return ""
+
+
+def full_inventory_excel_bytes(exclude_zero=True, exclude_series=None):
+    exclude_series = set(exclude_series or ())
     where_sql = f"WHERE qty>0 OR {_zero_qty_exception_sql()}" if exclude_zero else ""
     df = q(
         f"""
@@ -116,6 +132,8 @@ def full_inventory_excel_bytes(exclude_zero=True):
         ORDER BY location, product_name, lot, exp_date
         """
     )
+    if not df.empty and exclude_series:
+        df = df[~df["location"].apply(location_series).isin(exclude_series)]
 
     out = pd.DataFrame()
     out["로케이션"] = df["location"] if not df.empty else []
