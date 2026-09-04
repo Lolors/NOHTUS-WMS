@@ -254,7 +254,7 @@ def main():
     render_user_box()
     if is_admin():
         with st.sidebar.expander("데이터 백업"):
-            st.caption("WMS DB와 수출관리 DB는 매시간 로컬과 Google Drive에 자동 백업되며 각각 최신 20개를 보관합니다.")
+            st.caption("WMS DB, 수출관리 DB, 발주관리 DB는 매시간 로컬과 Google Drive에 자동 백업되며 각각 최신 20개를 보관합니다.")
             drive_path = st.text_input(
                 "Google Drive 동기화 폴더",
                 value=database_backup.google_drive_root(),

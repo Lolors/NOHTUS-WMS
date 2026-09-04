@@ -16,12 +16,16 @@ STATE_PATH = LOCAL_BACKUP_DIR / ".backup_state.json"
 _WORKER_LOCK = threading.Lock()
 _WORKER_STARTED = False
 
-# 두 DB는 하나의 백업 세트다. 한쪽만 백업되는 상태를 막기 위해
-# 주기 판단도 세트 단위로 하고, 실행 시 항상 둘 다 시도한다.
+# 세 DB는 하나의 백업 세트다. 한쪽만 백업되는 상태를 막기 위해
+# 주기 판단도 세트 단위로 하고, 실행 시 항상 다 함께 시도한다.
 EXPORT_DB_PATH = PROJECT_ROOT / "data" / "export.db"
+# 발주관리(nohtus-order-management)는 별도 저장소로, 이 저장소와 같은
+# GitHub 폴더 아래 형제 폴더로 clone되어 있다고 가정한다.
+ORDER_MANAGEMENT_DB_PATH = PROJECT_ROOT.parent / "nohtus-order-management" / "data" / "purchase_order.db"
 _BACKUP_TARGETS = (
     (Path(DB_PATH), "nohtus"),
     (Path(EXPORT_DB_PATH), "export"),
+    (Path(ORDER_MANAGEMENT_DB_PATH), "order_management"),
 )
 LOCAL_SET_STATE_KEY = "last_local_pair"
 DRIVE_SET_STATE_KEY = "last_google_drive_pair"
@@ -69,7 +73,7 @@ def _pair_is_due(state: dict, pair_key: str, legacy_keys: tuple[str, ...], now: 
 
 
 def _backup_pair(directory: Path, now: datetime) -> tuple[list[str], list[str]]:
-    """nohtus.db와 export.db를 같은 실행에서 함께 백업한다."""
+    """nohtus.db, export.db, 발주관리 db를 같은 실행에서 함께 백업한다."""
     paths: list[str] = []
     errors: list[str] = []
     for source_path, prefix in _BACKUP_TARGETS:
@@ -173,7 +177,7 @@ def backup_to_google_drive_now() -> str:
     if errors:
         raise ValueError(" / ".join(errors))
     if len(paths) != len(_BACKUP_TARGETS):
-        raise ValueError("nohtus.db와 export.db를 모두 백업하지 못했습니다.")
+        raise ValueError("nohtus.db, export.db, 발주관리 db를 모두 백업하지 못했습니다.")
 
     state[DRIVE_SET_STATE_KEY] = now.isoformat(timespec="seconds")
     state["last_google_drive"] = state[DRIVE_SET_STATE_KEY]
