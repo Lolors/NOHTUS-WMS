@@ -542,68 +542,9 @@ def _render_stock_comparison():
             st.error(f"비교 실패: {exc}")
 
     result = st.session_state.get("stock_compare_result")
-    if not result:
-        return
 
-    # 저장된 원본 문제를 현재 무시 목록 기준으로 매번 다시 필터링한다.
-    # 무시 등록/해제 후에도 파일을 다시 비교하지 않고 즉시 목록에 반영된다.
-    problems = filter_ignored_problems(
-        result.get("all_problems", result["problems"])
-    )
-    erp_result = result["erp"]
-    gm_result = result["gmmedic"]
-
-    total_erp = len(erp_result)
-    erp_errors = int((erp_result["상태"] == "불일치").sum()) if total_erp else 0
-    total_gm = len(gm_result)
-    gm_errors = int((gm_result["상태"] == "불일치").sum()) if total_gm else 0
-
-    metric1, metric2, metric3, metric4 = st.columns(4)
-    metric1.metric("ERP 비교 품목", f"{total_erp:,}건")
-    metric2.metric("ERP 불일치", f"{erp_errors:,}건")
-    metric3.metric("지엠메딕 비교 항목", f"{total_gm:,}건")
-    metric4.metric("전체 문제", f"{len(problems):,}건")
-
-    st.markdown("#### 문제목록")
-    if problems.empty:
-        st.success("업로드한 파일 기준으로 확인이 필요한 문제가 없습니다.")
-    else:
-        st.error(f"확인이 필요한 문제가 {len(problems):,}건 있습니다.")
-        problem_editor = problems.copy()
-        problem_editor.insert(0, "무시", False)
-        edited_problems = st.data_editor(
-            problem_editor,
-            hide_index=True,
-            use_container_width=True,
-            key="stock_compare_problem_editor",
-            disabled=[column for column in problem_editor.columns if column != "무시"],
-            column_config={
-                "무시": st.column_config.CheckboxColumn(
-                    "무시", help="의도적으로 유지할 차이라면 체크하세요."
-                ),
-                "WMS수량": st.column_config.NumberColumn(format="%d"),
-                "비교수량": st.column_config.NumberColumn(format="%d"),
-                "차이": st.column_config.NumberColumn(format="%+d"),
-            },
-        )
-        selected_problems = edited_problems[edited_problems["무시"] == True]
-        ignore_reason = st.text_input(
-            "차이 원인",
-            placeholder="선택한 항목에 공통으로 적용할 차이 원인을 입력하세요.",
-            key="stock_compare_ignore_reason",
-        )
-        if st.button(
-            "선택 항목 문제목록에서 무시",
-            disabled=selected_problems.empty or not str(ignore_reason or "").strip(),
-            use_container_width=True,
-            key="stock_compare_ignore_selected",
-        ):
-            added = add_ignored_problems(selected_problems, ignore_reason)
-            st.session_state["_stock_compare_ignore_message"] = (
-                f"{added:,}개 항목을 '{str(ignore_reason).strip()}' 원인으로 무시 목록에 등록했습니다."
-            )
-            st.rerun()
-
+    # 무시 목록은 재고 파일을 업로드하지 않아도(비교 전이라도) 항상 볼 수 있게 한다.
+    ignored_erp_result = result["erp"] if result else pd.DataFrame()
     ignored_problems = list_ignored_problems()
     ignored_result_source = pd.DataFrame()
     with st.expander(f"무시 목록 관리 ({len(ignored_problems):,}건)"):
@@ -621,14 +562,14 @@ def _render_stock_comparison():
             quantity_value_columns = ["WMS수량", "ERP수량", "차이"]
             for column in quantity_value_columns:
                 ignored_editor[column] = pd.NA
-            if not erp_result.empty:
+            if not ignored_erp_result.empty:
                 def quantity_key(row):
                     company = str(row.get("사업장", "") or "").strip()
                     product = str(row.get("표준제품명", "") or "").strip()
                     return company, product
 
                 quantity_lookup = {}
-                for _, current_row in erp_result[quantity_columns].iterrows():
+                for _, current_row in ignored_erp_result[quantity_columns].iterrows():
                     quantity_lookup[quantity_key(current_row)] = tuple(
                         current_row[column] for column in quantity_value_columns
                     )
@@ -715,6 +656,68 @@ def _render_stock_comparison():
                     f"{removed:,}개 항목의 무시를 해제했습니다."
                 )
                 st.rerun()
+
+    if not result:
+        return
+
+    # 저장된 원본 문제를 현재 무시 목록 기준으로 매번 다시 필터링한다.
+    # 무시 등록/해제 후에도 파일을 다시 비교하지 않고 즉시 목록에 반영된다.
+    problems = filter_ignored_problems(
+        result.get("all_problems", result["problems"])
+    )
+    erp_result = result["erp"]
+    gm_result = result["gmmedic"]
+
+    total_erp = len(erp_result)
+    erp_errors = int((erp_result["상태"] == "불일치").sum()) if total_erp else 0
+    total_gm = len(gm_result)
+    gm_errors = int((gm_result["상태"] == "불일치").sum()) if total_gm else 0
+
+    metric1, metric2, metric3, metric4 = st.columns(4)
+    metric1.metric("ERP 비교 품목", f"{total_erp:,}건")
+    metric2.metric("ERP 불일치", f"{erp_errors:,}건")
+    metric3.metric("지엠메딕 비교 항목", f"{total_gm:,}건")
+    metric4.metric("전체 문제", f"{len(problems):,}건")
+
+    st.markdown("#### 문제목록")
+    if problems.empty:
+        st.success("업로드한 파일 기준으로 확인이 필요한 문제가 없습니다.")
+    else:
+        st.error(f"확인이 필요한 문제가 {len(problems):,}건 있습니다.")
+        problem_editor = problems.copy()
+        problem_editor.insert(0, "무시", False)
+        edited_problems = st.data_editor(
+            problem_editor,
+            hide_index=True,
+            use_container_width=True,
+            key="stock_compare_problem_editor",
+            disabled=[column for column in problem_editor.columns if column != "무시"],
+            column_config={
+                "무시": st.column_config.CheckboxColumn(
+                    "무시", help="의도적으로 유지할 차이라면 체크하세요."
+                ),
+                "WMS수량": st.column_config.NumberColumn(format="%d"),
+                "비교수량": st.column_config.NumberColumn(format="%d"),
+                "차이": st.column_config.NumberColumn(format="%+d"),
+            },
+        )
+        selected_problems = edited_problems[edited_problems["무시"] == True]
+        ignore_reason = st.text_input(
+            "차이 원인",
+            placeholder="선택한 항목에 공통으로 적용할 차이 원인을 입력하세요.",
+            key="stock_compare_ignore_reason",
+        )
+        if st.button(
+            "선택 항목 문제목록에서 무시",
+            disabled=selected_problems.empty or not str(ignore_reason or "").strip(),
+            use_container_width=True,
+            key="stock_compare_ignore_selected",
+        ):
+            added = add_ignored_problems(selected_problems, ignore_reason)
+            st.session_state["_stock_compare_ignore_message"] = (
+                f"{added:,}개 항목을 '{str(ignore_reason).strip()}' 원인으로 무시 목록에 등록했습니다."
+            )
+            st.rerun()
 
     tab_erp, tab_gm = st.tabs(["ERP 비교결과", "지엠메딕 실사 비교결과"])
     with tab_erp:
