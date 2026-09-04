@@ -121,20 +121,10 @@ def location_series(location):
     return ""
 
 
-def full_inventory_excel_bytes(exclude_zero=True, exclude_series=None):
-    exclude_series = set(exclude_series or ())
-    where_sql = f"WHERE qty>0 OR {_zero_qty_exception_sql()}" if exclude_zero else ""
-    df = q(
-        f"""
-        SELECT location, product_name, warehouse_name, lot, exp_date, qty
-        FROM inventory
-        {where_sql}
-        ORDER BY location, product_name, lot, exp_date
-        """
-    )
-    if not df.empty and exclude_series:
-        df = df[~df["location"].apply(location_series).isin(exclude_series)]
+_TRUE_MATERIAL_VALUES = ("1", "true", "yes", "y", "o", "v", "체크", "부자재")
 
+
+def _inventory_survey_excel_bytes(df, sheet_name):
     out = pd.DataFrame()
     out["로케이션"] = df["location"] if not df.empty else []
     out["제품명(표준제품명)"] = df["product_name"] if not df.empty else []
@@ -145,8 +135,8 @@ def full_inventory_excel_bytes(exclude_zero=True, exclude_series=None):
 
     bio = BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-        out.to_excel(writer, index=False, sheet_name="전체재고실사")
-        ws = writer.book["전체재고실사"]
+        out.to_excel(writer, index=False, sheet_name=sheet_name)
+        ws = writer.book[sheet_name]
         widths = {"A": 16, "B": 30, "C": 18, "D": 16, "E": 12, "F": 12}
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
@@ -166,6 +156,43 @@ def full_inventory_excel_bytes(exclude_zero=True, exclude_series=None):
 
     bio.seek(0)
     return bio.getvalue()
+
+
+def full_inventory_excel_bytes(exclude_zero=True, exclude_series=None):
+    exclude_series = set(exclude_series or ())
+    where_sql = f"WHERE qty>0 OR {_zero_qty_exception_sql()}" if exclude_zero else ""
+    df = q(
+        f"""
+        SELECT location, product_name, warehouse_name, lot, exp_date, qty
+        FROM inventory
+        {where_sql}
+        ORDER BY location, product_name, lot, exp_date
+        """
+    )
+    if not df.empty and exclude_series:
+        df = df[~df["location"].apply(location_series).isin(exclude_series)]
+
+    return _inventory_survey_excel_bytes(df, "전체재고실사")
+
+
+def material_inventory_excel_bytes(exclude_zero=True):
+    """부자재로 분류된 제품만 모은 재고실사용 엑셀."""
+    placeholders = ",".join("?" for _ in _TRUE_MATERIAL_VALUES)
+    zero_sql = "AND qty>0" if exclude_zero else ""
+    df = q(
+        f"""
+        SELECT location, product_name, warehouse_name, lot, exp_date, qty
+        FROM inventory
+        WHERE TRIM(COALESCE(product_name,'')) IN (
+            SELECT TRIM(standard_name) FROM products
+            WHERE LOWER(TRIM(CAST(COALESCE(is_material, 0) AS TEXT))) IN ({placeholders})
+        )
+        {zero_sql}
+        ORDER BY location, product_name, lot, exp_date
+        """,
+        _TRUE_MATERIAL_VALUES,
+    )
+    return _inventory_survey_excel_bytes(df, "부자재재고실사")
 
 
 def import_stock_survey_excel(uploaded_file, replace_current=True):

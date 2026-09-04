@@ -12,17 +12,7 @@ from nohtus.services.inventory import insert_transaction_log
 from nohtus.services.export_waiting import STAGING_LOCATIONS, ensure_export_waiting_tables
 
 
-def full_inventory_excel_bytes_business(exclude_zero=True):
-    where_sql = "WHERE qty<>0" if exclude_zero else ""
-    df = q(
-        f"""
-        SELECT company, location, product_name, exp_date, qty
-        FROM inventory
-        {where_sql}
-        ORDER BY company, location, product_name, exp_date
-        """
-    )
-
+def _inventory_survey_excel_bytes_business(df, sheet_name):
     out = pd.DataFrame()
     out["사업장"] = df["company"] if not df.empty else []
     out["로케이션"] = df["location"] if not df.empty else []
@@ -33,8 +23,8 @@ def full_inventory_excel_bytes_business(exclude_zero=True):
 
     bio = BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-        out.to_excel(writer, index=False, sheet_name="전체재고실사")
-        ws = writer.book["전체재고실사"]
+        out.to_excel(writer, index=False, sheet_name=sheet_name)
+        ws = writer.book[sheet_name]
         widths = {"A": 14, "B": 16, "C": 34, "D": 16, "E": 12, "F": 12}
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
@@ -53,6 +43,43 @@ def full_inventory_excel_bytes_business(exclude_zero=True):
                     cell.fill = header_fill
     bio.seek(0)
     return bio.getvalue()
+
+
+def full_inventory_excel_bytes_business(exclude_zero=True, exclude_series=None):
+    exclude_series = set(exclude_series or ())
+    where_sql = "WHERE qty<>0" if exclude_zero else ""
+    df = q(
+        f"""
+        SELECT company, location, product_name, exp_date, qty
+        FROM inventory
+        {where_sql}
+        ORDER BY company, location, product_name, exp_date
+        """
+    )
+    if not df.empty and exclude_series:
+        df = df[~df["location"].apply(stocktake_service.location_series).isin(exclude_series)]
+
+    return _inventory_survey_excel_bytes_business(df, "전체재고실사")
+
+
+def material_inventory_excel_bytes_business(exclude_zero=True):
+    """부자재로 분류된 제품만 모은 재고실사용 엑셀(사업장 포함)."""
+    placeholders = ",".join("?" for _ in stocktake_service._TRUE_MATERIAL_VALUES)
+    zero_sql = "AND qty<>0" if exclude_zero else ""
+    df = q(
+        f"""
+        SELECT company, location, product_name, exp_date, qty
+        FROM inventory
+        WHERE TRIM(COALESCE(product_name,'')) IN (
+            SELECT TRIM(standard_name) FROM products
+            WHERE LOWER(TRIM(CAST(COALESCE(is_material, 0) AS TEXT))) IN ({placeholders})
+        )
+        {zero_sql}
+        ORDER BY company, location, product_name, exp_date
+        """,
+        stocktake_service._TRUE_MATERIAL_VALUES,
+    )
+    return _inventory_survey_excel_bytes_business(df, "부자재재고실사")
 
 
 def _merge_inventory_rows(con, keep_id, duplicate_ids):
@@ -529,15 +556,18 @@ def import_stock_survey_excel_business(uploaded_file, replace_current=True):
 
 def page_stocktake():
     original_full_inventory_excel_bytes = stocktake_service.full_inventory_excel_bytes
+    original_material_inventory_excel_bytes = stocktake_service.material_inventory_excel_bytes
     original_import_stock_survey_excel = stocktake_service.import_stock_survey_excel
     original_update_master = stocktake_page._update_inventory_and_product_mappings
 
     stocktake_service.full_inventory_excel_bytes = full_inventory_excel_bytes_business
+    stocktake_service.material_inventory_excel_bytes = material_inventory_excel_bytes_business
     stocktake_service.import_stock_survey_excel = import_stock_survey_excel_business
     stocktake_page._update_inventory_and_product_mappings = _update_inventory_and_product_mappings_business
     try:
         return stocktake_page.page_stocktake()
     finally:
         stocktake_service.full_inventory_excel_bytes = original_full_inventory_excel_bytes
+        stocktake_service.material_inventory_excel_bytes = original_material_inventory_excel_bytes
         stocktake_service.import_stock_survey_excel = original_import_stock_survey_excel
         stocktake_page._update_inventory_and_product_mappings = original_update_master

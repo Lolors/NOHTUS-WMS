@@ -889,7 +889,12 @@ def _render_stock_adjustment():
 
 
 def _render_stocktake_files():
-    from nohtus.services.stocktake import current_baseline_stock_excel_bytes, full_inventory_excel_bytes, import_stock_survey_excel
+    from nohtus.services.stocktake import (
+        current_baseline_stock_excel_bytes,
+        full_inventory_excel_bytes,
+        import_stock_survey_excel,
+        material_inventory_excel_bytes,
+    )
 
     st.subheader("재고실사 및 기준재고")
     file_area, _file_blank = st.columns([6, 4], gap="large")
@@ -928,6 +933,17 @@ def _render_stocktake_files():
             series_col2.checkbox("X계열(폐기)", value=exclude_x, key="stocktake_exclude_series_x")
             series_col3.checkbox("T계열(파렛트)", value=exclude_t, key="stocktake_exclude_series_t")
             series_col4.checkbox("기타 위치(창고 외부)", value=exclude_n, key="stocktake_exclude_series_n")
+
+            st.markdown("#### 부자재 재고표")
+            material_excel_data = material_inventory_excel_bytes(exclude_zero=exclude_zero)
+            st.download_button(
+                "부자재 재고표 내려받기",
+                data=material_excel_data,
+                file_name=f"NOHTUS_부자재재고실사_{date.today().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+            st.caption("부자재 관리에 등록된 제품만 따로 모은 재고표입니다.")
 
         with file_right:
             st.markdown("#### 기준재고")
