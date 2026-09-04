@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import tempfile
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -48,6 +49,19 @@ def _backup_to(source_path: Path, directory: Path, now: datetime, prefix: str) -
     for old_backup in backups[MAX_BACKUPS:]:
         old_backup.unlink(missing_ok=True)
     return destination
+
+
+def current_wms_db_bytes() -> bytes:
+    """지금 이 순간의 WMS DB(nohtus.db)를 안전하게 스냅샷 떠서 바이트로 반환한다."""
+    source_path = Path(DB_PATH)
+    if not source_path.is_file():
+        raise ValueError(f"WMS DB를 찾을 수 없습니다: {source_path}")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        snapshot_path = Path(temp_dir) / "nohtus_snapshot.db"
+        with sqlite3.connect(source_path) as source, sqlite3.connect(snapshot_path) as target:
+            source.backup(target)
+        return snapshot_path.read_bytes()
 
 
 def _state_time(state: dict, key: str) -> datetime:

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -279,6 +281,20 @@ def main():
                     st.error(str(exc))
             for error in backup_result.get("errors", []):
                 st.warning(error)
+
+            st.markdown("<hr>", unsafe_allow_html=True)
+            try:
+                db_bytes = database_backup.current_wms_db_bytes()
+                st.download_button(
+                    "현재 WMS의 DB파일 받기",
+                    data=db_bytes,
+                    file_name=f"nohtus_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db",
+                    mime="application/octet-stream",
+                    use_container_width=True,
+                    key="download_current_wms_db",
+                )
+            except Exception as exc:
+                st.error(str(exc))
     if not can_access_page(menu):
         st.warning("이 계정은 해당 메뉴에 접근할 수 없습니다.")
         return
