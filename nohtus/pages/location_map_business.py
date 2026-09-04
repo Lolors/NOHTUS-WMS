@@ -231,6 +231,8 @@ def page_map():
     def patched_button(label, *args, **kwargs):
         if isinstance(label, str) and label.startswith("⭐즐겨찾기"):
             return False
+        if isinstance(label, str) and label == "제품 사진\n(아래에서 업로드)":
+            label = "클릭해서 업로드"
         return original_button(label, *args, **kwargs)
 
     location_map_page.page_map_search_results = _page_map_search_results_with_available_filter
