@@ -47,14 +47,19 @@ def _inventory_survey_excel_bytes_business(df, sheet_name):
 
 def full_inventory_excel_bytes_business(exclude_zero=True, exclude_series=None):
     exclude_series = set(exclude_series or ())
-    where_sql = "WHERE qty<>0" if exclude_zero else ""
+    material_sql, material_params = stocktake_service._material_exclusion_sql()
+    conditions = [material_sql]
+    if exclude_zero:
+        conditions.append("qty<>0")
+    where_sql = "WHERE " + " AND ".join(conditions)
     df = q(
         f"""
         SELECT company, location, product_name, exp_date, qty
         FROM inventory
         {where_sql}
         ORDER BY company, location, product_name, exp_date
-        """
+        """,
+        material_params,
     )
     if not df.empty and exclude_series:
         df = df[~df["location"].apply(stocktake_service.location_series).isin(exclude_series)]

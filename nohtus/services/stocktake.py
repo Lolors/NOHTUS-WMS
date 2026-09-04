@@ -158,16 +158,34 @@ def _inventory_survey_excel_bytes(df, sheet_name):
     return bio.getvalue()
 
 
+def _material_exclusion_sql():
+    """부자재로 분류된 제품을 재고실사 대상에서 항상 제외하는 조건. 부자재는
+    별도의 "부자재 재고표"로 뽑기 때문에 기본 재고실사에는 포함하지 않는다."""
+    placeholders = ",".join("?" for _ in _TRUE_MATERIAL_VALUES)
+    return (
+        f"""TRIM(COALESCE(product_name,'')) NOT IN (
+            SELECT TRIM(standard_name) FROM products
+            WHERE LOWER(TRIM(CAST(COALESCE(is_material, 0) AS TEXT))) IN ({placeholders})
+        )""",
+        _TRUE_MATERIAL_VALUES,
+    )
+
+
 def full_inventory_excel_bytes(exclude_zero=True, exclude_series=None):
     exclude_series = set(exclude_series or ())
-    where_sql = f"WHERE qty>0 OR {_zero_qty_exception_sql()}" if exclude_zero else ""
+    material_sql, material_params = _material_exclusion_sql()
+    conditions = [material_sql]
+    if exclude_zero:
+        conditions.append(f"(qty>0 OR {_zero_qty_exception_sql()})")
+    where_sql = "WHERE " + " AND ".join(conditions)
     df = q(
         f"""
         SELECT location, product_name, warehouse_name, lot, exp_date, qty
         FROM inventory
         {where_sql}
         ORDER BY location, product_name, lot, exp_date
-        """
+        """,
+        material_params,
     )
     if not df.empty and exclude_series:
         df = df[~df["location"].apply(location_series).isin(exclude_series)]
