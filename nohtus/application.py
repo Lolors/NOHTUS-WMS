@@ -224,14 +224,23 @@ def _render_app_mode_toggle() -> str:
             background: rgba(148, 163, 184, 0.16);
             border: 1px solid rgba(148, 163, 184, 0.4);
             border-radius: 999px;
-            padding: 10px 14px;
-            margin: 4px 0 14px;
+            padding: 8px 14px;
+            margin: 4px 0 -0.7rem;
         }
         div[class*="st-key-app_mode_toggle_row"] [data-testid="stHorizontalBlock"] {
             align-items: center;
         }
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="column"] {
+            display: flex;
+            align-items: center;
+            height: 100%;
+        }
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stMarkdownContainer"] {
+            width: 100%;
+        }
         div[class*="st-key-app_mode_toggle_row"] [data-testid="stMarkdownContainer"] p {
             margin: 0;
+            line-height: 1.1;
             font-size: 0.92rem;
             font-weight: 800;
             white-space: nowrap;
@@ -242,6 +251,10 @@ def _render_app_mode_toggle() -> str:
         div[class*="st-key-app_mode_toggle_row"] label[data-baseweb="checkbox"] {
             transform: scale(1.6);
             transform-origin: center;
+        }
+        div[class*="st-key-app_mode_toggle_row"] + div [data-testid="stMarkdownContainer"] h1 {
+            margin-top: 0 !important;
+            padding-top: 0 !important;
         }
         </style>
         """,
@@ -269,7 +282,6 @@ def _render_app_mode_toggle() -> str:
     if new_mode != mode:
         st.session_state[_APP_MODE_KEY] = new_mode
         st.rerun()
-    st.sidebar.markdown("<hr>", unsafe_allow_html=True)
     return new_mode
 
 
