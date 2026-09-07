@@ -16,7 +16,7 @@ _OUTBOUND_NATIVE_WIDGETS = {
 
 from styles import apply_style
 from nohtus.auth import allowed_pages_for_current_user, can_access_page, is_admin, render_user_box, require_login
-from nohtus.config import APP_TITLE, VERSION
+from nohtus.config import APP_TITLE
 from nohtus.db_init import init_db
 from nohtus.export_app_bridge import init_export_app
 from nohtus.services import database_backup
@@ -209,6 +209,70 @@ def page_export_waiting():
             outbound_page._days_ago_label = original_days_ago_label
 
 
+_APP_MODE_KEY = "_top_app_mode"
+
+
+def _render_app_mode_toggle() -> str:
+    """WMS ↔ 발주관리 전환용 상단 슬라이드 스위치. 항상 사이드바 맨 위에 고정으로 그린다."""
+    mode = st.session_state.get(_APP_MODE_KEY, "wms")
+    is_order_management = mode == "order_management"
+
+    st.sidebar.markdown(
+        """
+        <style>
+        div[class*="st-key-app_mode_toggle_row"] {
+            background: rgba(148, 163, 184, 0.16);
+            border: 1px solid rgba(148, 163, 184, 0.4);
+            border-radius: 999px;
+            padding: 10px 14px;
+            margin: 4px 0 14px;
+        }
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stHorizontalBlock"] {
+            align-items: center;
+        }
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stMarkdownContainer"] p {
+            margin: 0;
+            font-size: 0.92rem;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stWidgetLabel"] {
+            display: none;
+        }
+        div[class*="st-key-app_mode_toggle_row"] label[data-baseweb="checkbox"] {
+            transform: scale(1.6);
+            transform-origin: center;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.sidebar.container(key="app_mode_toggle_row"):
+        wms_col, switch_col, om_col = st.columns([1.1, 0.9, 1.3], vertical_alignment="center")
+        wms_col.markdown(
+            f"<p style='text-align:right;color:{'#0f172a' if not is_order_management else '#94a3b8'}'>WMS</p>",
+            unsafe_allow_html=True,
+        )
+        with switch_col:
+            new_value = st.toggle(
+                "app_mode_switch",
+                value=is_order_management,
+                key="app_mode_switch",
+                label_visibility="collapsed",
+            )
+        om_col.markdown(
+            f"<p style='text-align:left;color:{'#0f172a' if is_order_management else '#94a3b8'}'>발주관리</p>",
+            unsafe_allow_html=True,
+        )
+
+    new_mode = "order_management" if new_value else "wms"
+    if new_mode != mode:
+        st.session_state[_APP_MODE_KEY] = new_mode
+        st.rerun()
+    st.sidebar.markdown("<hr>", unsafe_allow_html=True)
+    return new_mode
+
+
 def main():
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     init_db()
@@ -251,12 +315,20 @@ def main():
         page_mobile_stock_finder()
         return
 
+    app_mode = _render_app_mode_toggle()
+    st.sidebar.markdown(f"# {APP_TITLE}")
+
+    if app_mode == "order_management":
+        from nohtus.order_management_bridge import render_order_management
+        render_order_management()
+        return
+
     allowed_pages = allowed_pages_for_current_user()
-    menu = render_sidebar(APP_TITLE, VERSION, allowed_pages=allowed_pages)
+    menu = render_sidebar(allowed_pages=allowed_pages)
     render_user_box()
     if is_admin():
         with st.sidebar.expander("데이터 백업"):
-            st.caption("WMS DB와 수출관리 DB는 매시간 로컬과 Google Drive에 자동 백업되며 각각 최신 20개를 보관합니다.")
+            st.caption("WMS DB, 수출관리 DB, 발주관리 DB는 매시간 로컬과 Google Drive에 자동 백업되며 각각 최신 20개를 보관합니다.")
             drive_path = st.text_input(
                 "Google Drive 동기화 폴더",
                 value=database_backup.google_drive_root(),

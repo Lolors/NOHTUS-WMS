@@ -69,9 +69,7 @@ def apply_query_page_redirects():
         pass
 
 
-def render_sidebar(app_title, version, allowed_pages=None):
-    st.sidebar.markdown(f"# {app_title}")
-    st.sidebar.caption(version)
+def render_sidebar(allowed_pages=None):
     if "page" not in st.session_state:
         st.session_state["page"] = DEFAULT_PAGE
     apply_query_page_redirects()
