@@ -211,40 +211,60 @@ _APP_MODE_KEY = "_top_app_mode"
 
 
 def _render_app_mode_toggle() -> str:
-    """WMS ↔ 발주관리 전환용 상단 토글. 항상 사이드바 맨 위에 고정으로 그린다."""
+    """WMS ↔ 발주관리 전환용 상단 슬라이드 스위치. 항상 사이드바 맨 위에 고정으로 그린다."""
     mode = st.session_state.get(_APP_MODE_KEY, "wms")
+    is_order_management = mode == "order_management"
 
     st.sidebar.markdown(
         """
         <style>
-        div[class*="st-key-app_mode_toggle_row"] div[data-testid="stButton"] > button {
-            border-radius: 999px !important;
+        div[class*="st-key-app_mode_toggle_row"] {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 2px 0 12px;
+        }
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stMarkdownContainer"] p {
+            margin: 0;
+            font-size: 0.92rem;
             font-weight: 800;
+            white-space: nowrap;
+        }
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stWidgetLabel"] {
+            display: none;
+        }
+        div[class*="st-key-app_mode_toggle_row"] label[data-baseweb="checkbox"] > div:first-child {
+            transform: scale(1.35);
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
     with st.sidebar.container(key="app_mode_toggle_row"):
-        wms_col, om_col = st.columns(2)
-        if wms_col.button(
-            "🏭 WMS",
-            key="app_mode_btn_wms",
-            use_container_width=True,
-            type="primary" if mode == "wms" else "secondary",
-        ) and mode != "wms":
-            st.session_state[_APP_MODE_KEY] = "wms"
-            st.rerun()
-        if om_col.button(
-            "📦 발주관리",
-            key="app_mode_btn_order_management",
-            use_container_width=True,
-            type="primary" if mode == "order_management" else "secondary",
-        ) and mode != "order_management":
-            st.session_state[_APP_MODE_KEY] = "order_management"
-            st.rerun()
+        wms_col, switch_col, om_col = st.columns([1.1, 0.9, 1.3])
+        wms_col.markdown(
+            f"<p style='text-align:right;color:{'#0f172a' if not is_order_management else '#94a3b8'}'>WMS</p>",
+            unsafe_allow_html=True,
+        )
+        with switch_col:
+            new_value = st.toggle(
+                "app_mode_switch",
+                value=is_order_management,
+                key="app_mode_switch",
+                label_visibility="collapsed",
+            )
+        om_col.markdown(
+            f"<p style='text-align:left;color:{'#0f172a' if is_order_management else '#94a3b8'}'>발주관리</p>",
+            unsafe_allow_html=True,
+        )
+
+    new_mode = "order_management" if new_value else "wms"
+    if new_mode != mode:
+        st.session_state[_APP_MODE_KEY] = new_mode
+        st.rerun()
     st.sidebar.markdown("<hr>", unsafe_allow_html=True)
-    return mode
+    return new_mode
 
 
 def main():
