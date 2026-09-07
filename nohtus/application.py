@@ -14,7 +14,7 @@ _OUTBOUND_NATIVE_WIDGETS = {
 
 from styles import apply_style
 from nohtus.auth import allowed_pages_for_current_user, can_access_page, is_admin, render_user_box, require_login
-from nohtus.config import APP_TITLE, VERSION
+from nohtus.config import APP_TITLE
 from nohtus.db_init import init_db
 from nohtus.export_app_bridge import init_export_app
 from nohtus.services import database_backup
@@ -219,11 +219,14 @@ def _render_app_mode_toggle() -> str:
         """
         <style>
         div[class*="st-key-app_mode_toggle_row"] {
-            display: flex;
+            background: rgba(148, 163, 184, 0.16);
+            border: 1px solid rgba(148, 163, 184, 0.4);
+            border-radius: 999px;
+            padding: 10px 14px;
+            margin: 4px 0 14px;
+        }
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stHorizontalBlock"] {
             align-items: center;
-            justify-content: center;
-            gap: 10px;
-            padding: 2px 0 12px;
         }
         div[class*="st-key-app_mode_toggle_row"] [data-testid="stMarkdownContainer"] p {
             margin: 0;
@@ -234,15 +237,16 @@ def _render_app_mode_toggle() -> str:
         div[class*="st-key-app_mode_toggle_row"] [data-testid="stWidgetLabel"] {
             display: none;
         }
-        div[class*="st-key-app_mode_toggle_row"] label[data-baseweb="checkbox"] > div:first-child {
-            transform: scale(1.35);
+        div[class*="st-key-app_mode_toggle_row"] label[data-baseweb="checkbox"] {
+            transform: scale(1.6);
+            transform-origin: center;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
     with st.sidebar.container(key="app_mode_toggle_row"):
-        wms_col, switch_col, om_col = st.columns([1.1, 0.9, 1.3])
+        wms_col, switch_col, om_col = st.columns([1.1, 0.9, 1.3], vertical_alignment="center")
         wms_col.markdown(
             f"<p style='text-align:right;color:{'#0f172a' if not is_order_management else '#94a3b8'}'>WMS</p>",
             unsafe_allow_html=True,
@@ -309,13 +313,16 @@ def main():
         page_mobile_stock_finder()
         return
 
-    if _render_app_mode_toggle() == "order_management":
+    app_mode = _render_app_mode_toggle()
+    st.sidebar.markdown(f"# {APP_TITLE}")
+
+    if app_mode == "order_management":
         from nohtus.order_management_bridge import render_order_management
         render_order_management()
         return
 
     allowed_pages = allowed_pages_for_current_user()
-    menu = render_sidebar(APP_TITLE, VERSION, allowed_pages=allowed_pages)
+    menu = render_sidebar(allowed_pages=allowed_pages)
     render_user_box()
     if is_admin():
         with st.sidebar.expander("데이터 백업"):

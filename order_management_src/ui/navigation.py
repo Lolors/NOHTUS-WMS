@@ -1,8 +1,6 @@
 """Sidebar navigation for the 1.0 application."""
 from __future__ import annotations
 
-from config.version import APP_TITLE
-
 
 MENU_GROUPS = [
     ("발주서", ["발주 작성", "임시저장 목록", "발주서 목록"]),
@@ -13,13 +11,7 @@ MENU_GROUPS = [
 
 
 def render_sidebar(st) -> str:
-    """Render the sidebar and return the selected page name."""
-    st.sidebar.markdown(
-        '<div class="sidebar-title">발주관리</div>',
-        unsafe_allow_html=True,
-    )
-    st.sidebar.caption(APP_TITLE)
-
+    """Render the sidebar and return the selected page name. WMS와 같은 메뉴 스타일을 쓴다."""
     if st.session_state.current_page == "최근 발주 내역":
         st.session_state.current_page = "발주서 목록"
 
@@ -40,11 +32,9 @@ def render_sidebar(st) -> str:
             st.session_state.current_page = name
             st.rerun()
 
-    for group_index, (heading, pages) in enumerate(MENU_GROUPS):
+    for heading, pages in MENU_GROUPS:
         if heading:
-            if group_index > 0:
-                st.sidebar.markdown("---")
-            st.sidebar.markdown(f"**{heading}**")
+            st.sidebar.markdown(f"### {heading}")
         for page in pages:
             menu(page)
 
