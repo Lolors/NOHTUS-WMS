@@ -226,17 +226,63 @@ def _render_app_mode_toggle() -> str:
             border-radius: 999px;
             padding: 8px 14px;
             margin: 4px 0 0;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: fit-content;
+        }
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stLayoutWrapper"] {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            width: fit-content;
+            height: auto !important;
         }
         div[class*="st-key-app_mode_toggle_row"] [data-testid="stHorizontalBlock"] {
-            align-items: center;
+            width: fit-content;
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            align-items: center !important;
         }
-        div[class*="st-key-app_mode_toggle_row"] [data-testid="column"] {
-            display: flex;
-            align-items: center;
-            height: 100%;
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stVerticalBlock"] {
+            gap: 0;
+        }
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stElementContainer"],
+        div[class*="st-key-app_mode_toggle_row"] .element-container {
+            margin: 0 !important;
+            display: flex !important;
+            align-items: center !important;
+            align-self: center !important;
+            height: auto !important;
+        }
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stColumn"] {
+            display: flex !important;
+            align-items: center !important;
+            align-self: center !important;
+            width: auto !important;
+            flex: 0 0 auto !important;
+            height: auto !important;
+        }
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stVerticalBlock"] {
+            align-self: center !important;
+        }
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stMarkdown"],
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stMarkdown"] > div {
+            display: flex !important;
+            align-items: center !important;
+            align-self: center !important;
+            height: auto !important;
         }
         div[class*="st-key-app_mode_toggle_row"] [data-testid="stMarkdownContainer"] {
             width: 100%;
+            display: flex !important;
+            align-items: center !important;
+            align-self: center !important;
+        }
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stMarkdownContainer"] p {
+            align-self: center !important;
+            transform: translateY(-7px);
         }
         div[class*="st-key-app_mode_toggle_row"] [data-testid="stMarkdownContainer"] p {
             margin: 0;
@@ -246,11 +292,27 @@ def _render_app_mode_toggle() -> str:
             white-space: nowrap;
         }
         div[class*="st-key-app_mode_toggle_row"] [data-testid="stWidgetLabel"] {
-            display: none;
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        div[class*="st-key-app_mode_toggle_row"] [data-testid="stCheckbox"] {
+            display: flex !important;
+            align-items: center !important;
+            height: auto !important;
         }
         div[class*="st-key-app_mode_toggle_row"] label[data-baseweb="checkbox"] {
-            transform: scale(1.6);
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            transform: translateX(7px) scale(1.6);
             transform-origin: center;
+            margin: 0 !important;
+        }
+        div[class*="st-key-app_mode_toggle_row"] label[data-baseweb="checkbox"] > div:first-child {
+            margin: 0 !important;
         }
         </style>
         """,
@@ -285,7 +347,10 @@ def main():
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     init_db()
     init_export_app()
-    backup_result = database_backup.run_due_backups()
+    # 실제 백업 파일 복사(및 Google Drive 폴더 I/O)는 별도 스레드에서만 한다.
+    # 예전에는 여기서 매 rerun마다 동기적으로 run_due_backups()를 불렀는데,
+    # Dropbox로 동기화되는 폴더에서 이 파일 존재 확인/복사 자체가 느려서
+    # 클릭할 때마다 화면이 그만큼 느려지는 원인이었다.
     database_backup.start_backup_worker()
     apply_style()
     sync_mobile_flag()
@@ -375,7 +440,7 @@ def main():
                     st.success("Google Drive 백업 완료:  \n" + paths.replace("\n", "  \n"))
                 except Exception as exc:
                     st.error(str(exc))
-            for error in backup_result.get("errors", []):
+            for error in database_backup.last_backup_result().get("errors", []):
                 st.warning(error)
 
             st.markdown("<hr>", unsafe_allow_html=True)

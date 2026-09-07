@@ -798,7 +798,8 @@ section[data-testid="stSidebar"] .stButton button {
     justify-content: flex-start;
     text-align: left;
     padding-left: 18px;
-    height: 52px;
+    min-height: 36px;
+    margin: 0.04rem 0;
     border-radius: 8px;
     font-size: 15px;
     font-weight: 800;

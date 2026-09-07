@@ -105,9 +105,11 @@ def render(core_app, data, purchase_module=None) -> None:
     vendor_options = ["전체"] + sorted(
         working_headers["거래처명"].astype(str).replace("", pd.NA).dropna().unique().tolist()
     )
-    with st.container(border=True):
-        year, month = render_month_grid(st, "order_list", default_year=today.year, default_month=today.month)
-        vendor_col, keyword_col = st.columns([1.5, 3], gap="small")
+
+    panel_result: dict = {}
+
+    def _side_panel() -> None:
+        vendor_col, keyword_col = st.columns(2, gap="small")
         vendor_name = vendor_col.selectbox(
             "거래처",
             vendor_options,
@@ -119,41 +121,60 @@ def render(core_app, data, purchase_module=None) -> None:
             key="order_list_product_keyword",
         )
 
-    start_date = pd.Timestamp(year=year, month=month, day=1).date()
-    end_date = pd.Timestamp(
-        year=year, month=month, day=calendar.monthrange(year, month)[1]
-    ).date()
+        year_val = st.session_state.get("order_list_year", today.year)
+        month_val = st.session_state.get("order_list_month", today.month)
+        start_date = pd.Timestamp(year=year_val, month=month_val, day=1).date()
+        end_date = pd.Timestamp(
+            year=year_val, month=month_val, day=calendar.monthrange(year_val, month_val)[1]
+        ).date()
 
-    filtered_headers = _filter_orders(
-        working_headers,
-        items,
-        start_date,
-        end_date,
-        vendor_name,
-        keyword,
-    )
-    if filtered_headers.empty:
-        st.info("검색 조건에 맞는 발주서가 없습니다.")
+        filtered_headers = _filter_orders(
+            working_headers,
+            items,
+            start_date,
+            end_date,
+            vendor_name,
+            keyword,
+        )
+        display_headers = _sort_orders(filtered_headers)
+        panel_result["display_headers"] = display_headers
+
+        st.caption(f"검색 결과 {len(display_headers):,}건")
+        if display_headers.empty:
+            st.info("검색 조건에 맞는 발주서가 없습니다.")
+            return
+
+        event = st.dataframe(
+            orders._style_status_column(display_headers),
+            use_container_width=True,
+            hide_index=True,
+            height=320,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="order_list_row_selection",
+        )
+        panel_result["selected_rows"] = _selected_rows(event)
+
+    with st.container(border=True):
+        render_month_grid(
+            st,
+            "order_list",
+            default_year=today.year,
+            default_month=today.month,
+            scale=0.25,
+            year_font_scale=3,
+            side_content=_side_panel,
+        )
+
+    display_headers = panel_result.get("display_headers", pd.DataFrame())
+    if display_headers.empty:
         return
 
-    display_headers = _sort_orders(filtered_headers)
-
-    st.caption(
-        f"검색 결과 {len(display_headers):,}건 · 발주ID가 있는 행을 클릭하면 아래에 내용이 표시됩니다."
-    )
-    event = st.dataframe(
-        orders._style_status_column(display_headers),
-        use_container_width=True,
-        hide_index=True,
-        on_select="rerun",
-        selection_mode="single-row",
-        key="order_list_row_selection",
-    )
-
-    selected_rows = _selected_rows(event)
+    selected_rows = panel_result.get("selected_rows", [])
     if not selected_rows:
-        st.info("내용을 확인할 발주서 행을 선택하세요.")
         return
+
+    st.markdown("---")
 
     row_index = selected_rows[0]
     if row_index < 0 or row_index >= len(display_headers):

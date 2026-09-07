@@ -231,7 +231,12 @@ def render(purchase_module, data) -> None:
     today = datetime.now()
     with st.container(border=True):
         year, month = render_month_grid(
-            st, "accounting_export", default_year=today.year, default_month=today.month
+            st,
+            "accounting_export",
+            default_year=today.year,
+            default_month=today.month,
+            scale=0.25,
+            year_font_scale=3,
         )
     month_key = f"{year:04d}-{month:02d}"
 

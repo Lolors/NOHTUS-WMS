@@ -46,7 +46,6 @@ def render_order_receipt_review(orders, order_items_saved):
         st.info("검수할 발주서가 없습니다.")
         return
 
-    purchase.ensure_purchase_files()
     statements, statement_items, _, _ = purchase.load_purchase_data()
 
     ordered = orders.copy().sort_values("발주일시", ascending=False)

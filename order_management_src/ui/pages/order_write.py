@@ -87,6 +87,9 @@ def _render_latest_product_order_card(st, latest_product_order) -> None:
                     <div style="font-size:2rem; font-weight:800; margin-top:6px;">
                         {latest_product_order['quantity']:,}개
                     </div>
+                    <div style="margin-top:4px; color:#6b7280;">
+                        {latest_product_order['date']} 발주
+                    </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -147,10 +150,14 @@ def render(core_app, data) -> None:
 """,
         unsafe_allow_html=True,
     )
-    title_col, date_col, _ = st.columns(
-        [0.85, 1.25, 5], gap="small", vertical_alignment="center"
+    title_col, date_label_col, date_col, _ = st.columns(
+        [1.105, 0.5, 0.625, 4.5], gap="small", vertical_alignment="center"
     )
     title_col.markdown("## 발주 작성")
+    date_label_col.markdown(
+        "<div style='text-align:right;font-weight:600;'>작성일자</div>",
+        unsafe_allow_html=True,
+    )
     order_date = date_col.date_input(
         "발주일자",
         value=st.session_state.get("order_date", datetime.now().date()),
@@ -189,19 +196,6 @@ def render(core_app, data) -> None:
                 vendor = vendors[vendors["거래처명"].astype(str) == vendor_name].iloc[0]
                 _vendor_panel(st, vendor)
 
-                latest = orders_df[orders_df["거래처명"].astype(str) == vendor_name].copy()
-                if not latest.empty:
-                    latest = latest.sort_values("발주일시", ascending=False).iloc[0]
-                    if st.button("최근 발주 복사", use_container_width=True, key="copy_latest_order"):
-                        rows = saved_items[
-                            saved_items["발주ID"].astype(str) == str(latest["발주ID"])
-                        ]
-                        st.session_state.order_items = _normalise_items(core_app, rows)
-                        st.session_state.pop("order_excel_export", None)
-                        st.rerun()
-                else:
-                    st.caption("최근 발주 이력이 없습니다.")
-
                 latest_product_slot = st.empty()
 
         with search_col:
@@ -210,7 +204,7 @@ def render(core_app, data) -> None:
                 keyword = st.text_input(
                     "검색",
                     value="",
-                    placeholder="예: 마취크림",
+                    placeholder="예: 23G 니들",
                     key="order_product_search",
                     label_visibility="collapsed",
                 )

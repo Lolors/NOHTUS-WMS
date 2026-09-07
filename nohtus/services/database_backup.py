@@ -16,6 +16,8 @@ GOOGLE_DRIVE_FOLDER_NAME = "NOHTUS_WMS_BACKUP"
 STATE_PATH = LOCAL_BACKUP_DIR / ".backup_state.json"
 _WORKER_LOCK = threading.Lock()
 _WORKER_STARTED = False
+_RESULT_LOCK = threading.Lock()
+_LAST_RESULT: dict = {"local": [], "google_drive": [], "errors": []}
 
 # 세 DB는 하나의 백업 세트다. 한쪽만 백업되는 상태를 막기 위해
 # 주기 판단도 세트 단위로 하고, 실행 시 항상 다 함께 시도한다.
@@ -198,11 +200,34 @@ def backup_to_google_drive_now() -> str:
     return "\n".join(paths)
 
 
+def last_backup_result() -> dict:
+    """가장 최근 백업 스레드 실행 결과(에러 목록 등)를 반환한다.
+
+    이 함수는 DB에 직접 접근하지 않고 메모리에 저장된 값만 읽으므로,
+    화면 렌더링(rerun)마다 호출해도 느려지지 않는다."""
+    with _RESULT_LOCK:
+        return dict(_LAST_RESULT)
+
+
+def _run_and_record() -> None:
+    try:
+        result = run_due_backups()
+    except Exception as exc:
+        result = {"local": [], "google_drive": [], "errors": [f"백업 확인 실패: {exc}"]}
+    with _RESULT_LOCK:
+        _LAST_RESULT.clear()
+        _LAST_RESULT.update(result)
+
+
 def _backup_worker() -> None:
+    # 시작하자마자 한 번 확인해서 그동안 밀린 백업이 있으면 처리한다.
+    # 이 실제 파일 백업(및 Google Drive 동기화 폴더에 대한 디스크 I/O)은
+    # 메인 스레드에서 하지 않는다 - 화면 렌더링을 매번 막지 않기 위해서다.
+    _run_and_record()
     while True:
         threading.Event().wait(BACKUP_INTERVAL.total_seconds())
         try:
-            run_due_backups()
+            _run_and_record()
         except Exception:
             # 백업 오류가 앱 서버를 중단시키지 않도록 다음 주기에 재시도한다.
             continue
