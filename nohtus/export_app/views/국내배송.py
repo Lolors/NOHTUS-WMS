@@ -123,7 +123,23 @@ def render() -> None:
             else:
                 driver = phone = ''
 
-        submitted = st.form_submit_button('배송정보 저장 및 완료 처리', type='primary')
+        save_col, complete_col = st.columns(2)
+        save_draft = save_col.form_submit_button('배송정보 저장', use_container_width=True)
+        submitted = complete_col.form_submit_button('완료 처리', type='primary', use_container_width=True)
+
+    if save_draft:
+        delivery_service.save_delivery_draft(
+            case_id,
+            method=method,
+            actual_ship_date=str(actual_date),
+            tracking_no=tracking,
+            driver_name=driver,
+            driver_phone=phone,
+            consignee_name=consignee_name,
+            consignee_address=consignee_address,
+        )
+        st.session_state['delivery_save_message'] = '배송정보를 저장했습니다. (아직 완료 처리 전)'
+        st.rerun()
 
     if submitted:
         delivery_service.save_delivery(
