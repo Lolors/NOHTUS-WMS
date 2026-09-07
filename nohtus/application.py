@@ -225,7 +225,7 @@ def _render_app_mode_toggle() -> str:
             border: 1px solid rgba(148, 163, 184, 0.4);
             border-radius: 999px;
             padding: 8px 14px;
-            margin: 4px 0 -0.7rem;
+            margin: 4px 0 0;
         }
         div[class*="st-key-app_mode_toggle_row"] [data-testid="stHorizontalBlock"] {
             align-items: center;
@@ -251,10 +251,6 @@ def _render_app_mode_toggle() -> str:
         div[class*="st-key-app_mode_toggle_row"] label[data-baseweb="checkbox"] {
             transform: scale(1.6);
             transform-origin: center;
-        }
-        div[class*="st-key-app_mode_toggle_row"] + div [data-testid="stMarkdownContainer"] h1 {
-            margin-top: 0 !important;
-            padding-top: 0 !important;
         }
         </style>
         """,
@@ -327,8 +323,24 @@ def main():
         page_mobile_stock_finder()
         return
 
-    app_mode = _render_app_mode_toggle()
-    st.sidebar.markdown(f"# {APP_TITLE}")
+    st.sidebar.markdown(
+        """
+        <style>
+        div[class*="st-key-app_mode_wrap"] [data-testid="stVerticalBlockBorderWrapper"],
+        div[class*="st-key-app_mode_wrap"] [data-testid="stVerticalBlock"] {
+            gap: 0.25rem !important;
+        }
+        div[class*="st-key-app_mode_wrap"] [data-testid="stMarkdownContainer"] h1 {
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.sidebar.container(key="app_mode_wrap"):
+        app_mode = _render_app_mode_toggle()
+        st.markdown(f"# {APP_TITLE}")
 
     if app_mode == "order_management":
         from nohtus.order_management_bridge import render_order_management
