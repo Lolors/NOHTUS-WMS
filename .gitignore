@@ -54,3 +54,6 @@ data/export.db.bak.20260901_161244
 data/export.db.bak.20260901_180033
 data/nohtus.db.bak.20260901_161948
 data/nohtus.db.bak.20260901_164829
+order_management_src/data/purchase_order.db-wal
+order_management_src/data/purchase_order.db-shm
+data/export.db-wal
