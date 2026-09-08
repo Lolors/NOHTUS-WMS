@@ -236,7 +236,7 @@ def render(purchase_module, data) -> None:
             default_year=today.year,
             default_month=today.month,
             scale=0.25,
-            year_font_scale=3,
+            year_font_scale=6,
         )
     month_key = f"{year:04d}-{month:02d}"
 
