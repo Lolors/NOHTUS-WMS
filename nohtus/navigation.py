@@ -112,9 +112,10 @@ def render_sidebar(allowed_pages=None):
             header_col, toggle_col, _spacer_col = st.columns([1, 0.7, 1.3])
             header_col.markdown(f"### {section}")
             if toggle_col.button(
-                "접기" if expanded else "펼치기",
+                "▲" if expanded else "▼",
                 key="export_submenu_toggle",
                 use_container_width=True,
+                help="접기" if expanded else "펼치기",
             ):
                 st.session_state[_EXPORT_SUBMENU_EXPANDED_KEY] = not expanded
                 st.rerun()
