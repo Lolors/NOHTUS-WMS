@@ -109,20 +109,19 @@ def render_sidebar(allowed_pages=None):
     def render_collapsible_section(section, labels):
         expanded = bool(st.session_state.get(_EXPORT_SUBMENU_EXPANDED_KEY, False))
         with st.sidebar.container():
-            header_col, toggle_col = st.columns([2, 1])
+            header_col, toggle_col, _spacer_col = st.columns([1, 0.7, 1.3])
             header_col.markdown(f"### {section}")
-            if not expanded and toggle_col.button(
-                "펼치기", key="export_submenu_expand", use_container_width=True
+            if toggle_col.button(
+                "접기" if expanded else "펼치기",
+                key="export_submenu_toggle",
+                use_container_width=True,
             ):
-                st.session_state[_EXPORT_SUBMENU_EXPANDED_KEY] = True
+                st.session_state[_EXPORT_SUBMENU_EXPANDED_KEY] = not expanded
                 st.rerun()
             if not expanded:
                 return
             for label in labels:
                 submenu_button(label)
-            if st.button("수출 메뉴 접기", key="export_submenu_collapse", use_container_width=True):
-                st.session_state[_EXPORT_SUBMENU_EXPANDED_KEY] = False
-                st.rerun()
 
     for section, labels in MENU_SECTIONS:
         visible_labels = [label for label in labels if label not in HIDDEN_PAGES and is_allowed(label)]

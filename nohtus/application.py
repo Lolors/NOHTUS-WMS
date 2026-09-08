@@ -15,7 +15,7 @@ _OUTBOUND_NATIVE_WIDGETS = {
 }
 
 from styles import apply_style
-from nohtus.auth import allowed_pages_for_current_user, can_access_page, is_admin, render_user_box, require_login
+from nohtus.auth import allowed_pages_for_current_user, can_access_page, current_role, is_admin, render_user_box, require_login
 from nohtus.config import APP_TITLE
 from nohtus.db_init import init_db
 from nohtus.export_app_bridge import init_export_app
@@ -388,24 +388,29 @@ def main():
         page_mobile_stock_finder()
         return
 
-    st.sidebar.markdown(
-        """
-        <style>
-        div[class*="st-key-app_mode_wrap"] [data-testid="stVerticalBlockBorderWrapper"],
-        div[class*="st-key-app_mode_wrap"] [data-testid="stVerticalBlock"] {
-            gap: 0.25rem !important;
-        }
-        div[class*="st-key-app_mode_wrap"] [data-testid="stMarkdownContainer"] h1 {
-            margin: 0 !important;
-            padding: 0 !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    with st.sidebar.container(key="app_mode_wrap"):
-        app_mode = _render_app_mode_toggle()
-        st.markdown(f"# {'발주관리' if app_mode == 'order_management' else APP_TITLE}")
+    if current_role().strip().lower() in {"user", "admin"}:
+        st.sidebar.markdown(
+            """
+            <style>
+            div[class*="st-key-app_mode_wrap"] [data-testid="stVerticalBlockBorderWrapper"],
+            div[class*="st-key-app_mode_wrap"] [data-testid="stVerticalBlock"] {
+                gap: 0.25rem !important;
+            }
+            div[class*="st-key-app_mode_wrap"] [data-testid="stMarkdownContainer"] h1 {
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        with st.sidebar.container(key="app_mode_wrap"):
+            app_mode = _render_app_mode_toggle()
+            st.markdown(f"# {'발주관리' if app_mode == 'order_management' else APP_TITLE}")
+    else:
+        app_mode = "wms"
+        st.session_state[_APP_MODE_KEY] = "wms"
+        st.sidebar.markdown(f"# {APP_TITLE}")
 
     if app_mode == "order_management":
         from nohtus.order_management_bridge import render_order_management

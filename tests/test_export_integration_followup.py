@@ -264,7 +264,7 @@ class ExportIntegrationFollowupTests(TestCase):
     def test_export_menu_is_conditionally_rendered_and_has_bottom_collapse(self):
         source = Path("nohtus/navigation.py").read_text(encoding="utf-8")
         self.assertIn('if not expanded:', source)
-        self.assertIn('"수출 메뉴 접기"', source)
+        self.assertIn('"접기" if expanded else "펼치기"', source)
         self.assertNotIn('export_menu_hover_zone', source)
 
     def test_overview_column_order_and_todo_removal(self):
