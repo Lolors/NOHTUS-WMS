@@ -405,7 +405,8 @@ def main():
     )
     with st.sidebar.container(key="app_mode_wrap"):
         app_mode = _render_app_mode_toggle()
-        st.markdown(f"# {APP_TITLE}")
+        if app_mode != "order_management":
+            st.markdown(f"# {APP_TITLE}")
 
     if app_mode == "order_management":
         from nohtus.order_management_bridge import render_order_management
