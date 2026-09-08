@@ -238,21 +238,24 @@ def render(purchase_module, data) -> None:
             scale=0.25,
             year_font_scale=6,
         )
-    month_key = f"{year:04d}-{month:02d}"
+        month_key = f"{year:04d}-{month:02d}"
 
-    summary, detail, vendor = _build_frames(purchase_module, data, year, month)
+        summary, detail, vendor = _build_frames(purchase_module, data, year, month)
+        if summary.empty:
+            st.info("선택한 월의 거래명세서가 없습니다.")
+        else:
+            product_amount = int(summary["상품금액"].sum())
+            freight = int(summary["배송비"].sum())
+            total = int(summary["총 매입금액"].sum())
+            row1_col1, row1_col2 = st.columns(2)
+            row1_col1.metric("거래명세서", f"{len(summary):,}건")
+            row1_col2.metric("상품금액", f"{product_amount:,}원")
+            row2_col1, row2_col2 = st.columns(2)
+            row2_col1.metric("배송비", f"{freight:,}원")
+            row2_col2.metric("총 매입금액", f"{total:,}원")
+
     if summary.empty:
-        st.info("선택한 월의 거래명세서가 없습니다.")
         return
-
-    product_amount = int(summary["상품금액"].sum())
-    freight = int(summary["배송비"].sum())
-    total = int(summary["총 매입금액"].sum())
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("거래명세서", f"{len(summary):,}건")
-    m2.metric("상품금액", f"{product_amount:,}원")
-    m3.metric("배송비", f"{freight:,}원")
-    m4.metric("총 매입금액", f"{total:,}원")
 
     st.markdown("### 거래명세서별 월마감 요약")
     display = summary.copy()
