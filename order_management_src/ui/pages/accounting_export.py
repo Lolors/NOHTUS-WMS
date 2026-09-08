@@ -236,18 +236,36 @@ def render(purchase_module, data) -> None:
         month = st.session_state.get("accounting_export_month", today.month)
         summary, detail, vendor = _build_frames(purchase_module, data, year, month)
         results["summary"], results["detail"], results["vendor"] = summary, detail, vendor
-        if summary.empty:
-            st.info("선택한 월의 거래명세서가 없습니다.")
-            return
-        product_amount = int(summary["상품금액"].sum())
-        freight = int(summary["배송비"].sum())
-        total = int(summary["총 매입금액"].sum())
-        row1_col1, row1_col2 = st.columns(2)
-        row1_col1.metric("거래명세서", f"{len(summary):,}건")
-        row1_col2.metric("상품금액", f"{product_amount:,}원")
-        row2_col1, row2_col2 = st.columns(2)
-        row2_col1.metric("배송비", f"{freight:,}원")
-        row2_col2.metric("총 매입금액", f"{total:,}원")
+
+        st.markdown(
+            """
+            <style>
+            div[class*="st-key-accounting_export_side_metrics"] {
+                padding-left: 28px;
+            }
+            div[class*="st-key-accounting_export_side_metrics"] [data-testid="stMetricValue"] {
+                font-size: 1.25rem;
+            }
+            div[class*="st-key-accounting_export_side_metrics"] [data-testid="stMetricLabel"] {
+                font-size: 0.8rem;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        with st.container(key="accounting_export_side_metrics"):
+            if summary.empty:
+                st.info("선택한 월의 거래명세서가 없습니다.")
+                return
+            product_amount = int(summary["상품금액"].sum())
+            freight = int(summary["배송비"].sum())
+            total = int(summary["총 매입금액"].sum())
+            row1_col1, row1_col2 = st.columns(2)
+            row1_col1.metric("거래명세서", f"{len(summary):,}건")
+            row1_col2.metric("상품금액", f"{product_amount:,}원")
+            row2_col1, row2_col2 = st.columns(2)
+            row2_col1.metric("배송비", f"{freight:,}원")
+            row2_col2.metric("총 매입금액", f"{total:,}원")
 
     with st.container(border=True):
         year, month = render_month_grid(
