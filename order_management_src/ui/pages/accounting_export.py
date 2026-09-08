@@ -229,6 +229,26 @@ def render(purchase_module, data) -> None:
     st.caption("거래명세서 일자 기준으로 월마감 자료를 조회하고 내려받습니다.")
 
     today = datetime.now()
+    results: dict = {}
+
+    def _render_side_metrics() -> None:
+        year = st.session_state.get("accounting_export_year", today.year)
+        month = st.session_state.get("accounting_export_month", today.month)
+        summary, detail, vendor = _build_frames(purchase_module, data, year, month)
+        results["summary"], results["detail"], results["vendor"] = summary, detail, vendor
+        if summary.empty:
+            st.info("선택한 월의 거래명세서가 없습니다.")
+            return
+        product_amount = int(summary["상품금액"].sum())
+        freight = int(summary["배송비"].sum())
+        total = int(summary["총 매입금액"].sum())
+        row1_col1, row1_col2 = st.columns(2)
+        row1_col1.metric("거래명세서", f"{len(summary):,}건")
+        row1_col2.metric("상품금액", f"{product_amount:,}원")
+        row2_col1, row2_col2 = st.columns(2)
+        row2_col1.metric("배송비", f"{freight:,}원")
+        row2_col2.metric("총 매입금액", f"{total:,}원")
+
     with st.container(border=True):
         year, month = render_month_grid(
             st,
@@ -237,24 +257,14 @@ def render(purchase_module, data) -> None:
             default_month=today.month,
             scale=0.25,
             year_font_scale=6,
+            side_content=_render_side_metrics,
         )
-        month_key = f"{year:04d}-{month:02d}"
+    month_key = f"{year:04d}-{month:02d}"
 
-        summary, detail, vendor = _build_frames(purchase_module, data, year, month)
-        if summary.empty:
-            st.info("선택한 월의 거래명세서가 없습니다.")
-        else:
-            product_amount = int(summary["상품금액"].sum())
-            freight = int(summary["배송비"].sum())
-            total = int(summary["총 매입금액"].sum())
-            row1_col1, row1_col2 = st.columns(2)
-            row1_col1.metric("거래명세서", f"{len(summary):,}건")
-            row1_col2.metric("상품금액", f"{product_amount:,}원")
-            row2_col1, row2_col2 = st.columns(2)
-            row2_col1.metric("배송비", f"{freight:,}원")
-            row2_col2.metric("총 매입금액", f"{total:,}원")
-
-    if summary.empty:
+    summary = results.get("summary")
+    detail = results.get("detail")
+    vendor = results.get("vendor")
+    if summary is None or summary.empty:
         return
 
     st.markdown("### 거래명세서별 월마감 요약")
