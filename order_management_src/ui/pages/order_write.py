@@ -26,6 +26,7 @@ def _reset_order_form_state(st) -> None:
     st.session_state["order_add_qty"] = 1
     st.session_state["order_date"] = datetime.now().date()
     st.session_state.pop("order_excel_export", None)
+    st.session_state.pop("order_management_editing_order_id", None)
     for key in _ORDER_FORM_RESET_KEYS:
         st.session_state.pop(key, None)
 
@@ -150,8 +151,8 @@ def render(core_app, data) -> None:
 """,
         unsafe_allow_html=True,
     )
-    title_col, date_label_col, date_col, _ = st.columns(
-        [1.105, 0.5, 0.625, 4.5], gap="small", vertical_alignment="center"
+    title_col, date_label_col, date_col, reset_col, _ = st.columns(
+        [1.105, 0.5, 0.625, 0.7, 3.8], gap="small", vertical_alignment="center"
     )
     title_col.markdown("## 발주 작성")
     date_label_col.markdown(
@@ -165,6 +166,9 @@ def render(core_app, data) -> None:
         label_visibility="collapsed",
         help="발주일자",
     )
+    if reset_col.button("초기화", use_container_width=True, help="작성 중인 발주 내용을 모두 지웁니다."):
+        _reset_order_form_state(st)
+        st.rerun()
     if st.session_state.pop("order_saved_success", False):
         saved_order_id = st.session_state.pop("last_saved_order_id", "")
         st.success(f"발주 완료: {saved_order_id}")
