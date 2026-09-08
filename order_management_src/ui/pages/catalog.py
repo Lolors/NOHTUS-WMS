@@ -8,7 +8,8 @@ import pandas as pd
 
 from db_migration import normalize_product_code
 
-PRODUCT_COLUMNS = ["제품코드", "제품명", "규격", "포장단위"]
+PRODUCT_COLUMNS = ["전용거래처", "제품코드", "제품명", "규격", "포장단위"]
+COMMON_SCOPE = "공통"
 ALIAS_COLUMNS = ["거래처명", "별칭", "제품코드"]
 VENDOR_COLUMNS = ["거래처코드", "거래처명", "담당자", "연락처", "이메일", "배송지"]
 
@@ -25,6 +26,7 @@ def _normalize_products(df: pd.DataFrame | None) -> pd.DataFrame:
             source[column] = ""
         source[column] = source[column].astype(str).str.strip()
     source["제품코드"] = source["제품코드"].map(normalize_product_code)
+    source.loc[source["전용거래처"] == "", "전용거래처"] = COMMON_SCOPE
     source = source[(source["제품코드"] != "") & (source["제품명"] != "")]
     return source[PRODUCT_COLUMNS].drop_duplicates("제품코드", keep="last").reset_index(drop=True)
 
@@ -70,13 +72,16 @@ def _product_excel_bytes(products: pd.DataFrame) -> bytes:
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         products.to_excel(writer, index=False, sheet_name="제품목록")
         sheet = writer.book["제품목록"]
-        for column, width in {"A": 18, "B": 36, "C": 20, "D": 18}.items():
+        for column, width in {"A": 14, "B": 18, "C": 36, "D": 20, "E": 18}.items():
             sheet.column_dimensions[column].width = width
     output.seek(0)
     return output.getvalue()
 
 
-def _read_product_upload(uploaded_file) -> pd.DataFrame:
+_UPLOAD_REQUIRED_COLUMNS = ["제품코드", "제품명", "규격", "포장단위"]
+
+
+def _read_product_upload(uploaded_file, vendor_scope: str) -> pd.DataFrame:
     suffix = Path(uploaded_file.name).suffix.lower()
     if suffix == ".csv":
         raw = pd.read_csv(uploaded_file, dtype=str, keep_default_na=False)
@@ -84,9 +89,10 @@ def _read_product_upload(uploaded_file) -> pd.DataFrame:
         raw = pd.read_excel(uploaded_file, dtype=str, keep_default_na=False)
     else:
         raise ValueError("CSV 또는 Excel 파일만 업로드할 수 있습니다.")
-    missing = [column for column in PRODUCT_COLUMNS if column not in raw.columns]
+    missing = [column for column in _UPLOAD_REQUIRED_COLUMNS if column not in raw.columns]
     if missing:
         raise ValueError("필수 컬럼이 없습니다: " + ", ".join(missing))
+    raw["전용거래처"] = vendor_scope
     clean = _normalize_products(raw)
     if clean["제품코드"].duplicated().any():
         duplicated = clean.loc[clean["제품코드"].duplicated(), "제품코드"].drop_duplicates().tolist()
@@ -165,12 +171,16 @@ def vendors(core_app, data) -> None:
 def products(core_app, data) -> None:
     st = core_app.st
     current = _normalize_products(data["products"])
+    vendor_names = _normalize_vendors(data["vendors"])["거래처명"].tolist()
+    scope_options = [COMMON_SCOPE] + vendor_names
     st.markdown("## 제품 관리")
-    st.caption("제품코드, 제품명, 규격, 포장단위를 관리합니다.")
+    st.caption("제품코드, 제품명, 규격, 포장단위와 전용 거래처를 관리합니다.")
 
     with st.container(border=True):
         st.markdown("### 신규 제품 추가")
-        c1, c2, c3, c4 = st.columns(4)
+        c0, c1, c2, c3, c4 = st.columns(5)
+        with c0:
+            scope = st.selectbox("전용 거래처", scope_options, key="catalog_product_scope")
         with c1:
             code = st.text_input("제품코드", key="catalog_product_code")
         with c2:
@@ -189,6 +199,7 @@ def products(core_app, data) -> None:
                 st.warning("이미 존재하는 제품코드입니다.")
             else:
                 row = pd.DataFrame([{
+                    "전용거래처": scope,
                     "제품코드": normalized_code,
                     "제품명": name.strip(),
                     "규격": specification.strip(),
@@ -200,7 +211,11 @@ def products(core_app, data) -> None:
 
     with st.container(border=True):
         st.markdown("### 엑셀로 제품 목록 일괄 등록/수정")
-        template = pd.DataFrame(columns=PRODUCT_COLUMNS)
+        st.caption(
+            "거래처를 고르고 파일을 올리면, 그 거래처 전용 제품목록만 통째로 교체됩니다. "
+            "다른 거래처의 제품과 '공통' 제품은 그대로 유지됩니다."
+        )
+        template = pd.DataFrame(columns=_UPLOAD_REQUIRED_COLUMNS)
         left, right = st.columns(2)
         with left:
             st.download_button(
@@ -218,15 +233,25 @@ def products(core_app, data) -> None:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
+        upload_scope = st.selectbox(
+            "업로드 대상 거래처", scope_options, key="catalog_product_upload_scope"
+        )
         uploaded = st.file_uploader("제품목록 파일", type=["xlsx", "xls", "csv"], key="catalog_product_upload")
         if uploaded is not None:
             try:
-                uploaded_products = _read_product_upload(uploaded)
+                uploaded_products = _read_product_upload(uploaded, upload_scope)
                 st.dataframe(uploaded_products.head(50), use_container_width=True, hide_index=True)
-                st.caption(f"총 {len(uploaded_products):,}개 제품")
-                if st.button("업로드한 제품목록으로 교체", type="primary", use_container_width=True):
-                    core_app.save_products(uploaded_products)
-                    st.success("제품목록을 교체했습니다. 기존 별칭은 제품코드 기준으로 유지됩니다.")
+                st.caption(f"'{upload_scope}' 전용으로 총 {len(uploaded_products):,}개 제품")
+                if st.button(
+                    f"'{upload_scope}' 제품목록 교체",
+                    type="primary",
+                    use_container_width=True,
+                    key="catalog_product_upload_replace",
+                ):
+                    kept = current[current["전용거래처"] != upload_scope]
+                    merged = pd.concat([kept, uploaded_products], ignore_index=True)
+                    core_app.save_products(merged)
+                    st.success(f"'{upload_scope}' 제품목록을 교체했습니다. 다른 거래처 제품과 별칭은 그대로 유지됩니다.")
                     st.rerun()
             except Exception as exc:
                 st.error(str(exc))
@@ -243,7 +268,10 @@ def products(core_app, data) -> None:
         hide_index=True,
         num_rows="dynamic",
         disabled=["제품코드"],
-        column_config={"삭제": st.column_config.CheckboxColumn("삭제")},
+        column_config={
+            "삭제": st.column_config.CheckboxColumn("삭제"),
+            "전용거래처": st.column_config.SelectboxColumn("전용거래처", options=scope_options),
+        },
         key="catalog_product_editor",
     )
     save_col, delete_col = st.columns(2)

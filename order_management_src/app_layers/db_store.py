@@ -11,7 +11,7 @@ import pandas as pd
 
 from db_migration import normalize_product_code
 
-PRODUCT_COLUMNS = ["제품유형", "제품코드", "제품명", "규격", "포장단위"]
+PRODUCT_COLUMNS = ["전용거래처", "제품코드", "제품명", "규격", "포장단위"]
 ALIAS_COLUMNS = ["거래처명", "별칭", "제품코드"]
 VENDOR_COLUMNS = ["거래처코드", "거래처명", "담당자", "연락처", "이메일", "배송지"]
 ORDER_COLUMNS = ["발주ID", "발주일시", "거래처명", "요청사항", "상태", "총품목수", "총수량"]
@@ -59,8 +59,8 @@ def save_products(data_dir: Path, products: pd.DataFrame) -> None:
         clean["제품명"] = clean.get("정식제품명", "")
     if "포장단위" not in clean.columns:
         clean["포장단위"] = clean.get("단위", "")
-    if "제품유형" not in clean.columns:
-        clean["제품유형"] = ""
+    if "전용거래처" not in clean.columns:
+        clean["전용거래처"] = "공통"
     for col in PRODUCT_COLUMNS:
         if col not in clean.columns:
             clean[col] = ""

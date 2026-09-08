@@ -318,6 +318,27 @@ def _migrate_purchase(conn: sqlite3.Connection, data_dir: Path) -> tuple[int, in
     return s, si, p, c
 
 
+PRODUCT_SCOPE_MIGRATION_KEY = "product_vendor_scope_v1"
+
+
+def _backfill_legacy_product_scope(conn: sqlite3.Connection) -> None:
+    """전용거래처 구분이 생기기 전 등록된 제품을 전부 메디풀 전용으로 지정합니다."""
+    marker = conn.execute(
+        "SELECT value FROM app_metadata WHERE key = ?", (PRODUCT_SCOPE_MIGRATION_KEY,)
+    ).fetchone()
+    if marker:
+        return
+    with conn:
+        conn.execute(
+            "UPDATE products SET product_type = '메디풀' WHERE COALESCE(TRIM(product_type), '') = ''"
+        )
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            "INSERT OR REPLACE INTO app_metadata(key,value,updated_at) VALUES(?,?,?)",
+            (PRODUCT_SCOPE_MIGRATION_KEY, now, now),
+        )
+
+
 def initialize_database(data_dir: Path) -> dict:
     """DB를 생성하고 최초 한 번만 CSV를 백업·이전합니다."""
     data_dir = Path(data_dir)
@@ -328,6 +349,7 @@ def initialize_database(data_dir: Path) -> dict:
     try:
         with sqlite3.connect(db_path, timeout=10) as conn:
             _create_schema(conn)
+            _backfill_legacy_product_scope(conn)
             marker = conn.execute("SELECT value FROM app_metadata WHERE key = ?", (MIGRATION_KEY,)).fetchone()
             if marker:
                 status.update(ok=True, migrated=False)

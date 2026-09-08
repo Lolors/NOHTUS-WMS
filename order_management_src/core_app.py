@@ -199,6 +199,9 @@ def search_products(keyword, vendor_name, products, aliases):
 
     rows = []
     active = products.copy()
+    if "전용거래처" in active.columns:
+        scope = active["전용거래처"].astype(str).str.strip()
+        active = active[scope.isin(["", "공통", str(vendor_name or "").strip()])]
     alias_df = aliases[aliases["거래처명"].isin([vendor_name, "전체", ""])]
 
     for _, alias_row in alias_df.iterrows():
