@@ -243,12 +243,6 @@ def render(purchase_module, data) -> None:
             div[class*="st-key-accounting_export_side_metrics"] {
                 padding-left: 28px;
             }
-            div[class*="st-key-accounting_export_side_metrics"] [data-testid="stMetricValue"] {
-                font-size: 1.25rem;
-            }
-            div[class*="st-key-accounting_export_side_metrics"] [data-testid="stMetricLabel"] {
-                font-size: 0.8rem;
-            }
             </style>
             """,
             unsafe_allow_html=True,
