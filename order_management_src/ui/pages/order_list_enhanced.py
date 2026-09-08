@@ -198,7 +198,31 @@ def render(core_app, data, purchase_module=None) -> None:
             for column in ["제품코드", "정식제품명", "규격", "단위", "수량"]
             if column in detail.columns
         ]
-        st.dataframe(detail[cols], use_container_width=True, hide_index=True)
+        display_detail = detail
+        if purchase_module is not None:
+            statements, statement_items, _, _ = purchase_module.load_purchase_data()
+            linked_ids = (
+                statements.loc[statements["발주ID"].astype(str) == selected, "명세서ID"].astype(str).tolist()
+                if not statements.empty else []
+            )
+            received_rows = (
+                statement_items[statement_items["명세서ID"].astype(str).isin(linked_ids)]
+                if linked_ids else statement_items.iloc[0:0]
+            )
+            received = {}
+            for _, row in received_rows.iterrows():
+                key = orders._item_key(row)
+                received[key] = received.get(key, 0) + purchase_module.to_int(row.get("입고수량", 0))
+
+            def _receipt_flag(row):
+                ordered_qty = purchase_module.to_int(row.get("수량", 0))
+                received_qty = received.get(orders._item_key(row), 0)
+                return "입고" if ordered_qty > 0 and received_qty >= ordered_qty else "미입고"
+
+            display_detail = detail.copy()
+            display_detail["입고여부"] = display_detail.apply(_receipt_flag, axis=1)
+            cols = cols + ["입고여부"]
+        st.dataframe(display_detail[cols], use_container_width=True, hide_index=True)
 
     c1, c2, c3, c4 = st.columns(4)
     if c1.button("수정", type="primary", use_container_width=True, key=f"edit_order_{selected}"):
@@ -243,6 +267,3 @@ def render(core_app, data, purchase_module=None) -> None:
                 use_container_width=True,
                 key=f"download_order_{selected}",
             )
-
-    if purchase_module is not None:
-        orders._receipt_review(core_app, purchase_module, selected, detail)
