@@ -67,6 +67,17 @@ def _next_vendor_code(codes: list[str]) -> str:
     return f"V{(max(numbers) + 1 if numbers else 1):03d}"
 
 
+def _next_auto_product_code(codes: list[str]) -> str:
+    """제품코드를 입력하지 않은 제품에 자동으로 부여할, 실제 ERP코드와
+    겹치지 않는 임시 코드를 만든다."""
+    numbers: list[int] = []
+    for code in codes:
+        text = str(code or "").strip().upper()
+        if text.startswith("P") and text[1:].isdigit():
+            numbers.append(int(text[1:]))
+    return f"P{(max(numbers) + 1 if numbers else 1):04d}"
+
+
 def _product_excel_bytes(products: pd.DataFrame) -> bytes:
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -182,7 +193,7 @@ def products(core_app, data) -> None:
         with c0:
             scope = st.selectbox("전용 거래처", scope_options, key="catalog_product_scope")
         with c1:
-            code = st.text_input("제품코드", key="catalog_product_code")
+            code = st.text_input("제품코드 (비워두면 자동 부여)", key="catalog_product_code")
         with c2:
             name = st.text_input("제품명", key="catalog_product_name")
         with c3:
@@ -192,8 +203,8 @@ def products(core_app, data) -> None:
         if st.button("제품 추가", type="primary", use_container_width=True, key="catalog_product_add"):
             normalized_code = normalize_product_code(code)
             if not normalized_code:
-                st.warning("제품코드를 입력하세요.")
-            elif not name.strip():
+                normalized_code = _next_auto_product_code(current["제품코드"].tolist())
+            if not name.strip():
                 st.warning("제품명을 입력하세요.")
             elif normalized_code in current["제품코드"].tolist():
                 st.warning("이미 존재하는 제품코드입니다.")
