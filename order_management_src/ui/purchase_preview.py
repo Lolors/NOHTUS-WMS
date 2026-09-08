@@ -11,9 +11,6 @@ def render(core_app, vendor, order_items, request_note, order_date=None) -> None
     order_date = str(order_date or "") or datetime.now().strftime("%Y-%m-%d")
     vendor_name = str(vendor.get("거래처명", "") or "")
 
-    st.markdown('<div class="preview-title">발주서 미리보기</div>', unsafe_allow_html=True)
-    st.caption("아래 버튼은 지금 보이는 미리보기 화면을 그대로 인쇄(PDF)하거나 이미지(JPG)로 저장합니다.")
-
     html = core_app.render_order_html(
         vendor,
         order_items,
