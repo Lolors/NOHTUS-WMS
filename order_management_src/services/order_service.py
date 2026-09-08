@@ -26,9 +26,15 @@ class OrderService:
             self.core_app.st.session_state.get("order_management_editing_order_id", "") or ""
         ).strip()
         if editing_order_id:
-            order_id = self.order_repo.update(
-                editing_order_id, vendor_name, request_note, items
-            )
+            try:
+                order_id = self.order_repo.update(
+                    editing_order_id, vendor_name, request_note, items
+                )
+            except ValueError:
+                self.core_app.st.warning(
+                    f"수정하려던 발주서({editing_order_id})를 찾을 수 없어 새 발주서로 저장했습니다."
+                )
+                order_id = self.order_repo.save(vendor_name, request_note, items)
             self.core_app.st.session_state.pop("order_management_editing_order_id", None)
         else:
             order_id = self.order_repo.save(vendor_name, request_note, items)
