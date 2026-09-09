@@ -347,16 +347,18 @@ def render(core_app, data) -> None:
             else:
                 edit = pd.DataFrame(st.session_state.order_items)
                 edit["삭제"] = False
+                edit["순서"] = range(1, len(edit) + 1)
                 for col in ["제품코드", "정식제품명", "규격", "단위", "수량"]:
                     if col not in edit.columns:
                         edit[col] = ""
 
                 edited = st.data_editor(
-                    edit[["삭제", "제품코드", "정식제품명", "규격", "단위", "수량"]],
+                    edit[["순서", "삭제", "제품코드", "정식제품명", "규격", "단위", "수량"]],
                     use_container_width=True,
                     hide_index=True,
                     disabled=["제품코드", "정식제품명", "규격", "단위"],
                     column_config={
+                        "순서": st.column_config.NumberColumn("순서", min_value=1, step=1),
                         "삭제": st.column_config.CheckboxColumn("선택"),
                         "수량": st.column_config.NumberColumn("수량", min_value=0, step=1),
                         "단위": st.column_config.TextColumn("포장단위"),
@@ -366,16 +368,29 @@ def render(core_app, data) -> None:
 
                 updated_items = []
                 checked_indexes = []
+                order_numbers = []
                 for idx, row in edited.iterrows():
                     original = dict(st.session_state.order_items[idx])
                     original["수량"] = core_app.safe_int(row.get("수량", 0))
                     updated_items.append(original)
+                    order_numbers.append(core_app.safe_int(row.get("순서", idx + 1)))
                     if bool(row.get("삭제", False)):
                         checked_indexes.append(idx)
 
-                action_col, change_col, delete_col, summary_col = st.columns([1.1, 1.1, 1.1, 1.6])
+                action_col, reorder_col, change_col, delete_col, summary_col = st.columns(
+                    [1.1, 1.1, 1.1, 1.1, 1.4]
+                )
                 if action_col.button("수량 변경 적용", use_container_width=True):
                     st.session_state.order_items = updated_items
+                    st.session_state.pop("order_excel_export", None)
+                    st.rerun()
+
+                if reorder_col.button("순서 적용", use_container_width=True):
+                    reordered = sorted(
+                        range(len(updated_items)),
+                        key=lambda position: (order_numbers[position], position),
+                    )
+                    st.session_state.order_items = [updated_items[position] for position in reordered]
                     st.session_state.pop("order_excel_export", None)
                     st.rerun()
 
