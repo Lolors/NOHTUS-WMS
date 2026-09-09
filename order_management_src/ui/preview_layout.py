@@ -21,9 +21,9 @@ def render_order_html(core_app, vendor, order_items, request_note, order_id=None
         <tr>
             <td>{idx}</td>
             <td class="left">{item.get("정식제품명", item.get("제품명", ""))}</td>
-            <td>{item.get("규격", "")}</td>
             <td>{core_app.fmt_int(item.get("수량", 0))}</td>
             <td>{packaging_unit}</td>
+            <td>{item.get("규격", "")}</td>
         </tr>
         """
 
@@ -50,26 +50,27 @@ def render_order_html(core_app, vendor, order_items, request_note, order_id=None
         "<th>No.</th>\n                <th>제품코드</th>\n                <th>제품명</th>\n                <th>규격</th>\n                <th>수량</th>\n                <th>단위</th>",
         "<th>No.</th>\n                <th>제품명</th>\n                <th>규격</th>\n                <th>수량</th>\n                <th>단위</th>",
         "<th>No.</th>\n                <th>제품명</th>\n                <th>규격</th>\n                <th>수량</th>\n                <th>포장단위</th>",
+        "<th>No.</th>\n                <th>제품명</th>\n                <th>수량</th>\n                <th>포장단위</th>\n                <th>규격</th>",
     ]
     desired_header = (
         "<th>No.</th>\n"
         "                <th>제품명</th>\n"
-        "                <th>규격</th>\n"
         "                <th>수량</th>\n"
-        "                <th>포장단위</th>"
+        "                <th>포장단위</th>\n"
+        "                <th>규격</th>"
     )
     for pattern in header_patterns:
         template = template.replace(pattern, desired_header)
 
-    # 요청 비율 0.7 : 5 : 2 : 1 : 1.3을 백분율로 환산합니다.
+    # 요청 비율 0.7 : 5 : 1 : 1.3 : 2를 백분율로 환산합니다.
     ratio_css = """
 <style>
 .item-table { table-layout: fixed !important; width: 100% !important; }
 .item-table th:nth-child(1), .item-table td:nth-child(1) { width: 7% !important; }
 .item-table th:nth-child(2), .item-table td:nth-child(2) { width: 50% !important; }
-.item-table th:nth-child(3), .item-table td:nth-child(3) { width: 20% !important; }
-.item-table th:nth-child(4), .item-table td:nth-child(4) { width: 10% !important; }
-.item-table th:nth-child(5), .item-table td:nth-child(5) { width: 13% !important; }
+.item-table th:nth-child(3), .item-table td:nth-child(3) { width: 10% !important; }
+.item-table th:nth-child(4), .item-table td:nth-child(4) { width: 13% !important; }
+.item-table th:nth-child(5), .item-table td:nth-child(5) { width: 20% !important; }
 </style>
 """
     template = template.replace("</head>", ratio_css + "</head>")
