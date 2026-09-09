@@ -281,6 +281,65 @@ def render(core_app, data) -> None:
             with latest_product_slot.container():
                 _render_latest_product_order_card(st, latest_product_order)
 
+        @st.dialog("제품 변경")
+        def _change_product_dialog(idx: int) -> None:
+            current_item = st.session_state.order_items[idx]
+            st.caption(
+                f'현재 품목: {current_item.get("정식제품명", "")} / '
+                f'{current_item.get("규격", "")} / 수량 {current_item.get("수량", 0)}'
+            )
+            keyword = st.text_input("제품 검색", key=f"order_item_change_search_{idx}")
+            result = core_app.search_products(keyword, vendor_name, products, aliases)
+            picked = None
+            if keyword and result.empty:
+                st.warning("검색 결과가 없습니다.")
+            elif not result.empty:
+                view_cols = [
+                    c
+                    for c in ["별칭(검색어)", "정식제품명", "제품코드", "규격", "단위"]
+                    if c in result.columns
+                ]
+                st.dataframe(result[view_cols].head(30), use_container_width=True, hide_index=True, height=180)
+                pick_index = st.selectbox(
+                    "제품 선택",
+                    list(result.index[:30]),
+                    format_func=lambda i: (
+                        f'{result.loc[i, "별칭(검색어)"]} → {result.loc[i, "정식제품명"]}'
+                    ),
+                    key=f"order_item_change_pick_{idx}",
+                )
+                picked = result.loc[pick_index]
+
+            qty = st.number_input(
+                "수량",
+                min_value=1,
+                value=int(current_item.get("수량", 1) or 1),
+                step=1,
+                key=f"order_item_change_qty_{idx}",
+            )
+            apply_col, cancel_col = st.columns(2)
+            if apply_col.button(
+                "변경 적용", type="primary", use_container_width=True, disabled=picked is None
+            ):
+                new_item = {
+                    "제품코드": picked.get("제품코드", ""),
+                    "정식제품명": picked.get("정식제품명", ""),
+                    "검색별칭": picked.get("별칭(검색어)", ""),
+                    "규격": picked.get("규격", ""),
+                    "단위": picked.get("단위", ""),
+                    "포장단위": picked.get("단위", ""),
+                    "수량": int(qty),
+                }
+                items = list(st.session_state.order_items)
+                items[idx] = new_item
+                st.session_state.order_items = items
+                st.session_state.pop("order_excel_export", None)
+                st.session_state.pop("_order_item_change_idx", None)
+                st.rerun()
+            if cancel_col.button("취소", use_container_width=True):
+                st.session_state.pop("_order_item_change_idx", None)
+                st.rerun()
+
         with st.container(border=True):
             st.markdown("### 발주 품목")
             if not st.session_state.order_items:
@@ -314,11 +373,19 @@ def render(core_app, data) -> None:
                     if bool(row.get("삭제", False)):
                         checked_indexes.append(idx)
 
-                action_col, delete_col, summary_col = st.columns([1.1, 1.1, 2])
+                action_col, change_col, delete_col, summary_col = st.columns([1.1, 1.1, 1.1, 1.6])
                 if action_col.button("수량 변경 적용", use_container_width=True):
                     st.session_state.order_items = updated_items
                     st.session_state.pop("order_excel_export", None)
                     st.rerun()
+
+                if change_col.button("제품 변경", use_container_width=True):
+                    if len(checked_indexes) != 1:
+                        st.warning("변경할 품목을 하나만 체크하세요.")
+                    else:
+                        st.session_state.order_items = updated_items
+                        st.session_state["_order_item_change_idx"] = checked_indexes[0]
+                        st.rerun()
 
                 if delete_col.button("선택 품목 삭제", use_container_width=True):
                     if not checked_indexes:
@@ -338,6 +405,10 @@ def render(core_app, data) -> None:
                     f"총 {count:,}개 품목 / 총 수량 {total:,}</div>",
                     unsafe_allow_html=True,
                 )
+
+        change_idx = st.session_state.get("_order_item_change_idx")
+        if change_idx is not None and 0 <= change_idx < len(st.session_state.order_items):
+            _change_product_dialog(change_idx)
 
         with st.container(border=True):
             st.markdown("### 요청사항 및 발주 저장")
