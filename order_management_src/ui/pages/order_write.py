@@ -386,11 +386,31 @@ def render(core_app, data) -> None:
                     st.rerun()
 
                 if reorder_col.button("순서 적용", use_container_width=True):
-                    reordered = sorted(
-                        range(len(updated_items)),
-                        key=lambda position: (order_numbers[position], position),
-                    )
-                    st.session_state.order_items = [updated_items[position] for position in reordered]
+                    # 딱 한 행만 번호를 바꿨으면(가장 흔한 사용법) 그 행을 원래
+                    # 자리에서 빼서 입력한 번호 자리에 정확히 끼워 넣는다 -
+                    # 위/아래 어느 방향으로 옮기든 입력한 번호에 그대로 온다.
+                    moved_positions = [
+                        position
+                        for position in range(len(updated_items))
+                        if order_numbers[position] != position + 1
+                    ]
+                    if len(moved_positions) == 1:
+                        source = moved_positions[0]
+                        reordered_items = list(updated_items)
+                        moved_item = reordered_items.pop(source)
+                        target = max(0, min(order_numbers[source] - 1, len(reordered_items)))
+                        reordered_items.insert(target, moved_item)
+                    else:
+                        order = sorted(
+                            range(len(updated_items)),
+                            key=lambda position: (
+                                order_numbers[position],
+                                0 if order_numbers[position] != position + 1 else 1,
+                                position,
+                            ),
+                        )
+                        reordered_items = [updated_items[position] for position in order]
+                    st.session_state.order_items = reordered_items
                     st.session_state.pop("order_excel_export", None)
                     st.rerun()
 
