@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from datetime import date, datetime
 import unittest
+from unittest.mock import patch
+
+import pandas as pd
 
 from nohtus.export_app.services.dashboard_view_service import (
     recent_order_cases,
+    sales_registration_statuses,
     stage_bar_colors,
     timeline_bounds,
     timeline_date,
@@ -92,6 +96,41 @@ class DashboardTimelineTests(unittest.TestCase):
     def test_timeline_bar_colors_follow_display_stage(self) -> None:
         self.assertEqual(stage_bar_colors('출고 대기'), stage_bar_colors('패킹 대기'))
         self.assertNotEqual(stage_bar_colors('패킹 대기'), stage_bar_colors('패킹 완료'))
+
+    def test_sales_registration_statuses_follow_confirmation_orders(self) -> None:
+        orders = pd.DataFrame([
+            {'export_no': 'EXP-WAIT', 'status': 'waiting'},
+            {'export_no': 'EXP-PART', 'status': 'partial'},
+            {'export_no': 'EXP-DONE', 'status': 'confirmed'},
+        ])
+        with patch(
+            'nohtus.export_app.services.dashboard_view_service.export_confirm_service.list_active_orders',
+            return_value=orders,
+        ):
+            result = sales_registration_statuses(
+                ['EXP-WAIT', 'EXP-PART', 'EXP-DONE', 'EXP-NONE']
+            )
+
+        self.assertEqual('미등록', result['EXP-WAIT'])
+        self.assertEqual('등록중', result['EXP-PART'])
+        self.assertEqual('등록완료', result['EXP-DONE'])
+        self.assertEqual('미등록', result['EXP-NONE'])
+
+    def test_duplicate_links_are_complete_only_when_all_are_confirmed(self) -> None:
+        orders = pd.DataFrame([
+            {'export_no': 'EXP-MIXED', 'status': 'confirmed'},
+            {'export_no': 'EXP-MIXED', 'status': 'waiting'},
+            {'export_no': 'EXP-DONE', 'status': 'confirmed'},
+            {'export_no': 'EXP-DONE', 'status': 'confirmed'},
+        ])
+        with patch(
+            'nohtus.export_app.services.dashboard_view_service.export_confirm_service.list_active_orders',
+            return_value=orders,
+        ):
+            result = sales_registration_statuses(['EXP-MIXED', 'EXP-DONE'])
+
+        self.assertEqual('등록중', result['EXP-MIXED'])
+        self.assertEqual('등록완료', result['EXP-DONE'])
 
 
 if __name__ == '__main__':

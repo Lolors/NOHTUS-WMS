@@ -35,6 +35,9 @@ def render() -> None:
     else:
         case_ids = [int(case['id']) for case in cases]
         progress_by_case = dashboard_view_service.intake_progress_percentages(case_ids)
+        sales_status_by_export_no = dashboard_view_service.sales_registration_statuses(
+            [case['export_no'] for case in cases]
+        )
         status_rows = [
             {
                 '국가': case['country'] or '-',
@@ -42,6 +45,7 @@ def render() -> None:
                 '운송방식': case['transport_mode'] or '미지정',
                 '단계': dashboard_view_service.stage_label(case['stage']),
                 '입고 진행률': f"{progress_by_case.get(int(case['id']), 0.0):.0f}%",
+                '매출등록': sales_status_by_export_no.get(str(case['export_no'] or '').strip(), '미등록'),
                 '주문목록': dashboard_view_service.summarize_product_names(case['product_names']),
             }
             for case in cases

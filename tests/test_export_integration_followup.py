@@ -122,6 +122,12 @@ class ExportIntegrationFollowupTests(TestCase):
         # f32d5a8에서 대시보드 표 너비를 70vw에서 60vw로 의도적으로 조정했다.
         self.assertIn('width: 60vw !important', dashboard)
 
+    def test_dashboard_shows_sales_registration_after_intake_progress(self):
+        dashboard = Path('nohtus/export_app/views/오버뷰.py').read_text(encoding='utf-8')
+        self.assertIn("'매출등록':", dashboard)
+        self.assertLess(dashboard.index("'입고 진행률':"), dashboard.index("'매출등록':"))
+        self.assertLess(dashboard.index("'매출등록':"), dashboard.index("'주문목록':"))
+
     def test_duplicate_open_export_numbers_require_merge_or_new_number(self):
         # wms_link_edit_patch가 모듈 임포트 시점에 wms_link_service._find_open_order_id
         # 자체를 자신의 _editable_order_id로 영구히 바꿔치기하므로(export_app_pages.py

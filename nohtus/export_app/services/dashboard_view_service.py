@@ -4,7 +4,7 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta
 
 from nohtus.export_app import db
-from nohtus.export_app.services import export_service, order_service
+from nohtus.export_app.services import export_confirm_service, export_service, order_service
 
 
 STAGE_LABELS = {
@@ -275,4 +275,36 @@ def intake_progress_percentages(case_ids: list[int]) -> dict[int, float]:
         ordered_qty = float(row['ordered_qty'] or 0)
         received_qty = float(row['received_qty'] or 0)
         result[int(row['case_id'])] = min(100.0, received_qty / ordered_qty * 100.0) if ordered_qty > 0 else 0.0
+    return result
+
+
+def sales_registration_statuses(export_numbers: list[object]) -> dict[str, str]:
+    """Return the sales-registration state shown by the confirmation screen.
+
+    A missing/waiting WMS link has no confirmed sales, a partial link (or a
+    mixture of confirmed and waiting duplicate links) is in progress, and only
+    export numbers whose every active link is confirmed are complete.
+    """
+    requested = {
+        str(export_no or '').strip()
+        for export_no in export_numbers
+        if str(export_no or '').strip()
+    }
+    result = {export_no: '미등록' for export_no in requested}
+    if not requested:
+        return result
+
+    orders = export_confirm_service.list_active_orders()
+    if orders.empty:
+        return result
+
+    matched = orders.copy()
+    matched['_export_no'] = matched['export_no'].fillna('').astype(str).str.strip()
+    matched = matched[matched['_export_no'].isin(requested)]
+    for export_no, rows in matched.groupby('_export_no', sort=False):
+        statuses = {str(value or '').strip() for value in rows['status']}
+        if statuses and statuses == {'confirmed'}:
+            result[export_no] = '등록완료'
+        elif 'confirmed' in statuses or 'partial' in statuses:
+            result[export_no] = '등록중'
     return result
