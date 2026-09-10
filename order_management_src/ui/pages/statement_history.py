@@ -7,6 +7,7 @@ import pandas as pd
 
 from ui.month_grid import render_month_grid
 from ui.pages import purchase_enhancements, purchases
+from ui.pages.statement_register_substitution import _catalog
 from ui.style_utils import map_cells
 
 
@@ -163,6 +164,350 @@ def _returned_amount(items: pd.DataFrame) -> int:
     return total
 
 
+def _render_statement_edit(
+    purchase_module,
+    st,
+    today,
+    statement,
+    statement_id: str,
+    statement_no: str,
+    items: pd.DataFrame,
+    statements: pd.DataFrame,
+    statement_items: pd.DataFrame,
+    price_history: pd.DataFrame,
+    products: pd.DataFrame,
+) -> None:
+    """거래명세서 내역 수정 화면. 거래명세서 등록 화면과 같은 선택 행 복사/삭제,
+    대체품 입고/취소 기능을 제공한다."""
+    parsed_date = pd.to_datetime(statement.get("명세서일자", ""), errors="coerce")
+    initial_date = today if pd.isna(parsed_date) else parsed_date.date()
+
+    rows_key = f"stmt_edit_rows_{statement_id}"
+    row_seq_key = f"stmt_edit_row_seq_{statement_id}"
+    version_key = f"stmt_edit_version_{statement_id}"
+    sub_form_key = f"stmt_edit_show_sub_form_{statement_id}"
+    sub_cancel_key = f"stmt_edit_show_sub_cancel_{statement_id}"
+    session_keys = (rows_key, row_seq_key, version_key, sub_form_key, sub_cancel_key)
+
+    if rows_key not in st.session_state:
+        init_rows = []
+        next_id = 1
+        for _, row in items.reset_index(drop=True).iterrows():
+            init_rows.append({
+                "행번호": next_id,
+                "제품코드": str(row.get("제품코드", "") or ""),
+                "정식제품명": str(row.get("정식제품명", "") or ""),
+                "규격": str(row.get("규격", "") or ""),
+                "단위": str(row.get("단위", "") or ""),
+                "발주수량": _to_int(purchase_module, row.get("발주수량", 0)),
+                "입고수량": _to_int(purchase_module, row.get("입고수량", 0)),
+                "매입단가": _to_int(purchase_module, row.get("매입단가", 0)),
+                "제조번호": str(row.get("제조번호", "") or ""),
+                "유통기한": str(row.get("유통기한", "") or ""),
+                "원발주제품코드": str(row.get("원발주제품코드", "") or ""),
+                "원발주제품명": str(row.get("원발주제품명", "") or ""),
+                "원발주규격": str(row.get("원발주규격", "") or ""),
+                "원발주단위": str(row.get("원발주단위", "") or ""),
+                "입고유형": str(row.get("입고유형", "") or ""),
+                "대체사유": str(row.get("대체사유", "") or ""),
+            })
+            next_id += 1
+        st.session_state[rows_key] = init_rows
+        st.session_state[row_seq_key] = next_id
+        st.session_state[version_key] = 0
+
+    st.markdown("#### 거래명세서 수정")
+    f1, f2, f3 = st.columns([2, 2, 2])
+    edited_number = f1.text_input(
+        "명세서 번호", value=str(statement.get("명세서번호", "")), key=f"stmt_edit_number_{statement_id}"
+    )
+    edited_date = f2.date_input("명세서 일자", value=initial_date, key=f"stmt_edit_date_{statement_id}")
+    edited_freight = f3.number_input(
+        "배송비",
+        min_value=0,
+        step=100,
+        value=_to_int(purchase_module, statement.get("운송비", 0)),
+        key=f"stmt_edit_freight_{statement_id}",
+    )
+    edited_memo = st.text_area(
+        "메모", value=str(statement.get("메모", "") or ""), key=f"stmt_edit_memo_{statement_id}"
+    )
+
+    st.markdown("##### 품목 수정")
+    st.caption("같은 제품이 제조번호·유통기한별로 나뉘어 들어오면 해당 행을 체크한 뒤 '선택 행 복사'를 누르세요.")
+
+    current_rows = st.session_state[rows_key]
+    substituted = [row for row in current_rows if row.get("입고유형") == "대체입고"]
+    if substituted:
+        badge_rows = "".join(
+            '<div style="display:flex;align-items:center;gap:8px;margin:5px 0;">'
+            '<span style="display:inline-flex;align-items:center;padding:3px 10px;'
+            'border-radius:999px;background:#dcfce7;color:#15803d;font-size:12px;'
+            'font-weight:700;line-height:1.4;white-space:nowrap;">대체품</span>'
+            f'<span style="font-size:14px;"><b>{row["정식제품명"]}</b> '
+            f'<span style="color:#6b7280;">(원발주: {row["원발주제품명"]})</span></span></div>'
+            for row in substituted
+        )
+        st.markdown(
+            '<div style="padding:8px 12px;border:1px solid #dcfce7;border-radius:10px;'
+            'background:#f0fdf4;margin:4px 0 10px 0;">' + badge_rows + "</div>",
+            unsafe_allow_html=True,
+        )
+
+    editor_rows = [
+        {
+            "복사/삭제": False,
+            "행번호": row["행번호"],
+            "정식제품명": row["정식제품명"],
+            "규격": row["규격"],
+            "발주수량": row["발주수량"],
+            "입고수량": row["입고수량"],
+            "매입단가": row["매입단가"],
+            "제조번호": row["제조번호"],
+            "유통기한": row["유통기한"],
+        }
+        for row in current_rows
+    ]
+    edited = st.data_editor(
+        pd.DataFrame(editor_rows),
+        use_container_width=True,
+        hide_index=True,
+        disabled=["행번호", "정식제품명", "규격", "발주수량"],
+        column_config={
+            "복사/삭제": st.column_config.CheckboxColumn("복사/삭제", width="small"),
+            "행번호": None,
+            "정식제품명": st.column_config.TextColumn("제품명", width="large"),
+            "규격": st.column_config.TextColumn("규격", width="small"),
+            "발주수량": st.column_config.NumberColumn("발주수량", width="small"),
+            "입고수량": st.column_config.NumberColumn("입고수량", min_value=0, step=1, width="small"),
+            "매입단가": st.column_config.NumberColumn("매입단가", min_value=0, step=100, width="small"),
+            "제조번호": st.column_config.TextColumn("제조번호", width="small"),
+            "유통기한": st.column_config.TextColumn(
+                "유통기한", width="small", help="예: 2026-12-31, 20261231, 261231"
+            ),
+        },
+        key=f"stmt_edit_items_{statement_id}_{st.session_state[version_key]}",
+    )
+
+    by_id = {row["행번호"]: row for row in current_rows}
+    for _, erow in edited.iterrows():
+        target = by_id.get(int(erow.get("행번호")))
+        if target is None:
+            continue
+        target["입고수량"] = _to_int(purchase_module, erow.get("입고수량", 0))
+        target["매입단가"] = _to_int(purchase_module, erow.get("매입단가", 0))
+        target["제조번호"] = str(erow.get("제조번호", "") or "")
+        target["유통기한"] = str(erow.get("유통기한", "") or "")
+    st.session_state[rows_key] = current_rows
+
+    selected_ids = {
+        int(erow.get("행번호"))
+        for _, erow in edited.iterrows()
+        if bool(erow.get("복사/삭제", False))
+    }
+
+    copy_col, delete_col, sub_col, sub_cancel_col = st.columns(4)
+
+    if copy_col.button(
+        "선택 행 복사", use_container_width=True, disabled=edited.empty, key=f"stmt_edit_copy_{statement_id}"
+    ):
+        if not selected_ids:
+            st.warning("복사할 품목을 체크하세요.")
+        else:
+            rows = st.session_state[rows_key]
+            next_id = st.session_state[row_seq_key]
+            new_rows = []
+            for row in rows:
+                new_rows.append(row)
+                if row["행번호"] in selected_ids:
+                    copied = dict(row)
+                    copied["행번호"] = next_id
+                    copied["입고수량"] = 0
+                    copied["제조번호"] = ""
+                    copied["유통기한"] = ""
+                    new_rows.append(copied)
+                    next_id += 1
+            st.session_state[rows_key] = new_rows
+            st.session_state[row_seq_key] = next_id
+            st.session_state[version_key] += 1
+            st.rerun()
+
+    if delete_col.button(
+        "선택 행 삭제", use_container_width=True, disabled=edited.empty, key=f"stmt_edit_delete_{statement_id}"
+    ):
+        if not selected_ids:
+            st.warning("삭제할 품목을 체크하세요.")
+        else:
+            rows = [row for row in st.session_state[rows_key] if row["행번호"] not in selected_ids]
+            if not rows:
+                st.warning("거래명세서에는 품목이 한 개 이상 있어야 합니다.")
+            else:
+                st.session_state[rows_key] = rows
+                st.session_state[version_key] += 1
+                st.rerun()
+
+    if sub_col.button(
+        "대체품 입고",
+        use_container_width=True,
+        disabled=len(selected_ids) != 1,
+        key=f"stmt_edit_sub_{statement_id}",
+    ):
+        st.session_state[sub_form_key] = True
+        st.session_state[sub_cancel_key] = False
+
+    if sub_cancel_col.button(
+        "대체품 입고 취소",
+        use_container_width=True,
+        disabled=not substituted,
+        key=f"stmt_edit_sub_cancel_{statement_id}",
+    ):
+        st.session_state[sub_cancel_key] = True
+        st.session_state[sub_form_key] = False
+
+    product_labels, product_lookup = _catalog(products)
+
+    if st.session_state.get(sub_form_key, False):
+        with st.container(border=True):
+            st.markdown("###### 대체품 입고 설정")
+            if len(selected_ids) != 1:
+                st.warning("대체할 행을 하나만 체크한 뒤 다시 눌러주세요.")
+            elif not product_labels:
+                st.warning("제품 관리에 등록된 제품이 없어 대체제품을 선택할 수 없습니다.")
+            else:
+                target_id = next(iter(selected_ids))
+                keyword = st.text_input(
+                    "대체제품 검색",
+                    placeholder="제품명 또는 제품코드 일부 입력",
+                    key=f"stmt_edit_sub_search_{statement_id}",
+                )
+                normalized_keyword = str(keyword or "").strip().casefold()
+                filtered_labels = [
+                    label for label in product_labels
+                    if not normalized_keyword
+                    or normalized_keyword in label.casefold()
+                    or normalized_keyword in str(product_lookup[label].get("규격", "")).casefold()
+                ]
+                replacement_label = None
+                if not filtered_labels:
+                    st.warning("검색 결과가 없습니다.")
+                else:
+                    replacement_label = st.selectbox(
+                        "어떤 제품으로 대체하나요?", filtered_labels, key=f"stmt_edit_sub_target_{statement_id}"
+                    )
+                reason = st.text_input(
+                    "대체사유",
+                    placeholder="예: 거래처 재고 부족으로 다른 브랜드 대체",
+                    key=f"stmt_edit_sub_reason_{statement_id}",
+                )
+                confirm_col, close_col, _ = st.columns([1, 1, 3])
+                if confirm_col.button(
+                    "확인", type="primary", use_container_width=True, key=f"stmt_edit_sub_confirm_{statement_id}"
+                ):
+                    if replacement_label is None:
+                        st.warning("대체제품을 선택하세요.")
+                    elif not str(reason or "").strip():
+                        st.warning("대체사유를 입력하세요.")
+                    else:
+                        rows = st.session_state[rows_key]
+                        for row in rows:
+                            if row["행번호"] == target_id:
+                                replacement = product_lookup[replacement_label]
+                                if row.get("입고유형") != "대체입고":
+                                    row["원발주제품코드"] = row["제품코드"]
+                                    row["원발주제품명"] = row["정식제품명"]
+                                    row["원발주규격"] = row["규격"]
+                                    row["원발주단위"] = row["단위"]
+                                row["제품코드"] = str(replacement.get("제품코드", ""))
+                                row["정식제품명"] = str(replacement.get("정식제품명", ""))
+                                row["규격"] = str(replacement.get("규격", ""))
+                                row["단위"] = str(replacement.get("단위", ""))
+                                row["입고유형"] = "대체입고"
+                                row["대체사유"] = str(reason).strip()
+                                break
+                        st.session_state[rows_key] = rows
+                        st.session_state[sub_form_key] = False
+                        st.session_state[version_key] += 1
+                        st.rerun()
+                if close_col.button("닫기", use_container_width=True, key=f"stmt_edit_sub_close_{statement_id}"):
+                    st.session_state[sub_form_key] = False
+                    st.rerun()
+
+    if st.session_state.get(sub_cancel_key, False):
+        with st.container(border=True):
+            st.markdown("###### 대체품 입고 취소")
+            if not substituted:
+                st.info("취소할 대체품 입고 내역이 없습니다.")
+            else:
+                lookup = {row["행번호"]: row for row in substituted}
+                cancel_id = st.selectbox(
+                    "취소할 대체품을 선택하세요.",
+                    list(lookup),
+                    format_func=lambda rid: f'{lookup[rid]["원발주제품명"]} → {lookup[rid]["정식제품명"]}',
+                    key=f"stmt_edit_sub_cancel_target_{statement_id}",
+                )
+                confirm_col, close_col, _ = st.columns([1, 1, 3])
+                if confirm_col.button(
+                    "취소 확인",
+                    type="primary",
+                    use_container_width=True,
+                    key=f"stmt_edit_sub_cancel_confirm_{statement_id}",
+                ):
+                    rows = st.session_state[rows_key]
+                    for row in rows:
+                        if row["행번호"] == cancel_id:
+                            row["제품코드"] = row["원발주제품코드"]
+                            row["정식제품명"] = row["원발주제품명"]
+                            row["규격"] = row["원발주규격"]
+                            row["단위"] = row["원발주단위"]
+                            row["원발주제품코드"] = ""
+                            row["원발주제품명"] = ""
+                            row["원발주규격"] = ""
+                            row["원발주단위"] = ""
+                            row["입고유형"] = ""
+                            row["대체사유"] = ""
+                            break
+                    st.session_state[rows_key] = rows
+                    st.session_state[sub_cancel_key] = False
+                    st.session_state[version_key] += 1
+                    st.rerun()
+                if close_col.button(
+                    "닫기", use_container_width=True, key=f"stmt_edit_sub_cancel_close_{statement_id}"
+                ):
+                    st.session_state[sub_cancel_key] = False
+                    st.rerun()
+
+    save_col, cancel_col = st.columns(2)
+    if save_col.button(
+        "수정 내용 저장", type="primary", use_container_width=True, key=f"stmt_edit_save_{statement_id}"
+    ):
+        try:
+            purchase_enhancements._save_statement_edit(
+                purchase_module,
+                statement_id,
+                statements,
+                statement_items,
+                price_history,
+                edited_number,
+                edited_date,
+                int(edited_freight),
+                edited_memo,
+                pd.DataFrame(st.session_state[rows_key]),
+            )
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            for key in session_keys:
+                st.session_state.pop(key, None)
+            st.session_state.pop("editing_statement_id", None)
+            st.success(f"{statement_no}번 거래명세서를 수정했습니다.")
+            st.rerun()
+    if cancel_col.button("취소", use_container_width=True, key=f"stmt_edit_cancel_{statement_id}"):
+        for key in session_keys:
+            st.session_state.pop(key, None)
+        st.session_state.pop("editing_statement_id", None)
+        st.rerun()
+
+
 def _render_order_detail(
     purchase_module,
     st,
@@ -173,6 +518,7 @@ def _render_order_detail(
     order_items: pd.DataFrame,
     statements: pd.DataFrame,
     price_history: pd.DataFrame,
+    products: pd.DataFrame,
 ) -> None:
     order_id = str(order.get("발주ID", ""))
     vendor_name = str(order.get("거래처명", ""))
@@ -335,74 +681,7 @@ def _render_order_detail(
             st.caption("반품 내역이 있는 거래명세서는 반품 기록 보호를 위해 직접 수정할 수 없습니다.")
 
         if st.session_state.get("editing_statement_id") == statement_id and not has_returns:
-            parsed_date = pd.to_datetime(statement.get("명세서일자", ""), errors="coerce")
-            initial_date = today if pd.isna(parsed_date) else parsed_date.date()
-            with st.form(key=f"edit_statement_form_{statement_id}"):
-                st.markdown("#### 거래명세서 수정")
-                f1, f2, f3 = st.columns([2, 2, 2])
-                edited_number = f1.text_input(
-                    "명세서 번호", value=str(statement.get("명세서번호", ""))
-                )
-                edited_date = f2.date_input("명세서 일자", value=initial_date)
-                edited_freight = f3.number_input(
-                    "배송비",
-                    min_value=0,
-                    step=100,
-                    value=_to_int(purchase_module, statement.get("운송비", 0)),
-                )
-                edited_memo = st.text_area(
-                    "메모", value=str(statement.get("메모", "") or "")
-                )
-                st.markdown("##### 품목 수정")
-                edited_items = st.data_editor(
-                    purchase_enhancements._editable_items(items, purchase_module),
-                    key=f"edit_statement_items_{statement_id}",
-                    use_container_width=True,
-                    hide_index=True,
-                    num_rows="dynamic",
-                    disabled=["제품코드", "발주수량"],
-                    column_config={
-                        "입고수량": st.column_config.NumberColumn(min_value=0, step=1),
-                        "매입단가": st.column_config.NumberColumn(
-                            min_value=0, step=100, format="%d원"
-                        ),
-                        "제조번호": st.column_config.TextColumn(),
-                        "유통기한": st.column_config.TextColumn(
-                            help="예: 2026-12-31, 20261231, 261231"
-                        ),
-                    },
-                )
-                save_col, cancel_col = st.columns(2)
-                save_clicked = save_col.form_submit_button(
-                    "수정 내용 저장", type="primary", use_container_width=True
-                )
-                cancel_clicked = cancel_col.form_submit_button(
-                    "취소", use_container_width=True
-                )
-
-            if save_clicked:
-                try:
-                    purchase_enhancements._save_statement_edit(
-                        purchase_module,
-                        statement_id,
-                        statements,
-                        statement_items,
-                        price_history,
-                        edited_number,
-                        edited_date,
-                        int(edited_freight),
-                        edited_memo,
-                        edited_items,
-                    )
-                except ValueError as exc:
-                    st.error(str(exc))
-                else:
-                    st.session_state.pop("editing_statement_id", None)
-                    st.success(f"{statement_no}번 거래명세서를 수정했습니다.")
-                    st.rerun()
-            elif cancel_clicked:
-                st.session_state.pop("editing_statement_id", None)
-                st.rerun()
+            _render_statement_edit(purchase_module, st, today, statement, statement_id, statement_no, items, statements, statement_items, price_history, products)
 
         if seq < len(linked_statements):
             st.markdown("---")
@@ -414,6 +693,7 @@ def render(purchase_module, data) -> None:
     orders = data["orders"].copy()
     order_items = data["order_items"]
     aliases = data["aliases"]
+    products = data["products"]
 
     st.markdown("## 거래명세서 내역")
     if statements.empty or orders.empty:
@@ -546,4 +826,5 @@ def render(purchase_module, data) -> None:
         order_items,
         statements,
         price_history,
+        products,
     )

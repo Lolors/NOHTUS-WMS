@@ -178,6 +178,12 @@ def _save_statement_edit(
             "상품금액": product_amount,
             "출고단가": sale_price,
             "가격적용여부": "적용",
+            "원발주제품코드": str(row.get("원발주제품코드", "") or "").strip(),
+            "원발주제품명": str(row.get("원발주제품명", "") or "").strip(),
+            "원발주규격": str(row.get("원발주규격", "") or "").strip(),
+            "원발주단위": str(row.get("원발주단위", "") or "").strip(),
+            "입고유형": str(row.get("입고유형", "") or "").strip(),
+            "대체사유": str(row.get("대체사유", "") or "").strip(),
             "제조번호": str(row.get("제조번호", "") or "").strip(),
             "유통기한": expiry,
         })
