@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import db_store
 from db_migration import normalize_product_code
 
 PRODUCT_COLUMNS = ["전용거래처", "제품코드", "제품명", "규격", "포장단위"]
@@ -170,8 +171,23 @@ def vendors(core_app, data) -> None:
         if st.button("거래처 수정 저장", use_container_width=True, key="catalog_vendor_save"):
             clean = edited.drop(columns=["삭제"]).copy()
             clean["이메일"] = ""
+            old_name_by_code = current.set_index("거래처코드")["거래처명"].to_dict()
+            renames = []
+            for _, row in clean.iterrows():
+                code = str(row.get("거래처코드", "") or "").strip()
+                new_name = str(row.get("거래처명", "") or "").strip()
+                old_name = old_name_by_code.get(code)
+                if old_name and new_name and old_name != new_name:
+                    renames.append((old_name, new_name))
+
             core_app.save_vendors(_normalize_vendors(clean))
-            st.success("거래처 정보를 저장했습니다.")
+            for old_name, new_name in renames:
+                db_store.rename_vendor_everywhere(core_app.DATA, old_name, new_name)
+
+            if renames:
+                st.success("거래처 정보를 저장하고, 기존 발주 이력의 거래처명도 함께 바꿨습니다.")
+            else:
+                st.success("거래처 정보를 저장했습니다.")
             st.rerun()
     with delete_col:
         if st.button("선택 거래처 삭제", use_container_width=True, key="catalog_vendor_delete"):

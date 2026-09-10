@@ -30,6 +30,23 @@ def _connect(data_dir: Path) -> sqlite3.Connection:
     return conn
 
 
+def rename_vendor_everywhere(data_dir: Path, old_name: str, new_name: str) -> None:
+    """거래처명을 바꾸면 발주서/임시저장/별칭/거래명세서에 남아있는 예전
+    거래처명도 함께 바꿔서 기존 발주 이력과의 연결이 끊기지 않게 한다."""
+    old_name = str(old_name or "").strip()
+    new_name = str(new_name or "").strip()
+    if not old_name or not new_name or old_name == new_name:
+        return
+    with _connect(data_dir) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        for table in ("orders", "drafts", "aliases", "statements"):
+            conn.execute(
+                f"UPDATE {table} SET vendor_name = ? WHERE vendor_name = ?",
+                (new_name, old_name),
+            )
+        conn.commit()
+
+
 def _to_int(value: object) -> int:
     try:
         return int(float(str(value or "0").replace(",", "")))
