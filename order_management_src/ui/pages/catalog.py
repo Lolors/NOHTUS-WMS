@@ -155,9 +155,12 @@ def vendors(core_app, data) -> None:
         use_container_width=True,
         hide_index=True,
         num_rows="dynamic",
-        disabled=["거래처코드"],
         column_config={
             "삭제": st.column_config.CheckboxColumn("삭제"),
+            "거래처코드": st.column_config.TextColumn("거래처코드"),
+            "거래처명": st.column_config.TextColumn("거래처명"),
+            "담당자": st.column_config.TextColumn("담당자"),
+            "연락처": st.column_config.TextColumn("연락처"),
             "배송지": st.column_config.TextColumn("납품처 주소"),
         },
         key="catalog_vendor_editor",
