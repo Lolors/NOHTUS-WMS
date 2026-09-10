@@ -7,7 +7,7 @@ import pandas as pd
 
 from ui.month_grid import render_month_grid
 from ui.pages import purchase_enhancements, purchases
-from ui.pages.statement_register_substitution import _catalog
+from ui.pages.statement_register_substitution import _catalog, _received_by_order, item_key
 from ui.style_utils import map_cells
 
 
@@ -176,6 +176,8 @@ def _render_statement_edit(
     statement_items: pd.DataFrame,
     price_history: pd.DataFrame,
     products: pd.DataFrame,
+    order_id: str,
+    order_rows: pd.DataFrame,
 ) -> None:
     """거래명세서 내역 수정 화면. 거래명세서 등록 화면과 같은 선택 행 복사/삭제,
     대체품 입고/취소 기능을 제공한다."""
@@ -363,6 +365,75 @@ def _render_statement_edit(
     ):
         st.session_state[sub_cancel_key] = True
         st.session_state[sub_form_key] = False
+
+    st.markdown("##### 기존 발주 품목 중 추가로 입고할 품목 선택")
+    received_by_item = _received_by_order(purchase_module, statements, statement_items, order_id)
+    addable_rows = []
+    for source_index, (_, row) in enumerate(order_rows.reset_index(drop=True).iterrows()):
+        ordered_qty = _to_int(purchase_module, row.get("수량", 0))
+        received_qty = received_by_item.get(item_key(row), 0)
+        remaining = max(0, ordered_qty - received_qty)
+        if remaining <= 0:
+            continue
+        addable_rows.append({
+            "추가": False,
+            "품목번호": source_index,
+            "제품코드": str(row.get("제품코드", "") or ""),
+            "제품명": str(row.get("정식제품명", row.get("제품명", "")) or ""),
+            "규격": str(row.get("규격", "") or ""),
+            "포장단위": str(row.get("단위", row.get("포장단위", "")) or ""),
+            "발주수량": ordered_qty,
+            "누적입고": received_qty,
+            "남은수량": remaining,
+        })
+    if not addable_rows:
+        st.caption("이 발주서에는 추가로 입고할 품목이 없습니다.")
+    else:
+        addable_edited = st.data_editor(
+            pd.DataFrame(addable_rows),
+            use_container_width=True,
+            hide_index=True,
+            disabled=["품목번호", "제품코드", "제품명", "규격", "포장단위", "발주수량", "누적입고", "남은수량"],
+            column_config={
+                "추가": st.column_config.CheckboxColumn("추가", width="small"),
+                "품목번호": None,
+                "제품명": st.column_config.TextColumn("제품명", width="large"),
+            },
+            key=f"stmt_edit_addable_{statement_id}_{st.session_state[version_key]}",
+        )
+        to_add = addable_edited[addable_edited["추가"] == True]  # noqa: E712
+        if st.button(
+            "선택 품목 추가",
+            use_container_width=True,
+            disabled=to_add.empty,
+            key=f"stmt_edit_add_item_{statement_id}",
+        ):
+            rows = st.session_state[rows_key]
+            next_id = st.session_state[row_seq_key]
+            for _, arow in to_add.iterrows():
+                rows.append({
+                    "행번호": next_id,
+                    "제품코드": str(arow.get("제품코드", "")),
+                    "정식제품명": str(arow.get("제품명", "")),
+                    "규격": str(arow.get("규격", "")),
+                    "단위": str(arow.get("포장단위", "")),
+                    "발주수량": int(arow.get("발주수량", 0)),
+                    "입고수량": int(arow.get("남은수량", 0)),
+                    "매입단가": 0,
+                    "제조번호": "",
+                    "유통기한": "",
+                    "원발주제품코드": "",
+                    "원발주제품명": "",
+                    "원발주규격": "",
+                    "원발주단위": "",
+                    "입고유형": "",
+                    "대체사유": "",
+                })
+                next_id += 1
+            st.session_state[rows_key] = rows
+            st.session_state[row_seq_key] = next_id
+            st.session_state[version_key] += 1
+            st.rerun()
 
     product_labels, product_lookup = _catalog(products)
 
@@ -681,7 +752,10 @@ def _render_order_detail(
             st.caption("반품 내역이 있는 거래명세서는 반품 기록 보호를 위해 직접 수정할 수 없습니다.")
 
         if st.session_state.get("editing_statement_id") == statement_id and not has_returns:
-            _render_statement_edit(purchase_module, st, today, statement, statement_id, statement_no, items, statements, statement_items, price_history, products)
+            _render_statement_edit(
+                purchase_module, st, today, statement, statement_id, statement_no, items,
+                statements, statement_items, price_history, products, order_id, order_rows,
+            )
 
         if seq < len(linked_statements):
             st.markdown("---")
