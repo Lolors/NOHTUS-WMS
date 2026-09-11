@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>NOHTUS WMS</title>
+  <meta name="theme-color" content="#e94609" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <section id="login-screen">
+      <div class="login-brand">
+        <img src="icons/icon-192.png" alt="" />
+        <span>NOHTUS WMS</span>
+      </div>
+      <div class="field-label">아이디</div>
+      <input id="login-username" class="field-input" type="text" autocomplete="username" />
+      <div class="field-label">비밀번호</div>
+      <input id="login-password" class="field-input" type="password" autocomplete="current-password" />
+      <button id="login-submit" class="primary-button">로그인</button>
+      <div id="login-error" class="login-error"></div>
+    </section>
+
+    <div id="main-screen" hidden>
+      <header id="app-bar">
+        <div class="app-bar-title">
+          <img src="icons/icon-192.png" alt="" />
+          <span>NOHTUS WMS</span>
+        </div>
+        <button id="logout-button">로그아웃</button>
+      </header>
+
+      <section id="stock-screen" class="screen">
+        <div id="stock-list-view">
+          <div class="search-input-wrap">
+            <span class="search-icon">🔍</span>
+            <input id="stock-search" class="field-input" type="text" placeholder="제품명 또는 별칭 검색" />
+          </div>
+          <div class="filter-row">
+            <span></span>
+            <label class="checkbox-row"><input id="stock-exclude-material" type="checkbox" checked /> 부자재 제외</label>
+          </div>
+          <div id="stock-section-label" class="section-label" hidden></div>
+          <div id="stock-results" class="result-list"></div>
+        </div>
+        <div id="stock-detail-view" hidden></div>
+      </section>
+
+      <section id="expiry-screen" class="screen" hidden>
+        <div id="expiry-list-view">
+          <div class="filter-grid-2">
+            <select id="expiry-warehouse" class="field-input">
+              <option value="all">창고 전체</option>
+              <option value="yongin" selected>용인창고</option>
+              <option value="hwaseong">화성창고</option>
+            </select>
+            <select id="expiry-period" class="field-input">
+              <option value="3m">3개월 이내</option>
+              <option value="6m">6개월 이내</option>
+              <option value="1y" selected>1년 이내</option>
+            </select>
+          </div>
+          <div class="filter-row">
+            <span></span>
+            <label class="checkbox-row"><input id="expiry-exclude-bidata" type="checkbox" checked /> 비자료 제외</label>
+          </div>
+          <div id="expiry-results"></div>
+        </div>
+        <div id="expiry-detail-view" hidden></div>
+      </section>
+
+      <section id="purchase-screen" class="screen" hidden>
+        <div id="purchase-list-view">
+          <div class="search-input-wrap">
+            <span class="search-icon">🔍</span>
+            <input id="purchase-search" class="field-input" type="text" placeholder="제품명 또는 별칭 검색" />
+          </div>
+          <div class="segmented" id="purchase-period">
+            <button data-period="3m">3개월</button>
+            <button data-period="6m">6개월</button>
+            <button data-period="1y" class="active">1년</button>
+            <button data-period="all">전체</button>
+          </div>
+          <div id="purchase-section-label" class="section-label" hidden></div>
+          <div id="purchase-results" class="result-list"></div>
+        </div>
+        <div id="purchase-detail-view" hidden></div>
+      </section>
+
+      <section id="export-screen" class="screen" hidden>
+        <div id="export-filters-view">
+          <div class="filter-grid-2">
+            <select id="export-country-filter" class="field-input">
+              <option value="">국가 전체</option>
+            </select>
+            <select id="export-transport-filter" class="field-input">
+              <option value="">운송방식 전체</option>
+              <option value="AIR">✈️ AIR</option>
+              <option value="SEA">🚢 SEA</option>
+              <option value="HAND">✋ HAND</option>
+              <option value="미지정">미지정</option>
+            </select>
+          </div>
+          <div class="segmented" id="export-period">
+            <button data-period="recent" class="active">최근</button>
+            <button data-period="monthly">월별</button>
+            <button data-period="yearly">연도별</button>
+          </div>
+          <div class="section-label">진행 중</div>
+          <div id="export-in-progress-results" class="result-list"></div>
+          <div class="section-label">완료</div>
+          <div id="export-completed-results" class="result-list"></div>
+        </div>
+        <div id="export-year-view" hidden></div>
+        <div id="export-detail-view" hidden></div>
+      </section>
+
+      <nav id="tab-bar">
+        <button class="tab-button active" data-tab="stock"><span class="tab-icon">🔍</span>재고 검색</button>
+        <button class="tab-button" data-tab="expiry"><span class="tab-icon">⏰</span>임박재고</button>
+        <button class="tab-button" data-tab="purchase"><span class="tab-icon">💰</span>매입가</button>
+        <button class="tab-button" data-tab="export"><span class="tab-icon">✈️</span>수출현황</button>
+      </nav>
+    </div>
+  </div>
+
+  <div id="a2hs-overlay" class="a2hs-overlay" hidden>
+    <div class="a2hs-backdrop"></div>
+    <div class="a2hs-card" id="a2hs-card"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

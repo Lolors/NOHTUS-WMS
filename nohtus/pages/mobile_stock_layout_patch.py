@@ -5,6 +5,7 @@ import streamlit as st
 
 import nohtus.pages.mobile_stock as mobile_stock
 import nohtus.pages.mobile_stock_live_fix as base
+import nohtus.pages.mobile_theme as mobile_theme
 
 
 _ORIGINAL_INJECT_CSS = base._inject_mobile_search_css
@@ -313,10 +314,9 @@ def _render_stock_detail(product_name):
         columns={"company": "사업장", "location": "로케이션", "lot": "제조번호", "qty": "수량"}
     )
     st.markdown('<div class="mobile-detail-table-gap"></div>', unsafe_allow_html=True)
-    st.dataframe(
+    mobile_theme.render_location_cards(
         detail[["사업장", "로케이션", "제조번호", "유통기한", "수량"]],
-        use_container_width=True,
-        hide_index=True,
+        empty_message="현재 재고가 없습니다.",
     )
 
 
@@ -458,8 +458,10 @@ def page_mobile_stock_finder():
     base._render_result_list = _render_result_list
     base._render_recent_links = _render_recent_links
     try:
+        mobile_theme.render_app_bar()
         _inject_mobile_search_css()
-        stock_tab, expiry_tab = st.tabs(["재고 검색", "임박재고"])
+        mobile_theme.inject_mobile_theme()
+        stock_tab, expiry_tab = st.tabs(["🔍  재고 검색", "⏰  임박재고"])
         with stock_tab:
             _render_stock_tab()
         with expiry_tab:

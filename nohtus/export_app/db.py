@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -13,7 +14,11 @@ from nohtus.export_app.utils.performance import measure
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = PROJECT_ROOT / 'data' / 'export.db'
+
+# NOHTUS_EXPORT_DB_PATH 오버라이드는 nohtus/config.py의 NOHTUS_DB_PATH와
+# 같은 이유(워크트리별로 분리된 data/export.db)로 존재한다.
+_export_db_path_override = str(os.environ.get('NOHTUS_EXPORT_DB_PATH', '') or '').strip()
+DB_PATH = Path(_export_db_path_override) if _export_db_path_override else PROJECT_ROOT / 'data' / 'export.db'
 UPLOAD_DIR = PROJECT_ROOT / 'data' / 'export_uploads'
 LAST_USB_BACKUP_ERROR = ''
 LAST_USB_BACKUP_PATH = ''

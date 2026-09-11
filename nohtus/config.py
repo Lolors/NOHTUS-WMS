@@ -1,10 +1,19 @@
+import os
 from pathlib import Path
 
 APP_TITLE = "NOHTUS WMS"
 VERSION = "v4.9 RC3.3 UI Stable"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = PROJECT_ROOT / "data" / "nohtus.db"
+
+# NOHTUS_DB_PATH가 설정되어 있으면 그걸 우선 쓴다. 이 저장소를 git worktree로
+# 여러 개 체크아웃해두고 각각에서 서버를 띄우는 경우(예: 모바일 API를
+# mobile-inventory-ui-review 브랜치 워크트리에서 실행), data/nohtus.db가
+# 워크트리마다 서로 다른(gitignore된) 파일이라 로그인 계정이 안 맞는 문제가
+# 생길 수 있다 — 그럴 때 실제 운영 DB 경로를 이 환경변수로 지정해서 같은
+# DB를 바라보게 한다.
+_db_path_override = str(os.environ.get("NOHTUS_DB_PATH", "") or "").strip()
+DB_PATH = Path(_db_path_override) if _db_path_override else PROJECT_ROOT / "data" / "nohtus.db"
 
 COMPANIES = ["노투스팜", "노투스", "NOH", "비자료"]
 INBOUND_COMPANIES = COMPANIES + ["등록대기"]

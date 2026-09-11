@@ -21,7 +21,7 @@ from nohtus.db_init import init_db
 from nohtus.export_app_bridge import init_export_app
 from nohtus.services import database_backup
 import nohtus.services.export_waiting_history_patch  # noqa: F401
-from nohtus.device import is_mobile, sync_mobile_flag
+from nohtus.device import is_mobile, mobile_app_url, redirect_to_mobile_app, sync_mobile_flag
 from nohtus.navigation import render_sidebar
 from nohtus.pages.all_inventory import page_all_inventory
 from nohtus.pages.closing_print import page_closing
@@ -356,7 +356,14 @@ def main():
     sync_mobile_flag()
 
     force_mobile = str(st.query_params.get("mobile", "")).strip().lower() in {"1", "true", "yes", "on"}
+    skip_mobile_redirect = str(st.query_params.get("skip_mobile_redirect", "")).strip() == "1"
     mobile_view = is_mobile() or force_mobile
+
+    if mobile_view and not skip_mobile_redirect:
+        new_mobile_app_url = mobile_app_url()
+        if new_mobile_app_url:
+            redirect_to_mobile_app(new_mobile_app_url)
+
     if mobile_view:
         _inject_mobile_login_css()
 

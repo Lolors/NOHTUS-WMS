@@ -6,6 +6,7 @@ import streamlit as st
 
 import nohtus.pages.mobile_stock as mobile_stock
 import nohtus.pages.mobile_stock_layout_patch_v2 as base
+import nohtus.pages.mobile_theme as mobile_theme
 
 
 _ORIGINAL_INJECT_CSS = base._inject_mobile_search_css
@@ -321,10 +322,9 @@ def _render_expiry_detail(product_name, source_df):
         columns={"company": "사업장", "location": "로케이션", "lot": "제조번호", "qty": "수량"}
     )
     st.markdown('<div class="mobile-detail-table-gap"></div>', unsafe_allow_html=True)
-    st.dataframe(
+    mobile_theme.render_location_cards(
         rows[["사업장", "로케이션", "제조번호", "유통기한", "수량"]],
-        use_container_width=True,
-        hide_index=True,
+        empty_message="조건에 맞는 임박재고가 없습니다.",
     )
 
 
