@@ -386,12 +386,11 @@ html, body {
   padding-bottom: 2px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
 }
 .export-group-title { display: flex; align-items: center; gap: 6px; }
 .export-group-flag { font-size: 16px; line-height: 1; }
-.export-group-date { font-size: 11px; font-weight: 700; color: var(--text-muted); white-space: nowrap; }
+.export-case-dates { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.export-case-date { font-size: 11px; font-weight: 700; color: var(--text-muted); white-space: nowrap; }
 .export-case-row { display: flex; flex-direction: column; gap: 10px; }
 .export-case-row + .export-case-row { border-top: 1px dashed var(--border); padding-top: 12px; margin-top: 2px; }
 

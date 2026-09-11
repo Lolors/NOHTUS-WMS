@@ -23,6 +23,16 @@ TRANSPORT_ICONS = {"AIR": "✈️", "SEA": "🚢", "HAND": "✋"}
 _MONTH_NAMES_KO = "1월 2월 3월 4월 5월 6월 7월 8월 9월 10월 11월 12월".split()
 
 _DOMESTIC_STAGE_ORDER = dash.STAGE_ORDER["국내배송"]
+_INTAKE_STAGE_ORDER = dash.STAGE_ORDER["입고 진행"]
+# 실제 운영에서는 "국내배송"이 사실상 마지막 단계다(선적 준비/완료는 안 씀).
+_FINAL_STAGE_ORDER = _DOMESTIC_STAGE_ORDER
+# 입고가 시작되면 1%에서 시작해 입고 수량 비율에 따라 60%까지 올라간다.
+_INTAKE_START_PERCENT = 1
+_INTAKE_DONE_PERCENT = 60
+# 입고가 끝난 뒤부터는 패킹 단계마다 10%씩 깔끔하게 올라간다:
+# 패킹대기 60 → 패킹진행 70 → 패킹완료 80 → 국내배송 90(매출등록 전) → 100(매출등록 후).
+_PACKING_STAGE_PERCENTS = {4: 60, 5: 70, 6: 80}
+_STAGE_PROGRESS_CAP = 90
 
 
 def _parse_date(value):
@@ -41,6 +51,34 @@ def _is_completed_stage(case):
     return order >= _DOMESTIC_STAGE_ORDER
 
 
+def _overall_progress_percent(case, intake_percent, sales_status):
+    """전체 진행률(0~100).
+
+    - 주문 접수 ~ 아직 입고가 시작되지 않은 상태: 0%.
+    - "입고 진행" 단계: 입고된 수량 비율에 따라 1%(막 시작)에서 60%(입고
+      완료)까지 정수로 오른다.
+    - 패킹 단계(대기/진행/완료): 60% → 70% → 80%로 10%씩 깔끔하게 오른다.
+    - "국내배송" 단계에 도달하면 90%. 매출 등록까지 완료돼야(등록완료)
+      비로소 100%가 된다.
+    """
+    stage_order = dash.STAGE_ORDER.get(dash.stage_label(case["stage"]), 0)
+
+    if stage_order >= _FINAL_STAGE_ORDER:
+        return 100.0 if sales_status == "등록완료" else float(_STAGE_PROGRESS_CAP)
+
+    if stage_order >= _INTAKE_STAGE_ORDER + 1:
+        return float(_PACKING_STAGE_PERCENTS.get(stage_order, _INTAKE_DONE_PERCENT))
+
+    if stage_order == _INTAKE_STAGE_ORDER:
+        intake_ratio = max(0.0, min(1.0, float(intake_percent or 0.0) / 100.0))
+        if intake_ratio <= 0.0:
+            return 0.0
+        span = _INTAKE_DONE_PERCENT - _INTAKE_START_PERCENT
+        return float(round(_INTAKE_START_PERCENT + span * intake_ratio))
+
+    return 0.0
+
+
 def _filtered_cases(country=None, transport=None):
     cases = order_service.list_editable_cases()
     country = (country or "").strip()
@@ -57,10 +95,13 @@ def _serialize_case(case, intake, sales_status):
     bg, fg, _ = dash.stage_bar_colors(case["stage"])
     export_no = str(case["export_no"] or "").strip()
     transport_mode = str(case["transport_mode"] or "").strip()
+    intake_percent = intake.get(int(case["id"]), 0.0)
+    case_sales_status = sales_status.get(export_no, "미등록")
     return {
         "id": int(case["id"]),
         "export_no": export_no,
         "created_date": str(case["created_at"] or "").strip()[:10],
+        "confirmed_date": str(case["actual_ship_date"] or "").strip()[:10],
         "buyer": str(case["buyer"] or ""),
         "country": str(case["country"] or ""),
         "transport_mode": transport_mode,
@@ -68,8 +109,8 @@ def _serialize_case(case, intake, sales_status):
         "stage": stage,
         "stage_bg": bg,
         "stage_fg": fg,
-        "intake_percent": round(intake.get(int(case["id"]), 0.0), 1),
-        "sales_status": sales_status.get(export_no, "미등록"),
+        "progress_percent": _overall_progress_percent(case, intake_percent, case_sales_status),
+        "sales_status": case_sales_status,
         "products_summary": dash.summarize_product_names(case["product_names"]),
         "note": str(case["note"] or ""),
     }

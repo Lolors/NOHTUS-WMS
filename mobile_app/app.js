@@ -780,15 +780,23 @@
     const title = [item.buyer, item.transport_mode ? (item.transport_icon ? item.transport_icon + " " : "") + item.transport_mode : ""]
       .filter(Boolean)
       .join(" · ") || "-";
+    const datesHtml =
+      item.created_date || item.confirmed_date
+        ? `<div class="export-case-dates">
+            ${item.created_date ? `<span class="export-case-date">📅 접수 ${escapeHtml(item.created_date)}</span>` : ""}
+            ${item.confirmed_date ? `<span class="export-case-date">✅ 출고 ${escapeHtml(item.confirmed_date)}</span>` : ""}
+          </div>`
+        : "";
     return `
       <div class="export-case-row" data-id="${item.id}" role="button" tabindex="0">
         <div class="export-card-top">
           <div class="export-buyer">${escapeHtml(title)}</div>
           <span class="stage-badge" style="background:${escapeHtml(item.stage_bg)};color:${escapeHtml(item.stage_fg)}">${escapeHtml(item.stage)}</span>
         </div>
+        ${datesHtml}
         <div class="export-progress-row">
-          <div class="export-progress-track"><div class="export-progress-fill" style="width:${item.intake_percent}%"></div></div>
-          <span class="export-progress-label">${item.intake_percent}%</span>
+          <div class="export-progress-track"><div class="export-progress-fill" style="width:${item.progress_percent}%"></div></div>
+          <span class="export-progress-label">${item.progress_percent}%</span>
         </div>
         <div class="export-bottom-row">
           <span class="export-products">${escapeHtml(item.products_summary)}</span>
@@ -804,12 +812,10 @@
     return groups
       .map((group) => {
         const flag = countryFlag(group.country);
-        const latestDate = group.items.reduce((max, item) => (item.created_date > max ? item.created_date : max), "");
         return `
           <div class="export-card">
             <div class="export-group-header">
               <span class="export-group-title">${flag ? `<span class="export-group-flag">${flag}</span>` : ""}${escapeHtml(group.country)} · ${group.items.length}건</span>
-              ${latestDate ? `<span class="export-group-date">📅 ${escapeHtml(latestDate)}</span>` : ""}
             </div>
             ${group.items.map((item) => renderExportCaseRow(item)).join("")}
           </div>
