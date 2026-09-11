@@ -9,7 +9,19 @@ import streamlit as st
 from nohtus.db import q
 from nohtus.dates import display_date_only
 
-COMPANY_OPTIONS = ["노투스팜", "NOH", "노투스", "비자료"]
+COMPANY_GROUPS = {
+    "노투스팜·NOH·노투스": ["노투스팜", "NOH", "노투스"],
+    "비자료": ["비자료"],
+}
+COMPANY_OPTIONS = list(COMPANY_GROUPS)
+
+
+def _companies_for_groups(groups: list[str]) -> list[str]:
+    return [
+        company
+        for group in groups
+        for company in COMPANY_GROUPS.get(group, [])
+    ]
 
 
 def _expiry_alert_rows(companies: list[str]) -> pd.DataFrame:
@@ -179,14 +191,33 @@ def _render_html_table(rows: pd.DataFrame):
 
 def page_expiry_alerts():
     st.title("유통기한 임박")
-    selected_companies = st.multiselect(
-        "사업장",
+    selected_groups = st.multiselect(
+        "사업장 구분",
         COMPANY_OPTIONS,
         default=COMPANY_OPTIONS,
-        key="expiry_alert_company_filter",
+        key="expiry_alert_company_group_filter",
     )
-    rows = _expiry_alert_rows(selected_companies)
+    if not selected_groups:
+        st.info("조회할 사업장 구분을 선택하세요.")
+        return
+
+    rows = _expiry_alert_rows(_companies_for_groups(selected_groups))
     if rows.empty:
         st.info("선택한 조건에 해당하는 유통기한 1년 이하 재고가 없습니다.")
         return
-    _render_html_table(rows)
+
+    locations = rows["로케이션"].fillna("").astype(str).str.strip()
+    gmmedic_rows = rows[locations == "지엠메딕"]
+    regular_rows = rows[locations != "지엠메딕"]
+
+    st.markdown("### 일반 로케이션")
+    if regular_rows.empty:
+        st.info("선택한 조건에 해당하는 일반 로케이션 재고가 없습니다.")
+    else:
+        _render_html_table(regular_rows)
+
+    st.markdown("### 지엠메딕")
+    if gmmedic_rows.empty:
+        st.info("선택한 조건에 해당하는 지엠메딕 재고가 없습니다.")
+    else:
+        _render_html_table(gmmedic_rows)
