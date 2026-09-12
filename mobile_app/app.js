@@ -774,14 +774,14 @@
     return order.map((country) => ({ country, items: map.get(country) }));
   }
 
-  function renderExportCaseRow(item) {
+  function renderExportCaseRow(item, showOwnDates) {
     const salesClass = item.sales_status === "등록완료" ? "green" : item.sales_status === "등록중" ? "yellow" : "gray";
     const noteHtml = item.note ? `<div class="export-note">${escapeHtml(item.note)}</div>` : "";
     const title = [item.buyer, item.transport_mode ? (item.transport_icon ? item.transport_icon + " " : "") + item.transport_mode : ""]
       .filter(Boolean)
       .join(" · ") || "-";
     const datesHtml =
-      item.created_date || item.confirmed_date
+      showOwnDates && (item.created_date || item.confirmed_date)
         ? `<div class="export-case-dates">
             ${item.created_date ? `<span class="export-case-date">📅 접수 ${escapeHtml(item.created_date)}</span>` : ""}
             ${item.confirmed_date ? `<span class="export-case-date">✅ 출고 ${escapeHtml(item.confirmed_date)}</span>` : ""}
@@ -791,9 +791,11 @@
       <div class="export-case-row" data-id="${item.id}" role="button" tabindex="0">
         <div class="export-card-top">
           <div class="export-buyer">${escapeHtml(title)}</div>
-          <span class="stage-badge" style="background:${escapeHtml(item.stage_bg)};color:${escapeHtml(item.stage_fg)}">${escapeHtml(item.stage)}</span>
+          <div class="export-case-top-right">
+            ${datesHtml}
+            <span class="stage-badge" style="background:${escapeHtml(item.stage_bg)};color:${escapeHtml(item.stage_fg)}">${escapeHtml(item.stage)}</span>
+          </div>
         </div>
-        ${datesHtml}
         <div class="export-progress-row">
           <div class="export-progress-track"><div class="export-progress-fill" style="width:${item.progress_percent}%"></div></div>
           <span class="export-progress-label">${item.progress_percent}%</span>
@@ -812,12 +814,21 @@
     return groups
       .map((group) => {
         const flag = countryFlag(group.country);
+        const multi = group.items.length > 1;
+        const only = group.items[0];
+        const datesHtml = multi
+          ? ""
+          : `<div class="export-group-dates">
+              ${only.created_date ? `<span class="export-group-date">📅 접수 ${escapeHtml(only.created_date)}</span>` : ""}
+              ${only.confirmed_date ? `<span class="export-group-date">✅ 출고 ${escapeHtml(only.confirmed_date)}</span>` : ""}
+            </div>`;
         return `
           <div class="export-card">
             <div class="export-group-header">
               <span class="export-group-title">${flag ? `<span class="export-group-flag">${flag}</span>` : ""}${escapeHtml(group.country)} · ${group.items.length}건</span>
+              ${datesHtml}
             </div>
-            ${group.items.map((item) => renderExportCaseRow(item)).join("")}
+            ${group.items.map((item) => renderExportCaseRow(item, multi)).join("")}
           </div>
         `;
       })
