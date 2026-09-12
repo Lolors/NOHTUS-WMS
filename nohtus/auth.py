@@ -1,11 +1,77 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import os
 from datetime import datetime
 
 import streamlit as st
 
 from nohtus.db import connect, q
+
+# 비밀번호는 계정마다 무작위 salt를 더한 scrypt로 저장한다 — DB가 유출돼도
+# GPU로 초당 수십억 번씩 돌리는 오프라인 대입 공격에 훨씬 강하다(예전
+# SHA256 방식은 salt가 사실상 없어서 이 공격에 취약했다).
+_SCRYPT_PREFIX = "scrypt"
+_SCRYPT_N = 2 ** 14
+_SCRYPT_R = 8
+_SCRYPT_P = 1
+_SCRYPT_DKLEN = 32
+# OpenSSL의 scrypt 기본 메모리 한도(32MiB)보다 여유 있게 잡아둔다.
+_SCRYPT_MAXMEM = 64 * 1024 * 1024
+
+
+def _hash_password(username: str, password: str) -> str:
+    """새 비밀번호를 저장용 해시로 만든다(항상 새 scrypt 형식으로).
+
+    username은 예전 방식과 시그니처를 맞추려고 남겨둔 인자이고, 실제
+    salt는 계정마다 새로 뽑는 난수를 쓴다.
+    """
+    salt = os.urandom(16)
+    derived = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=_SCRYPT_N,
+        r=_SCRYPT_R,
+        p=_SCRYPT_P,
+        dklen=_SCRYPT_DKLEN,
+        maxmem=_SCRYPT_MAXMEM,
+    )
+    return f"{_SCRYPT_PREFIX}${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${salt.hex()}${derived.hex()}"
+
+
+def _hash_password_legacy(username: str, password: str) -> str:
+    """2026-09 이전에 쓰던 방식. 이미 저장된 예전 해시를 검증할 때만 쓴다."""
+    raw = f"NOHTUS-WMS::{username}::{password}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _verify_password(username: str, password: str, stored_hash: str) -> bool:
+    """저장된 해시가 새 scrypt 형식이든 예전 SHA256 형식이든 맞게 검증한다."""
+    stored_hash = str(stored_hash or "")
+    if stored_hash.startswith(f"{_SCRYPT_PREFIX}$"):
+        try:
+            _, n_s, r_s, p_s, salt_hex, hash_hex = stored_hash.split("$")
+            salt = bytes.fromhex(salt_hex)
+            expected = bytes.fromhex(hash_hex)
+        except ValueError:
+            return False
+        derived = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=salt,
+            n=int(n_s),
+            r=int(r_s),
+            p=int(p_s),
+            dklen=len(expected),
+            maxmem=_SCRYPT_MAXMEM,
+        )
+        return hmac.compare_digest(derived, expected)
+    return hmac.compare_digest(_hash_password_legacy(username, password), stored_hash)
+
+
+def _needs_rehash(stored_hash: str) -> bool:
+    """예전 SHA256 형식이면 로그인 성공 시 새 scrypt 형식으로 갈아끼워야 한다."""
+    return not str(stored_hash or "").startswith(f"{_SCRYPT_PREFIX}$")
 
 DEFAULT_USERS = {
     "hn": {"display_name": "김한나", "role": "admin"},
@@ -35,11 +101,6 @@ ROLE_PAGES = {
     "user": None,
     "viewer": VIEWER_PAGES,
 }
-
-
-def _hash_password(username: str, password: str) -> str:
-    raw = f"NOHTUS-WMS::{username}::{password}".encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()
 
 
 def ensure_auth_tables():
@@ -267,9 +328,17 @@ def render_login():
             pw = st.text_input("비밀번호", type="password", key="login_password")
             submitted = st.form_submit_button("로그인", type="primary", use_container_width=True)
         if submitted:
-            if _hash_password(username, pw) != password_hash:
+            if not _verify_password(username, pw, password_hash):
                 _login_notice("아이디 또는 비밀번호가 맞지 않습니다.")
                 return False
+            if _needs_rehash(password_hash):
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                with connect() as con:
+                    con.execute(
+                        "UPDATE users SET password_hash=?, updated_at=? WHERE username=?",
+                        (_hash_password(username, pw), now, username),
+                    )
+                    con.commit()
             st.session_state["current_user"] = {"username": username, "display_name": str(row.get("display_name") or username), "role": str(row.get("role") or "user")}
             st.rerun()
     return False

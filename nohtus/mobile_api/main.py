@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -49,8 +49,15 @@ def current_user(authorization: str | None = Header(default=None)):
 
 
 @app.post("/api/login")
-def api_login(payload: LoginRequest):
-    result = auth.login(payload.username, payload.password)
+def api_login(payload: LoginRequest, request: Request):
+    ip = request.client.host if request.client else ""
+    try:
+        result = auth.login(payload.username, payload.password, ip=ip)
+    except auth.LoginLockedError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=f"로그인 시도가 너무 많습니다. {exc.retry_after_minutes}분 후 다시 시도해주세요.",
+        )
     if not result:
         raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 맞지 않습니다.")
     token, user = result
