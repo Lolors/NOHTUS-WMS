@@ -812,21 +812,12 @@
     return groups
       .map((group) => {
         const flag = countryFlag(group.country);
-        const multi = group.items.length > 1;
-        const only = group.items[0];
-        const datesHtml = multi
-          ? ""
-          : `<div class="export-group-dates">
-              ${only.created_date ? `<span class="export-group-date">📅 접수 ${escapeHtml(only.created_date)}</span>` : ""}
-              ${only.confirmed_date ? `<span class="export-group-date">✅ 출고 ${escapeHtml(only.confirmed_date)}</span>` : ""}
-            </div>`;
         return `
           <div class="export-card">
             <div class="export-group-header">
               <span class="export-group-title">${flag ? `<span class="export-group-flag">${flag}</span>` : ""}${escapeHtml(group.country)} · ${group.items.length}건</span>
-              ${datesHtml}
             </div>
-            ${group.items.map((item) => renderExportCaseRow(item, multi)).join("")}
+            ${group.items.map((item) => renderExportCaseRow(item, true)).join("")}
           </div>
         `;
       })

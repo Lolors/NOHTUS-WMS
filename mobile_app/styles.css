@@ -385,15 +385,10 @@ html, body {
   color: var(--text);
   padding-bottom: 2px;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 4px 6px;
+  align-items: center;
 }
-.export-group-title { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; white-space: nowrap; }
+.export-group-title { display: flex; align-items: center; gap: 6px; }
 .export-group-flag { font-size: 16px; line-height: 1; }
-.export-group-dates { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; margin-left: auto; }
-.export-group-date { font-size: 11px; font-weight: 700; color: var(--text-muted); white-space: nowrap; }
 .export-case-dates { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .export-case-date { font-size: 11px; font-weight: 700; color: var(--text-muted); white-space: nowrap; }
 .export-case-row { display: flex; flex-direction: column; gap: 10px; }
