@@ -14,6 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 from nohtus.db import q
+from nohtus.locations import expand_row_range
 from nohtus.services.location_map import get_product_image_path
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -89,7 +90,7 @@ def stock_rows(product_name, exclude_material_or_promo=True):
         return pd.DataFrame()
     df = q(
         """
-        SELECT company, location, lot, exp_date, qty
+        SELECT company, location, lot, exp_date, qty, location_range_end, location_range_cells
         FROM inventory
         WHERE product_name=? AND qty>0
         ORDER BY company, exp_date, location, lot
@@ -140,10 +141,13 @@ def stock_detail(product_name):
     if not rows.empty:
         detail = rows.sort_values(["exp_date", "company", "location", "lot"])
         for row in detail.itertuples(index=False):
+            location = str(row.location or "")
+            occupied_cells = expand_row_range(location, row.location_range_cells, row.location_range_end)
             location_rows.append(
                 {
                     "company": str(row.company or ""),
-                    "location": str(row.location or ""),
+                    "location": location,
+                    "occupied_cells": occupied_cells,
                     "lot": str(row.lot or ""),
                     "exp_date": str(row.exp_date or ""),
                     "qty": int(row.qty or 0),

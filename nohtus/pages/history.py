@@ -8,7 +8,7 @@ from datetime import date, datetime
 import pandas as pd
 import streamlit as st
 
-from nohtus.auth import is_admin
+from nohtus.auth import current_display_name, current_role, current_username, is_admin
 from nohtus.config import COMPANIES
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only
@@ -252,6 +252,33 @@ def _reverse_transaction(cur, tx):
             location=tx["to_location"] or tx["from_location"],
             delta=-qty,
         )
+
+
+def _current_own_actor_names():
+    return {
+        name.strip().lower()
+        for name in (current_display_name(), current_username())
+        if name and name.strip()
+    }
+
+
+def _filter_ids_by_actor(tx_ids, own_names):
+    """DB를 직접 다시 조회해서, 실제로 본인(actor)이 남긴 이력만 남긴다.
+
+    화면에서 이미 한 번 걸렀더라도, 삭제를 실제로 실행하기 직전에 DB
+    기준으로 다시 검증한다(admin이 아닌 user 권한이 세션 상태를 우회해서
+    남의 이력을 지우지 못하도록 하는 마지막 방어선).
+    """
+    ids = sorted({int(x) for x in tx_ids if x})
+    if not ids or not own_names:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    with connect() as con:
+        rows = con.execute(
+            f"SELECT id, actor FROM transactions WHERE id IN ({placeholders})",
+            tuple(ids),
+        ).fetchall()
+    return [int(row[0]) for row in rows if str(row[1] or "").strip().lower() in own_names]
 
 
 def _delete_transaction_ids(tx_ids):
@@ -691,7 +718,8 @@ def page_history():
             help="현재 페이지와 관계없이 지정 기간 및 검색 조건에 맞는 전체 이력을 내려받습니다.",
         )
 
-    if is_admin():
+    can_manage_history = is_admin() or current_role() == "user"
+    if can_manage_history:
         admin_show = show.copy()
         admin_show.insert(0, "선택", False)
         styled_admin_show = _style_history_order_groups(admin_show, df)
@@ -704,17 +732,34 @@ def page_history():
             column_config={"선택": st.column_config.CheckboxColumn("선택")},
             key="history_admin_delete_editor",
         )
-        selected_ids = [tx_ids[i] for i, checked in enumerate(edited["선택"].tolist()) if checked and i < len(tx_ids)]
+        checked_indexes = [i for i, checked in enumerate(edited["선택"].tolist()) if checked and i < len(tx_ids)]
+        if not is_admin():
+            # admin이 아닌 user 권한은 본인이 입력한 이력만 삭제할 수 있다 —
+            # 다른 사람이 남긴 이력까지 건드리지 못하게 actor 컬럼으로 걸러낸다.
+            own_names = _current_own_actor_names()
+            owned_indexes = [
+                i for i in checked_indexes if str(df.iloc[i].get("actor") or "").strip().lower() in own_names
+            ]
+            skipped = len(checked_indexes) - len(owned_indexes)
+            if skipped:
+                st.warning(f"본인이 입력한 이력만 삭제할 수 있어요. 다른 사용자의 이력 {skipped}건은 선택에서 제외했습니다.")
+            checked_indexes = owned_indexes
+        selected_ids = [tx_ids[i] for i in checked_indexes]
         if selected_ids:
             st.warning(f"선택한 이력 {len(selected_ids)}건의 삭제 방식을 선택하세요.")
-            c1, c2 = st.columns([1, 1])
-            with c1:
+            if is_admin():
+                c1, c2 = st.columns([1, 1])
+                with c1:
+                    if st.button("삭제 + 재고 원복", type="primary", use_container_width=True):
+                        st.session_state["history_delete_pending_ids"] = selected_ids
+                        st.rerun()
+                with c2:
+                    if st.button("이력만 삭제 (원복 없음)", use_container_width=True):
+                        st.session_state["history_log_only_delete_pending_ids"] = selected_ids
+                        st.rerun()
+            else:
                 if st.button("삭제 + 재고 원복", type="primary", use_container_width=True):
                     st.session_state["history_delete_pending_ids"] = selected_ids
-                    st.rerun()
-            with c2:
-                if st.button("이력만 삭제 (원복 없음)", use_container_width=True):
-                    st.session_state["history_log_only_delete_pending_ids"] = selected_ids
                     st.rerun()
         pending_ids = st.session_state.get("history_delete_pending_ids") or []
         if pending_ids:
@@ -727,7 +772,10 @@ def page_history():
             with d2:
                 if st.button("예, 삭제하고 재고를 원복합니다", type="primary", use_container_width=True, key="history_delete_confirm"):
                     try:
-                        deleted = _delete_transaction_ids(pending_ids)
+                        ids_to_delete = pending_ids
+                        if not is_admin():
+                            ids_to_delete = _filter_ids_by_actor(pending_ids, _current_own_actor_names())
+                        deleted = _delete_transaction_ids(ids_to_delete)
                         st.session_state.pop("history_delete_pending_ids", None)
                         st.success(f"이력 {deleted}건을 삭제하고 재고를 원복했습니다.")
                         st.rerun()

@@ -293,8 +293,9 @@
           .map(escapeHtml)
           .join(" · ");
         const exportBadge = row.export_waiting ? ` <span class="badge export">✈️ 수출대기중</span>` : "";
+        const occupied = row.occupied_cells && row.occupied_cells.length ? row.occupied_cells : [row.location];
         return `
-          <div class="loc-row" data-location="${escapeHtml(row.location || "")}">
+          <div class="loc-row" data-location="${escapeHtml(row.location || "")}" data-occupied="${escapeHtml(occupied.join(","))}">
             <div>
               <div class="loc-name">${escapeHtml(row.location || "-")}${exportBadge}</div>
               <div class="loc-meta">${metaParts}</div>
@@ -541,17 +542,21 @@
 
   function bindLocationRowClicks(container) {
     container.querySelectorAll(".loc-row[data-location]").forEach((row) => {
-      row.addEventListener("click", () => highlightMapLocation(row.dataset.location, row, container));
+      const occupied = (row.dataset.occupied || row.dataset.location || "").split(",").filter(Boolean);
+      row.addEventListener("click", () => highlightMapLocation(occupied, row, container));
     });
   }
 
-  async function highlightMapLocation(loc, rowEl, container) {
+  async function highlightMapLocation(locs, rowEl, container) {
     const holder = el("stock-map-holder");
     const wrap = holder && holder.querySelector(".map-wrap");
     if (!wrap) return;
     try {
       const layout = await ensureLocationMapLayout();
-      const matched = matchingCodes(loc, layout.items);
+      const matched = new Set();
+      (Array.isArray(locs) ? locs : [locs]).forEach((loc) => {
+        matchingCodes(loc, layout.items).forEach((code) => matched.add(code));
+      });
       wrap.querySelectorAll(".map-cell").forEach((cell) => {
         cell.classList.toggle("lit", matched.has(cell.dataset.code));
       });
