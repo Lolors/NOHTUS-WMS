@@ -379,6 +379,7 @@
         `<div id="stock-map-holder"></div>`;
       stockDetailView.querySelector(".back-button").addEventListener("click", closeStockDetail);
       await loadLocationMapInto(el("stock-map-holder"));
+      await highlightAllProductLocations(detail.rows);
       bindLocationRowClicks(stockDetailView);
     } catch (err) {
       if (err.message !== "unauthorized") {
@@ -543,6 +544,24 @@
     container.querySelectorAll(".loc-row[data-location]").forEach((row) => {
       row.addEventListener("click", () => highlightMapLocation(row.dataset.location, row, container));
     });
+  }
+
+  async function highlightAllProductLocations(rows) {
+    const holder = el("stock-map-holder");
+    const wrap = holder && holder.querySelector(".map-wrap");
+    if (!wrap || !rows || !rows.length) return;
+    try {
+      const layout = await ensureLocationMapLayout();
+      const matched = new Set();
+      rows.forEach((row) => {
+        matchingCodes(row.location, layout.items).forEach((code) => matched.add(code));
+      });
+      wrap.querySelectorAll(".map-cell").forEach((cell) => {
+        cell.classList.toggle("lit", matched.has(cell.dataset.code));
+      });
+    } catch (err) {
+      /* 맵을 못 불러왔으면 조용히 무시 — 위치 목록 자체는 이미 보이고 있다 */
+    }
   }
 
   async function highlightMapLocation(loc, rowEl, container) {
