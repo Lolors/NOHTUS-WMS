@@ -220,15 +220,69 @@ def summarize_product_names(value: object) -> str:
     return summary
 
 
+def is_completed_stage(case: dict) -> bool:
+    """실제 운영 기준 마지막 단계(국내배송)에 도달했는지."""
+    order = STAGE_ORDER.get(stage_label(case['stage']), -1)
+    return order >= STAGE_ORDER['국내배송']
+
+
+_SALES_REGISTERED_BONUS = 10
+_INTAKE_START_PERCENT = 1
+_INTAKE_DONE_PERCENT = 60
+# 입고가 끝난 뒤부터는 패킹 단계마다 10%씩 깔끔하게 올라간다:
+# 패킹대기 60 → 패킹진행 70 → 패킹완료 80 → 국내배송 90(매출등록 전) → 100(매출등록 후).
+_PACKING_STAGE_PERCENTS = {4: 60, 5: 70, 6: 80}
+_STAGE_PROGRESS_CAP = 90
+
+
+def overall_progress_percent(case: dict, intake_percent: float, sales_status: str) -> float:
+    """전체 진행률(0~100).
+
+    - 주문 접수 ~ 아직 입고가 시작되지 않은 상태: 0%.
+    - "입고 진행" 단계: 입고된 수량 비율에 따라 1%(막 시작)에서 60%(입고
+      완료)까지 정수로 오른다.
+    - 패킹 단계(대기/진행/완료): 60% → 70% → 80%로 10%씩 깔끔하게 오른다.
+    - "국내배송" 단계에 도달하면 90%. 매출 등록까지 완료돼야(등록완료)
+      비로소 100%가 된다.
+    - 어느 단계든 입고가 시작된 뒤라면, 매출 등록이 먼저 끝나 있으면
+      그만큼 진척된 거니까 +10%를 더해준다(같은 단계라도 매출 등록완료
+      건이 미등록 건보다 진행률이 높게 보이도록).
+    """
+    final_stage_order = STAGE_ORDER['국내배송']
+    intake_stage_order = STAGE_ORDER['입고 진행']
+    stage_order = STAGE_ORDER.get(stage_label(case['stage']), 0)
+    registered = sales_status == '등록완료'
+
+    if stage_order >= final_stage_order:
+        return 100.0 if registered else float(_STAGE_PROGRESS_CAP)
+
+    if stage_order >= intake_stage_order + 1:
+        base = float(_PACKING_STAGE_PERCENTS.get(stage_order, _INTAKE_DONE_PERCENT))
+    elif stage_order == intake_stage_order:
+        intake_ratio = max(0.0, min(1.0, float(intake_percent or 0.0) / 100.0))
+        if intake_ratio <= 0.0:
+            base = 0.0
+        else:
+            span = _INTAKE_DONE_PERCENT - _INTAKE_START_PERCENT
+            base = float(round(_INTAKE_START_PERCENT + span * intake_ratio))
+    else:
+        base = 0.0
+
+    if registered and base > 0.0:
+        return min(base + _SALES_REGISTERED_BONUS, float(_STAGE_PROGRESS_CAP))
+    return base
+
+
 def active_and_recent_cases(*, reference: date | None = None, recent_days: int = 7) -> list[dict]:
     """Cases still in progress (stage not yet 국내배송), plus 국내배송 cases
-    whose actual_ship_date falls within the last `recent_days` days."""
+    whose actual_ship_date falls within the last `recent_days` days.
+
+    과거 이력으로 등록된(case_type='historical') 건도 모바일 수출현황과
+    동일하게 포함한다 — 예전엔 여기서만 숨겨져 있었다."""
     reference_date = reference or date.today()
     cutoff = reference_date - timedelta(days=recent_days)
     cases = []
     for case in order_service.list_editable_cases():
-        if str(case['case_type'] or '') == 'historical':
-            continue
         stage = str(case['stage'] or '').strip()
         if stage != '국내배송':
             cases.append(case)

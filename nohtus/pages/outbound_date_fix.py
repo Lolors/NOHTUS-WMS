@@ -7,18 +7,10 @@ import streamlit as st
 
 import nohtus.pages.outbound as outbound_page
 import nohtus.pages.outbound_business as outbound_business
+from nohtus.services.stock_rules import is_export_waiting_location as _is_blocked_outbound_location
 
 
 _INVALID_RECENT_DATE_TEXTS = {"", "none", "nan", "nat", "null", "-"}
-
-
-def _normalized_location(value):
-    return str(value or "").strip().upper().replace(" ", "")
-
-
-def _is_blocked_outbound_location(value):
-    location = _normalized_location(value)
-    return location.startswith("P")
 
 
 def _normalized_recent_date(value):

@@ -9,33 +9,10 @@ import nohtus.pages.mobile_stock as mobile_stock
 import nohtus.pages.mobile_stock_layout_patch_v3 as mobile_layout
 from nohtus.pages.mobile_stock_layout_patch_v3 import page_mobile_stock_finder as _page_mobile_stock_finder
 from nohtus.services.location_map import product_thumbnail_uris_for
-
-
-_MATERIAL_OR_PROMO_PREFIXES = ("G1", "G2")
-_MATERIAL_OR_PROMO_KEYWORDS = ("부자재", "홍보물")
-
-
-def _normalized_location(value):
-    return str(value or "").strip().upper().replace(" ", "").replace("-", "").replace("_", "")
-
-
-def _is_material_or_promo_location(value):
-    location = _normalized_location(value)
-    return (
-        location.startswith(_MATERIAL_OR_PROMO_PREFIXES)
-        or any(keyword in location for keyword in _MATERIAL_OR_PROMO_KEYWORDS)
-    )
-
-
-def _is_export_waiting_location(value):
-    """P, P1, P2 등 수출대기 로케이션인지 확인한다."""
-    return _normalized_location(value).startswith("P")
-
-
-def _exclude_material_or_promo_rows(df):
-    if not isinstance(df, pd.DataFrame) or df.empty or "location" not in df.columns:
-        return df
-    return df.loc[~df["location"].apply(_is_material_or_promo_location)].copy()
+from nohtus.services.stock_rules import (
+    exclude_material_or_promo_rows as _exclude_material_or_promo_rows,
+)
+from nohtus.services.stock_rules import is_export_waiting_location as _is_export_waiting_location
 
 
 def _has_export_waiting_stock(rows):

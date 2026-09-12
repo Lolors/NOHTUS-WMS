@@ -28,7 +28,7 @@ def _load_patched_product_groups(original_product_groups, session_state=None, ma
         "st": types.SimpleNamespace(session_state=dict(session_state or {})),
         "_AVAILABLE_ONLY_KEY": lmb._AVAILABLE_ONLY_KEY,
         "_EXCLUDE_MATERIALS_KEY": lmb._EXCLUDE_MATERIALS_KEY,
-        "_normalized_location": lmb._normalized_location,
+        "_is_export_waiting_location": lmb._is_export_waiting_location,
         "material_products": set(material_products or []),
         "original_product_groups": original_product_groups,
     }

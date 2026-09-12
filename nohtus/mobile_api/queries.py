@@ -1,8 +1,8 @@
 """모바일 전용 API가 사용하는, Streamlit에 의존하지 않는 순수 조회 함수 모음.
 
-nohtus/pages/mobile_stock*.py에 있는 동일한 비즈니스 규칙(부자재/홍보물 제외,
-수출대기 로케이션 판정, 유통기한 구간 필터)을 st.session_state 없이 그대로
-재구현한다. 규칙이 바뀌면 두 곳 다 함께 고쳐야 한다는 점에 주의.
+부자재/홍보물 제외, 수출대기 로케이션 판정, 유통기한 구간, 창고 필터
+같은 규칙은 `nohtus/services/stock_rules.py` 등 공용 모듈에서 가져온다 —
+데스크톱 페이지도 같은 곳을 본다.
 """
 
 from __future__ import annotations
@@ -15,31 +15,18 @@ import pandas as pd
 
 from nohtus.db import q
 from nohtus.locations import expand_row_range
+from nohtus.services.expiry_rules import PERIOD_DAYS as EXPIRY_PERIOD_DAYS
+from nohtus.services.expiry_rules import expiry_badge_for as _expiry_badge_for
 from nohtus.services.location_map import get_product_image_path
+from nohtus.services.stock_rules import BIDATA_COMPANY
+from nohtus.services.stock_rules import (
+    exclude_material_or_promo_rows as _exclude_material_or_promo_rows,
+)
+from nohtus.services.stock_rules import is_export_waiting_location
+from nohtus.services.warehouse_rules import apply_warehouse_filter as _apply_warehouse_filter
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _THUMB_DIR = _PROJECT_ROOT / "data" / "product_images" / "thumbs"
-
-_MATERIAL_OR_PROMO_PREFIXES = ("G1", "G2")
-_MATERIAL_OR_PROMO_KEYWORDS = ("부자재", "홍보물")
-
-EXPIRY_PERIOD_DAYS = {"3m": 90, "6m": 180, "1y": 365}
-
-
-def _normalized_location(value):
-    return str(value or "").strip().upper().replace(" ", "").replace("-", "").replace("_", "")
-
-
-def _is_material_or_promo_location(value):
-    location = _normalized_location(value)
-    return (
-        location.startswith(_MATERIAL_OR_PROMO_PREFIXES)
-        or any(keyword in location for keyword in _MATERIAL_OR_PROMO_KEYWORDS)
-    )
-
-
-def is_export_waiting_location(value):
-    return _normalized_location(value).startswith("P")
 
 
 def _material_product_names():
@@ -48,12 +35,6 @@ def _material_product_names():
     if df.empty:
         return set()
     return set(df["standard_name"].dropna().astype(str))
-
-
-def _exclude_material_or_promo_rows(df):
-    if not isinstance(df, pd.DataFrame) or df.empty or "location" not in df.columns:
-        return df
-    return df.loc[~df["location"].apply(_is_material_or_promo_location)].copy()
 
 
 def product_candidates(term, limit=20):
@@ -162,29 +143,6 @@ def stock_detail(product_name):
     }
 
 
-_GM_MEDIC_COMPANY = "노투스팜"
-_GM_MEDIC_LOCATION = "지엠메딕"
-_YONGIN_COMPANIES = ("노투스팜", "NOH", "노투스")
-
-
-def _apply_warehouse_filter(df, warehouse):
-    """용인창고/화성창고 필터.
-
-    화성창고 = 노투스팜 소속 재고 중 로케이션이 "지엠메딕"인 것만.
-    용인창고 = 노투스팜(지엠메딕 제외) + NOH + 노투스 — 즉 화성창고를 뺀
-    나머지. 두 창고 어디에도 안 속하는 회사(비자료, 등록대기 등)는
-    "전체"를 골랐을 때만 보인다.
-    """
-    if not isinstance(df, pd.DataFrame) or df.empty or warehouse not in ("yongin", "hwaseong"):
-        return df
-    company = df["company"].astype(str).str.strip()
-    location = df["location"].astype(str).str.strip()
-    is_gm_medic = (company == _GM_MEDIC_COMPANY) & (location == _GM_MEDIC_LOCATION)
-    if warehouse == "hwaseong":
-        return df[is_gm_medic]
-    return df[company.isin(_YONGIN_COMPANIES) & ~is_gm_medic]
-
-
 def expiry_inventory(period="1y", exclude_bidata=True, warehouse="all"):
     days_limit = EXPIRY_PERIOD_DAYS.get(period, 365)
     df = q(
@@ -204,21 +162,9 @@ def expiry_inventory(period="1y", exclude_bidata=True, warehouse="all"):
     df = df[(df["days_left"] >= 0) & (df["days_left"] <= days_limit)]
     df = _exclude_material_or_promo_rows(df)
     if exclude_bidata and not df.empty:
-        df = df[df["company"].astype(str).str.strip() != "비자료"]
+        df = df[df["company"].astype(str).str.strip() != BIDATA_COMPANY]
     df = _apply_warehouse_filter(df, warehouse)
     return df
-
-
-def _expiry_badge_for(nearest_expiry_ts):
-    if pd.isna(nearest_expiry_ts):
-        return None
-    days = int((nearest_expiry_ts.date() - pd.Timestamp.today().normalize().date()).days)
-    date_text = nearest_expiry_ts.strftime("%Y.%m.%d")
-    if days <= 90:
-        return {"label": "3개월 이내", "level": "red", "date": date_text}
-    if days <= 180:
-        return {"label": "6개월 이내", "level": "yellow", "date": date_text}
-    return {"label": "1년 이내", "level": "blue", "date": date_text}
 
 
 def search_expiry(term, period="1y", exclude_bidata=True, warehouse="all", limit=100):

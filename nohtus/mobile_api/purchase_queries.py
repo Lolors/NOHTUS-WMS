@@ -12,8 +12,8 @@ from datetime import date, timedelta
 
 import nohtus.pages.purchase_history as purchase_page
 import nohtus.pages.purchase_history_all_products as purchase_all
+from nohtus.services.expiry_rules import PERIOD_DAYS
 
-PERIOD_DAYS = {"3m": 90, "6m": 180, "1y": 365}
 _EARLIEST_DATE = "2000-01-01"
 
 

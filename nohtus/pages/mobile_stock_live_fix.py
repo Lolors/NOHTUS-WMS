@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 import nohtus.pages.mobile_stock as mobile_stock
+from nohtus.services.expiry_rules import PERIOD_DAYS_KO as _EXPIRY_PERIOD_DAYS_KO
 from nohtus.services.location_map import get_product_image_path
 
 
@@ -354,12 +355,11 @@ def _render_mobile_search(username):
 
 
 def _filtered_expiry_df(period, exclude_bidata):
-    limits = {"3개월 이내": 90, "6개월 이내": 180, "1년 이내": 365}
     df = mobile_stock._expiry_inventory(days_limit=365)
     if exclude_bidata and not df.empty:
         df = df[df["company"].astype(str).str.strip() != "비자료"]
-    if period in limits and not df.empty:
-        df = df[(df["남은일수"] >= 0) & (df["남은일수"] <= limits[period])]
+    if period in _EXPIRY_PERIOD_DAYS_KO and not df.empty:
+        df = df[(df["남은일수"] >= 0) & (df["남은일수"] <= _EXPIRY_PERIOD_DAYS_KO[period])]
     return df
 
 

@@ -18,6 +18,7 @@ from nohtus.config import AREA_COLOR, AREA_CONFIG, COMPANIES
 from nohtus.db import exec_sql, q
 from nohtus.dates import display_date_only
 from nohtus.locations import location_picking_key, parse_location
+from nohtus.services import stock_rules
 from nohtus.pages.product_shortcuts import add_recent_product_view, is_favorite_product, toggle_favorite_product
 from nohtus.services.products import product_options
 
@@ -254,8 +255,7 @@ def _normalized_map_location(value):
 
 
 def _is_material_or_promo_location(value):
-    normalized = _normalized_map_location(value)
-    return normalized.startswith("G1") or normalized.startswith("G2")
+    return stock_rules.is_material_or_promo_location(value)
 
 
 def page_map_search_results(term, compact: bool = False):
@@ -295,7 +295,7 @@ def page_map_search_results(term, compact: bool = False):
         inv["warehouse_name"] = inv["warehouse_name"].apply(_map_search_warehouse_name)
         inv["qty"] = pd.to_numeric(inv["qty"], errors="coerce").fillna(0).astype(int)
         if exclude_p:
-            inv = inv.loc[~inv["location"].apply(lambda v: _normalized_map_location(v).startswith("P"))].copy()
+            inv = inv.loc[~inv["location"].apply(stock_rules.is_export_waiting_location)].copy()
         if exclude_materials:
             inv = inv.loc[~inv["location"].apply(_is_material_or_promo_location)].copy()
 

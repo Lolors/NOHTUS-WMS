@@ -22,17 +22,8 @@ RECENT_DAYS = 14
 TRANSPORT_ICONS = {"AIR": "✈️", "SEA": "🚢", "HAND": "✋"}
 _MONTH_NAMES_KO = "1월 2월 3월 4월 5월 6월 7월 8월 9월 10월 11월 12월".split()
 
-_DOMESTIC_STAGE_ORDER = dash.STAGE_ORDER["국내배송"]
-_INTAKE_STAGE_ORDER = dash.STAGE_ORDER["입고 진행"]
-# 실제 운영에서는 "국내배송"이 사실상 마지막 단계다(선적 준비/완료는 안 씀).
-_FINAL_STAGE_ORDER = _DOMESTIC_STAGE_ORDER
-# 입고가 시작되면 1%에서 시작해 입고 수량 비율에 따라 60%까지 올라간다.
-_INTAKE_START_PERCENT = 1
-_INTAKE_DONE_PERCENT = 60
-# 입고가 끝난 뒤부터는 패킹 단계마다 10%씩 깔끔하게 올라간다:
-# 패킹대기 60 → 패킹진행 70 → 패킹완료 80 → 국내배송 90(매출등록 전) → 100(매출등록 후).
-_PACKING_STAGE_PERCENTS = {4: 60, 5: 70, 6: 80}
-_STAGE_PROGRESS_CAP = 90
+_is_completed_stage = dash.is_completed_stage
+_overall_progress_percent = dash.overall_progress_percent
 
 
 def _parse_date(value):
@@ -44,50 +35,6 @@ def _parse_date(value):
 
 def _reference_date(case):
     return _parse_date(case["actual_ship_date"]) or _parse_date(case["created_at"])
-
-
-def _is_completed_stage(case):
-    order = dash.STAGE_ORDER.get(dash.stage_label(case["stage"]), -1)
-    return order >= _DOMESTIC_STAGE_ORDER
-
-
-_SALES_REGISTERED_BONUS = 10
-
-
-def _overall_progress_percent(case, intake_percent, sales_status):
-    """전체 진행률(0~100).
-
-    - 주문 접수 ~ 아직 입고가 시작되지 않은 상태: 0%.
-    - "입고 진행" 단계: 입고된 수량 비율에 따라 1%(막 시작)에서 60%(입고
-      완료)까지 정수로 오른다.
-    - 패킹 단계(대기/진행/완료): 60% → 70% → 80%로 10%씩 깔끔하게 오른다.
-    - "국내배송" 단계에 도달하면 90%. 매출 등록까지 완료돼야(등록완료)
-      비로소 100%가 된다.
-    - 어느 단계든 입고가 시작된 뒤라면, 매출 등록이 먼저 끝나 있으면
-      그만큼 진척된 거니까 +10%를 더해준다(같은 단계라도 매출 등록완료
-      건이 미등록 건보다 진행률이 높게 보이도록).
-    """
-    stage_order = dash.STAGE_ORDER.get(dash.stage_label(case["stage"]), 0)
-    registered = sales_status == "등록완료"
-
-    if stage_order >= _FINAL_STAGE_ORDER:
-        return 100.0 if registered else float(_STAGE_PROGRESS_CAP)
-
-    if stage_order >= _INTAKE_STAGE_ORDER + 1:
-        base = float(_PACKING_STAGE_PERCENTS.get(stage_order, _INTAKE_DONE_PERCENT))
-    elif stage_order == _INTAKE_STAGE_ORDER:
-        intake_ratio = max(0.0, min(1.0, float(intake_percent or 0.0) / 100.0))
-        if intake_ratio <= 0.0:
-            base = 0.0
-        else:
-            span = _INTAKE_DONE_PERCENT - _INTAKE_START_PERCENT
-            base = float(round(_INTAKE_START_PERCENT + span * intake_ratio))
-    else:
-        base = 0.0
-
-    if registered and base > 0.0:
-        return min(base + _SALES_REGISTERED_BONUS, float(_STAGE_PROGRESS_CAP))
-    return base
 
 
 def _filtered_cases(country=None, transport=None):

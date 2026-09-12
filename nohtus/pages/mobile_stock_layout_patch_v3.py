@@ -1,5 +1,4 @@
 import html
-from datetime import date
 
 import pandas as pd
 import streamlit as st
@@ -7,6 +6,7 @@ import streamlit as st
 import nohtus.pages.mobile_stock as mobile_stock
 import nohtus.pages.mobile_stock_layout_patch_v2 as base
 import nohtus.pages.mobile_theme as mobile_theme
+from nohtus.services import expiry_rules
 
 
 _ORIGINAL_INJECT_CSS = base._inject_mobile_search_css
@@ -234,21 +234,13 @@ def _restore_result_position(state_key, key_prefix):
 def _expiry_badge(rows):
     if rows is None or rows.empty or "_expiry" not in rows.columns:
         return ""
-    nearest = rows["_expiry"].min()
-    if pd.isna(nearest):
+    badge = expiry_rules.expiry_badge_for(rows["_expiry"].min())
+    if not badge:
         return ""
-    days = int((nearest.date() - date.today()).days)
-    date_text = nearest.strftime("%Y.%m.%d")
-    if days <= 90:
-        badge_text, badge_class = "3개월 이내", "red"
-    elif days <= 180:
-        badge_text, badge_class = "6개월 이내", "yellow"
-    else:
-        badge_text, badge_class = "1년 이내", "blue"
     return (
         '<div class="mobile-expiry-date-row">'
-        f'<span>{html.escape(date_text)}</span>'
-        f'<span class="mobile-expiry-badge {badge_class}">{badge_text}</span>'
+        f'<span>{html.escape(badge["date"])}</span>'
+        f'<span class="mobile-expiry-badge {badge["level"]}">{badge["label"]}</span>'
         '</div>'
     )
 
