@@ -115,22 +115,40 @@ def stock_summary(rows):
     return total_qty, summary
 
 
-def search_products(term, limit=20, exclude_material=True):
-    """검색어에 매칭되고 실제로 노출 가능한 재고가 있는 제품만 반환."""
-    candidates = product_candidates(term, limit=max(limit * 5, 100))
+def search_products(term, limit=20, exclude_material=True, sort="relevance"):
+    """검색어에 매칭되고 실제로 노출 가능한 재고가 있는 제품만 반환.
+
+    sort="expiry"면 제품마다 가장 빠른 유통기한(가진 로트 중 최소) 기준
+    오름차순으로 정렬한다 — 검색어와 매칭되는 제품이 많을 때(예: term이
+    비어있지 않아도 후보가 많은 경우) 전부 훑어야 하므로 relevance보다
+    후보 폭을 넉넉히 잡는다.
+    """
+    candidate_limit = max(limit * 5, 100) if sort != "expiry" else 500
+    candidates = product_candidates(term, limit=candidate_limit)
     if exclude_material:
         material_names = _material_product_names()
         candidates = [name for name in candidates if name not in material_names]
+
     results = []
     for name in candidates:
         rows = stock_rows(name)
         if rows.empty:
             continue
         total_qty, summary = stock_summary(rows)
-        results.append({"name": name, "total_qty": total_qty, "summary": summary})
-        if len(results) >= limit:
-            break
-    return results
+        item = {"name": name, "total_qty": total_qty, "summary": summary}
+        if sort == "expiry":
+            expiry_ts = pd.to_datetime(rows["exp_date"], errors="coerce").dt.normalize()
+            nearest = expiry_ts.min()
+            item["nearest_expiry"] = nearest.strftime("%Y-%m-%d") if pd.notna(nearest) else ""
+            item["_sort_key"] = nearest if pd.notna(nearest) else pd.Timestamp.max
+        results.append(item)
+
+    if sort == "expiry":
+        results.sort(key=lambda item: item["_sort_key"])
+        for item in results:
+            item.pop("_sort_key", None)
+
+    return results[:limit]
 
 
 def stock_detail(product_name):

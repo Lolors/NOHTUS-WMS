@@ -79,8 +79,14 @@ def api_me(user=Depends(current_user)):
 
 
 @app.get("/api/products/search")
-def api_search(q: str = "", limit: int = 20, exclude_material: bool = True, user=Depends(current_user)):
-    return {"results": queries.search_products(q, limit=limit, exclude_material=exclude_material)}
+def api_search(
+    q: str = "",
+    limit: int = 20,
+    exclude_material: bool = True,
+    sort: str = "relevance",
+    user=Depends(current_user),
+):
+    return {"results": queries.search_products(q, limit=limit, exclude_material=exclude_material, sort=sort)}
 
 
 @app.get("/api/products/{name:path}")

@@ -234,6 +234,8 @@
   function renderResultCard(item, opts = {}) {
     const badgeHtml = item.badge
       ? `${opts.hideBadgeLevel ? "" : `<span class="badge ${item.badge.level}">${escapeHtml(item.badge.label)}</span>`}<span class="badge-date">${escapeHtml(item.badge.date)}</span>`
+      : item.nearest_expiry
+      ? `<span class="badge-date">📅 유통기한 ${escapeHtml(item.nearest_expiry)}</span>`
       : "";
     const exportHtml = item.export_waiting
       ? `<span class="badge export">✈️ 수출대기중</span>`
@@ -329,7 +331,17 @@
   const stockListView = el("stock-list-view");
   const stockDetailView = el("stock-detail-view");
   const stockExcludeMaterial = el("stock-exclude-material");
+  const stockSortButtons = el("stock-sort");
+  let stockSort = "relevance";
   stockExcludeMaterial.addEventListener("change", loadStock);
+  stockSortButtons.querySelectorAll("button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.dataset.sort === stockSort) return;
+      stockSort = btn.dataset.sort;
+      stockSortButtons.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      loadStock();
+    });
+  });
 
   async function loadStock() {
     const term = stockSearchInput.value.trim();
@@ -345,6 +357,7 @@
         q: term,
         limit: "20",
         exclude_material: stockExcludeMaterial.checked ? "true" : "false",
+        sort: stockSort,
       });
       const data = await api(`/api/products/search?${params.toString()}`);
       if (!data.results.length) {
