@@ -293,8 +293,9 @@
           .map(escapeHtml)
           .join(" · ");
         const exportBadge = row.export_waiting ? ` <span class="badge export">✈️ 수출대기중</span>` : "";
+        const occupied = row.occupied_cells && row.occupied_cells.length ? row.occupied_cells : [row.location];
         return `
-          <div class="loc-row" data-location="${escapeHtml(row.location || "")}">
+          <div class="loc-row" data-location="${escapeHtml(row.location || "")}" data-occupied="${escapeHtml(occupied.join(","))}">
             <div>
               <div class="loc-name">${escapeHtml(row.location || "-")}${exportBadge}</div>
               <div class="loc-meta">${metaParts}</div>
@@ -379,7 +380,6 @@
         `<div id="stock-map-holder"></div>`;
       stockDetailView.querySelector(".back-button").addEventListener("click", closeStockDetail);
       await loadLocationMapInto(el("stock-map-holder"));
-      await highlightAllProductLocations(detail.rows);
       bindLocationRowClicks(stockDetailView);
     } catch (err) {
       if (err.message !== "unauthorized") {
@@ -542,35 +542,21 @@
 
   function bindLocationRowClicks(container) {
     container.querySelectorAll(".loc-row[data-location]").forEach((row) => {
-      row.addEventListener("click", () => highlightMapLocation(row.dataset.location, row, container));
+      const occupied = (row.dataset.occupied || row.dataset.location || "").split(",").filter(Boolean);
+      row.addEventListener("click", () => highlightMapLocation(occupied, row, container));
     });
   }
 
-  async function highlightAllProductLocations(rows) {
-    const holder = el("stock-map-holder");
-    const wrap = holder && holder.querySelector(".map-wrap");
-    if (!wrap || !rows || !rows.length) return;
-    try {
-      const layout = await ensureLocationMapLayout();
-      const matched = new Set();
-      rows.forEach((row) => {
-        matchingCodes(row.location, layout.items).forEach((code) => matched.add(code));
-      });
-      wrap.querySelectorAll(".map-cell").forEach((cell) => {
-        cell.classList.toggle("lit", matched.has(cell.dataset.code));
-      });
-    } catch (err) {
-      /* 맵을 못 불러왔으면 조용히 무시 — 위치 목록 자체는 이미 보이고 있다 */
-    }
-  }
-
-  async function highlightMapLocation(loc, rowEl, container) {
+  async function highlightMapLocation(locs, rowEl, container) {
     const holder = el("stock-map-holder");
     const wrap = holder && holder.querySelector(".map-wrap");
     if (!wrap) return;
     try {
       const layout = await ensureLocationMapLayout();
-      const matched = matchingCodes(loc, layout.items);
+      const matched = new Set();
+      (Array.isArray(locs) ? locs : [locs]).forEach((loc) => {
+        matchingCodes(loc, layout.items).forEach((code) => matched.add(code));
+      });
       wrap.querySelectorAll(".map-cell").forEach((cell) => {
         cell.classList.toggle("lit", matched.has(cell.dataset.code));
       });
