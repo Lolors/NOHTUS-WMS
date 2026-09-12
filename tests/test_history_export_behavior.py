@@ -5,7 +5,7 @@ import unittest
 
 import pandas as pd
 
-from nohtus.pages import history, history_business
+from nohtus.pages import history
 
 
 class HistoryExportBehaviorTests(unittest.TestCase):
@@ -135,7 +135,7 @@ class HistoryExportBehaviorTests(unittest.TestCase):
                 }
             )
 
-            tx_id = history_business._display_row_to_tx_id(con.cursor(), display_row, set())
+            tx_id = history._display_row_to_tx_id(con.cursor(), display_row, set())
         finally:
             con.close()
 

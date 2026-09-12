@@ -13,6 +13,7 @@ from nohtus.config import COMPANIES
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only
 from nohtus.services.closing import _infer_customer_from_title
+from nohtus.services.inventory import backfill_missing_transaction_final_stock
 
 
 ERP_NAME_COLUMN_BY_COMPANY = {
@@ -572,7 +573,207 @@ def _style_history_order_groups(show, source_df):
     return show.style.apply(lambda _data: styles, axis=None)
 
 
+def _normalize_created_at(value):
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("일시는 비워둘 수 없습니다.")
+    parsed = pd.to_datetime(text, errors="coerce")
+    if pd.isna(parsed):
+        raise ValueError(f"일시 형식을 확인하세요: {text}")
+    return parsed.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _display_row_to_tx_id(cur, row, used_ids):
+    created_at = str(row.get("일시") or "").strip()
+    tx_type = str(row.get("이력유형") or "").strip()
+    product_name = str(row.get("제품명") or "").strip()
+    lot = str(row.get("LOT") or "").strip()
+    exp_date = str(row.get("유통기한") or "").strip()
+    memo = str(row.get("메모") or "").strip()
+    if not created_at or not tx_type or not product_name:
+        return None
+    database_tx_type = (
+        "출고"
+        if tx_type == "출고지시" and memo.startswith(EXPORT_CONFIRM_MEMO_PREFIX)
+        else tx_type
+    )
+    rows = cur.execute(
+        """
+        SELECT id
+        FROM transactions
+        WHERE created_at=?
+          AND tx_type=?
+          AND product_name=?
+          AND IFNULL(lot, '')=?
+          AND IFNULL(exp_date, '')=?
+          AND IFNULL(memo, '')=?
+        ORDER BY id DESC
+        """,
+        (created_at, database_tx_type, product_name, lot, exp_date, memo),
+    ).fetchall()
+    for raw in rows:
+        tx_id = int(raw[0])
+        if tx_id not in used_ids:
+            used_ids.add(tx_id)
+            return tx_id
+    return None
+
+
+def _update_history_dates(original_df, edited_df):
+    """편집된 "일시" 열을 찾아 실제 transactions 행에 반영하고, 수정된 건수를 반환한다."""
+    if not isinstance(original_df, pd.DataFrame) or not isinstance(edited_df, pd.DataFrame):
+        return 0
+    if "일시" not in original_df.columns or "일시" not in edited_df.columns:
+        return 0
+
+    changed_indexes = []
+    for idx in range(min(len(original_df), len(edited_df))):
+        before = str(original_df.iloc[idx].get("일시") or "").strip()
+        after = str(edited_df.iloc[idx].get("일시") or "").strip()
+        if before != after:
+            changed_indexes.append(idx)
+    if not changed_indexes:
+        return 0
+
+    with connect() as con:
+        cur = con.cursor()
+        used_ids = set()
+        row_to_id = {}
+        for idx in range(len(original_df)):
+            tx_id = _display_row_to_tx_id(cur, original_df.iloc[idx], used_ids)
+            if tx_id is not None:
+                row_to_id[idx] = tx_id
+
+        updated = 0
+        for idx in changed_indexes:
+            tx_id = row_to_id.get(idx)
+            if tx_id is None:
+                continue
+            new_created_at = _normalize_created_at(edited_df.iloc[idx].get("일시"))
+            cur.execute("UPDATE transactions SET created_at=? WHERE id=?", (new_created_at, tx_id))
+            updated += 1
+        con.commit()
+    if changed_indexes and updated == 0:
+        raise ValueError("수정할 이력 행을 찾지 못했습니다. 같은 내용의 중복 이력이 있으면 조건을 좁혀 다시 시도하세요.")
+    return updated
+
+
+def _deleted_outbound_orders_for_transactions(tx_ids):
+    """삭제 대상 이력 중 출고지시서와 연결된 것들의 매출처 정보를 미리 수집한다
+    (삭제 후 customer_last_sales 재동기화에 쓴다 — 삭제되고 나면 알 수 없으니 미리 챙겨둔다)."""
+    ids = [int(x) for x in tx_ids if x]
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    with connect() as con:
+        cur = con.cursor()
+        rows = cur.execute(
+            f"""
+            SELECT tx_type, memo, from_company
+            FROM transactions
+            WHERE id IN ({placeholders})
+            """,
+            tuple(ids),
+        ).fetchall()
+        order_companies = {}
+        for tx_type, memo, from_company in rows:
+            if str(tx_type or "") not in {"출고지시", "출고", "출고지시수정"}:
+                continue
+            match = re.search(r"출고지시서\s*#(\d+)", str(memo or ""))
+            if match:
+                order_id = int(match.group(1))
+                company = str(from_company or "").strip()
+                if company:
+                    order_companies.setdefault(order_id, company)
+        if not order_companies:
+            return []
+        order_ids = sorted(order_companies)
+        order_placeholders = ",".join("?" for _ in order_ids)
+        columns = {row[1] for row in cur.execute("PRAGMA table_info(outbound_orders)").fetchall()}
+        customer_expr = "COALESCE(customer_name, '')" if "customer_name" in columns else "''"
+        company_expr = "COALESCE(customer_company, '')" if "customer_company" in columns else "''"
+        orders = cur.execute(
+            f"""
+            SELECT id, order_date, COALESCE(title, ''), {customer_expr}, {company_expr}
+            FROM outbound_orders
+            WHERE id IN ({order_placeholders})
+            """,
+            tuple(order_ids),
+        ).fetchall()
+    result = []
+    for order_id, order_date, title, customer_name, customer_company in orders:
+        customer = str(customer_name or "").strip()
+        if not customer:
+            customer = str(title or "").split(" - ", 1)[0].strip()
+        company = str(customer_company or "").strip() or order_companies.get(int(order_id), "")
+        result.append({
+            "order_id": int(order_id),
+            "order_date": str(order_date or "").strip(),
+            "customer_name": customer,
+            "company": company,
+        })
+    return result
+
+
+def _sync_customer_last_sales_after_delete(deleted_orders):
+    """삭제된 출고지시서가 그 매출처의 '최근거래'였다면, 남은 이력 기준으로 다시 계산한다."""
+    if not deleted_orders:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with connect() as con:
+        cur = con.cursor()
+        tables = {row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "customer_last_sales" not in tables:
+            return
+        order_columns = {row[1] for row in cur.execute("PRAGMA table_info(outbound_orders)").fetchall()}
+        if "customer_name" not in order_columns:
+            return
+        company_expr = "COALESCE(customer_company, '')" if "customer_company" in order_columns else "''"
+        for deleted in deleted_orders:
+            customer = str(deleted.get("customer_name") or "").strip()
+            company = str(deleted.get("company") or "").strip()
+            deleted_date = str(deleted.get("order_date") or "").strip()
+            if not customer or not deleted_date:
+                continue
+            current = cur.execute(
+                """
+                SELECT id, last_sale_date
+                FROM customer_last_sales
+                WHERE customer_name=? AND company=?
+                """,
+                (customer, company),
+            ).fetchone()
+            if not current or str(current[1] or "").strip() != deleted_date:
+                continue
+            latest = cur.execute(
+                f"""
+                SELECT MAX(order_date)
+                FROM outbound_orders
+                WHERE TRIM(COALESCE(customer_name, ''))=?
+                  AND {company_expr}=?
+                  AND IFNULL(status, '') NOT IN ('삭제됨', '취소됨')
+                """,
+                (customer, company),
+            ).fetchone()[0]
+            latest_date = str(latest or "").strip()
+            if latest_date:
+                cur.execute(
+                    "UPDATE customer_last_sales SET last_sale_date=?, updated_at=? WHERE id=?",
+                    (latest_date, now, int(current[0])),
+                )
+            else:
+                cur.execute("DELETE FROM customer_last_sales WHERE id=?", (int(current[0]),))
+        con.commit()
+
+
 def page_history():
+    try:
+        backfilled = backfill_missing_transaction_final_stock()
+        if backfilled:
+            st.caption(f"최종재고 누락 이력 {backfilled:,}건을 보정했습니다.")
+    except Exception as e:
+        st.warning(f"최종재고 보정 중 오류가 발생했습니다: {e}")
+
     st.title("이력 조회")
 
     today = date.today()
@@ -723,15 +924,28 @@ def page_history():
         admin_show = show.copy()
         admin_show.insert(0, "선택", False)
         styled_admin_show = _style_history_order_groups(admin_show, df)
+        # "일시" 직접 수정은 admin만 — user 권한까지 열어주면 본인 이력이 아닌
+        # 것도 시각을 바꿀 수 있게 돼버려서, 삭제와 달리 이건 더 위험하다.
+        disabled_columns = [c for c in admin_show.columns if c != "선택"]
+        if is_admin():
+            disabled_columns = [c for c in disabled_columns if c != "일시"]
         edited = st.data_editor(
             styled_admin_show,
             use_container_width=True,
             hide_index=True,
             height=table_height,
-            disabled=[c for c in admin_show.columns if c != "선택"],
+            disabled=disabled_columns,
             column_config={"선택": st.column_config.CheckboxColumn("선택")},
             key="history_admin_delete_editor",
         )
+        if is_admin():
+            try:
+                updated_dates = _update_history_dates(admin_show, edited)
+                if updated_dates:
+                    st.success(f"이력 일시 {updated_dates}건을 수정했습니다.")
+                    st.rerun()
+            except Exception as e:
+                st.error(str(e))
         checked_indexes = [i for i, checked in enumerate(edited["선택"].tolist()) if checked and i < len(tx_ids)]
         if not is_admin():
             # admin이 아닌 user 권한은 본인이 입력한 이력만 삭제할 수 있다 —
@@ -775,7 +989,9 @@ def page_history():
                         ids_to_delete = pending_ids
                         if not is_admin():
                             ids_to_delete = _filter_ids_by_actor(pending_ids, _current_own_actor_names())
+                        deleted_orders = _deleted_outbound_orders_for_transactions(ids_to_delete)
                         deleted = _delete_transaction_ids(ids_to_delete)
+                        _sync_customer_last_sales_after_delete(deleted_orders)
                         st.session_state.pop("history_delete_pending_ids", None)
                         st.success(f"이력 {deleted}건을 삭제하고 재고를 원복했습니다.")
                         st.rerun()
@@ -799,7 +1015,12 @@ def page_history():
                     key="history_log_only_delete_confirm",
                 ):
                     try:
+                        # 재고·위치·주문 상태는 그대로 두지만, 삭제된 이력이 그
+                        # 매출처의 '최근거래'였다면 그것만은 다시 계산해줘야
+                        # customer_last_sales가 죽은 이력을 계속 가리키지 않는다.
+                        deleted_orders = _deleted_outbound_orders_for_transactions(log_only_pending_ids)
                         deleted = _delete_transaction_ids_without_reversal(log_only_pending_ids)
+                        _sync_customer_last_sales_after_delete(deleted_orders)
                         st.session_state.pop("history_log_only_delete_pending_ids", None)
                         st.success(f"재고 원복 없이 이력 {deleted}건만 삭제했습니다.")
                         st.rerun()
@@ -817,8 +1038,9 @@ def page_history():
         """
         <style>
         div[data-testid="stNumberInput"]{
-            width:100px!important;
+            width:138px!important;
             margin:10px auto 0 auto!important;
+            overflow:visible!important;
         }
         div[data-testid="stNumberInput"] input{
             height:68px!important;
@@ -827,7 +1049,14 @@ def page_history():
             font-size:16px!important;
         }
         div[data-testid="stNumberInput"] button{
+            display:flex!important;
+            visibility:visible!important;
+            opacity:1!important;
+            width:32px!important;
+            min-width:32px!important;
+            height:34px!important;
             min-height:34px!important;
+            padding:0!important;
         }
         </style>
         """,

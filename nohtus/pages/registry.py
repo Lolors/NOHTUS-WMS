@@ -26,7 +26,7 @@ from nohtus.pages.export_app_pages import (
     page_export_sales_registration,
     page_export_statistics,
 )
-from nohtus.pages.history_business import page_history
+from nohtus.pages.history import page_history
 from nohtus.pages.inbound import page_inbound as page_inbound_refactored
 from nohtus.pages.location_map_business import page_map
 from nohtus.pages.location_map_editor import page_location_map_editor
