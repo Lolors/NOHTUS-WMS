@@ -411,6 +411,7 @@
     const value = String(loc || "").trim();
     if (!value) return matched;
     for (const item of items) {
+      if (item.kind !== "zone" && item.kind !== "location") continue;
       if (value === item.code || value.startsWith(item.code + "-")) {
         matched.add(item.code);
       }
@@ -418,27 +419,100 @@
     return matched;
   }
 
+  function mapFillFor(item, companyColors) {
+    if (item.fill_type === "company") return companyColors[item.company] || "#ffffff";
+    if (item.fill_type === "solid") return item.fill_color || "#ffffff";
+    if (item.fill_type === "hatched") return "url(#map-hatch)";
+    return "none";
+  }
+
+  function renderMapLabel(item, cx, cy) {
+    const lines = String(item.label || "").split("\n");
+    const lineHeight = 22;
+    const startDy = -((lines.length - 1) * lineHeight) / 2;
+    const tspans = lines
+      .map((line, i) => `<tspan x="${cx}" dy="${i === 0 ? startDy : lineHeight}">${escapeHtml(line)}</tspan>`)
+      .join("");
+    return `<text class="map-cell-label" x="${cx}" y="${cy}">${tspans}</text>`;
+  }
+
   function renderLocationMapSvg(layout) {
     const { canvas, items } = layout;
+    const companyColors = layout.company_colors || {};
     const scale = 0.6;
     const width = Math.round(canvas.width * scale);
     const height = Math.round(canvas.height * scale);
-    const rects = items
+
+    const shapesHtml = items
+      .filter((item) => item.kind === "shape")
+      .map((item) => {
+        if (item.shape_type === "polyline") {
+          const points = (item.path_points || [])
+            .map(([px, py]) => `${item.x + px},${item.y + py}`)
+            .join(" ");
+          return `<polyline class="map-shape-line" points="${points}" stroke="${escapeHtml(item.stroke)}" />`;
+        }
+        if (item.shape_type === "door") {
+          const r = Math.min(item.width, item.height);
+          return `<path class="map-shape-door" d="M ${item.x} ${item.y} A ${r} ${r} 0 0 1 ${item.x + r} ${item.y + r}" stroke="${escapeHtml(item.stroke)}" />`;
+        }
+        // rounded_rect(기본값)
+        const fill = mapFillFor(item, companyColors);
+        return `<rect class="map-shape-rect" x="${item.x}" y="${item.y}" width="${item.width}" height="${item.height}" rx="10" fill="${fill}" stroke="${escapeHtml(item.stroke)}" />`;
+      })
+      .join("");
+
+    const cellsHtml = items
+      .filter((item) => item.kind === "zone" || item.kind === "location")
       .map((item) => {
         const cx = item.x + item.width / 2;
         const cy = item.y + item.height / 2;
+        const fill = mapFillFor(item, companyColors);
+        const dot = item.has_stock
+          ? `<circle class="map-cell-dot" cx="${item.x + item.width - 10}" cy="${item.y + 10}" r="7" />`
+          : "";
         return `
           <g class="map-cell" data-code="${escapeHtml(item.code)}">
-            <rect class="map-cell-rect" x="${item.x}" y="${item.y}" width="${item.width}" height="${item.height}" rx="6" />
-            <text class="map-cell-label" x="${cx}" y="${cy}">${escapeHtml(item.label)}</text>
+            <rect class="map-cell-rect" x="${item.x}" y="${item.y}" width="${item.width}" height="${item.height}" rx="8" fill="${fill}" stroke="${escapeHtml(item.stroke)}" />
+            ${renderMapLabel(item, cx, cy)}
+            ${dot}
           </g>
         `;
       })
       .join("");
+
     return `
       <svg width="${width}" height="${height}" viewBox="0 0 ${canvas.width} ${canvas.height}" xmlns="http://www.w3.org/2000/svg">
-        ${rects}
+        <defs>
+          <pattern id="map-hatch" width="10" height="10" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+            <line x1="0" y1="0" x2="0" y2="10" stroke="#c2c2c2" stroke-width="4" />
+          </pattern>
+        </defs>
+        ${shapesHtml}
+        ${cellsHtml}
       </svg>
+    `;
+  }
+
+  function renderMapLegend(layout) {
+    const companyColors = layout.company_colors || {};
+    const usedCompanies = new Set(
+      (layout.items || [])
+        .filter((item) => (item.kind === "zone" || item.kind === "location") && item.fill_type === "company")
+        .map((item) => item.company)
+    );
+    const skip = new Set(["특수", "기타"]);
+    const entries = Object.keys(companyColors).filter((name) => usedCompanies.has(name) && !skip.has(name));
+    if (!entries.length) return "";
+    return `
+      <div class="map-company-legend">
+        ${entries
+          .map(
+            (name) =>
+              `<span class="map-company-chip"><span class="map-company-swatch" style="background:${escapeHtml(companyColors[name])}"></span>${escapeHtml(name)}</span>`
+          )
+          .join("")}
+      </div>
     `;
   }
 
@@ -454,6 +528,7 @@
       holder.innerHTML = `
         <div class="map-section">
           <div class="section-label" style="margin-top:0">로케이션맵</div>
+          ${renderMapLegend(layout)}
           <div class="map-hint">위의 위치를 눌러보세요</div>
           <div class="map-wrap" id="stock-map-wrap">${renderLocationMapSvg(layout)}</div>
           <div class="map-legend"><span class="map-legend-swatch"></span>선택한 위치</div>

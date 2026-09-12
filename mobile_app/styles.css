@@ -513,32 +513,47 @@ html, body {
 }
 .map-wrap svg { display: block; }
 .map-cell-rect {
-  fill: #f8fafc;
-  stroke: #cbd5e1;
   stroke-width: 2;
+  transition: fill .2s ease, stroke .2s ease;
 }
 .map-cell-label {
-  fill: #64748b;
-  font-size: 20px;
+  fill: #46505f;
+  font-size: 18px;
   font-weight: 700;
   text-anchor: middle;
   dominant-baseline: middle;
   pointer-events: none;
 }
+.map-cell-dot {
+  fill: #62dc58;
+  stroke: #15803d;
+  stroke-width: 1.5;
+}
+.map-shape-rect { stroke-width: 2; }
+.map-shape-line { fill: none; stroke-width: 3; }
+.map-shape-door { fill: none; stroke-width: 2; stroke-dasharray: 4 3; }
 .map-cell.lit .map-cell-rect {
-  fill: var(--brand);
+  fill: var(--brand) !important;
   stroke: var(--brand-active);
 }
 .map-cell.lit .map-cell-label { fill: #ffffff; }
-.map-cell-rect { transition: fill .2s ease, stroke .2s ease; }
 .map-hint { font-size: 11.5px; color: var(--text-muted); margin-bottom: 8px; margin-top: -4px; }
 .map-legend { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 11.5px; color: var(--text-muted); }
 .map-legend-swatch { width: 12px; height: 12px; border-radius: 3px; background: var(--brand); display: inline-block; }
-
-@media (prefers-color-scheme: dark) {
-  .map-cell-rect { fill: #232833; stroke: #3a4150; }
-  .map-cell-label { fill: #99a2b3; }
+.map-company-legend { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.map-company-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px 4px 6px;
 }
+.map-company-swatch { width: 14px; height: 14px; border-radius: 4px; display: inline-block; border: 1px solid rgba(0,0,0,.1); }
 
 /* ---------- 홈 화면에 추가 온보딩 ---------- */
 .a2hs-overlay {
