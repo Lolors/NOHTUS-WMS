@@ -1,9 +1,9 @@
 :root {
   --primary: #2563eb;
   --primary-soft: rgba(37, 99, 235, .08);
-  --brand: #e94609;
-  --brand-active: #c93a06;
-  --brand-soft: rgba(233, 70, 9, .10);
+  --brand: #ec6618;
+  --brand-active: #b84d0f;
+  --brand-soft: rgba(236, 102, 24, .10);
   --bg: #f3f5f9;
   --surface: #ffffff;
   --border: #e5e8ee;
@@ -117,7 +117,7 @@ html, body {
   top: 0;
   z-index: 50;
   background: var(--brand);
-  box-shadow: 0 2px 8px rgba(233, 70, 9, .18);
+  box-shadow: 0 2px 8px rgba(236, 102, 24, .18);
   margin-bottom: 4px;
 }
 .app-bar-title {
@@ -634,6 +634,6 @@ html, body {
     --text: #eef1f6;
     --text-muted: #99a2b3;
     --primary-soft: rgba(96, 138, 255, .16);
-    --brand-soft: rgba(233, 70, 9, .18);
+    --brand-soft: rgba(236, 102, 24, .18);
   }
 }
