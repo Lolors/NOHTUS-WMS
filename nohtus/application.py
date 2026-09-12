@@ -1,7 +1,10 @@
 from datetime import datetime
+from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
+
+_FAVICON_PATH = Path(__file__).resolve().parent.parent / "mobile_app" / "icons" / "icon-512.png"
 
 # 수출대기 화면은 출고지시 렌더러를 재사용하면서 Streamlit 위젯을 임시로
 # 바꾼다. 일반 출고지시 진입점에서는 반드시 앱 시작 시점의 원본 위젯을
@@ -344,7 +347,11 @@ def _render_app_mode_toggle() -> str:
 
 
 def main():
-    st.set_page_config(page_title=APP_TITLE, layout="wide")
+    st.set_page_config(
+        page_title=APP_TITLE,
+        layout="wide",
+        page_icon=str(_FAVICON_PATH) if _FAVICON_PATH.is_file() else None,
+    )
     init_db()
     init_export_app()
     # 실제 백업 파일 복사(및 Google Drive 폴더 I/O)는 별도 스레드에서만 한다.
