@@ -791,11 +791,9 @@
       <div class="export-case-row" data-id="${item.id}" role="button" tabindex="0">
         <div class="export-card-top">
           <div class="export-buyer">${escapeHtml(title)}</div>
-          <div class="export-case-top-right">
-            ${datesHtml}
-            <span class="stage-badge" style="background:${escapeHtml(item.stage_bg)};color:${escapeHtml(item.stage_fg)}">${escapeHtml(item.stage)}</span>
-          </div>
+          <span class="stage-badge" style="background:${escapeHtml(item.stage_bg)};color:${escapeHtml(item.stage_fg)}">${escapeHtml(item.stage)}</span>
         </div>
+        ${datesHtml}
         <div class="export-progress-row">
           <div class="export-progress-track"><div class="export-progress-fill" style="width:${item.progress_percent}%"></div></div>
           <span class="export-progress-label">${item.progress_percent}%</span>
