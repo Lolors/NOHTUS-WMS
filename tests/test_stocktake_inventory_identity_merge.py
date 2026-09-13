@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 
-from nohtus.pages.stocktake_business import _update_inventory_identity
+from nohtus.pages.stocktake import _update_inventory_identity
 
 
 class StocktakeInventoryIdentityMergeTests(unittest.TestCase):

@@ -39,7 +39,7 @@ from nohtus.pages.product_matching_business import page_product_matching
 from nohtus.pages.product_shortcuts import page_recent_products
 from nohtus.pages.purchase_history_single import page_purchase_history
 from nohtus.pages.saved_outbound_date_fix import page_saved_outbound as page_saved_outbound_refactored
-from nohtus.pages.stocktake_business import page_stocktake
+from nohtus.pages.stocktake import page_stocktake
 
 
 def _page_location_map_editor_guarded():
