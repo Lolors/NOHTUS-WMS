@@ -1,0 +1,494 @@
+
+<!doctype html><html><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box} body{margin:0;background:#f8fafc;font-family:Inter,Segoe UI,Arial,'Noto Sans KR',sans-serif;color:#0f172a;}
+.wms-wrap{display:grid;grid-template-columns:minmax(0,3fr) minmax(300px,1fr);gap:22px;align-items:start;width:100%;}
+.map-card,.side-card{background:#fff;border:1px solid #dbe4f0;border-radius:18px;padding:16px;box-shadow:0 8px 24px rgba(15,23,42,.06);}
+.legend-wrap{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 14px 0;}
+.legend-chip{display:flex;align-items:center;gap:8px;border:1px solid #dbe4f0;background:#fff;border-radius:12px;padding:9px 14px;font-weight:800;color:#111827;font-size:14px;}
+.swatch{width:18px;height:18px;border-radius:5px;border:1px solid rgba(15,23,42,.12);display:inline-block;}
+.swatch.y{background:#fff39b} .swatch.b{background:#68d2e7} .swatch.p{background:#f0a7e6} .swatch.g{background:#f3f4f6}
+.map-scroll{overflow:hidden;padding-bottom:0;height:565px;}
+.map-stage{position:relative;width:1064px;height:618px;min-width:1064px;background:#fff;border-radius:14px;transform:scale(0.90);transform-origin:top left;}
+.rack{position:absolute;width:116px;height:154px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr 1fr;border:1px solid #334155;border-radius:9px;overflow:hidden;box-shadow:0 6px 14px rgba(15,23,42,.06);}
+.map-cell,.zone{appearance:none;position:relative;display:flex;align-items:center;justify-content:center;text-decoration:none;color:#0f172a;font-weight:900;font-size:14px;border:0;border-right:1px solid rgba(51,65,85,.38);border-bottom:1px solid rgba(51,65,85,.38);cursor:pointer;font-family:inherit;}
+.map-cell:hover,.zone:hover{outline:3px solid rgba(37,99,235,.22);z-index:2;}
+.map-cell:nth-child(2n){border-right:none;}
+.map-cell:nth-child(n+5){border-bottom:none;}
+
+.special-menu{position:absolute;display:none;z-index:30;background:#fff;border:1px solid #cbd5e1;border-radius:12px;box-shadow:0 12px 28px rgba(15,23,42,.18);padding:6px;}
+.special-menu.open{display:grid;gap:5px;}
+.special-menu button,.special-menu a{appearance:none;border:1px solid #e2e8f0;background:#f8fafc;border-radius:9px;padding:8px 7px;font-size:12px;font-weight:900;color:#0f172a;cursor:pointer;font-family:inherit;text-align:center;text-decoration:none;}
+.special-menu button:hover,.special-menu button.selected,.special-menu a:hover,.special-menu a.selected{background:#22c55e;color:#fff;border-color:#16a34a;}
+.map-cell.selected,.zone.selected{background:#22c55e!important;color:#ffffff!important;outline:3px solid rgba(34,197,94,.35)!important;box-shadow:0 0 0 3px rgba(255,255,255,.8),0 0 18px rgba(34,197,94,.75)!important;border-color:#16a34a!important;z-index:4;}
+.yellow{background:#fff39b;} .blue{background:#68d2e7;} .pink{background:#f0a7e6;} .gray{background:#f7f8fa;} .bidata{background:#d1d5db;} .white{background:#fff;} .yellow .map-cell,.zone.yellow{background:#fff39b;} .blue .map-cell,.zone.blue{background:#68d2e7;} .pink .map-cell,.zone.pink{background:#f0a7e6;} .gray .map-cell,.zone.gray{background:#f7f8fa;} .bidata .map-cell,.zone.bidata{background:#d1d5db;} .white .map-cell,.zone.white{background:#fff;}
+.stock-dot{position:absolute;right:7px;top:7px;width:9px;height:9px;background:#65d84f;border:1.5px solid #166534;border-radius:999px;box-shadow:0 0 0 2px rgba(255,255,255,.65);}
+.zone{position:absolute;border:1px solid #334155;border-radius:9px;box-shadow:0 6px 14px rgba(15,23,42,.04);}
+.big-left{position:absolute;left:0;top:0;width:170px;height:258px;border:1px solid #334155;border-radius:10px;overflow:hidden;background:#fff;}
+.big-left button,.big-left a{appearance:none;position:relative;display:flex;align-items:center;justify-content:center;width:100%;border:0;border-bottom:1px solid #cbd5e1;background:#f7f8fa;color:#0f172a;font-weight:900;cursor:pointer;font-family:inherit;text-decoration:none;}
+.big-left button:hover,.big-left a:hover{outline:3px solid rgba(37,99,235,.22);z-index:2;}
+.big-left button.selected,.big-left a.selected{background:#22c55e!important;color:#fff!important;outline:3px solid rgba(34,197,94,.35)!important;box-shadow:0 0 0 3px rgba(255,255,255,.8),0 0 18px rgba(34,197,94,.75)!important;z-index:4;}
+.g2{height:205px;background:#f7f8fa;} .g1row{height:52px;display:grid;grid-template-columns:1fr 1fr 1fr;}
+.g1row button,.g1row a{height:52px;border-right:1px solid #cbd5e1;border-bottom:none;} .g1row button:last-child,.g1row a:last-child{border-right:none;}
+
+.label{position:absolute;text-align:center;font-weight:900;color:#111827;font-size:14px;}
+.memo{position:absolute;color:#334155;font-size:15px;line-height:2.6;}
+.qp{position:absolute;left:0;top:480px;width:150px;height:135px;border:1px solid #cbd5e1;border-radius:10px;overflow:hidden;background:#fff;}
+.qp button,.qp a{position:relative;display:grid;grid-template-columns:54px 1fr;align-items:center;width:100%;height:67px;border:0;border-bottom:1px solid #e2e8f0;background:#fff;color:#111827;font-weight:900;cursor:pointer;text-align:left;font-family:inherit;text-decoration:none;}
+.qp button:last-child{border-bottom:none;}
+.qp button.selected{background:#22c55e!important;color:#ffffff!important;outline:3px solid rgba(34,197,94,.35)!important;box-shadow:0 0 0 3px rgba(255,255,255,.8),0 0 18px rgba(34,197,94,.75)!important;border-color:#16a34a!important;z-index:4;}
+.qp button.selected .qp-key{background:#16a34a!important;color:#fff!important;}
+.qp-key{height:100%;display:flex;align-items:center;justify-content:center;color:#ff221a;font-weight:900;font-size:18px;border-right:1px solid #e2e8f0;}
+.qp .qkey{background:#f186ca;color:#ff0d0d;}
+.rec-red{color:#ff1e12;font-weight:900;}
+.small-title{position:absolute;font-size:14px;font-weight:900;color:#111827;text-align:center;}
+.side-card{height:705px;overflow:auto;}
+.side-title{font-size:22px;font-weight:900;margin:0 0 4px;} .caption{color:#64748b;font-size:13px;margin-bottom:10px;}
+.zone-pill{display:inline-block;background:#e8f5ee;color:#15803d;font-weight:900;border-radius:10px;padding:6px 10px;margin:8px 0 12px;}
+.metric{background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:12px;margin-bottom:12px;}
+.metric .n{font-size:24px;font-weight:900;}
+.detail-card{background:white;border:1px solid #dbe4f0;border-radius:14px;padding:12px;margin:8px 0;box-shadow:0 5px 16px rgba(15,23,42,.05);cursor:pointer;transition:border-color .1s ease,box-shadow .1s ease;}
+.detail-card:hover{border-color:#93c5fd;}
+.detail-card.card-pinned{border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,.25);}
+.mini-rack{margin:8px 0;display:inline-block;}
+.mini-rack-row{display:flex;align-items:center;gap:6px;}
+.mini-rack-level{width:26px;font-size:11px;font-weight:800;color:#64748b;text-align:right;}
+.mini-rack-cells{display:flex;gap:3px;}
+.mini-rack-cell{width:16px;height:16px;border-radius:3px;border:1px solid #cbd5e1;background:#f8fafc;}
+.mini-rack-cell.filled{background:#16a34a;border-color:#166534;}
+.mini-rack-label{margin-top:4px;font-size:11px;color:#64748b;font-weight:700;padding-left:32px;}
+.map-cell.line-soft,.zone.line-soft{outline:3px solid rgba(37,99,235,.35)!important;box-shadow:0 0 0 2px rgba(37,99,235,.15)!important;z-index:3;}
+.product-inline-detail{margin:8px 0 14px 0;}
+.card-top{display:flex;justify-content:space-between;align-items:center;gap:8px;} .company-badge{display:inline-block;background:#f1f5f9;color:#475569;font-weight:500;border:1px solid #e2e8f0;border-radius:999px;padding:3px 8px;font-size:12px;}
+.product-title{font-weight:400;font-size:18px;line-height:1.25;margin-top:8px;margin-bottom:6px;color:#111827;}
+.lot-exp{font-weight:400;font-size:14px;color:#334155;line-height:1.55;margin-top:6px;}
+.loc-line{font-weight:400;font-size:14px;color:#334155;line-height:1.55;margin-top:6px;}
+.muted{color:#64748b;font-size:12px;line-height:1.6;}
+.qty-text{font-weight:900;color:#111827;white-space:nowrap;}
+.loc-link{border:1px solid #e2e8f0;background:#ffffff;border-radius:10px;padding:7px 10px;margin:5px 0;width:100%;display:flex;justify-content:space-between;align-items:center;cursor:pointer;color:#0f172a;font-weight:700;}
+.loc-link:hover{background:#f1f5f9;border-color:#94a3b8;}
+.prod-name-large{font-size:12pt;font-weight:400;line-height:1.25;color:#111827;margin:8px auto 6px;}
+.prod-search-form{margin:0;padding:0;}
+.prod-search-title{appearance:none;border:0;background:transparent;display:block;text-align:center;cursor:pointer;padding:0;font-family:inherit;text-decoration:none;width:100%;}
+.prod-search-title:hover{color:#1d4ed8;text-decoration:underline;}
+.prod-btn{display:block;margin:10px auto 0;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:10px;padding:7px 16px;font-weight:800;cursor:pointer;min-width:150px;text-align:center;}
+.prod-box{border-top:1px solid #e2e8f0;margin-top:14px;padding-top:14px;text-align:center;} .photo-box{width:150px;height:150px;margin:0 auto 10px;border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:700;}
+
+.detail-total-text{display:flex;gap:8px;align-items:baseline;justify-content:center;color:#334155;font-size:13px;margin:2px auto 10px;}
+.detail-total-text strong{font-weight:600;color:#111827;}
+.loc-metric .caption{text-align:left!important;}
+.recent-title{text-align:center;margin:8px 0 4px!important;font-size:14px;}
+.recent-list{text-align:left;}
+.tx-row{font-size:12px;border-bottom:1px solid #f1f5f9;padding:6px 0;color:#334155;text-align:left;}
+@media(max-width:1100px){.wms-wrap{grid-template-columns:1fr}.side-card{height:auto}}
+</style></head><body>
+<div class="wms-wrap">
+  <div class="map-card">
+    <div class="legend-wrap">
+      <div class="legend-chip"><span class="swatch y"></span>노투스팜</div>
+      <div class="legend-chip"><span class="swatch b"></span>노투스</div>
+      <div class="legend-chip"><span class="swatch p"></span>NOH</div>
+      <div class="legend-chip"><span class="swatch g"></span>비자료</div>
+    </div>
+    <div class="map-scroll"><div class="map-stage">
+      <div class="big-left">
+        <button type="button" class="g2 gray" data-loc="G2">G2</button>
+        <div class="g1row">
+          <button type="button" data-loc="G1-01">G1-01</button>
+          <button type="button" data-loc="G1-02">G1-02</button>
+          <button type="button" data-loc="G1-03">G1-03</button>
+        </div>
+      </div>
+      <div class="rack yellow" style="left:210px;top:0px;"><button type="button" class="map-cell" data-loc="A2-03">A2-03</button><button type="button" class="map-cell" data-loc="A2-04">A2-04</button><button type="button" class="map-cell" data-loc="A2-02">A2-02</button><button type="button" class="map-cell" data-loc="A2-05">A2-05</button><button type="button" class="map-cell" data-loc="A2-01">A2-01</button><button type="button" class="map-cell" data-loc="A2-06">A2-06</button></div>
+      <div class="rack yellow" style="left:340px;top:0px;"><button type="button" class="map-cell" data-loc="B2-03">B2-03</button><button type="button" class="map-cell" data-loc="B2-04">B2-04</button><button type="button" class="map-cell" data-loc="B2-02">B2-02</button><button type="button" class="map-cell" data-loc="B2-05">B2-05</button><button type="button" class="map-cell" data-loc="B2-01">B2-01</button><button type="button" class="map-cell" data-loc="B2-06">B2-06</button></div>
+      <div class="rack blue" style="left:470px;top:0px;"><button type="button" class="map-cell" data-loc="C2-03">C2-03</button><button type="button" class="map-cell" data-loc="C2-04">C2-04</button><button type="button" class="map-cell" data-loc="C2-02">C2-02</button><button type="button" class="map-cell" data-loc="C2-05">C2-05</button><button type="button" class="map-cell" data-loc="C2-01">C2-01</button><button type="button" class="map-cell" data-loc="C2-06">C2-06</button></div>
+      <div class="rack blue" style="left:600px;top:0px;"><button type="button" class="map-cell" data-loc="D1-03">D1-03</button><button type="button" class="map-cell" data-loc="D1-04">D1-04</button><button type="button" class="map-cell" data-loc="D1-02">D1-02</button><button type="button" class="map-cell" data-loc="D1-05">D1-05</button><button type="button" class="map-cell" data-loc="D1-01">D1-01</button><button type="button" class="map-cell" data-loc="D1-06">D1-06</button></div>
+      <button type="button" class="zone white" data-loc="T1" style="left:600px;top:154px;width:116px;height:48px;">T1</button>
+      <div class="rack pink" style="left:730px;top:0px;"><button type="button" class="map-cell" data-loc="E1-03">E1-03</button><button type="button" class="map-cell" data-loc="E1-04">E1-04</button><button type="button" class="map-cell" data-loc="E1-02">E1-02</button><button type="button" class="map-cell" data-loc="E1-05">E1-05</button><button type="button" class="map-cell" data-loc="E1-01">E1-01</button><button type="button" class="map-cell" data-loc="E1-06">E1-06</button></div>
+      <button type="button" class="zone white" data-loc="T2" style="left:730px;top:154px;width:116px;height:48px;">T2</button>
+      <button type="button" class="zone bidata" data-loc="F1-01" style="left:875px;top:0px;width:58px;height:48px;">F1-01</button>
+      <button type="button" class="zone bidata" data-loc="F1-02" style="left:933px;top:0px;width:58px;height:48px;">F1-02</button>
+      <button type="button" class="zone bidata" data-loc="F1-03" style="left:991px;top:0px;width:58px;height:48px;">F1-03</button>
+      <div class="small-title" style="left:915px;top:66px;width:100px;">비자료</div>
+      <button type="button" class="zone gray" data-loc="X2" style="left:1070px;top:0px;width:64px;height:48px;">X2</button>
+      <div class="rack yellow" style="left:210px;top:245px;"><button type="button" class="map-cell" data-loc="A1-03">A1-03</button><button type="button" class="map-cell" data-loc="A1-04">A1-04</button><button type="button" class="map-cell" data-loc="A1-02">A1-02</button><button type="button" class="map-cell" data-loc="A1-05">A1-05</button><button type="button" class="map-cell" data-loc="A1-01">A1-01</button><button type="button" class="map-cell" data-loc="A1-06">A1-06</button></div>
+      <div class="rack yellow" style="left:340px;top:245px;"><button type="button" class="map-cell" data-loc="B1-03">B1-03</button><button type="button" class="map-cell" data-loc="B1-04">B1-04</button><button type="button" class="map-cell" data-loc="B1-02">B1-02</button><button type="button" class="map-cell" data-loc="B1-05">B1-05</button><button type="button" class="map-cell" data-loc="B1-01">B1-01</button><button type="button" class="map-cell" data-loc="B1-06">B1-06</button></div>
+      <div class="rack yellow" style="left:470px;top:245px;"><button type="button" class="map-cell" data-loc="C1-03">C1-03</button><button type="button" class="map-cell" data-loc="C1-04">C1-04</button><button type="button" class="map-cell" data-loc="C1-02">C1-02</button><button type="button" class="map-cell" data-loc="C1-05">C1-05</button><button type="button" class="map-cell" data-loc="C1-01">C1-01</button><button type="button" class="map-cell" data-loc="C1-06">C1-06</button></div>
+      <div class="memo" style="left:760px;top:270px;line-height:1.55;">X1-01~03 : 폐기<br>X1-01-01 : 대표님 시술용</div>
+      <button type="button" class="zone gray" data-loc="X1-01" style="left:1010px;top:245px;width:58px;height:52px;">X1-01</button>
+      <button type="button" class="zone gray" data-loc="X1-02" style="left:1010px;top:297px;width:58px;height:52px;">X1-02</button>
+      <button type="button" class="zone gray" data-loc="X1-03" style="left:1010px;top:349px;width:58px;height:52px;">X1-03</button>
+      <div class="qp">
+        <button type="button" data-loc="Q"><span class="qp-key qkey">Q</span><span>유통기간임박</span></button>
+        <button type="button" data-loc="P"><span class="qp-key">P</span><span>수출대기</span><span class="stock-dot"></span></button>
+      </div>
+      <button type="button" class="zone white" data-loc="REC" style="left:340px;top:520px;width:130px;height:52px;"><span><span class="rec-red">REC</span>eiving</span></button>
+      <div class="label" style="left:340px;top:582px;width:130px;">매입등록대기</div>
+      <button type="button" class="zone white" data-loc="R2" style="left:725px;top:420px;width:58px;height:52px;">R2</button>
+      <button type="button" class="zone white" data-loc="R1" style="left:783px;top:420px;width:58px;height:52px;">R1</button>
+      <div class="label" style="left:706px;top:482px;width:170px;">R2 비자료 / R1 자료</div>
+      <button type="button" class="zone white" data-loc="N" style="left:930px;top:565px;width:155px;height:60px;">기타 위치</button>
+      <div class="special-menu" id="specialMenu" style="left:930px;top:428px;width:155px;"><button type="button" data-special-loc="오른쪽 창고">오른쪽 창고</button><button type="button" data-special-loc="사무실(4층)">사무실(4층)</button></div>
+    </div></div>
+  </div>
+  <div class="side-card" id="detail"><div class="side-title">위치 상세 정보</div><div class="caption">맵에서 로케이션을 선택하면 상세 재고가 여기에 표시됩니다.</div></div>
+</div>
+<script>
+const DATA = {"inventory": {"P-1": [{"id": 1, "company": "노투스", "product_name": "테스트제품", "warehouse_name": "ERP-1", "lot": "LOT-1", "exp_date": "2027-01-01", "qty": 10, "primary_location": "P-1", "occupied_cells": ["P-1"]}]}, "tx": [], "selected_location": "", "layout_company": {"A1-01": "노투스팜", "A1-02": "노투스팜", "A1-03": "노투스팜", "A1-04": "노투스팜", "A1-05": "노투스팜", "A1-06": "노투스팜", "A1-07": "노투스팜", "A1-08": "노투스팜", "A1-09": "노투스팜", "F1-01": "비자료", "F1-02": "비자료", "F1-03": "비자료", "X1-01": "비자료", "X1-02": "비자료", "X1-03": "비자료", "C1-01": "노투스팜", "C1-02": "노투스팜", "C1-03": "노투스팜", "A1-10": "노투스팜", "A1-11": "노투스팜", "A1-12": "노투스팜", "A1-13": "노투스팜", "A1-14": "노투스팜", "A1-15": "노투스팜", "B1-01": "노투스팜", "B1-02": "노투스팜", "B1-03": "노투스팜", "B1-04": "노투스팜", "B1-05": "노투스팜", "B1-06": "노투스팜", "B1-07": "노투스팜", "B1-08": "노투스팜", "B1-09": "노투스팜", "B1-10": "노투스팜", "B1-11": "노투스팜", "B1-12": "노투스팜", "C1-04": "노투스팜", "C1-05": "노투스팜", "C1-06": "노투스팜", "D1-01": "노투스", "D1-02": "노투스", "D1-03": "노투스", "D1-04": "노투스", "D1-05": "노투스", "D1-06": "노투스", "D1-07": "노투스", "D1-08": "노투스", "D1-09": "노투스", "D1-10": "노투스", "D1-11": "노투스", "D1-12": "노투스", "E1-01": "NOH", "E1-02": "NOH", "E1-03": "NOH", "E1-04": "NOH", "E1-05": "NOH", "E1-06": "NOH"}, "layout_label": {"T1": "파렛트", "T2": "파렛트", "T3": "파렛트", "T4": "파렛트", "T5": "파렛트"}, "area_config": {"A1": {"lines": ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14", "15"], "levels": ["01", "02", "03"]}, "B1": {"lines": ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"], "levels": ["01", "02", "03"]}, "C1": {"lines": ["01", "02", "03", "04", "05", "06"], "levels": ["01", "02", "03"]}, "D1": {"lines": ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"], "levels": ["01", "02", "03"]}, "E1": {"lines": ["01", "02", "03", "04", "05", "06", "07", "08", "09"], "levels": ["01", "02", "03"]}, "F1": {"lines": ["01", "02", "03"], "levels": ["01", "02", "03"]}, "G1": {"lines": ["01", "02", "03"], "levels": ["01", "02", "03"]}, "T1": {"lines": [], "levels": []}, "T2": {"lines": [], "levels": []}, "T3": {"lines": [], "levels": []}, "T4": {"lines": [], "levels": []}, "T5": {"lines": [], "levels": []}, "박스(기타)": {"lines": [], "levels": []}, "X1": {"lines": ["01", "02", "03"], "levels": ["01", "02", "03", "04"]}, "X2": {"lines": [], "levels": []}, "REC": {"lines": [], "levels": []}, "Q": {"lines": ["01", "02", "03"], "levels": ["01", "02", "03"]}, "P": {"lines": [], "levels": []}, "R1": {"lines": [], "levels": []}, "R2": {"lines": [], "levels": []}, "N": {"lines": ["오른쪽 창고", "사무실(4층)", "지엠메딕", "거래처 창고"], "levels": []}, "다용도랙": {"lines": [], "levels": []}, "옷장1": {"lines": [], "levels": []}, "옷장2": {"lines": [], "levels": []}, "옷장3": {"lines": [], "levels": []}, "옷장4": {"lines": [], "levels": []}, "옷장5": {"lines": [], "levels": []}}, "reversed_line_ranges": {"A1": [10, 15], "B1": [7, 12], "D1": [7, 12]}};
+const inventory = DATA.inventory || {};
+const txData = DATA.tx || [];
+const specialLocations = ["오른쪽 창고", "사무실(4층)"];
+const initialSelectedLocation = DATA.selected_location || "";
+const layoutCompany = DATA.layout_company || {};
+const layoutLabel = DATA.layout_label || {};
+const areaConfig = DATA.area_config || {};
+const reversedLineRanges = DATA.reversed_line_ranges || {};
+const RACK_GROUP_SIZE = 3;
+// 같은 알파벳 구역 안에서 두 줄 선반이 마주보는 경우, 뒷줄은 번호가 클수록
+// 왼쪽에 오도록(오름차순의 반대로) 그려야 실제 배치와 맞는다.
+function lineGroupIsReversed(area, cols){
+  const range = reversedLineRanges[area];
+  if (!range || !cols || !cols.length) return false;
+  const first = parseInt(cols[0], 10);
+  return Number.isFinite(first) && first >= range[0] && first <= range[1];
+}
+function zoneName(loc, rows){
+  const area=(loc||'').split('-')[0];
+  const customLabel = layoutLabel[loc] || layoutLabel[area];
+  if(customLabel) return customLabel;
+  if((loc||'')==='홍보물랙') return '홍보물랙';
+  if(specialLocations.includes(loc||'')) return '기타 위치';
+  if(['A1','A2','B1','B2','C1','C2','D1','E1'].includes(area)){
+    const companies=Array.from(new Set((rows||[]).map(r=>r.company).filter(Boolean)));
+    if(companies.length) return companies.join(', ');
+    const p=(loc||'').split('-');
+    const cellCode=p.length>=2 ? p[0]+'-'+p[1] : loc;
+    return layoutCompany[cellCode] || layoutCompany[loc] || '-';
+  }
+  if(area==='Q') return '유통기간임박';
+  if(area==='F1') return '비자료';
+  if(area==='X1') return '폐기';
+  if(area==='X2') return '기타 보관 구역';
+  if(area==='R1') return '냉장고(자료)';
+  if(area==='R2') return '냉장고(비자료)';
+  if(area==='REC') return '매입등록대기';
+  if(area==='P') return '수출대기';
+  if(area==='G2') return '패키지 창고';
+  if(area==='N') return '기타 위치';
+  return '기타 보관 구역';
+}
+function rowsFor(loc){
+  let rows=[];
+  Object.entries(inventory).forEach(([k,v])=>{ if(k===loc || k.startsWith(loc+'-')) rows=rows.concat(v.map(x=>({...x, location:k}))); });
+  return rows;
+}
+function formatRecentHistory(tx, currentTotal){
+  if(!tx.length) return '<div class="muted">최근 이력이 없습니다.</div>';
+  let running = Number(currentTotal || 0);
+  return tx.map(t=>{
+    const type = String(t.tx_type || '이력');
+    const qty = Number(t.qty || 0);
+    const fromLoc = t.from_location || '-';
+    const toLoc = t.to_location || '-';
+    let body = '';
+    if(type.includes('이동')){
+      body = `${esc(fromLoc)} → ${esc(toLoc)} (${qty}EA)`;
+    } else if(type.includes('입고')){
+      const after = running;
+      const before = Math.max(0, after - qty);
+      body = `${before}EA → ${after}EA`;
+      running = before;
+    } else if(type.includes('출고')){
+      const after = running;
+      const before = after + qty;
+      body = `${before}EA → ${after}EA`;
+      running = before;
+    } else if(type.includes('조정')){
+      body = `${qty}EA 조정`;
+    } else {
+      body = `${qty}EA`;
+    }
+    const shownDate = cleanDate(String(t.created_at || '').slice(0,10));
+    return `<div class="tx-row">${esc(shownDate)} <b>[${esc(type)}]</b> ${body}</div>`;
+  }).join('');
+}
+function rangeSummaryLabel(cells){
+  const area=lineCode(cells[0]).split('-')[0];
+  const lines=Array.from(new Set(cells.map(c=>c.split('-')[1]||''))).filter(Boolean).sort();
+  const lineSpan = lines.length>1 ? `${lines[0]}~${lines[lines.length-1]}` : (lines[0]||'');
+  return `${area}-${lineSpan} (여러 위치, ${cells.length}칸)`;
+}
+function productDetail(name){
+  // 재고 행 하나가 여러 칸(location_range_cells)에 걸쳐 있으면 rowsFor류
+  // 순회에서 칸 수만큼 중복 등장한다. id로 한 번만 세야 이 행의 실제 수량이
+  // 칸마다 반복 표시되지 않는다.
+  const rowsById={};
+  Object.values(inventory).forEach(arr=>arr.forEach(x=>{ if(x.product_name===name) rowsById[x.id]=x; }));
+  const rows=Object.values(rowsById);
+  const total=rows.reduce((a,b)=>a+(b.qty||0),0);
+  const locRows=rows
+    .slice()
+    .sort((a,b)=>(a.primary_location||'').localeCompare(b.primary_location||''))
+    .map(x=>{
+      const cells=(x.occupied_cells && x.occupied_cells.length) ? x.occupied_cells : [x.primary_location];
+      const jumpLoc=x.primary_location || cells[0] || '';
+      const label = cells.length>1 ? rangeSummaryLabel(cells) : (jumpLoc || '-');
+      return `<button class="loc-link" type="button" data-jump-loc="${esc(jumpLoc)}"><span>${esc(label)} <em style="font-style:normal;color:#64748b;font-size:12px;">${esc(x.company||'-')}</em></span><span>${Number(x.qty)||0} EA</span></button>`;
+    }).join('');
+  const tx=txData.filter(t=>t.product_name===name).slice(0,5);
+  return `<div class="prod-box"><div class="photo-box">📷</div><form class="prod-search-form" method="get" target="_top" action="" data-search-form="1"><input type="hidden" name="map_search_product" value="${esc(name)}"><button type="submit" class="prod-name-large prod-search-title" data-search-product="${esc(name)}">${esc(name)}</button></form><div class="detail-total-text"><span>창고 총재고</span><strong>${total} EA</strong></div><div class="metric loc-metric"><div class="caption">분산 로케이션</div>${locRows||'<div class="muted">재고 위치가 없습니다.</div>'}</div><h4 class="recent-title">최근 이력 5건</h4><div class="recent-list">${formatRecentHistory(tx,total)}</div></div>`;
+}
+function occupiedKey(cells){ return (cells||[]).slice().sort().join(','); }
+function lineCode(loc){
+  const p=(loc||'').split('-');
+  return p.length>=2 ? p[0]+'-'+p[1] : loc;
+}
+// 메인 2D 맵은 라인(X축)까지만 표현하고 단(Y축)은 표현하지 않는다. 그래서
+// "이 위치를 포함하는 재고"가 실제로 어느 단에 얼마나 있는지는 재고 행 단위로
+// 작은 라인×단 그림(미니 랙)을 그려서 보여준다 — 로케이션 하나가 아니라
+// 이 재고 행이 실제로 차지하는 정확한 모양 그대로.
+function miniRackHtml(occupiedCells){
+  if(!occupiedCells || !occupiedCells.length) return {html:'', lines:[]};
+  const area=lineCode(occupiedCells[0]).split('-')[0];
+  const cfg=areaConfig[area] || {};
+  const areaLines=cfg.lines || [];
+  const areaLevels=cfg.levels || [];
+  if(!areaLines.length || !areaLevels.length) return {html:'', lines:[]};
+  const touchedLines=Array.from(new Set(occupiedCells.map(c=>c.split('-')[1]||''))).filter(Boolean);
+  const touchedIdx=touchedLines.map(l=>areaLines.indexOf(l)).filter(i=>i>=0);
+  if(!touchedIdx.length) return {html:'', lines:[]};
+  const anchorIdx=Math.min(...touchedIdx);
+  const groupStart=Math.floor(anchorIdx / RACK_GROUP_SIZE) * RACK_GROUP_SIZE;
+  let cols=areaLines.slice(groupStart, groupStart + RACK_GROUP_SIZE);
+  // 이 랙 묶음이 "뒷줄"(마주보는 두 줄 중 번호가 큰 쪽)이면 왼쪽→오른쪽
+  // 그리는 순서를 뒤집는다 — 실제 창고에서는 뒷줄이 번호 오름차순과 반대로
+  // 배치돼 있기 때문이다(저장되는 라인 값 자체는 바뀌지 않는다).
+  if(lineGroupIsReversed(area, cols)) cols=cols.slice().reverse();
+  const occSet=new Set(occupiedCells);
+  const rowsHtml=areaLevels.slice().reverse().map(level=>{
+    const cellsHtml=cols.map(line=>{
+      const filled=occSet.has(`${area}-${line}-${level}`);
+      return `<span class="mini-rack-cell${filled ? ' filled' : ''}"></span>`;
+    }).join('');
+    return `<div class="mini-rack-row"><span class="mini-rack-level">${esc(level)}단</span><span class="mini-rack-cells">${cellsHtml}</span></div>`;
+  }).join('');
+  // 라벨은 그림칸(cols, 랙 3라인 전체)이 아니라 실제로 채워진 라인만 기준으로
+  // 써야 한다 — cols로 쓰면 범위를 1칸으로 줄여도 랙 전체 구간("A1-13~15")이
+  // 그대로 남아 있는 것처럼 보여서, 마치 이전의 더 큰 범위가 아직도 선택돼
+  // 있는 것 같은 착시를 일으킨다.
+  const touchedSorted=touchedIdx.slice().sort((a,b)=>a-b).map(i=>areaLines[i]);
+  const rangeLabel = touchedSorted.length>1 ? `${area}-${touchedSorted[0]}~${touchedSorted[touchedSorted.length-1]}` : `${area}-${touchedSorted[0]}`;
+  const html=`<div class="mini-rack">${rowsHtml}<div class="mini-rack-label">${esc(rangeLabel)}</div></div>`;
+  // 메인 맵 하이라이트는 실제로 점유한 라인만 켠다(랙 전체 3라인 창이 아니라).
+  // 미니 랙은 같은 랙 단위를 보여주려고 3라인을 다 그리지만, 안 채워진 라인까지
+  // 메인 맵에서 켜면 실제로 안 쓰는 라인도 점유한 것처럼 보이게 된다.
+  const lines=areaLines.filter(l=>touchedLines.includes(l)).map(line=>`${area}-${line}`);
+  return {html, lines};
+}
+function productCardsHtml(rows){
+  const groups={};
+  rows.forEach(r=>{
+    const key=(r.product_name||'-') + '::' + occupiedKey(r.occupied_cells);
+    if(!groups[key]) groups[key]={name:r.product_name||'-', occupied_cells:r.occupied_cells||[], itemsById:{}};
+    // 한 재고 행이 여러 칸에 걸쳐 있으면(location_range_cells) rowsFor()가 그 칸
+    // 수만큼 같은 id를 중복해서 넘긴다. id로 한 번만 세야 수량이 곱절로 잡히지 않는다.
+    groups[key].itemsById[r.id]=r;
+  });
+  return Object.values(groups).map(group=>{
+    const {name, occupied_cells}=group;
+    const items=Object.values(group.itemsById);
+    const total=items.reduce((a,b)=>a+(Number(b.qty)||0),0);
+    const companies=Array.from(new Set(items.map(x=>x.company||'-'))).sort().join(', ');
+    const lines=items
+      .slice()
+      .sort((a,b)=>String(a.exp_date||'').localeCompare(String(b.exp_date||'')) || String(a.lot||'').localeCompare(String(b.lot||'')) || String(a.company||'').localeCompare(String(b.company||'')))
+      .map(x=>{
+        const companyInfo = companies.includes(',') ? `<span class="company-badge">${esc(x.company||'-')}</span> ` : '';
+        return `<div class="lot-exp">${companyInfo}${Number(x.qty)||0}EA&nbsp;&nbsp;${esc(x.lot||'-')} | ${esc(cleanDate(x.exp_date||'-'))}<button class="lot-move-btn" type="button" data-move-id="${esc(x.id)}" style="margin-left:8px;padding:1px 8px;font-size:11px;border-radius:6px;border:1px solid #2563eb;color:#2563eb;background:#eff6ff;cursor:pointer;">이동</button></div>`;
+      }).join('');
+    const rack=miniRackHtml(occupied_cells);
+    return `<div class="detail-card" data-occupied-lines="${esc(rack.lines.join(','))}"><div class="card-top"><span class="product-title">${esc(name)}</span><span class="qty-text">${total} EA</span></div><div class="muted">사업장: ${esc(companies||'-')}</div>${rack.html}${lines}<button class="prod-btn" type="button" data-product="${esc(name)}">제품 상세 보기</button></div>`;
+  }).join('');
+}
+function cleanDate(v){
+  const s=String(v ?? '').trim();
+  if(!s || s==='-' || s.toLowerCase()==='nan') return '-';
+  const m=s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if(m) return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+  return s;
+}
+function esc(v){return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;')}
+function parentBaseHref(){
+  try { return window.top.location.href; } catch(e) {}
+  try { return window.parent.location.href; } catch(e) {}
+  return document.referrer || window.location.href;
+}
+function buildParentUrl(key, value, removeKey){
+  const url = new URL(parentBaseHref());
+  url.searchParams.set(key, value);
+  if(removeKey) url.searchParams.delete(removeKey);
+  return url.toString();
+}
+function buildParentUrlMulti(setParams, removeKeys){
+  const url = new URL(parentBaseHref());
+  Object.entries(setParams||{}).forEach(([k,v])=>url.searchParams.set(k,v));
+  (removeKeys||[]).forEach(k=>url.searchParams.delete(k));
+  return url.toString();
+}
+
+function tryParentSearch(productName){
+  try {
+    const doc = window.parent.document;
+    const inputs = Array.from(doc.querySelectorAll('input'));
+    const input = inputs.find(x => (x.getAttribute('aria-label')||'').includes('제품명 검색'));
+    if(input){
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, productName);
+      input.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'insertText', data:productName}));
+      input.dispatchEvent(new Event('change', {bubbles:true}));
+      const buttons = Array.from(doc.querySelectorAll('button'));
+      const searchBtn = buttons.find(b => (b.innerText||'').trim()==='검색');
+      if(searchBtn){ searchBtn.click(); return true; }
+    }
+  } catch(e) {}
+  return false;
+}
+function setFormsToParent(){
+  document.querySelectorAll('form[data-search-form]').forEach(f=>{
+    try { f.action = buildParentUrl('map_search_product', f.querySelector('[name="map_search_product"]').value || '', 'inbound_loc'); } catch(e) {}
+  });
+}
+
+function navigateTop(href){
+  try { window.top.location.assign(href); return; } catch(e) {}
+  try { window.parent.location.assign(href); return; } catch(e) {}
+  try { window.open(href, '_top'); return; } catch(e) {}
+  const a = document.createElement('a');
+  a.href = href;
+  a.target = '_top';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+}
+function highlightLines(lineCodes, on){
+  if(!lineCodes || !lineCodes.length) return;
+  document.querySelectorAll('[data-loc]').forEach(el=>{
+    if(lineCodes.includes(el.dataset.loc)) el.classList.toggle('line-soft', on);
+  });
+}
+function showDetail(loc){
+  document.querySelectorAll('.line-soft').forEach(el=>el.classList.remove('line-soft'));
+  document.querySelectorAll('[data-loc]').forEach(b=>{
+    const cellLoc = b.dataset.loc || '';
+    b.classList.toggle('selected', cellLoc===loc || String(loc||'').startsWith(cellLoc+'-') || (cellLoc==='N' && specialLocations.includes(loc||'')));
+  });
+  const rows=rowsFor(loc);
+  const d=document.getElementById('detail');
+  let title=loc;
+  const p=loc.split('-'); if(p.length>=2) title=p[0]+'-'+p[1];
+  if(!rows.length){d.innerHTML=`<div class="side-title">${esc(title)}</div><div class="zone-pill">${esc(zoneName(loc, rows))}</div><div class="caption">현재 이 로케이션에는 표시할 재고가 없습니다.</div>`; return;}
+  // 단(段)별 탭으로 나누면 여러 단에 걸친 재고 행(location_range_cells)이
+  // 탭마다 중복 표시된다. 미니 랙이 이미 재고 행 하나당 정확한 단 점유
+  // 모양을 보여주므로, 탭 없이 이 위치를 포함하는 재고를 그대로 나열한다.
+  const groupCount=new Set(rows.map(r=>(r.product_name||'-') + '::' + occupiedKey(r.occupied_cells))).size;
+  let html=`<div class="side-title">${esc(title)}</div><div class="zone-pill">${esc(zoneName(loc, rows))}</div><div class="metric"><div class="caption">이 위치를 포함하는 재고</div><div class="n">${groupCount}건</div><div class="muted" style="margin-top:6px;">제품을 선택하면 점유 영역이 지도에 표시됩니다.</div></div>`;
+  html+=productCardsHtml(rows);
+  d.innerHTML=html;
+  // 제품 카드에 마우스를 올리거나 탭하면, 그 제품이 실제로 차지하는 라인들만
+  // 메인 2D 맵에서 은은하게 강조한다. 메인 맵은 라인(X축)까지만 책임지고,
+  // 정확한 단(Y축) 점유 모양은 카드 안의 미니 랙이 보여준다.
+  d.querySelectorAll('[data-occupied-lines]').forEach(card=>{
+    const lineCodes=(card.dataset.occupiedLines||'').split(',').filter(Boolean);
+    if(!lineCodes.length) return;
+    card.addEventListener('mouseenter', ()=>highlightLines(lineCodes, true));
+    card.addEventListener('mouseleave', ()=>{ if(!card.classList.contains('card-pinned')) highlightLines(lineCodes, false); });
+    card.addEventListener('click', (ev)=>{
+      if(ev.target.closest('button')) return;
+      const wasPinned=card.classList.contains('card-pinned');
+      d.querySelectorAll('.card-pinned').forEach(other=>{
+        if(other!==card){ other.classList.remove('card-pinned'); highlightLines((other.dataset.occupiedLines||'').split(',').filter(Boolean), false); }
+      });
+      card.classList.toggle('card-pinned', !wasPinned);
+      highlightLines(lineCodes, !wasPinned);
+    });
+  });
+  d.querySelectorAll('[data-product]').forEach(btn=>btn.addEventListener('click',(ev)=>{
+    ev.stopPropagation();
+    const card=btn.closest('.detail-card');
+    const old=card.nextElementSibling;
+    if(old && old.classList.contains('product-inline-detail')){
+      // 같은 버튼을 다시 누르면 접는다(예전엔 여기서 버튼을 disabled로 만들어
+      // 다시 눌러도 이 분기에 아예 도달하지 못했다).
+      old.remove();
+      btn.textContent='제품 상세 보기';
+      return;
+    }
+    d.querySelectorAll('.product-inline-detail').forEach(x=>x.remove());
+    d.querySelectorAll('[data-product]').forEach(x=>x.textContent='제품 상세 보기');
+    card.insertAdjacentHTML('afterend', `<div class="product-inline-detail">${productDetail(btn.dataset.product)}</div>`);
+    btn.textContent='접기';
+    const box=card.nextElementSibling;
+    box.querySelectorAll('[data-jump-loc]').forEach(j=>j.addEventListener('click',()=>showDetail(j.dataset.jumpLoc)));
+    box.querySelectorAll('[data-search-product]').forEach(t=>t.addEventListener('click',(ev)=>{
+      ev.preventDefault();
+      ev.stopPropagation();
+      const productName = t.dataset.searchProduct || '';
+      if(!productName) return;
+      if(tryParentSearch(productName)) return;
+      const href = buildParentUrl('map_search_product', productName, 'inbound_loc');
+      const form = t.closest('form');
+      if(form) form.action = href;
+      navigateTop(href);
+    }));
+    setFormsToParent();
+  }));
+  d.querySelectorAll('[data-move-id]').forEach(btn=>btn.addEventListener('click',(ev)=>{
+    ev.preventDefault();
+    ev.stopPropagation();
+    const invId = btn.dataset.moveId || '';
+    if(!invId) return;
+    // 이 iframe은 sandbox에 allow-top-navigation이 없어 window.top.location.assign은
+    // 브라우저가 조용히 막는다(버튼을 눌러도 아무 반응이 없는 것처럼 보임). 그래서
+    // 최상위 페이지 이동 대신, 부모 문서(같은 출처라 DOM 접근은 허용됨)에 숨겨 그려둔
+    // 입력칸에 재고 id만 적어 넣어 그 on_change가 실제 화면 전환을 하게 한다.
+    try {
+      const doc = window.parent.document;
+      const input = Array.from(doc.querySelectorAll('input')).find(x => (x.getAttribute('aria-label')||'')==='__map_move_inv_id_bridge');
+      if(input){
+        input.focus();
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(input, invId);
+        input.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'insertText', data:invId}));
+        input.dispatchEvent(new Event('change', {bubbles:true}));
+        input.blur();
+        return;
+      }
+    } catch(e) {}
+    navigateTop(buildParentUrlMulti({move_inv_id: invId}, ['map_search_product', 'inbound_loc']));
+  }));
+}
+function toggleSpecialMenu(forceClose=false){
+  const menu=document.getElementById('specialMenu');
+  if(!menu) return;
+  if(forceClose){menu.classList.remove('open'); return;}
+  menu.classList.toggle('open');
+}
+document.querySelectorAll('[data-special-loc]').forEach(btn=>btn.addEventListener('click',(ev)=>{
+  ev.preventDefault(); ev.stopPropagation();
+  const loc=btn.dataset.specialLoc || '';
+  toggleSpecialMenu(true);
+  document.querySelectorAll('[data-special-loc]').forEach(x=>x.classList.toggle('selected', x.dataset.specialLoc===loc));
+  showDetail(loc);
+}));
+document.querySelectorAll('[data-loc]').forEach(btn=>btn.addEventListener('click',(ev)=>{
+  const loc=btn.dataset.loc || '';
+  if(loc==='N'){
+    ev.preventDefault(); ev.stopPropagation();
+    toggleSpecialMenu(false);
+    return;
+  }
+  toggleSpecialMenu(true);
+  showDetail(loc);
+}));
+if(initialSelectedLocation){setTimeout(()=>showDetail(initialSelectedLocation), 80);}
+</script></body></html>
