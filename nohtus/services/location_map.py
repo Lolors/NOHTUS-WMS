@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import mimetypes
 from pathlib import Path
 
@@ -20,6 +21,22 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _THUMB_DIR = _PROJECT_ROOT / "data" / "product_images" / "thumbs"
 
 __all__ = ["get_product_image_path", "render_location_map", "product_thumbnail_uris_for"]
+
+_logger = logging.getLogger(__name__)
+
+
+def _patch(html, target, replacement, label):
+    """location_map_legacy.py의 출력에 문자열 치환으로 기능을 덧붙인다.
+
+    target이 원본에서 사라지면(예: legacy 템플릿 리팩토링) str.replace()는
+    조용히 아무 일도 안 하고 넘어가버린다 — 실제로 이렇게 수출대기 P존
+    카드 그룹핑 패치가 한동안 죽어 있었다. 매치 여부를 로그로 남겨서
+    다음엔 조용히 묻히지 않게 한다.
+    """
+    if target not in html:
+        _logger.warning("location_map enhanced_html: patch %r target not found, skipped", label)
+        return html
+    return html.replace(target, replacement, 1)
 
 
 def _product_thumbnail_data_uris():
@@ -126,18 +143,26 @@ def render_location_map():
     original_html = _legacy.components.html
 
     def enhanced_html(html, *args, **kwargs):
-        html = html.replace(
+        html = _patch(
+            html,
             "const txData = DATA.tx || [];",
             f"const rawTxData = DATA.tx || [];\nconst txData = rawTxData.filter(t => !String(t.tx_type || '').includes('재고조사불러오기') && !String(t.memo || '').includes('재고조사불러오기'));\nconst productImages = {product_images};\nconst exportWaitingItems = {export_waiting};",
-            1,
+            "inject productImages/exportWaitingItems",
         )
-        html = html.replace(
+        html = _patch(
+            html,
             ".prod-box{border-top:1px solid #e2e8f0;margin-top:14px;padding-top:14px;text-align:center;} .photo-box{width:150px;height:150px;margin:0 auto 10px;border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:700;}",
             ".prod-box{border-top:1px solid #e2e8f0;margin-top:14px;padding-top:14px;text-align:center;} .photo-box{width:150px;height:150px;margin:0 auto 10px;border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:700;overflow:hidden;} .photo-box img{width:100%;height:100%;object-fit:cover;object-position:center;display:block;}",
-            1,
+            "photo-box overflow css",
         )
-        html = html.replace('<div class="photo-box">📷</div>', '<div class="photo-box">${productImages[name] ? `<img src="${productImages[name]}" alt="${esc(name)}">` : "📷"}</div>', 1)
-        html = html.replace(
+        html = _patch(
+            html,
+            '<div class="photo-box">📷</div>',
+            '<div class="photo-box">${productImages[name] ? `<img src="${productImages[name]}" alt="${esc(name)}">` : "📷"}</div>',
+            "photo-box image markup",
+        )
+        html = _patch(
+            html,
             "function productCardsHtml(rows){",
             """function exportWaitingCardsHtml(fallbackRows){
   const orders={};
@@ -147,10 +172,20 @@ def render_location_map():
   return entries.map(order=>{const total=order.items.reduce((sum,item)=>sum+(Number(item.qty)||0),0);const productGroups={};order.items.forEach(item=>{const name=item.product_name||'-';if(!productGroups[name])productGroups[name]=[];productGroups[name].push(item);});const products=Object.entries(productGroups).map(([name,items])=>{const qty=items.reduce((sum,item)=>sum+(Number(item.qty)||0),0);const lines=items.map(item=>`<div class="lot-exp">${esc(item.company||'-')} · ${Number(item.qty)||0}EA&nbsp;&nbsp;${esc(item.lot||'-')} | ${esc(cleanDate(item.exp_date||'-'))}</div>`).join('');return `<div class="export-product-row"><div class="card-top"><span class="product-title">${esc(name)}</span><span class="qty-text">${qty} EA</span></div>${lines}</div>`;}).join('');return `<div class="detail-card export-order-card"><div class="export-order-title">${esc(order.country)}-${esc(order.buyer)}-${esc(order.transport_method)}</div><div class="muted">남은 수출대기 총수량: ${total} EA</div>${products}</div>`;}).join('');
 }
 function productCardsHtml(rows){""",
-            1,
+            "define exportWaitingCardsHtml",
         )
-        html = html.replace("html+=productCardsHtml(grouped[lvl]);", "html+=(loc==='P' ? exportWaitingCardsHtml(grouped[lvl]) : productCardsHtml(grouped[lvl]));", 1)
-        html = html.replace("</style>", ".export-order-card{border:1.5px solid #c7d2fe;background:#f8faff;padding:14px;margin-bottom:14px}.export-order-title{font-size:18px;font-weight:800;color:#1e3a8a;margin-bottom:5px}.export-product-row{border-top:1px solid #dbeafe;margin-top:12px;padding-top:12px}.export-product-row:first-of-type{border-top:0;margin-top:8px;padding-top:0}</style>", 1)
+        html = _patch(
+            html,
+            "html+=productCardsHtml(rows);",
+            "html+=(loc==='P' ? exportWaitingCardsHtml(rows) : productCardsHtml(rows));",
+            "wire P-zone card grouping into showDetail",
+        )
+        html = _patch(
+            html,
+            "</style>",
+            ".export-order-card{border:1.5px solid #c7d2fe;background:#f8faff;padding:14px;margin-bottom:14px}.export-order-title{font-size:18px;font-weight:800;color:#1e3a8a;margin-bottom:5px}.export-product-row{border-top:1px solid #dbeafe;margin-top:12px;padding-top:12px}.export-product-row:first-of-type{border-top:0;margin-top:8px;padding-top:0}</style>",
+            "export-order-card css",
+        )
         html = apply_new_layout(html)
         return original_html(html, *args, **kwargs)
 
