@@ -112,7 +112,6 @@ def page_mobile_stock_finder():
     original_stock_rows = mobile_stock.mobile_stock_rows
     original_candidates = mobile_stock.mobile_product_candidates
     original_expiry_inventory = mobile_stock._expiry_inventory
-    original_favorites = mobile_stock.mobile_favorites_for_user
     original_render_result_list = mobile_layout._render_result_list
 
     def filtered_stock_rows(product_name, company_filter="전체", expiry_filter="전체"):
@@ -133,17 +132,9 @@ def page_mobile_stock_finder():
     def filtered_expiry_inventory(days_limit=365):
         return _exclude_material_or_promo_rows(original_expiry_inventory(days_limit))
 
-    def filtered_favorites(username):
-        favorites = original_favorites(username)
-        if not isinstance(favorites, pd.DataFrame) or favorites.empty or "product_name" not in favorites.columns:
-            return favorites
-        keep = favorites["product_name"].astype(str).apply(has_visible_stock)
-        return favorites.loc[keep].copy()
-
     mobile_stock.mobile_stock_rows = filtered_stock_rows
     mobile_stock.mobile_product_candidates = filtered_candidates
     mobile_stock._expiry_inventory = filtered_expiry_inventory
-    mobile_stock.mobile_favorites_for_user = filtered_favorites
     mobile_layout._render_result_list = _render_result_list_with_export_badge
     try:
         _inject_export_waiting_badge_css()
@@ -157,5 +148,4 @@ def page_mobile_stock_finder():
         mobile_stock.mobile_stock_rows = original_stock_rows
         mobile_stock.mobile_product_candidates = original_candidates
         mobile_stock._expiry_inventory = original_expiry_inventory
-        mobile_stock.mobile_favorites_for_user = original_favorites
         mobile_layout._render_result_list = original_render_result_list

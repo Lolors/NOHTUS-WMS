@@ -448,18 +448,3 @@ def _render_expiry_inventory():
     )
 
 
-def page_mobile_stock_finder():
-    """모바일 재고검색과 임박재고를 앱형 검색 UX로 렌더링한다."""
-    _inject_mobile_search_css()
-    original_search = mobile_stock._render_mobile_search
-    original_detail = mobile_stock._render_product_detail
-    original_expiry = mobile_stock._render_expiry_inventory
-    mobile_stock._render_mobile_search = _render_mobile_search
-    mobile_stock._render_product_detail = _render_stock_detail
-    mobile_stock._render_expiry_inventory = _render_expiry_inventory
-    try:
-        return mobile_stock.page_mobile_stock_finder()
-    finally:
-        mobile_stock._render_mobile_search = original_search
-        mobile_stock._render_product_detail = original_detail
-        mobile_stock._render_expiry_inventory = original_expiry
