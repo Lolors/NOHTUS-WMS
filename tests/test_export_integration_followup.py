@@ -293,8 +293,8 @@ class ExportIntegrationFollowupTests(TestCase):
         self.assertLess(navigation.index('"수출대기 저장"'), navigation.index('"박스 패킹"'))
         self.assertLess(navigation.index('"박스 패킹"'), navigation.index('"수출확정 매출 등록"'))
 
-        application = Path("nohtus/application.py").read_text(encoding="utf-8")
-        self.assertIn('elif menu == "수출확정 매출 등록": page_export_sales_registration()', application)
+        registry = Path("nohtus/pages/registry.py").read_text(encoding="utf-8")
+        self.assertIn('"수출확정 매출 등록": page_export_sales_registration,', registry)
 
     def test_confirmation_was_removed_from_order_edit_and_moved_to_own_page(self):
         order_edit = Path("nohtus/export_app/views/주문_검색_및_수정.py").read_text(encoding="utf-8")

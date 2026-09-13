@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from html import escape
-from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -14,15 +13,6 @@ from nohtus.db import q
 from nohtus.dates import display_date_only
 from nohtus.locations import REVERSED_LINE_RANGES, expand_row_range
 from nohtus.services.location_map_layout import load_location_map_layout
-
-def get_product_image_path(product_name):
-    df = q("SELECT image_path FROM products WHERE standard_name=?", (product_name,))
-    if df.empty:
-        return ""
-    value = str(df.iloc[0].get("image_path") or "")
-    full = Path(__file__).parent / value
-    return str(full) if value and full.exists() else ""
-
 
 def _range_block_locations(loc, r):
     """이 재고 행이 "채워짐"으로 함께 표시해야 할 추가 칸 목록(자기 자신 포함)을 만든다.

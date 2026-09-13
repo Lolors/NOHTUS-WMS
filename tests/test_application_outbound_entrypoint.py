@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 
-APPLICATION_PATH = Path(__file__).parents[1] / "nohtus" / "application.py"
+APPLICATION_PATH = Path(__file__).parents[1] / "nohtus" / "pages" / "outbound_entry.py"
 
 
 class ApplicationOutboundEntrypointTests(unittest.TestCase):

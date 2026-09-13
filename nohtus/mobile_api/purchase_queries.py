@@ -1,7 +1,7 @@
 """모바일 매입가 조회 API가 사용하는 조회 전용 함수.
 
-데스크톱의 nohtus/pages/purchase_history_all_products.py(현재 제품마스터 +
-과거 매입 DB의 모든 제품명을 함께 검색하는 버전, purchase_history_single.py가
+nohtus/services/purchase_history_lookup.py(현재 제품마스터 + 과거 매입 DB의
+모든 제품명을 함께 검색하는 버전, 데스크톱 purchase_history_single.py가
 실제로 라우팅하는 것도 이 검색 로직)의 순수 함수를 그대로 재사용한다.
 업로드/가져오기 기능은 데스크톱 전용 관리 작업이라 모바일에는 넣지 않는다.
 """
@@ -10,10 +10,12 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-import nohtus.pages.purchase_history as purchase_page
-import nohtus.pages.purchase_history_all_products as purchase_all
+from nohtus.services.expiry_rules import PERIOD_DAYS
+from nohtus.services.purchase_history_lookup import (
+    all_purchase_product_options,
+    query_all_purchase_rows,
+)
 
-PERIOD_DAYS = {"3m": 90, "6m": 180, "1y": 365}
 _EARLIEST_DATE = "2000-01-01"
 
 
@@ -29,14 +31,14 @@ def product_candidates(term, limit=20):
     term = (term or "").strip().lower()
     if not term:
         return []
-    options = purchase_all._all_purchase_product_options()
+    options = all_purchase_product_options()
     matched = [name for name in options if term in name.lower()]
     matched.sort(key=lambda name: (not name.lower().startswith(term), name))
     return matched[:limit]
 
 
 def _rows_for(product_name, start_date, end_date):
-    df = purchase_all._query_all_purchase_rows("", product_name, start_date, end_date)
+    df = query_all_purchase_rows("", product_name, start_date, end_date)
     return df
 
 

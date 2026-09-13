@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from html import escape
 
 import pandas as pd
@@ -8,6 +8,7 @@ import streamlit as st
 
 from nohtus.db import q
 from nohtus.dates import display_date_only
+from nohtus.services import expiry_rules
 
 COMPANY_GROUPS = {
     "노투스팜·NOH·노투스": ["노투스팜", "NOH", "노투스"],
@@ -60,27 +61,10 @@ def _expiry_alert_rows(companies: list[str]) -> pd.DataFrame:
 
 
 def _expiry_badge(exp_date_text: str) -> tuple[str, str]:
-    text = str(exp_date_text or "").strip()
-    if not text:
+    badge = expiry_rules.expiry_badge_for_date_text(exp_date_text)
+    if not badge:
         return "", ""
-
-    parsed = None
-    for fmt in ("%Y.%m.%d", "%Y-%m-%d", "%Y/%m/%d"):
-        try:
-            parsed = datetime.strptime(text, fmt).date()
-            break
-        except ValueError:
-            continue
-
-    if parsed is None:
-        return "", ""
-
-    days = (parsed - date.today()).days
-    if days <= 90:
-        return "3개월 이내", "red"
-    if days <= 180:
-        return "6개월 이내", "yellow"
-    return "1년 이내", "blue"
+    return badge["label"], badge["level"]
 
 
 def _render_html_table(rows: pd.DataFrame):

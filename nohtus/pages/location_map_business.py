@@ -7,15 +7,12 @@ import streamlit.components.v1 as components
 import nohtus.pages.location_map as location_map_page
 from nohtus.pages.location_map import page_map as _page_map
 from nohtus.db import q
+from nohtus.services.stock_rules import is_export_waiting_location as _is_export_waiting_location
 
 
 _ORIGINAL_MAP_SEARCH_RESULTS = location_map_page.page_map_search_results
 _AVAILABLE_ONLY_KEY = "map_search_available_only"
 _EXCLUDE_MATERIALS_KEY = "map_search_exclude_materials"
-
-
-def _normalized_location(value):
-    return str(value or "").strip().upper().replace(" ", "")
 
 
 def _material_product_names() -> set[str]:
@@ -59,7 +56,7 @@ def _page_map_search_results_with_available_filter(term, compact: bool = False):
             keep = pd.Series(True, index=result.index)
             locations = result["location"].fillna("").astype(str)
             if available_only:
-                keep &= ~locations.apply(lambda value: _normalized_location(value).startswith("P"))
+                keep &= ~locations.apply(_is_export_waiting_location)
             if exclude_materials:
                 if material_products and "product_name" in result.columns:
                     keep &= ~result["product_name"].fillna("").astype(str).str.strip().isin(material_products)
@@ -184,9 +181,7 @@ def page_map():
             filtered_inv = inv_df.copy()
             locations = filtered_inv["location"].fillna("").astype(str)
             if bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False)):
-                filtered_inv = filtered_inv.loc[
-                    ~locations.apply(lambda value: _normalized_location(value).startswith("P"))
-                ].copy()
+                filtered_inv = filtered_inv.loc[~locations.apply(_is_export_waiting_location)].copy()
                 locations = filtered_inv["location"].fillna("").astype(str)
             if bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)):
                 keep = pd.Series(True, index=filtered_inv.index)

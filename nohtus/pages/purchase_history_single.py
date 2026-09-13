@@ -7,8 +7,11 @@ import pandas as pd
 import streamlit as st
 
 import nohtus.pages.purchase_history as purchase_page
-import nohtus.pages.purchase_history_all_products as all_products
 from nohtus.db import connect, q
+from nohtus.services.purchase_history_lookup import (
+    all_purchase_product_options,
+    query_all_purchase_rows,
+)
 
 
 NOTUS_COLUMN_ALIASES = {
@@ -118,7 +121,7 @@ def _render_purchase_page(original_render_import_box):
     st.title("매입가 조회")
     st.caption("표준제품명을 선택하면 노투스팜·노투스·NOH ERP명까지 함께 찾아 과거 매입가를 조회합니다.")
 
-    options = all_products._all_purchase_product_options()
+    options = all_purchase_product_options()
     if not options:
         st.info("제품 매칭표에 등록된 제품이 없습니다. 먼저 제품 매칭표를 업로드해 주세요.")
         return
@@ -148,7 +151,7 @@ def _render_purchase_page(original_render_import_box):
 
     frames = []
     for item_no, product_name in selected:
-        rows = all_products._query_all_purchase_rows(item_no, product_name, str(start), str(end))
+        rows = query_all_purchase_rows(item_no, product_name, str(start), str(end))
         if not rows.empty:
             frames.append(rows)
 

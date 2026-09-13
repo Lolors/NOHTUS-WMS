@@ -19,10 +19,10 @@ class ExportSearchAndWaitingSaveUiTests(TestCase):
 
     def test_waiting_menu_and_copy_use_save_wording(self):
         navigation = Path('nohtus/navigation.py').read_text(encoding='utf-8')
-        application = Path('nohtus/application.py').read_text(encoding='utf-8')
+        registry = Path('nohtus/pages/registry.py').read_text(encoding='utf-8')
         view = Path('nohtus/export_app/views/실출고_입력.py').read_text(encoding='utf-8')
         self.assertIn('"수출대기 저장"', navigation)
-        self.assertIn('menu == "수출대기 저장"', application)
+        self.assertIn('"수출대기 저장"', registry)
         self.assertIn("st.title('수출대기 저장')", view)
         self.assertIn("'출고 저장'", view)
         self.assertNotIn('이미 연결된 실재고', view)
