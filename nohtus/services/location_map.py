@@ -12,24 +12,14 @@ import streamlit as st
 from nohtus.db import q
 from nohtus.db import read_cache_token as _wms_read_cache_token
 from nohtus.services.export_waiting import ensure_export_waiting_tables
+from nohtus.services.product_images import get_product_image_path
 from . import location_map_legacy as _legacy
 from .location_map_new_layout import apply_new_layout
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _THUMB_DIR = _PROJECT_ROOT / "data" / "product_images" / "thumbs"
 
-
-def get_product_image_path(product_name):
-    df = q("SELECT image_path FROM products WHERE standard_name=? AND COALESCE(image_path, '') <> '' LIMIT 1", (product_name,))
-    if df.empty:
-        return ""
-    value = str(df.iloc[0].get("image_path") or "").strip()
-    if not value:
-        return ""
-    path = Path(value)
-    if not path.is_absolute():
-        path = _PROJECT_ROOT / path
-    return str(path) if path.is_file() else ""
+__all__ = ["get_product_image_path", "render_location_map", "product_thumbnail_uris_for"]
 
 
 def _product_thumbnail_data_uris():

@@ -17,7 +17,7 @@ from nohtus.db import q
 from nohtus.locations import expand_row_range
 from nohtus.services.expiry_rules import PERIOD_DAYS as EXPIRY_PERIOD_DAYS
 from nohtus.services.expiry_rules import expiry_badge_for as _expiry_badge_for
-from nohtus.services.location_map import get_product_image_path
+from nohtus.services.product_images import get_product_image_path
 from nohtus.services.stock_rules import BIDATA_COMPANY
 from nohtus.services.stock_rules import (
     exclude_material_or_promo_rows as _exclude_material_or_promo_rows,

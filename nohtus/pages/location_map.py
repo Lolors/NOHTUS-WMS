@@ -261,7 +261,7 @@ def _is_material_or_promo_location(value):
 def page_map_search_results(term, compact: bool = False):
     """로케이션맵 > 제품명 검색 결과."""
     try:
-        from nohtus.services.location_map import get_product_image_path
+        from nohtus.services.product_images import get_product_image_path
     except Exception:
         get_product_image_path = lambda _name: ""
 

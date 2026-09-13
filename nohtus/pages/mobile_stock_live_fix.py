@@ -8,7 +8,7 @@ import streamlit as st
 
 import nohtus.pages.mobile_stock as mobile_stock
 from nohtus.services.expiry_rules import PERIOD_DAYS_KO as _EXPIRY_PERIOD_DAYS_KO
-from nohtus.services.location_map import get_product_image_path
+from nohtus.services.product_images import get_product_image_path
 
 
 DETAIL_STATE_KEY = "mobile_search_detail_product"
