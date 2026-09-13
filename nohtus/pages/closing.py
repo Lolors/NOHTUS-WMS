@@ -1,9 +1,11 @@
+import json
+import re
 from datetime import date
 from html import escape
-from io import BytesIO
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from nohtus.db import q
 from nohtus.dates import display_date_only
@@ -12,7 +14,19 @@ from nohtus.services.closing import (
     _infer_customer_from_title,
     _extract_inbound_source_from_memo,
 )
-from nohtus.services.outbound import _find_korean_font
+from nohtus.services.export_waiting import ensure_export_waiting_tables
+
+
+_VALID_OUTBOUND_HISTORY_TYPES = (
+    "'출고지시'",
+    "'출고지시수정'",
+    "'출고지시 재차감'",
+    "'출고'",
+    "'사업장이동'",
+    "'사업장+위치이동'",
+    "'사업장 이동'",
+)
+_PRINT_BUTTON_LABEL = "마감 체크리스트 출력"
 
 
 def _safe_int(value, default=0):
@@ -127,9 +141,193 @@ def _today_outbound_display_df(items):
     return pd.DataFrame(rows, columns=["사업장", "로케이션", "제품명", "유통기한", "매출처", "수량", "총 출고수량", "최종재고"])
 
 
+def _natural_location_key(value):
+    """A1, A2, A10 순서처럼 로케이션의 숫자 부분을 실제 숫자로 정렬한다."""
+    text = str(value or "").strip().upper()
+    if not text:
+        return ((2, ""),)
+    parts = re.findall(r"\d+|[^\d]+", text)
+    key = []
+    for part in parts:
+        if part.isdigit():
+            key.append((0, int(part)))
+        else:
+            key.append((1, part))
+    return tuple(key)
+
+
+def _sort_checklist_items(items):
+    if items is None or items.empty or "로케이션" not in items.columns:
+        return items
+    sorted_items = items.copy()
+    sorted_items["_location_sort"] = sorted_items["로케이션"].apply(_natural_location_key)
+    sort_cols = ["_location_sort"]
+    for column in ["사업장", "표준제품명", "제조번호", "유통기한", "출고지시서ID"]:
+        if column in sorted_items.columns:
+            sort_cols.append(column)
+    sorted_items = sorted_items.sort_values(sort_cols, kind="stable").drop(columns=["_location_sort"])
+    return sorted_items.reset_index(drop=True)
+
+
+def _deduplicate_outbound_details(items):
+    """일반 출고의 동일 상세가 여러 ID로 저장돼도 체크리스트에는 한 번만 남긴다."""
+    if items is None or items.empty:
+        return items
+
+    result = items.copy()
+    if "출고상세ID" in result.columns:
+        detail_ids = result["출고상세ID"]
+        duplicated_ids = detail_ids.notna() & detail_ids.duplicated(keep="first")
+        result = result.loc[~duplicated_ids].copy()
+
+    signature_columns = [
+        "출고지시서ID", "재고ID", "사업장", "로케이션", "표준제품명",
+        "제조번호", "유통기한", "출고수량",
+    ]
+    if not all(column in result.columns for column in signature_columns):
+        return result.reset_index(drop=True)
+
+    order_ids = pd.to_numeric(result["출고지시서ID"], errors="coerce")
+    regular_outbound = order_ids.gt(0)
+    duplicated_signatures = result.duplicated(subset=signature_columns, keep="first")
+    return result.loc[~(regular_outbound & duplicated_signatures)].reset_index(drop=True)
+
+
+def _location_final_stock_map(items):
+    """출고·수출대기 후 각 출발 로케이션에 실제로 남은 현재 수량을 계산한다."""
+    if items is None or items.empty:
+        return {}
+    key_cols = ["사업장", "로케이션", "표준제품명", "제조번호", "유통기한"]
+    result = {}
+    for row in items[key_cols].drop_duplicates().itertuples(index=False):
+        company, location, product, lot, exp = [str(value or "-") for value in row]
+        stock = q(
+            """
+            SELECT COALESCE(SUM(qty), 0) AS qty
+            FROM inventory
+            WHERE company=?
+              AND location=?
+              AND product_name=?
+              AND COALESCE(lot, '-')=?
+              AND COALESCE(exp_date, '-')=?
+            """,
+            (company, location, product, lot, exp),
+        )
+        result[(company, location, product, lot, exp)] = int(stock.iloc[0]["qty"] or 0) if not stock.empty else 0
+    return result
+
+
+def _export_waiting_rows(ds):
+    """마감에는 당일 신규 등록 전체와 당일 수정 중 실제 P 적재 증가분만 표시한다."""
+    ensure_export_waiting_tables()
+    date_text = str(ds or "")
+
+    # 당일 새로 등록한 수출대기는 현재 남아 있는 목록만 마감 대상으로 본다.
+    # 수정 과정에서 삭제된 품목은 export_waiting_items에서 제거되므로 표시되지 않는다.
+    created_rows = q(
+        """
+        SELECT o.title AS 출고지시서제목,
+               -o.id AS 출고지시서ID,
+               i.source_inventory_id AS 재고ID,
+               i.company AS 사업장,
+               i.source_location AS 로케이션,
+               i.product_name AS 표준제품명,
+               COALESCE(i.lot, '-') AS 제조번호,
+               COALESCE(i.exp_date, '-') AS 유통기한,
+               i.qty AS 출고수량
+        FROM export_waiting_orders o
+        JOIN export_waiting_items i ON o.id=i.order_id
+        WHERE substr(COALESCE(o.created_at, ''), 1, 10)=?
+          AND o.status IN ('waiting', 'partial', 'confirmed')
+        ORDER BY i.company, i.source_location, i.product_name,
+                 i.lot, i.exp_date, o.id, i.id
+        """,
+        (date_text,),
+    )
+
+    # 과거 수출대기 수정은 기존 목록 전체를 원복한 뒤 다시 P에 적재한다.
+    # 따라서 P 적재 이력만 세면 수정/삭제 시도 횟수만큼 주문 전체가 반복된다.
+    # 같은 날의 P 입출고를 재고키별로 상계해 실제 순증가분만 표시한다.
+    changed_rows = q(
+        """
+        SELECT o.title AS 출고지시서제목,
+               -o.id AS 출고지시서ID,
+               NULL AS 재고ID,
+               CASE
+                 WHEN TRIM(COALESCE(t.to_location,''))='P' THEN COALESCE(NULLIF(TRIM(t.from_company),''), t.to_company)
+                 ELSE COALESCE(NULLIF(TRIM(t.to_company),''), t.from_company)
+               END AS 사업장,
+               CASE
+                 WHEN TRIM(COALESCE(t.to_location,''))='P' THEN COALESCE(NULLIF(TRIM(t.from_location),''), '-')
+                 ELSE COALESCE(NULLIF(TRIM(t.to_location),''), '-')
+               END AS 로케이션,
+               t.product_name AS 표준제품명,
+               COALESCE(t.lot, '-') AS 제조번호,
+               COALESCE(t.exp_date, '-') AS 유통기한,
+               SUM(
+                 CASE
+                   WHEN TRIM(COALESCE(t.to_location,''))='P' THEN ABS(COALESCE(t.qty,0))
+                   WHEN TRIM(COALESCE(t.from_location,''))='P' THEN -ABS(COALESCE(t.qty,0))
+                   ELSE 0
+                 END
+               ) AS 출고수량
+        FROM transactions t
+        JOIN export_waiting_orders o
+          ON COALESCE(t.memo,'') LIKE '%수출번호: ' || o.export_no || '%'
+         AND o.id = (
+             SELECT MAX(o2.id)
+             FROM export_waiting_orders o2
+             WHERE COALESCE(t.memo,'') LIKE '%수출번호: ' || o2.export_no || '%'
+         )
+        WHERE substr(COALESCE(t.created_at,''), 1, 10)=?
+          AND t.tx_type='위치이동'
+          AND COALESCE(t.memo,'') LIKE '수출대기 수정 /%'
+          AND (
+                TRIM(COALESCE(t.to_location,''))='P'
+                OR TRIM(COALESCE(t.from_location,''))='P'
+              )
+          AND substr(COALESCE(o.created_at,''), 1, 10)<>?
+        GROUP BY o.id, o.title,
+                 CASE
+                   WHEN TRIM(COALESCE(t.to_location,''))='P' THEN COALESCE(NULLIF(TRIM(t.from_company),''), t.to_company)
+                   ELSE COALESCE(NULLIF(TRIM(t.to_company),''), t.from_company)
+                 END,
+                 CASE
+                   WHEN TRIM(COALESCE(t.to_location,''))='P' THEN COALESCE(NULLIF(TRIM(t.from_location),''), '-')
+                   ELSE COALESCE(NULLIF(TRIM(t.to_location),''), '-')
+                 END,
+                 t.product_name, COALESCE(t.lot,'-'), COALESCE(t.exp_date,'-')
+        HAVING SUM(
+                 CASE
+                   WHEN TRIM(COALESCE(t.to_location,''))='P' THEN ABS(COALESCE(t.qty,0))
+                   WHEN TRIM(COALESCE(t.from_location,''))='P' THEN -ABS(COALESCE(t.qty,0))
+                   ELSE 0
+                 END
+               ) > 0
+        ORDER BY 사업장, 로케이션, 표준제품명
+        """,
+        (date_text, date_text),
+    )
+
+    frames = []
+    if created_rows is not None and not created_rows.empty:
+        frames.append(created_rows)
+    if changed_rows is not None and not changed_rows.empty:
+        frames.append(changed_rows)
+    if not frames:
+        return pd.DataFrame(
+            columns=[
+                "출고지시서제목", "출고지시서ID", "재고ID", "사업장", "로케이션",
+                "표준제품명", "제조번호", "유통기한", "출고수량",
+            ]
+        )
+    return pd.concat(frames, ignore_index=True)
+
+
 def _today_outbound_html(items, *, include_style=True):
+    items = _sort_checklist_items(items)
     group_cols = ["사업장", "로케이션", "표준제품명", "제조번호", "유통기한"]
-    final_map = _today_outbound_final_stock_map(items)
+    final_map = _location_final_stock_map(items)
     html = []
     if include_style:
         html.extend([
@@ -144,26 +342,21 @@ def _today_outbound_html(items, *, include_style=True):
         "<table class='today-out-table'>",
         "<thead><tr><th>사업장</th><th>로케이션</th><th>제품명</th><th>유통기한</th><th>매출처</th><th>수량</th><th>총 출고수량</th><th>최종재고</th></tr></thead><tbody>",
     ])
-    for key, grp in items.groupby(group_cols, sort=False, dropna=False):
+    for key, group in items.groupby(group_cols, sort=False, dropna=False):
         company, location, product, lot, exp = key
-        company = _safe_text(company)
-        location = _safe_text(location, "-")
-        product = _safe_text(product)
-        lot = _safe_text(lot, "-")
-        exp = _safe_text(exp, "-")
-        total_qty = _safe_int(grp["출고수량"].sum())
-        final_qty = final_map.get((company, product, lot, exp), 0)
-        rowspan = len(grp)
-        for i, rr in enumerate(grp.itertuples(index=False)):
+        total_qty = int(group["출고수량"].sum())
+        final_qty = final_map.get(tuple(str(value or "-") for value in key), 0)
+        rowspan = len(group)
+        for index, row in enumerate(group.itertuples(index=False)):
             html.append("<tr>")
-            if i == 0:
-                html.append(f"<td rowspan='{rowspan}'>{escape(company)}</td>")
-                html.append(f"<td rowspan='{rowspan}'>{escape(location)}</td>")
-                html.append(f"<td rowspan='{rowspan}'>{escape(product)}</td>")
-                html.append(f"<td rowspan='{rowspan}'>{escape(exp)}</td>")
-            html.append(f"<td>{escape(_safe_text(getattr(rr, '매출처', ''), '-'))}</td>")
-            html.append(f"<td class='num'>{_safe_int(getattr(rr, '출고수량', 0)):,}</td>")
-            if i == 0:
+            if index == 0:
+                html.append(f"<td rowspan='{rowspan}'>{escape(str(company))}</td>")
+                html.append(f"<td rowspan='{rowspan}'>{escape(str(location))}</td>")
+                html.append(f"<td rowspan='{rowspan}'>{escape(str(product))}</td>")
+                html.append(f"<td rowspan='{rowspan}'>{escape(str(exp))}</td>")
+            html.append(f"<td>{escape(str(getattr(row, '매출처', '') or '-'))}</td>")
+            html.append(f"<td class='num'>{int(getattr(row, '출고수량', 0) or 0):,}</td>")
+            if index == 0:
                 html.append(f"<td class='num' rowspan='{rowspan}'>{total_qty:,}</td>")
                 html.append(f"<td class='num' rowspan='{rowspan}'>{final_qty:,}</td>")
             html.append("</tr>")
@@ -175,82 +368,108 @@ def _render_today_outbound_html(items):
     st.markdown(_today_outbound_html(items), unsafe_allow_html=True)
 
 
-def _today_outbound_pdf_bytes(items, ds):
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
+def _render_print_button(items, ds: str) -> None:
+    table_html = _today_outbound_html(items, include_style=False)
+    printable_document = f"""<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>마감 체크리스트 · {ds}</title>
+<style>
+@page {{ size: A4 landscape; margin: 10mm; }}
+* {{ box-sizing: border-box; }}
+html, body {{ margin: 0; padding: 0; color: #111827; font-family: Arial, 'Malgun Gothic', sans-serif; }}
+h1 {{ margin: 0 0 4px; font-size: 22px; }}
+.print-date {{ margin: 0 0 14px; color: #475569; font-size: 12px; }}
+.today-out-table {{ width: 100%; border-collapse: collapse; background: white; border: 1px solid #94a3b8; font-size: 10px; table-layout: auto; }}
+.today-out-table th {{ background: #f1f5f9; color: #111827; font-weight: 800; border: 1px solid #94a3b8; padding: 5px; text-align: center; white-space: nowrap; }}
+.today-out-table td {{ border: 1px solid #94a3b8; padding: 5px; vertical-align: middle; color: #111827; word-break: keep-all; }}
+.today-out-table td.num {{ text-align: right; font-weight: 700; white-space: nowrap; }}
+thead {{ display: table-header-group; }}
+tr {{ break-inside: avoid; page-break-inside: avoid; }}
+</style>
+</head>
+<body>
+<h1>마감 체크리스트</h1>
+<div class="print-date">기준일: {ds}</div>
+{table_html}
+</body>
+</html>"""
+    document_json = json.dumps(printable_document, ensure_ascii=False)
 
-    bio = BytesIO()
-    font_name = "Helvetica"
-    font_path = _find_korean_font()
-    if font_path:
-        try:
-            pdfmetrics.registerFont(TTFont("NOHTUS_KR_CLOSING", font_path))
-            font_name = "NOHTUS_KR_CLOSING"
-        except Exception:
-            font_name = "Helvetica"
+    components.html(
+        f"""
+        <style>
+        html, body {{ margin: 0; padding: 0; background: transparent; }}
+        .print-button {{
+            width: 100%;
+            min-height: 40px;
+            border: 1px solid rgba(49, 51, 63, 0.2);
+            border-radius: 8px;
+            background: white;
+            color: #31333f;
+            font: 600 14px Arial, 'Malgun Gothic', sans-serif;
+            cursor: pointer;
+        }}
+        .print-button:hover {{ border-color: #ff4b4b; color: #ff4b4b; }}
+        </style>
+        <button class="print-button" id="closing-print-button" type="button">{_PRINT_BUTTON_LABEL}</button>
+        <script>
+        const printableDocument = {document_json};
+        const button = document.getElementById('closing-print-button');
 
-    styles = getSampleStyleSheet()
-    styles["Title"].fontName = font_name
-    styles["Normal"].fontName = font_name
-    doc = SimpleDocTemplate(bio, pagesize=landscape(A4), leftMargin=20, rightMargin=20, topMargin=24, bottomMargin=24)
-    story = [Paragraph(f"마감 체크리스트 · {ds}", styles["Title"]), Spacer(1, 12)]
+        button.addEventListener('click', function () {{
+            button.disabled = true;
+            const oldFrame = document.getElementById('closing-print-frame');
+            if (oldFrame) oldFrame.remove();
 
-    headers = ["사업장", "로케이션", "제품명", "유통기한", "매출처", "수량", "총 출고수량", "최종재고"]
-    data = [headers]
-    spans = []
-    group_cols = ["사업장", "로케이션", "표준제품명", "제조번호", "유통기한"]
-    final_map = _today_outbound_final_stock_map(items)
-    row_idx = 1
-    for key, grp in items.groupby(group_cols, sort=False, dropna=False):
-        company, location, product, lot, exp = key
-        company = _safe_text(company)
-        location = _safe_text(location, "-")
-        product = _safe_text(product)
-        lot = _safe_text(lot, "-")
-        exp = _safe_text(exp, "-")
-        total_qty = _safe_int(grp["출고수량"].sum())
-        final_qty = final_map.get((company, product, lot, exp), 0)
-        start = row_idx
-        for i, rr in enumerate(grp.itertuples(index=False)):
-            data.append([
-                company if i == 0 else "",
-                location if i == 0 else "",
-                product if i == 0 else "",
-                exp if i == 0 else "",
-                _safe_text(getattr(rr, "매출처", ""), "-"),
-                f"{_safe_int(getattr(rr, '출고수량', 0)):,}",
-                f"{total_qty:,}" if i == 0 else "",
-                f"{final_qty:,}" if i == 0 else "",
-            ])
-            row_idx += 1
-        end = row_idx - 1
-        if end > start:
-            for col in [0, 1, 2, 3, 6, 7]:
-                spans.append(("SPAN", (col, start), (col, end)))
+            const frame = document.createElement('iframe');
+            frame.id = 'closing-print-frame';
+            frame.setAttribute('title', '마감 체크리스트 인쇄');
+            frame.style.position = 'fixed';
+            frame.style.right = '0';
+            frame.style.bottom = '0';
+            frame.style.width = '1px';
+            frame.style.height = '1px';
+            frame.style.border = '0';
+            frame.style.opacity = '0';
+            frame.style.pointerEvents = 'none';
+            document.body.appendChild(frame);
 
-    table = Table(data, colWidths=[62, 72, 178, 82, 130, 48, 72, 62], repeatRows=1)
-    style_cmds = [
-        ("FONTNAME", (0, 0), (-1, -1), font_name),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F1F5F9")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#111827")),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
-        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-        ("ALIGN", (5, 1), (7, -1), "RIGHT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8.3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-    ]
-    style_cmds.extend(spans)
-    table.setStyle(TableStyle(style_cmds))
-    story.append(table)
-    doc.build(story)
-    bio.seek(0)
-    return bio.getvalue()
+            try {{
+                const printDocument = frame.contentWindow.document;
+                printDocument.open();
+                printDocument.write(printableDocument);
+                printDocument.close();
+
+                const runPrint = function () {{
+                    try {{
+                        frame.contentWindow.focus();
+                        frame.contentWindow.print();
+                    }} catch (error) {{
+                        alert('인쇄창을 열지 못했습니다. 브라우저에서 인쇄 기능을 허용한 뒤 다시 시도해주세요.');
+                    }} finally {{
+                        button.disabled = false;
+                        setTimeout(function () {{ frame.remove(); }}, 1200);
+                    }}
+                }};
+
+                if (printDocument.readyState === 'complete') {{
+                    setTimeout(runPrint, 80);
+                }} else {{
+                    frame.onload = function () {{ setTimeout(runPrint, 80); }};
+                }}
+            }} catch (error) {{
+                button.disabled = false;
+                frame.remove();
+                alert('인쇄용 체크리스트를 만들지 못했습니다. 화면을 새로고침한 뒤 다시 시도해주세요.');
+            }}
+        }});
+        </script>
+        """,
+        height=44,
+        scrolling=False,
+    )
 
 
 def _business_log_company_and_partner(row, memo, customers_df):
@@ -408,7 +627,7 @@ def page_closing():
     ds = str(target_date)
 
     if tab == "오늘 출고 체크":
-        items = q("""SELECT COALESCE(o.title, '') AS 출고지시서제목,
+        items = q(f"""SELECT COALESCE(o.title, '') AS 출고지시서제목,
                             o.id AS 출고지시서ID,
                             COALESCE(NULLIF(TRIM(o.customer_name), ''), '') AS 저장매출처,
                             COALESCE(NULLIF(TRIM(o.customer_company), ''), '') AS 저장매출처사업장,
@@ -425,18 +644,21 @@ def page_closing():
                      WHERE o.order_date=?
                        AND IFNULL(o.status,'')<>'취소됨'
                        AND EXISTS (
-                           SELECT 1 FROM transactions t
-                           WHERE substr(t.created_at,1,10)=o.order_date
-                             AND t.tx_type IN ('출고지시','출고지시수정','출고')
-                             AND COALESCE(t.from_company,'')=COALESCE(i.company,'')
-                             AND t.product_name=i.product_name
-                             AND COALESCE(t.lot,'-')=COALESCE(i.lot,'-')
-                             AND COALESCE(t.exp_date,'-')=COALESCE(i.exp_date,'-')
-                             AND COALESCE(t.from_location,'')=COALESCE(i.location,'')
-                             AND CAST(t.qty AS INTEGER)=CAST(i.qty AS INTEGER)
+                           SELECT 1
+                           FROM transactions t
+                           WHERE t.tx_type IN ({",".join(_VALID_OUTBOUND_HISTORY_TYPES)})
                              AND COALESCE(t.memo,'') LIKE '%' || '출고지시서 #' || CAST(o.id AS TEXT) || '%'
                        )
                      ORDER BY i.company, i.location, i.product_name, i.lot, i.exp_date, o.id, i.id""", (ds,))
+
+        export_rows = _export_waiting_rows(ds)
+        if export_rows is not None and not export_rows.empty:
+            if items is None or items.empty:
+                items = export_rows
+            else:
+                items = pd.concat([items, export_rows], ignore_index=True)
+        items = _sort_checklist_items(_deduplicate_outbound_details(items))
+
         if items.empty:
             st.info("해당 날짜의 출고지시가 없습니다.")
         else:
@@ -454,7 +676,7 @@ def page_closing():
             _render_today_outbound_html(items)
             btn_left, btn_mid, btn_right = st.columns([3, 2, 3])
             with btn_mid:
-                st.download_button("마감 체크리스트 PDF 다운로드", data=_today_outbound_pdf_bytes(items, ds), file_name=f"NOHTUS_마감체크_{ds}.pdf", mime="application/pdf", use_container_width=True)
+                _render_print_button(items, ds)
         return
 
     st.subheader("업무일지 작성")

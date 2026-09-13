@@ -166,13 +166,19 @@ def _standard_name_for(erp_product_name, match_map):
     return match_map.get(name, match_map.get(name.replace(" ", ""), ""))
 
 
-def _import_purchase_history(uploaded_file, company):
+def _import_purchase_history(uploaded_file, company, *, reader=None, before_import=None):
+    """reader(payload, company)는 회사별로 다른 엑셀 형식을 읽어야 할 때(예:
+    purchase_history_single.py의 노투스 7행 헤더) 기본 _read_purchase_excel
+    대신 쓸 수 있다. before_import(company)는 실제 파싱/삽입 전에 실행되는
+    훅(예: 재업로드 전 기존 데이터 삭제)이다."""
     _ensure_purchase_storage()
+    if before_import is not None:
+        before_import(company)
 
     source = getattr(uploaded_file, "name", "")
     payload = _uploaded_file_payload(uploaded_file)
     file_hash = hashlib.sha256(payload).hexdigest()
-    raw = _read_purchase_excel(payload)
+    raw = reader(payload, company) if reader is not None else _read_purchase_excel(payload)
     if raw.empty:
         return {"total": 0, "inserted": 0, "file_duplicate": False, "skipped": 0, "matched": 0, "unmatched": 0}
 
@@ -330,16 +336,16 @@ def _query_purchase_rows(item_no, standard_name, start_date, end_date):
     return df
 
 
-def _render_import_box():
+def _render_import_box(*, file_types=None, reader=None, before_import=None):
     with st.expander("매입가 엑셀 업로드", expanded=False):
         st.caption(
             "원본 행은 내용이 같아도 모두 저장합니다. 같은 사업장에 완전히 동일한 파일을 다시 올린 경우에만 중복 파일로 차단합니다."
         )
         company = st.selectbox("업로드 사업장", PURCHASE_COMPANIES, key="purchase_import_company")
-        uploaded = st.file_uploader("매입내역 엑셀 업로드", type=["xlsx"], key="purchase_history_upload")
+        uploaded = st.file_uploader("매입내역 엑셀 업로드", type=file_types or ["xlsx"], key="purchase_history_upload")
         if uploaded is not None and st.button("DB에 업로드", type="primary", use_container_width=True):
             try:
-                result = _import_purchase_history(uploaded, company)
+                result = _import_purchase_history(uploaded, company, reader=reader, before_import=before_import)
                 if result["file_duplicate"]:
                     st.warning("같은 사업장에 이미 업로드한 동일 파일입니다. 기존 데이터는 변경하지 않았습니다.")
                 else:

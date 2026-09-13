@@ -6,7 +6,6 @@ from pathlib import Path
 import pandas as pd
 
 import nohtus.pages.stocktake as stocktake_page
-import nohtus.pages.stocktake_business as stocktake_business
 
 
 def _create_tables(con):
@@ -44,21 +43,21 @@ _MAPPING_DF = pd.DataFrame([{
 class StocktakeMasterEditMergeTests(unittest.TestCase):
     """실제 '제품마스터 수정' 다이얼로그는 6개 값으로 언패킹한다
     (saved_product, saved_lot, saved_exp, mapping_count, propagation_error, merged).
-    stocktake_business의 패치 버전이 그보다 적게/많이 반환하면 저장할 때마다
-    ValueError로 깨진다 — 실제로 이 불일치 때문에 매 저장이 실패했었다."""
+    이 함수가 그보다 적게/많이 반환하면 저장할 때마다 ValueError로 깨진다
+    — 실제로 이 불일치 때문에 매 저장이 실패했었다."""
 
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.db_path = Path(self._tmpdir.name) / "test.db"
         with sqlite3.connect(self.db_path) as con:
             _create_tables(con)
-        self._orig_connect = stocktake_business.connect
+        self._orig_connect = stocktake_page.connect
         self._orig_propagate = stocktake_page._propagate_master_edit_to_shipment_items
-        stocktake_business.connect = lambda: sqlite3.connect(self.db_path)
+        stocktake_page.connect = lambda: sqlite3.connect(self.db_path)
         stocktake_page._propagate_master_edit_to_shipment_items = lambda *a, **k: ""
 
     def tearDown(self):
-        stocktake_business.connect = self._orig_connect
+        stocktake_page.connect = self._orig_connect
         stocktake_page._propagate_master_edit_to_shipment_items = self._orig_propagate
         self._tmpdir.cleanup()
 
@@ -79,7 +78,7 @@ class StocktakeMasterEditMergeTests(unittest.TestCase):
         ])
 
         saved_product, saved_lot, saved_exp, mapping_count, propagation_error, merged = (
-            stocktake_business._update_inventory_and_product_mappings_business(
+            stocktake_page._update_inventory_and_product_mappings(
                 2, "제품A", "LOTA", "2028-01-01", _MAPPING_DF
             )
         )
@@ -96,7 +95,7 @@ class StocktakeMasterEditMergeTests(unittest.TestCase):
             (1, "노투스팜", "제품A", "제품A", "LOTB", "2028-01-01", "A1-01-01", 5, "2026-08-31"),
         ])
 
-        _, saved_lot, _, _, _, merged = stocktake_business._update_inventory_and_product_mappings_business(
+        _, saved_lot, _, _, _, merged = stocktake_page._update_inventory_and_product_mappings(
             1, "제품A", "LOTA", "2028-01-01", _MAPPING_DF
         )
 
@@ -128,7 +127,7 @@ class StocktakeMasterEditMergeTests(unittest.TestCase):
             )
             con.commit()
 
-        stocktake_business._update_inventory_and_product_mappings_business(
+        stocktake_page._update_inventory_and_product_mappings(
             1, "제품A", "LOT-NEW", "2028-05-01", _MAPPING_DF
         )
 

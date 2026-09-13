@@ -4,7 +4,8 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from nohtus.pages.closing_export_history_patch import _patched_export_waiting_rows
+import nohtus.pages.closing as closing_page
+from nohtus.pages.closing import _export_waiting_rows
 
 
 class ClosingExportWaitingNetChangeTests(unittest.TestCase):
@@ -54,10 +55,9 @@ class ClosingExportWaitingNetChangeTests(unittest.TestCase):
                 self._movement(product, 'B1-03-02', 'P')
         self.con.commit()
 
-        with patch(
-            'nohtus.pages.closing_export_history_patch.ensure_export_waiting_tables'
-        ):
-            result = _patched_export_waiting_rows(self._query, '2026-08-13')
+        with patch('nohtus.pages.closing.ensure_export_waiting_tables'), \
+                patch.object(closing_page, 'q', self._query):
+            result = _export_waiting_rows('2026-08-13')
 
         self.assertTrue(result.empty)
 
@@ -67,10 +67,9 @@ class ClosingExportWaitingNetChangeTests(unittest.TestCase):
         self._movement('제품A', 'B1-03-02', 'P', 5)
         self.con.commit()
 
-        with patch(
-            'nohtus.pages.closing_export_history_patch.ensure_export_waiting_tables'
-        ):
-            result = _patched_export_waiting_rows(self._query, '2026-08-13')
+        with patch('nohtus.pages.closing.ensure_export_waiting_tables'), \
+                patch.object(closing_page, 'q', self._query):
+            result = _export_waiting_rows('2026-08-13')
 
         self.assertEqual(result['표준제품명'].tolist(), ['제품A'])
         self.assertEqual(result['출고수량'].tolist(), [5])

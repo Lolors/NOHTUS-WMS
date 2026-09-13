@@ -115,7 +115,7 @@ def _render_latest_upload_info():
         st.caption(f"{company} · 마지막 업데이트 {imported_at} · {file_name} · {row_count:,}건")
 
 
-def _render_purchase_page(original_render_import_box):
+def page_purchase_history():
     purchase_page._ensure_purchase_storage()
 
     st.title("매입가 조회")
@@ -140,7 +140,11 @@ def _render_purchase_page(original_render_import_box):
         run_query = st.button("매입가 조회", type="primary", use_container_width=True)
 
     with side_col:
-        original_render_import_box()
+        purchase_page._render_import_box(
+            file_types=["xls", "xlsx"],
+            reader=_read_purchase_excel_for_company,
+            before_import=_replace_company_purchase_data,
+        )
         _render_latest_upload_info()
 
     if not run_query:
@@ -175,35 +179,3 @@ def _render_purchase_page(original_render_import_box):
     st.markdown("### 조회 결과")
     st.caption("결과표에는 ERP 제품명을 표시하지 않고 표준제품명만 표시합니다.")
     st.dataframe(result, use_container_width=True)
-
-
-def page_purchase_history():
-    original_file_uploader = st.file_uploader
-    original_import_purchase_history = purchase_page._import_purchase_history
-    original_render_import_box = purchase_page._render_import_box
-
-    def patched_file_uploader(label, *args, **kwargs):
-        if kwargs.get("key") == "purchase_history_upload":
-            kwargs["type"] = ["xls", "xlsx"]
-        return original_file_uploader(label, *args, **kwargs)
-
-    def patched_import_purchase_history(uploaded_file, company):
-        original_reader = purchase_page._read_purchase_excel
-
-        def company_reader(payload):
-            return _read_purchase_excel_for_company(payload, company)
-
-        purchase_page._read_purchase_excel = company_reader
-        try:
-            _replace_company_purchase_data(company)
-            return original_import_purchase_history(uploaded_file, company)
-        finally:
-            purchase_page._read_purchase_excel = original_reader
-
-    purchase_page._import_purchase_history = patched_import_purchase_history
-    st.file_uploader = patched_file_uploader
-    try:
-        _render_purchase_page(original_render_import_box)
-    finally:
-        purchase_page._import_purchase_history = original_import_purchase_history
-        st.file_uploader = original_file_uploader

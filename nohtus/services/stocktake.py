@@ -21,12 +21,6 @@ def _normalized_stocktake_location_sql():
     return "REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', ''), '-', ''), '_', '')"
 
 
-def _is_zero_qty_exception_location(location):
-    """G1, G2는 수량이 0이어도 재고 행을 유지한다."""
-    normalized = _normalize_stocktake_location(location)
-    return normalized.startswith("G1") or normalized.startswith("G2")
-
-
 def _zero_qty_exception_sql():
     """0이어도 실사/기준재고 양식에 남겨야 하는 로케이션 조건."""
     location = _normalized_stocktake_location_sql()
@@ -126,9 +120,9 @@ _TRUE_MATERIAL_VALUES = ("1", "true", "yes", "y", "o", "v", "체크", "부자재
 
 def _inventory_survey_excel_bytes(df, sheet_name):
     out = pd.DataFrame()
+    out["사업장"] = df["company"] if not df.empty else []
     out["로케이션"] = df["location"] if not df.empty else []
-    out["제품명(표준제품명)"] = df["product_name"] if not df.empty else []
-    out["제조번호"] = df["lot"] if not df.empty else []
+    out["제품명"] = df["product_name"] if not df.empty else []
     out["유통기한"] = df["exp_date"].apply(display_date_only) if not df.empty else []
     out["전산수량"] = df["qty"] if not df.empty else []
     out["실물수량"] = ""
@@ -137,7 +131,7 @@ def _inventory_survey_excel_bytes(df, sheet_name):
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
         out.to_excel(writer, index=False, sheet_name=sheet_name)
         ws = writer.book[sheet_name]
-        widths = {"A": 16, "B": 30, "C": 18, "D": 16, "E": 12, "F": 12}
+        widths = {"A": 14, "B": 16, "C": 34, "D": 16, "E": 12, "F": 12}
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
 
@@ -153,7 +147,6 @@ def _inventory_survey_excel_bytes(df, sheet_name):
                 if cell.row == 1:
                     cell.font = Font(bold=True)
                     cell.fill = header_fill
-
     bio.seek(0)
     return bio.getvalue()
 
@@ -176,14 +169,14 @@ def full_inventory_excel_bytes(exclude_zero=True, exclude_series=None):
     material_sql, material_params = _material_exclusion_sql()
     conditions = [material_sql]
     if exclude_zero:
-        conditions.append(f"(qty>0 OR {_zero_qty_exception_sql()})")
+        conditions.append("qty<>0")
     where_sql = "WHERE " + " AND ".join(conditions)
     df = q(
         f"""
-        SELECT location, product_name, warehouse_name, lot, exp_date, qty
+        SELECT company, location, product_name, exp_date, qty
         FROM inventory
         {where_sql}
-        ORDER BY location, product_name, lot, exp_date
+        ORDER BY company, location, product_name, exp_date
         """,
         material_params,
     )
@@ -194,19 +187,19 @@ def full_inventory_excel_bytes(exclude_zero=True, exclude_series=None):
 
 
 def material_inventory_excel_bytes(exclude_zero=True):
-    """부자재로 분류된 제품만 모은 재고실사용 엑셀."""
+    """부자재로 분류된 제품만 모은 재고실사용 엑셀(사업장 포함)."""
     placeholders = ",".join("?" for _ in _TRUE_MATERIAL_VALUES)
-    zero_sql = "AND qty>0" if exclude_zero else ""
+    zero_sql = "AND qty<>0" if exclude_zero else ""
     df = q(
         f"""
-        SELECT location, product_name, warehouse_name, lot, exp_date, qty
+        SELECT company, location, product_name, exp_date, qty
         FROM inventory
         WHERE TRIM(COALESCE(product_name,'')) IN (
             SELECT TRIM(standard_name) FROM products
             WHERE LOWER(TRIM(CAST(COALESCE(is_material, 0) AS TEXT))) IN ({placeholders})
         )
         {zero_sql}
-        ORDER BY location, product_name, lot, exp_date
+        ORDER BY company, location, product_name, exp_date
         """,
         _TRUE_MATERIAL_VALUES,
     )
@@ -216,8 +209,8 @@ def material_inventory_excel_bytes(exclude_zero=True):
 def import_stock_survey_excel(uploaded_file, replace_current=True):
     """기준재고 엑셀을 현재 WMS 재고로 불러온다.
 
-    일반 로케이션의 0 수량 행은 제외하지만 G1, G2의 0 수량 행은
-    DB에 저장하여 이후 실사 및 기준재고 양식에도 계속 나타나게 한다.
+    같은 사업장·표준제품명·전산상명칭·LOT·유통기한·로케이션 행이 이미 있으면
+    새 행을 또 만들지 않고 기존 행에 수량만 합친다.
     """
     normal_df, issue_df = prepare_baseline_stock_dataframe(uploaded_file)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -227,91 +220,128 @@ def import_stock_survey_excel(uploaded_file, replace_current=True):
 
     with connect() as con:
         cur = con.cursor()
-        if replace_current:
-            cur.execute("DELETE FROM inventory")
-            cur.execute("DELETE FROM transactions WHERE tx_type='재고조사불러오기'")
+        try:
+            if replace_current:
+                cur.execute("DELETE FROM inventory")
+                cur.execute("DELETE FROM transactions WHERE tx_type='재고조사불러오기'")
 
-        for _, row in normal_df.iterrows():
-            company = str(row.get("사업장") or "").strip()
-            code = str(row.get("ERP제품코드") or "").strip()
-            product_raw = str(row.get("ERP제품명") or "").strip()
-            product = str(row.get("표준제품명") or "").strip()
-            lot = str(row.get("LOT/제조번호") or "").strip() or "-"
-            exp = _excel_date_to_iso(row.get("유통기한"))
-            location = str(row.get("로케이션") or "").strip()
-            qty = int(float(row.get("수량") or 0))
+            for _, r in normal_df.iterrows():
+                company = str(r.get("사업장") or "").strip()
+                code = str(r.get("ERP제품코드") or "").strip()
+                product_raw = str(r.get("ERP제품명") or "").strip()
+                product = str(r.get("표준제품명") or "").strip()
+                lot = str(r.get("LOT/제조번호") or "").strip() or "-"
+                exp = _excel_date_to_iso(r.get("유통기한"))
+                loc = str(r.get("로케이션") or "").strip()
+                qty = int(float(r.get("수량") or 0))
+                if not company or not product or not loc or qty <= 0:
+                    skipped += 1
+                    continue
 
-            keep_zero = qty == 0 and _is_zero_qty_exception_location(location)
-            if not company or not product or not location or qty < 0 or (qty == 0 and not keep_zero):
-                skipped += 1
-                continue
+                exists = cur.execute(
+                    "SELECT id FROM products WHERE standard_name=? ORDER BY id LIMIT 1",
+                    (product,),
+                ).fetchone()
+                if not exists:
+                    cur.execute(
+                        """
+                        INSERT INTO products(
+                            product_code, standard_name, warehouse_name, aliases,
+                            erp_nohtuspharm_name, erp_noh_name, erp_noh_code,
+                            erp_nohtus_name, bidata_name
+                        ) VALUES(?,?,?,?,?,?,?,?,?)
+                        """,
+                        (
+                            code if company == "노투스팜" else "",
+                            product,
+                            product_raw,
+                            "",
+                            product_raw if company == "노투스팜" else "",
+                            product_raw if company == "NOH" else "",
+                            code if company == "NOH" else "",
+                            product_raw if company == "노투스" else "",
+                            product_raw if company == "비자료" else "",
+                        ),
+                    )
+                    product_inserted += 1
+                else:
+                    pid = int(exists[0])
+                    if company == "노투스팜":
+                        cur.execute(
+                            "UPDATE products SET erp_nohtuspharm_name=COALESCE(NULLIF(erp_nohtuspharm_name,''), ?), product_code=COALESCE(NULLIF(product_code,''), ?) WHERE id=?",
+                            (product_raw, code, pid),
+                        )
+                    elif company == "NOH":
+                        cur.execute(
+                            "UPDATE products SET erp_noh_name=COALESCE(NULLIF(erp_noh_name,''), ?), erp_noh_code=COALESCE(NULLIF(erp_noh_code,''), ?) WHERE id=?",
+                            (product_raw, code, pid),
+                        )
+                    elif company == "노투스":
+                        cur.execute(
+                            "UPDATE products SET erp_nohtus_name=COALESCE(NULLIF(erp_nohtus_name,''), ?) WHERE id=?",
+                            (product_raw, pid),
+                        )
+                    elif company == "비자료":
+                        cur.execute(
+                            "UPDATE products SET bidata_name=COALESCE(NULLIF(bidata_name,''), ?) WHERE id=?",
+                            (product_raw, pid),
+                        )
 
-            exists = cur.execute("SELECT id FROM products WHERE standard_name=?", (product,)).fetchone()
-            if not exists:
-                cur.execute(
-                    """INSERT INTO products(
-                           product_code, standard_name, warehouse_name, aliases,
-                           erp_nohtuspharm_name, erp_noh_name, erp_noh_code,
-                           erp_nohtus_name, bidata_name
-                       ) VALUES(?,?,?,?,?,?,?,?,?)""",
-                    (
-                        code if company == "노투스팜" else "",
-                        product,
-                        product_raw,
-                        "",
-                        product_raw if company == "노투스팜" else "",
-                        product_raw if company == "NOH" else "",
-                        code if company == "NOH" else "",
-                        product_raw if company == "노투스" else "",
-                        product_raw if company == "비자료" else "",
-                    ),
+                existing_inventory = cur.execute(
+                    """
+                    SELECT id, qty
+                    FROM inventory
+                    WHERE company=?
+                      AND product_name=?
+                      AND COALESCE(warehouse_name,'')=?
+                      AND COALESCE(lot,'-')=?
+                      AND COALESCE(exp_date,'-')=?
+                      AND location=?
+                    ORDER BY id
+                    LIMIT 1
+                    """,
+                    (company, product, product_raw, lot, exp, loc),
+                ).fetchone()
+
+                if existing_inventory:
+                    inventory_id = int(existing_inventory[0])
+                    merged_qty = int(existing_inventory[1] or 0) + qty
+                    cur.execute(
+                        "UPDATE inventory SET qty=?, updated_at=? WHERE id=?",
+                        (merged_qty, now, inventory_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO inventory(
+                            company, product_name, warehouse_name, lot,
+                            exp_date, location, qty, updated_at
+                        ) VALUES(?,?,?,?,?,?,?,?)
+                        """,
+                        (company, product, product_raw, lot, exp, loc, qty, now),
+                    )
+
+                insert_transaction_log(
+                    cur,
+                    created_at=now,
+                    tx_type="재고조사불러오기",
+                    product_name=product,
+                    warehouse_name=product_raw,
+                    lot=lot,
+                    exp_date=exp,
+                    from_company=None,
+                    from_location=None,
+                    to_company=company,
+                    to_location=loc,
+                    qty=qty,
+                    memo=f"기준재고 엑셀 업로드 / 원본명: {product_raw}",
                 )
-                product_inserted += 1
-            else:
-                product_id = int(exists[0])
-                if company == "노투스팜":
-                    cur.execute(
-                        "UPDATE products SET erp_nohtuspharm_name=COALESCE(NULLIF(erp_nohtuspharm_name,''), ?), product_code=COALESCE(NULLIF(product_code,''), ?) WHERE id=?",
-                        (product_raw, code, product_id),
-                    )
-                elif company == "NOH":
-                    cur.execute(
-                        "UPDATE products SET erp_noh_name=COALESCE(NULLIF(erp_noh_name,''), ?), erp_noh_code=COALESCE(NULLIF(erp_noh_code,''), ?) WHERE id=?",
-                        (product_raw, code, product_id),
-                    )
-                elif company == "노투스":
-                    cur.execute(
-                        "UPDATE products SET erp_nohtus_name=COALESCE(NULLIF(erp_nohtus_name,''), ?) WHERE id=?",
-                        (product_raw, product_id),
-                    )
-                elif company == "비자료":
-                    cur.execute(
-                        "UPDATE products SET bidata_name=COALESCE(NULLIF(bidata_name,''), ?) WHERE id=?",
-                        (product_raw, product_id),
-                    )
+                inserted += 1
 
-            cur.execute(
-                "INSERT INTO inventory(company, product_name, warehouse_name, lot, exp_date, location, qty, updated_at) VALUES(?,?,?,?,?,?,?,?)",
-                (company, product, product_raw, lot, exp, location, qty, now),
-            )
-            insert_transaction_log(
-                cur,
-                created_at=now,
-                tx_type="재고조사불러오기",
-                product_name=product,
-                warehouse_name=product_raw,
-                lot=lot,
-                exp_date=exp,
-                from_company=None,
-                from_location=None,
-                to_company=company,
-                to_location=location,
-                qty=qty,
-                memo=f"기준재고 엑셀 업로드 / 원본명: {product_raw}",
-            )
-            inserted += 1
-
-        con.commit()
+            con.commit()
+        except Exception:
+            con.rollback()
+            raise
 
     return inserted, skipped, product_inserted, skipped
 

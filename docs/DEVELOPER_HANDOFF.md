@@ -51,7 +51,7 @@ python -m streamlit run app.py
 관련 파일:
 
 - 기본 화면/거래처 검색: `nohtus/pages/outbound.py`
-- 현재 진입 래퍼: `nohtus/pages/outbound_business.py`, `nohtus/pages/outbound_date_fix.py`
+- 현재 진입 래퍼: `nohtus/pages/outbound_entry.py`, `nohtus/pages/outbound_business.py`
 - 저장과 재고 처리: `nohtus/services/outbound_orders.py`, `nohtus/services/outbound.py`
 - 저장된 지시서: `nohtus/pages/saved_outbound*.py`
 

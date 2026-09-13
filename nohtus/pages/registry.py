@@ -11,7 +11,7 @@ import streamlit as st
 
 from nohtus.auth import is_admin
 from nohtus.pages.all_inventory import page_all_inventory
-from nohtus.pages.closing_print import page_closing
+from nohtus.pages.closing import page_closing
 from nohtus.pages.customer_master_business import page_customer_master
 from nohtus.pages.expiry_alerts import page_expiry_alerts
 from nohtus.pages.export_app_pages import (
@@ -39,7 +39,7 @@ from nohtus.pages.product_matching_business import page_product_matching
 from nohtus.pages.product_shortcuts import page_recent_products
 from nohtus.pages.purchase_history_single import page_purchase_history
 from nohtus.pages.saved_outbound_date_fix import page_saved_outbound as page_saved_outbound_refactored
-from nohtus.pages.stocktake_business import page_stocktake
+from nohtus.pages.stocktake import page_stocktake
 
 
 def _page_location_map_editor_guarded():
