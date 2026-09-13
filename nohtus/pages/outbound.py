@@ -17,6 +17,7 @@ import pandas as pd
 import streamlit as st
 
 from nohtus.services.products import product_options
+from nohtus.services.stock_rules import is_export_waiting_location
 from nohtus.config import COMPANIES
 from nohtus.db import connect, q
 from nohtus.dates import display_date_only
@@ -292,11 +293,46 @@ def _days_ago_label(date_text):
     return f"{days}일 전"
 
 
-def _last_sale_text(customer_name, company, exact_map, name_map):
-    customer = _normalize_customer_name(customer_name)
+_INVALID_RECENT_DATE_TEXTS = {"", "none", "nan", "nat", "null", "-"}
+
+
+def _normalized_recent_date(value):
+    text = str(value or "").strip()
+    if text.casefold() in _INVALID_RECENT_DATE_TEXTS:
+        return ""
+    try:
+        return datetime.strptime(text[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
+    except Exception:
+        return ""
+
+
+def _actual_recent_outbound_date(customer_name, company):
+    """최근거래일 테이블이 비었거나 깨졌을 때 실제 출고지시 이력으로 보완한다."""
+    customer = str(customer_name or "").strip()
     company = str(company or "").strip()
-    # 사업장이 지정된 거래처는 이름만 같은 다른 사업장의 거래일을 대신 쓰지 않는다.
-    last_date = exact_map.get((customer, company), "") if company else name_map.get(customer, "")
+    if not customer or not company:
+        return ""
+    try:
+        history = _recent_outbound_history(customer, company, limit=1)
+    except Exception:
+        return ""
+    if not history:
+        return ""
+    return _normalized_recent_date(history[0].get("order_date"))
+
+
+def _resolved_last_sale_date(customer_name, company, exact_map, name_map):
+    customer = str(customer_name or "").strip()
+    company = str(company or "").strip()
+    raw_date = exact_map.get((customer, company)) if company else name_map.get(customer)
+    last_date = _normalized_recent_date(raw_date)
+    if last_date:
+        return last_date
+    return _actual_recent_outbound_date(customer, company)
+
+
+def _last_sale_text(customer_name, company, exact_map, name_map):
+    last_date = _resolved_last_sale_date(customer_name, company, exact_map, name_map)
     if not last_date:
         return "최근거래 없음"
     ago = _days_ago_label(last_date)
@@ -306,9 +342,7 @@ def _last_sale_text(customer_name, company, exact_map, name_map):
 def _customer_select_label(row, exact_map, name_map):
     customer = str(getattr(row, "customer_name", "") or "").strip()
     company = str(getattr(row, "company", "") or "").strip()
-    # 드롭다운은 반드시 거래처명+사업장이 모두 일치하는 날짜만 표시한다.
-    # 사업장이 비어 있거나 일치 자료가 없을 때 이름만 같은 다른 사업장 날짜를 쓰지 않는다.
-    last_date = exact_map.get((customer, company), "") if company else ""
+    last_date = _resolved_last_sale_date(customer, company, exact_map, name_map)
     if not last_date:
         last_sale = "최근거래 없음"
     else:
@@ -445,7 +479,7 @@ def _inventory_query_for_outbound(selected_product, selected_company, ignore_com
     if not selected_product:
         return pd.DataFrame()
     if ignore_company:
-        return q(
+        rows = q(
             """
             SELECT id, company, product_name, warehouse_name, lot, exp_date, location, qty
             FROM inventory
@@ -454,8 +488,8 @@ def _inventory_query_for_outbound(selected_product, selected_company, ignore_com
             """,
             (selected_product,),
         )
-    if selected_company:
-        return q(
+    elif selected_company:
+        rows = q(
             """
             SELECT id, company, product_name, warehouse_name, lot, exp_date, location, qty
             FROM inventory
@@ -464,7 +498,13 @@ def _inventory_query_for_outbound(selected_product, selected_company, ignore_com
             """,
             (selected_product, selected_company),
         )
-    return pd.DataFrame()
+    else:
+        return pd.DataFrame()
+    if rows is None or rows.empty or "location" not in rows.columns:
+        return rows
+    # 수출대기(P계열)로 이동된 재고는 일반 출고지시에서 다시 고를 수 없게 한다.
+    blocked = rows["location"].apply(is_export_waiting_location)
+    return rows.loc[~blocked].copy()
 
 
 def _manual_pick_rows(pick_df, editor_df):
@@ -642,13 +682,29 @@ def page_outbound():
             if export_waiting_mode:
                 _, total_col, _ = st.columns([1, 1, 1], gap="medium")
                 with total_col:
-                    df_total = q("SELECT COALESCE(SUM(qty),0) AS qty FROM inventory WHERE product_name=? AND qty>0", (selected_product,))
+                    df_total = q(
+                        """
+                        SELECT COALESCE(SUM(qty),0) AS qty
+                        FROM inventory
+                        WHERE product_name=? AND qty>0
+                          AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT LIKE 'P%'
+                        """,
+                        (selected_product,),
+                    )
                     total_qty = int(df_total.iloc[0]["qty"] or 0) if not df_total.empty else 0
                     st.metric("총재고", f"{total_qty} EA")
             else:
                 total_col, req_col = st.columns([1, 1], gap="medium")
                 with total_col:
-                    df_total = q("SELECT COALESCE(SUM(qty),0) AS qty FROM inventory WHERE product_name=? AND qty>0", (selected_product,))
+                    df_total = q(
+                        """
+                        SELECT COALESCE(SUM(qty),0) AS qty
+                        FROM inventory
+                        WHERE product_name=? AND qty>0
+                          AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT LIKE 'P%'
+                        """,
+                        (selected_product,),
+                    )
                     total_qty = int(df_total.iloc[0]["qty"] or 0) if not df_total.empty else 0
                     st.metric("총재고", f"{total_qty} EA")
                 with req_col:
@@ -702,7 +758,15 @@ def page_outbound():
                 )
                 picked_qty = int(pd.to_numeric(edited.loc[edited["선택"] == True, "요청수량"], errors="coerce").fillna(0).sum())  # noqa: E712
                 if selected_product:
-                    df_total = q("SELECT COALESCE(SUM(qty),0) AS qty FROM inventory WHERE product_name=? AND qty>0", (selected_product,))
+                    df_total = q(
+                        """
+                        SELECT COALESCE(SUM(qty),0) AS qty
+                        FROM inventory
+                        WHERE product_name=? AND qty>0
+                          AND REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', '') NOT LIKE 'P%'
+                        """,
+                        (selected_product,),
+                    )
                     product_total_qty = int(df_total.iloc[0]["qty"] or 0) if not df_total.empty else 0
                     if picked_qty and picked_qty < product_total_qty:
                         st.warning(f"선택한 수량 합계는 {picked_qty} EA이지만, 이 제품의 전체 재고는 {product_total_qty} EA입니다. 다른 LOT/유통기한/로케이션 행에도 재고가 남아 있을 수 있으니 확인하세요.")

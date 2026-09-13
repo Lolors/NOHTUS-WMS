@@ -22,7 +22,7 @@ class ApplicationOutboundEntrypointTests(unittest.TestCase):
             idx
             for idx, node in enumerate(tree.body)
             if isinstance(node, ast.ImportFrom)
-            and node.module == "nohtus.pages.outbound_date_fix"
+            and node.module == "nohtus.pages.outbound_business"
         )
         self.assertLess(capture_index, outbound_import_index)
 
