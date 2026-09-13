@@ -2,7 +2,7 @@ import unittest
 
 import pandas as pd
 
-from nohtus.pages.closing_date_fix import _deduplicate_outbound_details
+from nohtus.pages.closing import _deduplicate_outbound_details
 
 
 class ClosingOutboundDetailDeduplicationTests(unittest.TestCase):

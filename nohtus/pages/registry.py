@@ -11,7 +11,7 @@ import streamlit as st
 
 from nohtus.auth import is_admin
 from nohtus.pages.all_inventory import page_all_inventory
-from nohtus.pages.closing_print import page_closing
+from nohtus.pages.closing import page_closing
 from nohtus.pages.customer_master_business import page_customer_master
 from nohtus.pages.expiry_alerts import page_expiry_alerts
 from nohtus.pages.export_app_pages import (
