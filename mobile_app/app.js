@@ -76,6 +76,7 @@
   function showLogin() {
     el("login-screen").hidden = false;
     el("main-screen").hidden = true;
+    setTimeout(maybeShowA2HSOverlay, 700);
   }
   function showMain() {
     el("login-screen").hidden = true;
@@ -84,7 +85,6 @@
   }
 
   // ---------- 홈 화면에 추가 온보딩 ----------
-  const A2HS_SEEN_KEY = "nohtus_a2hs_seen";
   let deferredInstallPrompt = null;
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
@@ -125,7 +125,6 @@
   }
 
   function dismissA2HSOverlay() {
-    localStorage.setItem(A2HS_SEEN_KEY, "1");
     el("a2hs-overlay").hidden = true;
   }
 
@@ -162,7 +161,6 @@
 
   function maybeShowA2HSOverlay() {
     if (isStandaloneDisplay()) return;
-    if (localStorage.getItem(A2HS_SEEN_KEY)) return;
     showA2HSOverlay();
   }
 
@@ -249,9 +247,12 @@
       ? `<span class="badge export">✈️ 수출대기중</span>`
       : "";
     const hasBadgeRow = badgeHtml || exportHtml;
+    const thumbHtml = item.thumbnail
+      ? `<img src="${item.thumbnail}" alt="" />`
+      : "📷";
     return `
       <div class="result-card" data-name="${escapeHtml(item.name)}" role="button" tabindex="0">
-        <div class="result-thumb">📷</div>
+        <div class="result-thumb">${thumbHtml}</div>
         <div class="result-info">
           <div class="result-name">${escapeHtml(item.name)}</div>
           <div class="result-company">${escapeHtml(item.summary || "재고 없음")}</div>

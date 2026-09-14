@@ -109,7 +109,14 @@ def search_products(term, limit=20, exclude_material=True):
         if rows.empty:
             continue
         total_qty, summary = stock_summary(rows)
-        results.append({"name": name, "total_qty": total_qty, "summary": summary})
+        results.append(
+            {
+                "name": name,
+                "total_qty": total_qty,
+                "summary": summary,
+                "thumbnail": thumbnail_data_uri(name),
+            }
+        )
         if len(results) >= limit:
             break
     return results
@@ -193,6 +200,7 @@ def search_expiry(term, period="1y", exclude_bidata=True, warehouse="all", limit
                 "summary": summary,
                 "badge": badge,
                 "export_waiting": export_waiting,
+                "thumbnail": thumbnail_data_uri(name),
                 "_sort_key": nearest,
             }
         )

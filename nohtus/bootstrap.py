@@ -59,10 +59,9 @@ def _inject_mobile_login_css():
                 margin: 0 !important;
             }
             .login-account { display: none !important; }
-            .login-title {
+            .login-brand {
                 margin-top: .35rem !important;
                 margin-bottom: 1rem !important;
-                font-size: 1.65rem !important;
             }
             div[data-testid="stTextInput"] { margin-bottom: .15rem !important; }
             div[data-testid="stFormSubmitButton"] { margin-top: .2rem !important; }
