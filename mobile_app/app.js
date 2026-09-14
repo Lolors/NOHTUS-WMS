@@ -1,7 +1,17 @@
 (() => {
   "use strict";
 
-  const API_BASE = "";
+  // 이 정적 파일이 실제로 서빙된 경로를 기준으로 API prefix를 계산한다.
+  // http://host:8535/ 에서 직접 열든 https://nohtus-wms.online/mobile/ 로
+  // 열든, "/api/..." 요청이 항상 같은 prefix 아래로 가도록 하기 위함
+  // (하드코딩된 "/mobile"이 아니라 location에서 유도해야 로컬 개발 시
+  // 프리픽스 없는 접속도 그대로 동작한다).
+  const API_BASE = (() => {
+    const path = window.location.pathname;
+    const idx = path.indexOf("/index.html");
+    if (idx !== -1) return path.slice(0, idx);
+    return path.endsWith("/") ? path.slice(0, -1) : path;
+  })();
   const TOKEN_KEY = "nohtus_mobile_token";
 
   const el = (id) => document.getElementById(id);

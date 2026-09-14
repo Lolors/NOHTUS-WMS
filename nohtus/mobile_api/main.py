@@ -4,7 +4,15 @@ mobile_app/(정적 프론트엔드)이 호출하는 백엔드. 기존 Streamlit 
 같은 SQLite DB, 같은 users 테이블/비밀번호를 사용하지만 완전히 별도
 프로세스로 떠서 mobile_app/의 정적 파일을 서빙하고 JSON API를 제공한다.
 
-실행: python -m uvicorn nohtus.mobile_api.main:app --port 8535
+실행 (로컬, 프리픽스 없이 http://host:8535/ 에서 바로 접속):
+    python -m uvicorn nohtus.mobile_api.main:app --port 8535
+
+실행 (운영, Cloudflare Tunnel 등 리버스 프록시가 경로를 그대로
+`/mobile/...`로 전달해주는 경우): 아래 `root_app`을 대신 띄운다.
+    python -m uvicorn nohtus.mobile_api.main:root_app --port 8535
+`root_app`은 `/mobile/*` 요청과 프리픽스 없는 `/*` 요청을 모두 같은
+API로 라우팅하므로, https://nohtus-wms.online/mobile/ 로 접속해도
+http://host:8535/ 로 접속해도 동일하게 동작한다.
 """
 
 from __future__ import annotations
@@ -173,3 +181,11 @@ def api_export_case_items(case_id: int, user=Depends(current_user)):
 
 if _FRONTEND_DIR.is_dir():
     app.mount("/", StaticFiles(directory=str(_FRONTEND_DIR), html=True), name="mobile_app")
+
+
+# Cloudflare Tunnel 등 리버스 프록시가 경로를 그대로(`/mobile/...`) 넘겨주는
+# 배포 형태를 위한 래퍼. `app`은 그대로 두고 여기에 `/mobile` 프리픽스로도
+# 얹어서, 같은 백엔드가 프리픽스 유무에 상관없이 동작하게 한다.
+root_app = FastAPI()
+root_app.mount("/mobile", app)
+root_app.mount("/", app)

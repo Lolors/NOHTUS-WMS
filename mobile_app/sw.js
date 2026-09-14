@@ -20,7 +20,9 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   // API 요청은 항상 네트워크로 — 캐시하면 재고 데이터가 오래된 채로 보일 수 있다.
-  if (url.pathname.startsWith("/api/")) return;
+  // "/mobile/" 프리픽스 아래에서 서빙될 때는 "/api/..."가 아니라
+  // "/mobile/api/..."로 오므로 startsWith가 아니라 includes로 확인한다.
+  if (url.pathname.includes("/api/")) return;
   if (event.request.method !== "GET") return;
 
   event.respondWith(
