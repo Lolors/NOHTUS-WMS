@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -187,5 +188,15 @@ if _FRONTEND_DIR.is_dir():
 # 배포 형태를 위한 래퍼. `app`은 그대로 두고 여기에 `/mobile` 프리픽스로도
 # 얹어서, 같은 백엔드가 프리픽스 유무에 상관없이 동작하게 한다.
 root_app = FastAPI()
+
+
+@root_app.get("/mobile")
+def _mobile_root_redirect():
+    # 마운트(`/mobile`)는 끝에 슬래시가 없는 요청("/mobile")을 빈 경로("")로
+    # 넘겨버려서 하위 StaticFiles 마운트("/")와 매칭이 안 되고 404가 난다.
+    # 슬래시 있는 경로로 리다이렉트해서 우회한다.
+    return RedirectResponse(url="/mobile/")
+
+
 root_app.mount("/mobile", app)
 root_app.mount("/", app)
