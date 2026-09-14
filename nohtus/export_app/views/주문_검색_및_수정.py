@@ -406,7 +406,12 @@ def render() -> None:
         transport=a[2].selectbox('운송방식',TRANSPORT_MODES,index=ti)
         note=a[3].text_input('비고',value=case['note'] or '')
         date_row=st.columns(4)
-        actual_ship_date=date_row[0].date_input(
+        reception_date=date_row[0].date_input(
+            '접수일자',
+            value=odval(detail['reception_date']) or dval(detail['created_at']),
+            key=f'current_reception_date_{case_id}',
+        )
+        actual_ship_date=date_row[1].date_input(
             '출고일자',
             value=odval(detail['actual_ship_date']),
             key=f'current_ship_date_{case_id}',
@@ -419,6 +424,7 @@ def render() -> None:
                 transport,
                 note,
                 actual_ship_date=str(actual_ship_date) if actual_ship_date else '',
+                reception_date=str(reception_date) if reception_date else '',
             )
             order_service.clear_editable_cases_cache()
             folder_service.try_sync_case_folder(case_id)

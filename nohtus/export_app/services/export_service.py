@@ -203,8 +203,9 @@ def update_basic(
     note: str,
     *,
     actual_ship_date: str | None = None,
+    reception_date: str | None = None,
 ) -> None:
-    if actual_ship_date is None:
+    if actual_ship_date is None and reception_date is None:
         db.execute(
             '''UPDATE export_cases
                SET country=?,buyer=?,transport_mode=?,note=?,updated_at=?
@@ -213,19 +214,23 @@ def update_basic(
         )
         return
 
+    sets = ['country=?', 'buyer=?', 'transport_mode=?', 'note=?']
+    params: list[Any] = [country.strip(), buyer.strip(), transport, note.strip()]
+    if actual_ship_date is not None:
+        sets.append('actual_ship_date=?')
+        params.append(actual_ship_date.strip())
+    if reception_date is not None:
+        sets.append('reception_date=?')
+        params.append(reception_date.strip())
+    sets.append('updated_at=?')
+    params.append(now_text())
+    params.append(case_id)
+
     db.execute(
-        '''UPDATE export_cases
-           SET country=?,buyer=?,transport_mode=?,note=?,actual_ship_date=?,updated_at=?
+        f'''UPDATE export_cases
+           SET {",".join(sets)}
            WHERE id=?''',
-        (
-            country.strip(),
-            buyer.strip(),
-            transport,
-            note.strip(),
-            actual_ship_date.strip(),
-            now_text(),
-            case_id,
-        ),
+        tuple(params),
     )
 
 

@@ -331,6 +331,7 @@ def init_db() -> None:
             "consignee_address TEXT DEFAULT ''",
             "note TEXT DEFAULT ''",
             "actual_ship_date TEXT DEFAULT ''",
+            "reception_date TEXT DEFAULT ''",
             "folder_path TEXT DEFAULT ''",
             "cancel_reason TEXT DEFAULT ''",
             "cancelled_at TEXT DEFAULT ''",

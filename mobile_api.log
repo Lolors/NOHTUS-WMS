@@ -459,3 +459,25 @@ INFO:     117.111.6.197:0 - "GET /mobile/api/export/cases/58/items HTTP/1.1" 200
 INFO:     117.111.6.197:0 - "GET /mobile/api/export/cases/58/items HTTP/1.1" 200 OK
 INFO:     117.111.6.197:0 - "GET /mobile/api/export/cases/62/items HTTP/1.1" 200 OK
 INFO:     117.111.6.197:0 - "GET /mobile/api/export/cases/58/items HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/icons/icon-192.png HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/countries HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=recent HTTP/1.1" 200 OK
+INFO:     43.159.145.153:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EB%94%94%EC%84%BC%EB%B0%94&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/%EB%94%94%EC%84%BC%EB%B0%94B%20%285EA%29 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/location-map/layout HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/%EB%94%94%EC%84%BC%EB%B0%94B%20%28Vial%29 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/%EB%94%94%EC%84%BC%EB%B0%94B%20%285EA%29 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/%EB%94%94%EC%84%BC%EB%B0%94B%20%285EA%29 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EB%94%94%EC%84%BC&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EB%94%94%EC%84%BC%E3%85%82&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EB%94%94%EC%84%BC%EB%B0%94&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/%EB%94%94%EC%84%BC%EB%B0%94B%20%285EA%29 HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
