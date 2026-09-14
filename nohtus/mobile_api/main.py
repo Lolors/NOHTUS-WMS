@@ -42,6 +42,20 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _FRONTEND_DIR = _PROJECT_ROOT / "mobile_app"
 
 
+@app.middleware("http")
+async def _no_cdn_cache_for_static_frontend(request: Request, call_next):
+    """정적 프론트엔드 파일(app.js 등)에 Cloudflare가 기본 몇 시간씩 엣지
+    캐싱을 거는 바람에, 배포해도 폰에서는 옛날 JS가 계속 실행되는 문제가
+    있었다. no-cache(= 캐시는 하되 매번 origin에 ETag로 재검증)를 강제해서
+    "고쳤는데 반영이 안 된다"를 원천 차단한다. API 응답은 건드릴 필요 없다
+    (이미 프록시가 안 건드리게 돼 있음).
+    """
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str

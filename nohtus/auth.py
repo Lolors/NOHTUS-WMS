@@ -1,13 +1,30 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import os
 from datetime import datetime
+from pathlib import Path
 
 import streamlit as st
 
 from nohtus.db import connect, q
+
+_BRAND_ICON_PATH = Path(__file__).resolve().parent.parent / "mobile_app" / "icons" / "icon-512.png"
+
+
+@st.cache_data
+def _brand_icon_data_uri() -> str:
+    """모바일 앱과 같은 브랜드 아이콘을 로그인 화면에 쓰기 위해 base64로 인라인.
+
+    스트림릿은 임의 로컬 경로를 <img src>로 바로 서빙해주지 않으므로
+    data URI로 박아 넣는다.
+    """
+    if not _BRAND_ICON_PATH.is_file():
+        return ""
+    encoded = base64.b64encode(_BRAND_ICON_PATH.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 # 비밀번호는 계정마다 무작위 salt를 더한 scrypt로 저장한다 — DB가 유출돼도
 # GPU로 초당 수십억 번씩 돌리는 오프라인 대입 공격에 훨씬 강하다(예전
@@ -237,50 +254,91 @@ def _login_notice(message: str):
 
 def render_login():
     ensure_auth_tables()
+    # 모바일 앱(mobile_app/) 로그인 화면과 같은 톤(브랜드 오렌지, 둥근
+    # 입력창, 아이콘+타이틀 배치)으로 데스크톱 스트림릿 로그인도 맞춘다.
     st.markdown("""
     <style>
-    @media (min-width: 769px) {
-        div[data-testid="stTextInput"],
-        div[data-testid="stButton"],
-        div[data-testid="stFormSubmitButton"],
-        div[data-testid="stForm"] {
-            width: 20vw !important;
-            max-width: 420px !important;
-            min-width: 320px !important;
-            margin-left: auto !important;
-            margin-right: auto !important;
-        }
-        div[data-testid="stForm"] {
-            border: 0 !important;
-            background: transparent !important;
-            box-shadow: none !important;
-            padding: 0 !important;
-        }
-        div[data-testid="stForm"] > div {
-            border: 0 !important;
-            background: transparent !important;
-            box-shadow: none !important;
-            padding: 0 !important;
-        }
+    [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+        background: #f3f5f9 !important;
     }
-    @media (max-width: 768px) {
-        div[data-testid="stTextInput"],
-        div[data-testid="stButton"],
-        div[data-testid="stFormSubmitButton"],
-        div[data-testid="stForm"] {
-            width: 100% !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-        }
+    div[data-testid="stTextInput"],
+    div[data-testid="stButton"],
+    div[data-testid="stFormSubmitButton"],
+    div[data-testid="stForm"] {
+        width: 100% !important;
+        max-width: 420px !important;
+        min-width: 0 !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
     }
+    div[data-testid="stForm"],
+    div[data-testid="stForm"] > div {
+        border: 0 !important;
+        background: transparent !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+    }
+    div[data-testid="stTextInputRootElement"] {
+        height: 48px !important;
+        border-radius: 13px !important;
+        border: 1px solid #e5e8ee !important;
+        background: #ffffff !important;
+    }
+    div[data-testid="stTextInputRootElement"]:focus-within {
+        border-color: #ec6618 !important;
+        box-shadow: 0 0 0 3px rgba(236, 102, 24, .10) !important;
+    }
+    div[data-testid="stTextInputRootElement"] input {
+        background: transparent !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        height: 100% !important;
+        padding: 0 15px !important;
+        font-size: 15px !important;
+    }
+    div[data-testid="stTextInputRootElement"] > div {
+        background: transparent !important;
+        border: 0 !important;
+        height: 100% !important;
+    }
+    div[data-testid="stTextInputRootElement"] button {
+        background: transparent !important;
+    }
+    div[data-testid="stTextInput"] label {
+        font-size: 12.5px !important;
+        font-weight: 700 !important;
+        color: #6b7280 !important;
+    }
+    div[data-testid="stFormSubmitButton"] button {
+        height: 48px !important;
+        border-radius: 13px !important;
+        background: #ec6618 !important;
+        border: 0 !important;
+        font-size: 15px !important;
+        font-weight: 700 !important;
+    }
+    div[data-testid="stFormSubmitButton"] button:hover,
+    div[data-testid="stFormSubmitButton"] button:focus {
+        background: #b84d0f !important;
+    }
+    div[data-testid="stFormSubmitButton"] button p { color: #fff !important; }
     div[data-testid="stAlert"] {display:none !important;}
-    .login-title {text-align:center;margin-top:1.2rem;margin-bottom:1.2rem;font-size:2.2rem;font-weight:700;}
-    .login-account {text-align:center;color:#64748b;margin:0.25rem auto 0.9rem;font-size:0.92rem;}
-    .login-notice {width:20vw;max-width:420px;min-width:320px;margin:8px auto 0 auto;color:#64748b;font-size:0.9rem;text-align:center;}
-    @media (max-width: 768px) {.login-notice{width:100%;max-width:100%;min-width:0;}}
+    .login-brand { display:flex; flex-direction:column; align-items:center; gap:12px;
+        justify-content:center; margin: 48px auto 32px; font-size:19px; font-weight:800;
+        letter-spacing:-.01em; color:#182033; }
+    .login-brand img { width:64px; height:64px; border-radius:20px;
+        box-shadow: 0 1px 3px rgba(15,23,42,.15); }
+    .login-account {text-align:center;color:#6b7280;margin:0.25rem auto 0.9rem;font-size:0.92rem;}
+    .login-notice {max-width:420px;margin:8px auto 0 auto;color:#b91c1c;font-size:0.9rem;text-align:center;}
     </style>
     """, unsafe_allow_html=True)
-    st.markdown("<div class='login-title'>NOHTUS WMS 로그인</div>", unsafe_allow_html=True)
+    icon_uri = _brand_icon_data_uri()
+    st.markdown(
+        "<div class='login-brand'>"
+        + (f"<img src='{icon_uri}' alt='' />" if icon_uri else "")
+        + "<span>NOHTUS WMS</span></div>",
+        unsafe_allow_html=True,
+    )
 
     username = st.text_input("아이디", key="login_username_input").strip().lower()
     row = _load_user(username) if username else None

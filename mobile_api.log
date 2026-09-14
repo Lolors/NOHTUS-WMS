@@ -1,0 +1,483 @@
+2026-09-14 10:40:11.457 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 10:40:11.462 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 10:40:11.464 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 10:40:11.464 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 10:40:11.465 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 10:40:11.466 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 10:40:11.467 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 10:40:11.469 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 10:40:11.470 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+INFO:     Started server process [21716]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8535 (Press CTRL+C to quit)
+INFO:     127.0.0.1:59417 - "GET / HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile HTTP/1.1" 307 Temporary Redirect
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/icons/icon-192.png HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/icons/apple-touch-icon.png HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile HTTP/1.1" 307 Temporary Redirect
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/app.js HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/styles.css HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "POST /mobile/api/login HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "POST /mobile/api/login HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:159: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+2026-09-14 10:42:40.651 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 10:42:40.663 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/countries HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=recent HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "POST /mobile/api/login HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:159: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EC%BD%98%EC%A5%AC%EB%9E%80&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/%EC%BD%98%EC%A5%AC%EB%9E%80%20%285%20Syringe%29 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/location-map/layout HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:159: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry/E%20COG%20MESH%20CW%2018-100155-2%20%28NOTIE%29?period=1y&exclude_bidata=true&warehouse=yongin HTTP/1.1" 200 OK
+^C2026-09-14 11:01:31.487 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:01:31.493 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:01:31.494 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:01:31.494 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:01:31.495 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:01:31.495 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:01:31.496 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:01:31.500 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:01:31.501 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+INFO:     Started server process [31936]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8535 (Press CTRL+C to quit)
+INFO:     117.111.6.197:0 - "GET /mobile HTTP/1.1" 307 Temporary Redirect
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EC%BD%98%EC%A5%B4&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%E3%85%97%E3%84%B4&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%E3%85%97%E3%84%B4%EC%A5%B4&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EB%B2%B7%EB%A3%A9%EC%8B%9C&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EB%B2%A0&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EB%B2%A8%EB%A3%A9%EC%8B%9C&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/%EB%B2%A8%EB%A3%A9%EC%8B%9C%20PCL HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/location-map/layout HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/%EB%B2%A8%EB%A3%A9%EC%8B%9C%20%ED%86%A1%EC%8B%A02%20200U HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/%EB%B2%A8%EB%A3%A9%EC%8B%9C%20PCL HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     211.231.103.92:0 - "GET /mobile HTTP/1.1" 307 Temporary Redirect
+INFO:     211.231.103.92:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile HTTP/1.1" 307 Temporary Redirect
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+2026-09-14 11:04:39.045 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/countries HTTP/1.1" 200 OK
+2026-09-14 11:04:39.057 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=recent HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59886 - "GET /api/products/search?q=%EB%B2%A8%EB%A3%A9%EC%8B%9C&limit=5 HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:59890 - "GET /api/products/search?q=%EB%B2%A8%EB%A3%A9%EC%8B%9C&limit=5 HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+2026-09-14 11:09:02.149 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:09:02.155 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:09:02.156 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:09:02.157 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:09:02.157 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:09:02.158 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:09:02.158 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:09:02.165 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:09:02.170 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+INFO:     Started server process [26752]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8535 (Press CTRL+C to quit)
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 304 Not Modified
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+2026-09-14 11:09:27.470 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:09:27.480 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/countries HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=recent HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59974 - "GET /app.js HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/styles.css HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/icons/icon-192.png HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/app.js HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/countries HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=recent HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/styles.css HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/app.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/icons/icon-192.png HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "POST /mobile/api/logout HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "POST /mobile/api/login HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EC%BD%98%EC%A5%AC%EB%9E%80&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/%EC%BD%98%EC%A5%AC%EB%9E%80%20%285%20Syringe%29 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/location-map/layout HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/purchase/search?q=%E3%84%B9&period=3m&limit=20 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/purchase/search?q=%EB%B0%94%EC%9D%B4%EC%98%A8&period=3m&limit=20 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/purchase/%EB%B0%94%EC%9D%B4%EC%98%A8%EC%A3%BC%28%EA%B8%80%EB%A3%A8%ED%83%80%ED%8B%B0%EC%98%A8%28%ED%99%98%EC%9B%90%ED%98%95%29%29600mg%2010V?period=3m HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/purchase/%EB%B0%94%EC%9D%B4%EC%98%A8%EC%A3%BC%28%EA%B8%80%EB%A3%A8%ED%83%80%ED%8B%B0%EC%98%A8%28%ED%99%98%EC%9B%90%ED%98%95%29%29600mg%2010V?period=3m HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/countries HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=recent HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=yearly HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=monthly HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=yearly HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=monthly HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard/month/2026/9 HTTP/1.1" 200 OK
+^C2026-09-14 11:35:39.248 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:35:39.253 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:35:39.254 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:35:39.255 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:35:39.255 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:35:39.256 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:35:39.257 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:35:39.262 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:35:39.265 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+INFO:     Started server process [21376]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8535 (Press CTRL+C to quit)
+^C2026-09-14 11:36:39.298 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:36:39.302 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:36:39.303 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:36:39.304 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:36:39.304 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:36:39.305 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:36:39.305 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:36:39.308 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 11:36:39.309 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+INFO:     Started server process [31748]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8535 (Press CTRL+C to quit)
+INFO:     127.0.0.1:60414 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60416 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile HTTP/1.1" 307 Temporary Redirect
+INFO:     49.165.6.9:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/styles.css HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/icons/icon-192.png HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/app.js HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/sw.js HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/ HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/manifest.json HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile HTTP/1.1" 307 Temporary Redirect
+INFO:     49.165.6.9:0 - "GET /mobile/ HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile HTTP/1.1" 307 Temporary Redirect
+INFO:     49.165.6.9:0 - "GET /mobile/ HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile HTTP/1.1" 307 Temporary Redirect
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/icons/icon-192.png HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/icons/apple-touch-icon.png HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/icons/apple-touch-icon.png HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     54.89.214.25:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     54.89.214.25:0 - "GET /mobile/app.js HTTP/1.1" 200 OK
+INFO:     54.89.214.25:0 - "GET /mobile/icons/icon-192.png HTTP/1.1" 200 OK
+INFO:     54.89.214.25:0 - "GET /mobile/styles.css HTTP/1.1" 200 OK
+INFO:     54.89.214.25:0 - "GET /mobile/sw.js HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     54.89.214.25:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     54.89.214.25:0 - "GET /mobile/manifest.json HTTP/1.1" 200 OK
+INFO:     54.89.214.25:0 - "GET /mobile/ HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "POST /mobile/api/logout HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "POST /mobile/api/login HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+2026-09-14 12:43:50.226 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/countries HTTP/1.1" 200 OK
+2026-09-14 12:43:50.243 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=recent HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 304 Not Modified
+^C2026-09-14 12:58:17.290 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 12:58:17.302 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 12:58:17.305 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 12:58:17.306 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 12:58:17.306 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 12:58:17.307 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 12:58:17.307 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 12:58:17.308 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 12:58:17.310 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-09-14 12:58:17.311 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+INFO:     Started server process [31144]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8535 (Press CTRL+C to quit)
+INFO:     49.165.6.9:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/app.js HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/ HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/ HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/index.html HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:61557 - "GET /mobile/app.js HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/app.js HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+2026-09-14 13:04:49.547 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/countries HTTP/1.1" 200 OK
+2026-09-14 13:04:49.563 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=recent HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=monthly HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=recent HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61579 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/sw.js HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/styles.css?v=2 HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/app.js?v=2 HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/ HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "POST /mobile/api/login HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/styles.css?v=2 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/app.js?v=2 HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/countries HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=recent HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/countries HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=recent HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/app.js?v=2 HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/styles.css?v=2 HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "POST /mobile/api/logout HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "POST /mobile/api/login HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/countries HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=recent HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61673 - "GET /mobile/app.js?v=3 HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/app.js?v=3 HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/sw.js HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/app.js?v=3 HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/ HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/ HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/app.js?v=3 HTTP/1.1" 304 Not Modified
+INFO:     49.165.6.9:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+INFO:     49.165.6.9:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/countries HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=recent HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/icons/icon-192.png HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/icons/apple-touch-icon.png HTTP/1.1" 200 OK
+INFO:     43.135.182.95:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/countries HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=recent HTTP/1.1" 200 OK
+INFO:     14.32.212.13:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     14.32.212.13:0 - "GET /mobile/app.js?v=3 HTTP/1.1" 200 OK
+INFO:     14.32.212.13:0 - "GET /mobile/styles.css?v=2 HTTP/1.1" 200 OK
+INFO:     14.32.212.13:0 - "GET /mobile/icons/icon-192.png HTTP/1.1" 200 OK
+INFO:     14.32.212.13:0 - "GET /mobile/sw.js HTTP/1.1" 200 OK
+INFO:     14.32.212.13:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     14.32.212.13:0 - "GET /mobile/ HTTP/1.1" 304 Not Modified
+INFO:     14.32.212.13:0 - "GET /mobile/manifest.json HTTP/1.1" 200 OK
+INFO:     14.32.212.13:0 - "POST /mobile/api/login HTTP/1.1" 401 Unauthorized
+INFO:     14.32.212.13:0 - "POST /mobile/api/login HTTP/1.1" 401 Unauthorized
+INFO:     14.32.212.13:0 - "POST /mobile/api/login HTTP/1.1" 401 Unauthorized
+INFO:     14.32.212.13:0 - "POST /mobile/api/login HTTP/1.1" 401 Unauthorized
+INFO:     14.32.212.13:0 - "POST /mobile/api/login HTTP/1.1" 401 Unauthorized
+INFO:     14.32.212.13:0 - "POST /mobile/api/login HTTP/1.1" 401 Unauthorized
+INFO:     2001:2d8:e3b4:52e5:5dd2:3115:6b8d:9670:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     2001:2d8:e3b4:52e5:5dd2:3115:6b8d:9670:0 - "GET /mobile/manifest.json HTTP/1.1" 200 OK
+INFO:     2001:2d8:e3b4:52e5:5dd2:3115:6b8d:9670:0 - "GET /mobile/styles.css?v=2 HTTP/1.1" 200 OK
+INFO:     2001:2d8:e3b4:52e5:5dd2:3115:6b8d:9670:0 - "GET /mobile/app.js?v=3 HTTP/1.1" 200 OK
+INFO:     2001:2d8:e3b4:52e5:5dd2:3115:6b8d:9670:0 - "GET /mobile/icons/icon-192.png HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/cases/60/items HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/cases/60/items HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/cases/61/items HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/cases/61/items HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/cases/61/items HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EC%BD%98%EC%A5%AC%EB%9E%80&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EC%BD%98%EC%A5%AC&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/app.js?v=3 HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/cases/58/items HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/cases/58/items HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/cases/58/items HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/cases/62/items HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/cases/58/items HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/me HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/manifest.json HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/index.html HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/icons/icon-192.png HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/sw.js HTTP/1.1" 304 Not Modified
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/countries HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/export/dashboard?period=recent HTTP/1.1" 200 OK
+INFO:     43.159.145.153:0 - "GET /mobile/ HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EB%94%94%EC%84%BC%EB%B0%94&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/%EB%94%94%EC%84%BC%EB%B0%94B%20%285EA%29 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/location-map/layout HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/%EB%94%94%EC%84%BC%EB%B0%94B%20%28Vial%29 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/%EB%94%94%EC%84%BC%EB%B0%94B%20%285EA%29 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/%EB%94%94%EC%84%BC%EB%B0%94B%20%285EA%29 HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EB%94%94%EC%84%BC&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EB%94%94%EC%84%BC%E3%85%82&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/search?q=%EB%94%94%EC%84%BC%EB%B0%94&limit=20&exclude_material=true HTTP/1.1" 200 OK
+INFO:     117.111.6.197:0 - "GET /mobile/api/products/%EB%94%94%EC%84%BC%EB%B0%94B%20%285EA%29 HTTP/1.1" 200 OK
+C:\Users\Windows10\Documents\GitHub\NOHTUS-WMS\nohtus\mobile_api\queries.py:166: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["_expiry"] = pd.to_datetime(df["exp_date"], errors="coerce").dt.normalize()
+INFO:     117.111.6.197:0 - "GET /mobile/api/expiry?period=1y&exclude_bidata=true&warehouse=yongin&limit=300 HTTP/1.1" 200 OK

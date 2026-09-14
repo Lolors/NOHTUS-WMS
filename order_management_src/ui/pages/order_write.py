@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import streamlit as st
 
 from ui.export_cache import export_fingerprint, get_or_create_excel
 from ui.pages.orders import _add_or_merge_item, _normalise_items, _vendor_panel
@@ -95,6 +96,33 @@ def _render_latest_product_order_card(st, latest_product_order) -> None:
                 """,
                 unsafe_allow_html=True,
             )
+
+
+@st.dialog("별칭으로 추가")
+def _alias_add_dialog() -> None:
+    """제품 등록 여부와 상관없이 제품명·수량·단위를 직접 입력해 발주 품목에 추가합니다."""
+    st.caption("제품 등록 여부와 상관없이 제품명, 수량, 단위를 직접 입력해 발주 품목에 추가합니다.")
+
+    name = st.text_input("제품명", key="alias_add_name", placeholder="예: 마취크림 30g")
+    qty = st.number_input("수량", min_value=1, value=1, step=1, key="alias_add_qty")
+    unit = st.text_input("단위", key="alias_add_unit", placeholder="예: EA, BOX")
+
+    if st.button("추가", type="primary", use_container_width=True, key="alias_add_confirm"):
+        if not name.strip():
+            st.warning("제품명을 입력하세요.")
+        else:
+            item = {
+                "제품코드": "",
+                "정식제품명": name.strip(),
+                "검색별칭": name.strip(),
+                "규격": "",
+                "단위": unit.strip(),
+                "포장단위": unit.strip(),
+                "수량": int(qty),
+            }
+            st.session_state.order_items = _add_or_merge_item(st.session_state.order_items, item)
+            st.session_state.pop("order_excel_export", None)
+            st.rerun()
 
 
 def _render_excel_export(st, core_app, vendor, order_items, request_note: str, order_date_text: str, column) -> None:
@@ -204,7 +232,13 @@ def render(core_app, data) -> None:
 
         with search_col:
             with st.container(border=True):
-                st.markdown("### 제품 검색")
+                search_title_col, alias_add_col = st.columns([2, 1.3], vertical_alignment="center")
+                search_title_col.markdown("### 제품 검색")
+                if alias_add_col.button(
+                    "별칭으로 추가", use_container_width=True, key="open_alias_add_dialog"
+                ):
+                    _alias_add_dialog()
+
                 keyword = st.text_input(
                     "검색",
                     value="",

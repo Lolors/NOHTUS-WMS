@@ -1,5 +1,5 @@
-const CACHE_NAME = "nohtus-mobile-shell-v1";
-const SHELL_FILES = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.json"];
+const CACHE_NAME = "nohtus-mobile-shell-v4";
+const SHELL_FILES = ["./", "./index.html", "./styles.css?v=2", "./app.js?v=3", "./manifest.json"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

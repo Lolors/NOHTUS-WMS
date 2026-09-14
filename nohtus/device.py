@@ -70,17 +70,16 @@ def is_mobile():
 def mobile_app_url():
     """새 모바일 전용 앱(mobile_app/ + nohtus/mobile_api/)의 접속 주소.
 
-    NOHTUS_MOBILE_APP_URL 환경변수가 설정된 경우에만 값을 반환한다.
-    설정하지 않으면 빈 문자열을 반환하고, 이 경우 기존 스트림릿 모바일
-    화면(page_mobile_stock_finder)이 그대로 쓰인다 — 즉 이 값을 넣기
-    전까지는 아무 동작도 바뀌지 않는다.
+    기본값은 같은 도메인의 "/mobile" (Cloudflare Tunnel이 이미 그 경로를
+    mobile_api로 넘겨주도록 설정돼 있음). NOHTUS_MOBILE_APP_URL 환경변수를
+    설정하면 그 값으로 덮어쓸 수 있다 (예: 로컬 테스트 시
+    http://localhost:8535, 또는 모바일 전용 서브도메인을 쓸 때).
 
-    로컬 테스트: NOHTUS_MOBILE_APP_URL=http://localhost:8535
-    운영(도메인+Cloudflare): 모바일 앱을 위한 서브도메인을 Cloudflare에서
-    새로 만들어 mobile_api가 떠 있는 오리진(포트)으로 연결한 뒤,
-    NOHTUS_MOBILE_APP_URL=https://그-서브도메인 으로 설정하면 된다.
+    예전엔 이 값이 비어 있으면 기존 스트림릿 모바일 화면
+    (page_mobile_stock_finder)으로 빠졌는데, 그 경로는 더 이상 쓰지 않는다.
     """
-    return str(os.environ.get("NOHTUS_MOBILE_APP_URL", "") or "").strip()
+    override = str(os.environ.get("NOHTUS_MOBILE_APP_URL", "") or "").strip()
+    return override or "/mobile"
 
 
 def redirect_to_mobile_app(url):
