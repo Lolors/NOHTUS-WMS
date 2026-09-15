@@ -59,8 +59,5 @@ order_management_src/data/purchase_order.db-shm
 data/export.db-wal
 /.tmp.driveupload
 /data
-*.log
 mobile_api.log
-mobile_api.log
-mobile_api.log
-.tmp.drivedownload/17902.1789454489172043
+/.tmp.drivedownload/
