@@ -17,6 +17,7 @@ from datetime import datetime
 
 
 OUTBOUND_REDEDUCT_TX_TYPE = '출고지시 재차감'
+OUTBOUND_LINE_CANCEL_TX_TYPE = '출고지시취소'
 TITLE_EDIT_TX_TYPE = '출고지시 제목수정'
 
 
@@ -254,7 +255,8 @@ def update_outbound_order(order_id, title_or_cart, maybe_cart=None):
     운영 기준:
     - 저장된 출고지시는 이미 inventory에서 차감된 상태다.
     - 수정 저장 시 기존 지시와 새 장바구니의 차이만 재고에 반영한다.
-    - 이력도 변경된 품목/수량만 '출고지시 재차감'으로 남긴다.
+    - 이력도 변경된 품목/수량만 남긴다: 품목이 완전히 빠지면 '출고지시취소',
+      그 외 수량 증감은 '출고지시 재차감'으로 구분해서 남긴다.
     - 제목만 바뀐 경우 재고 이력 없이 제목 수정 이력만 남긴다.
     """
     if maybe_cart is None:
@@ -379,14 +381,33 @@ def update_outbound_order(order_id, title_or_cart, maybe_cart=None):
             lot = src.get('lot', '-')
             exp = src.get('exp_date', '-')
             final_stock = stock_key_final_qty(cur, company=company, product_name=product, lot=lot, exp_date=exp)
-            if delta > 0:
+            new_qty = int(new_requested_by_inv.get(inv_key, 0) or 0)
+            # 이 재고행이 새 장바구니에서 완전히 사라졌다면(수량만 줄어든 게 아니라
+            # 품목 자체가 빠짐) '재차감'이 아니라 명확하게 '취소'로 남긴다.
+            # 그래야 "A사업장 3개 취소 → B사업장 3개로 교체" 같은 흔한 편집이
+            # -3/+3 두 줄 다 '재차감'으로 찍혀서 헷갈리는 일이 없다.
+            line_cancelled = delta < 0 and new_qty == 0
+            if line_cancelled:
+                # '출고지시취소'는 기존(전체 주문 취소) 경로와 같은 부호 규칙을 쓴다:
+                # qty는 "원복된 수량"을 양수로 담는다(_transaction_stock_delta가
+                # 이 타입은 qty를 그대로 +로 더해 재고 증가로 계산하기 때문에,
+                # 여기서 음수 delta를 그대로 넣으면 재고가 줄어든 것으로 잘못
+                # 계산된다).
+                tx_type = OUTBOUND_LINE_CANCEL_TX_TYPE
+                tx_qty = -delta
+                change_desc = f'품목 취소 / {tx_qty}EA 원복'
+            elif delta > 0:
+                tx_type = OUTBOUND_REDEDUCT_TX_TYPE
+                tx_qty = delta
                 change_desc = f'수량 증가 / 추가 재차감 {delta}EA'
             else:
-                change_desc = f'수량 감소 또는 품목 제거 / {-delta}EA 원복'
+                tx_type = OUTBOUND_REDEDUCT_TX_TYPE
+                tx_qty = delta
+                change_desc = f'수량 감소 / {-delta}EA 원복'
             insert_transaction_log(
                 cur,
                 created_at=now,
-                tx_type=OUTBOUND_REDEDUCT_TX_TYPE,
+                tx_type=tx_type,
                 product_name=product,
                 warehouse_name=wh,
                 lot=lot,
@@ -395,7 +416,7 @@ def update_outbound_order(order_id, title_or_cart, maybe_cart=None):
                 from_location=loc,
                 to_company=None,
                 to_location=None,
-                qty=delta,
+                qty=tx_qty,
                 memo=f'출고지시서 #{order_id} 수정 / {change_desc}',
                 final_stock=final_stock,
             )

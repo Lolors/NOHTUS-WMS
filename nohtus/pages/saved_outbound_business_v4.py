@@ -212,9 +212,14 @@ def _render_saved_orders(orders_df, selected_order_id, summaries=None):
         oid = int(getattr(r, "id"))
         created = str(getattr(r, "order_date", "") or getattr(r, "created_at", ""))[:10]
         summary = summaries.get(oid, {})
-        # 담긴 제품들의 실제 사업장이 여러 개면 그 전부를 콤마로 이어 보여주고,
-        # 사업장 정보가 없는(옛) 지시서만 저장된 대표 매출처 값으로 되돌아간다.
-        customer_text = summary.get("companies") or _order_customer_summary(r)
+        # 매출 사업장은 담긴 제품들의 실제 재고 사업장이 아니라 매출처 선택 시
+        # 정한 사업장(customer_company) 기준으로 보여준다 — "사업장 구분 없이"로
+        # 다른 사업장 재고를 담아도 매출은 선택한 매출처 사업장으로 잡혀야
+        # 하기 때문. customer_company가 없는(직접입력 매출처 등) 옛 지시서만
+        # 실제로 담긴 재고 사업장들로 되돌아간다.
+        customer_text = _order_customer_summary(r)
+        if customer_text == "-":
+            customer_text = summary.get("companies") or "-"
         display_no = str(getattr(r, "display_no", "") or getattr(r, "daily_no", "") or oid)
         order_title = str(getattr(r, "title", "") or "").strip() or summary.get("products") or _order_items_summary(oid)
         selected = int(selected_order_id or 0) == oid
@@ -403,6 +408,11 @@ def page_saved_outbound():
             st.info("이 출고지시서에는 저장된 품목이 없습니다.")
             rows_for_download = []
         else:
+            # 품목별 사업장도 실제 재고 사업장이 아니라 매출처의 사업장으로
+            # 통일해서 보여준다(위 _render_saved_orders와 같은 이유).
+            order_customer_company = str(order_row.iloc[0].get("customer_company") or "").strip()
+            if order_customer_company:
+                item_df["사업장"] = order_customer_company
             item_df["유통기한"] = item_df["유통기한"].apply(display_date_only)
             view_items = item_df[["사업장", "로케이션", "제품명", "LOT", "유통기한", "요청수량"]]
             st.markdown(_detail_table_html(view_items), unsafe_allow_html=True)

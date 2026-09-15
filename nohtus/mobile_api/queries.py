@@ -17,6 +17,7 @@ from nohtus.db import q
 from nohtus.locations import expand_row_range
 from nohtus.services.expiry_rules import PERIOD_DAYS as EXPIRY_PERIOD_DAYS
 from nohtus.services.expiry_rules import expiry_badge_for as _expiry_badge_for
+from nohtus.services.product_images import ensure_thumbnail as _ensure_thumbnail
 from nohtus.services.product_images import get_product_image_path
 from nohtus.services.stock_rules import BIDATA_COMPANY
 from nohtus.services.stock_rules import (
@@ -24,9 +25,6 @@ from nohtus.services.stock_rules import (
 )
 from nohtus.services.stock_rules import is_export_waiting_location
 from nohtus.services.warehouse_rules import apply_warehouse_filter as _apply_warehouse_filter
-
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_THUMB_DIR = _PROJECT_ROOT / "data" / "product_images" / "thumbs"
 
 
 def _material_product_names():
@@ -250,9 +248,10 @@ def _image_data_uri(path_value):
 
 
 def thumbnail_data_uri(product_name):
+    """압축된 썸네일만 반환한다 — 원본으로 폴백하면 검색 결과에 원본 크기
+    이미지가 그대로 base64로 실려 모바일 응답이 크게 느려진다."""
     original_path = get_product_image_path(product_name)
     if not original_path:
         return ""
-    original = Path(original_path)
-    thumb = _THUMB_DIR / f"{original.stem}.jpg"
-    return _image_data_uri(thumb if thumb.is_file() else original)
+    thumb = _ensure_thumbnail(original_path)
+    return _image_data_uri(thumb) if thumb else ""

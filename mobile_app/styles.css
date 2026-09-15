@@ -388,7 +388,8 @@ html, body {
   align-items: center;
 }
 .export-group-title { display: flex; align-items: center; gap: 6px; }
-.export-group-flag { font-size: 16px; line-height: 1; }
+.export-group-flag { font-size: 16px; line-height: 1; display: inline-flex; align-items: center; }
+.flag-ico { width: 18px; height: 13px; border-radius: 2px; box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.12); object-fit: cover; vertical-align: -1px; }
 .export-case-dates { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .export-case-date { font-size: 11px; font-weight: 700; color: var(--text-muted); white-space: nowrap; }
 .export-case-row { display: flex; flex-direction: column; gap: 10px; }

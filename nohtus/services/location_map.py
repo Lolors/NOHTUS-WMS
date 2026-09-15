@@ -12,6 +12,7 @@ import streamlit as st
 
 from nohtus.db import q
 from nohtus.db import read_cache_token as _wms_read_cache_token
+from nohtus.services.country_flags import flag_icon_html_for_country
 from nohtus.services.export_waiting import ensure_export_waiting_tables
 from nohtus.services.product_images import get_product_image_path
 from . import location_map_legacy as _legacy
@@ -111,9 +112,9 @@ def _export_waiting_groups():
     try:
         ensure_export_waiting_tables()
         rows = q("""
-            SELECT o.id AS order_id, o.country, o.buyer, o.transport_method, o.title,
+            SELECT o.id AS order_id, o.export_no, o.country, o.buyer, o.transport_method, o.title,
                    i.company, i.product_name, i.warehouse_name, i.lot, i.exp_date,
-                   i.qty, i.waiting_location
+                   i.qty, i.waiting_location, i.waiting_inventory_id
             FROM export_waiting_orders o
             JOIN export_waiting_items i ON i.order_id=o.id
             WHERE o.status IN ('waiting','partial') AND i.waiting_location='P' AND COALESCE(i.confirmed,0)=0
@@ -128,11 +129,12 @@ def _export_waiting_groups():
         clean = {}
         for key, value in row.items():
             if value is None:
-                clean[key] = ""
-            elif key in {"order_id", "qty"}:
+                clean[key] = 0 if key == "waiting_inventory_id" else ""
+            elif key in {"order_id", "qty", "waiting_inventory_id"}:
                 clean[key] = int(value or 0)
             else:
                 clean[key] = str(value)
+        clean["country_flag"] = flag_icon_html_for_country(clean.get("country"))
         result.append(clean)
     return result
 
@@ -166,10 +168,37 @@ def render_location_map():
             "function productCardsHtml(rows){",
             """function exportWaitingCardsHtml(fallbackRows){
   const orders={};
-  exportWaitingItems.forEach(item=>{const key=String(item.order_id||'');if(!key)return;if(!orders[key])orders[key]={country:item.country||'-',buyer:item.buyer||'미지정',transport_method:item.transport_method||'미지정',items:[]};orders[key].items.push(item);});
+  const usedInventoryIds=new Set();
+  exportWaitingItems.forEach(item=>{
+    const key=String(item.order_id||'');
+    if(!key)return;
+    if(!orders[key])orders[key]={export_no:item.export_no||'',country:item.country||'-',country_flag:item.country_flag||'',buyer:item.buyer||'미지정',transport_method:item.transport_method||'미지정',items:[]};
+    orders[key].items.push(item);
+    const invId=Number(item.waiting_inventory_id||0);
+    if(invId>0)usedInventoryIds.add(invId);
+  });
   const entries=Object.values(orders).sort((a,b)=>String(a.country||'').localeCompare(String(b.country||''),'ko')||String(a.buyer||'').localeCompare(String(b.buyer||''),'ko')||String(a.transport_method||'').localeCompare(String(b.transport_method||''),'ko'));
-  if(!entries.length)return productCardsHtml(fallbackRows||[]);
-  return entries.map(order=>{const total=order.items.reduce((sum,item)=>sum+(Number(item.qty)||0),0);const productGroups={};order.items.forEach(item=>{const name=item.product_name||'-';if(!productGroups[name])productGroups[name]=[];productGroups[name].push(item);});const products=Object.entries(productGroups).map(([name,items])=>{const qty=items.reduce((sum,item)=>sum+(Number(item.qty)||0),0);const lines=items.map(item=>`<div class="lot-exp">${esc(item.company||'-')} · ${Number(item.qty)||0}EA&nbsp;&nbsp;${esc(item.lot||'-')} | ${esc(cleanDate(item.exp_date||'-'))}</div>`).join('');return `<div class="export-product-row"><div class="card-top"><span class="product-title">${esc(name)}</span><span class="qty-text">${qty} EA</span></div>${lines}</div>`;}).join('');return `<div class="detail-card export-order-card"><div class="export-order-title">${esc(order.country)}-${esc(order.buyer)}-${esc(order.transport_method)}</div><div class="muted">남은 수출대기 총수량: ${total} EA</div>${products}</div>`;}).join('');
+  const assignedHtml=entries.map(order=>{
+    const total=order.items.reduce((sum,item)=>sum+(Number(item.qty)||0),0);
+    const productGroups={};
+    order.items.forEach(item=>{const name=item.product_name||'-';if(!productGroups[name])productGroups[name]=[];productGroups[name].push(item);});
+    const products=Object.entries(productGroups).map(([name,items])=>{
+      const qty=items.reduce((sum,item)=>sum+(Number(item.qty)||0),0);
+      const lines=items.map(item=>`<div class="lot-exp">${esc(item.company||'-')} · ${Number(item.qty)||0}EA&nbsp;&nbsp;${esc(item.lot||'-')} | ${esc(cleanDate(item.exp_date||'-'))}</div>`).join('');
+      return `<div class="export-product-row"><div class="card-top"><span class="product-title">${esc(name)}</span><span class="qty-text">${qty} EA</span></div>${lines}</div>`;
+    }).join('');
+    const jumpAttr=order.export_no?` data-jump-export-no="${esc(order.export_no)}"`:'';
+    const jumpCls=order.export_no?' export-order-clickable':'';
+    const countryLabel=(order.country_flag?order.country_flag+' ':'')+esc(order.country);
+    return `<div class="detail-card export-order-card${jumpCls}"${jumpAttr}><div class="export-order-title">${countryLabel}-${esc(order.buyer)}-${esc(order.transport_method)}</div><div class="muted">남은 수출대기 총수량: ${total} EA · 클릭하면 수출대기 저장 화면으로 이동합니다</div>${products}</div>`;
+  }).join('');
+  const unassignedRows=(fallbackRows||[]).filter(r=>!usedInventoryIds.has(Number(r.id)));
+  const unassignedDivider=entries.length ? '<div class="export-unassigned-divider"></div>' : '';
+  const unassignedHtml=unassignedRows.length
+    ? `${unassignedDivider}<div class="export-unassigned-heading"><div class="export-order-title">미지정</div><div class="muted">아직 수출대기 입고 처리가 되지 않은 재고입니다.</div></div>${productCardsHtml(unassignedRows)}`
+    : '';
+  if(!entries.length && !unassignedHtml)return productCardsHtml(fallbackRows||[]);
+  return assignedHtml+unassignedHtml;
 }
 function productCardsHtml(rows){""",
             "define exportWaitingCardsHtml",
@@ -183,8 +212,32 @@ function productCardsHtml(rows){""",
         html = _patch(
             html,
             "</style>",
-            ".export-order-card{border:1.5px solid #c7d2fe;background:#f8faff;padding:14px;margin-bottom:14px}.export-order-title{font-size:18px;font-weight:800;color:#1e3a8a;margin-bottom:5px}.export-product-row{border-top:1px solid #dbeafe;margin-top:12px;padding-top:12px}.export-product-row:first-of-type{border-top:0;margin-top:8px;padding-top:0}</style>",
+            ".export-order-card{border:1.5px solid #c7d2fe;background:#f8faff;padding:14px;margin-bottom:14px}.export-order-title{font-size:18px;font-weight:800;color:#1e3a8a;margin-bottom:5px}.export-product-row{border-top:1px solid #dbeafe;margin-top:12px;padding-top:12px}.export-product-row:first-of-type{border-top:0;margin-top:8px;padding-top:0}.export-order-card.export-order-clickable{cursor:pointer}.export-order-card.export-order-clickable:hover{outline:2px solid #2563eb;outline-offset:1px}.export-unassigned-heading{margin:0 0 10px}.export-unassigned-heading .export-order-title{color:#475569}.export-unassigned-divider{border-top:2px dashed #cbd5e1;margin:18px 0}.flag-ico{width:18px;height:13px;vertical-align:-1px;margin-right:2px;border-radius:2px;box-shadow:0 0 0 1px rgba(15,23,42,.12);object-fit:cover}</style>",
             "export-order-card css",
+        )
+        html = _patch(
+            html,
+            "</script></body></html>",
+            """document.getElementById('detail')?.addEventListener('click', function(ev){
+  const card = ev.target.closest('[data-jump-export-no]');
+  if(!card) return;
+  const exportNo = card.getAttribute('data-jump-export-no') || '';
+  if(!exportNo) return;
+  try {
+    const doc = window.parent.document;
+    const input = Array.from(doc.querySelectorAll('input')).find(x => (x.getAttribute('aria-label')||'')==='__map_export_edit_export_no_bridge');
+    if(input){
+      input.focus();
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, exportNo);
+      input.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'insertText', data:exportNo}));
+      input.dispatchEvent(new Event('change', {bubbles:true}));
+      input.blur();
+    }
+  } catch(e) {}
+});
+</script></body></html>""",
+            "wire export-order-card click to jump bridge",
         )
         html = apply_new_layout(html)
         return original_html(html, *args, **kwargs)

@@ -8,6 +8,7 @@ import nohtus.pages.location_map as location_map_page
 from nohtus.pages.location_map import page_map as _page_map
 from nohtus.db import q
 from nohtus.services.stock_rules import is_export_waiting_location as _is_export_waiting_location
+from nohtus.streamlit_patch_lock import STREAMLIT_PATCH_LOCK as _PATCH_LOCK
 
 
 _ORIGINAL_MAP_SEARCH_RESULTS = location_map_page.page_map_search_results
@@ -230,16 +231,17 @@ def page_map():
             label = "클릭해서 업로드"
         return original_button(label, *args, **kwargs)
 
-    location_map_page.page_map_search_results = _page_map_search_results_with_available_filter
-    location_map_page._map_search_product_groups = patched_product_groups
-    st.text_input = patched_text_input
-    st.button = patched_button
-    try:
-        _page_map()
-    finally:
-        location_map_page.page_map_search_results = original_search_results
-        location_map_page._map_search_product_groups = original_product_groups
-        st.text_input = original_text_input
-        st.button = original_button
+    with _PATCH_LOCK:
+        location_map_page.page_map_search_results = _page_map_search_results_with_available_filter
+        location_map_page._map_search_product_groups = patched_product_groups
+        st.text_input = patched_text_input
+        st.button = patched_button
+        try:
+            _page_map()
+        finally:
+            location_map_page.page_map_search_results = original_search_results
+            location_map_page._map_search_product_groups = original_product_groups
+            st.text_input = original_text_input
+            st.button = original_button
     _inject_special_location_button("지엠메딕")
     _inject_special_location_button("거래처 창고")

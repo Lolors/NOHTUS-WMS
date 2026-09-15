@@ -104,3 +104,55 @@ def render_move_js_bridge():
         label_visibility="collapsed",
         on_change=_move_js_inv_id_changed,
     )
+
+
+_EXPORT_ORDER_SELECTOR_KEY_PREFIX = "shipment_export_selector"
+
+
+def _apply_export_order_prefill(export_no):
+    """수출번호로 EXPORT 앱의 진행 중인 건(case)을 찾아 '수출대기 저장' 화면에 미리 선택해 둔다."""
+    from nohtus.export_app.services import export_service
+
+    export_no = str(export_no or "").strip()
+    if not export_no:
+        return False
+    cases = export_service.intake_editable_cases()
+    match = next(
+        (case for case in cases if str(case.get("export_no") or "").strip() == export_no),
+        None,
+    )
+    if not match:
+        return False
+    for suffix in ("country", "buyer", "transport", "case"):
+        st.session_state.pop(f"{_EXPORT_ORDER_SELECTOR_KEY_PREFIX}_{suffix}", None)
+    st.session_state["actual_packing_case_id"] = int(match["id"])
+    return True
+
+
+def _export_edit_js_export_no_changed():
+    """로케이션 맵의 수출대기 카드 클릭으로 넘어온 수출번호를 소비해, '수출대기 저장'
+    화면에 해당 건을 미리 선택해 두고 그 화면으로 전환한다."""
+    raw = str(st.session_state.get("_export_edit_js_export_no_buffer", "") or "").strip()
+    if not raw:
+        return
+    if _apply_export_order_prefill(raw):
+        st.session_state["page"] = "수출대기 저장"
+
+
+def render_export_edit_js_bridge():
+    """로케이션 맵의 수출대기(P) 카드 클릭 브리지 입력칸. render_move_js_bridge()와 같은 방식."""
+    st.markdown(
+        """<style>
+        div[data-testid="stTextInput"]:has(input[aria-label="__map_export_edit_export_no_bridge"]) {
+            position: absolute; width: 1px; height: 1px; overflow: hidden;
+            opacity: 0; pointer-events: none;
+        }
+        </style>""",
+        unsafe_allow_html=True,
+    )
+    st.text_input(
+        "__map_export_edit_export_no_bridge",
+        key="_export_edit_js_export_no_buffer",
+        label_visibility="collapsed",
+        on_change=_export_edit_js_export_no_changed,
+    )

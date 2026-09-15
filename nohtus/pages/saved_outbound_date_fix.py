@@ -6,6 +6,7 @@ import streamlit as st
 
 from nohtus.db import connect, q
 import nohtus.pages.saved_outbound_business_v4 as saved_v4
+from nohtus.streamlit_patch_lock import STREAMLIT_PATCH_LOCK as _PATCH_LOCK
 
 
 def _extend_default_range_to_scheduled_orders():
@@ -122,70 +123,71 @@ def _normalize_order_number_search(value):
 def page_saved_outbound():
     _extend_default_range_to_scheduled_orders()
 
-    original_cancel_order = saved_v4.saved_v2._cancel_order
-    original_filter_orders = saved_v4._filter_orders
-    original_text_input = st.text_input
-    original_columns = st.columns
-    original_caption = st.caption
+    with _PATCH_LOCK:
+        original_cancel_order = saved_v4.saved_v2._cancel_order
+        original_filter_orders = saved_v4._filter_orders
+        original_text_input = st.text_input
+        original_columns = st.columns
+        original_caption = st.caption
 
-    def patched_cancel_order(order_id):
-        customer_name, company, cancelled_date = _cancelled_order_customer(order_id)
-        result = original_cancel_order(order_id)
-        _refresh_customer_last_sale(customer_name, company, cancelled_date)
-        return result
+        def patched_cancel_order(order_id):
+            customer_name, company, cancelled_date = _cancelled_order_customer(order_id)
+            result = original_cancel_order(order_id)
+            _refresh_customer_last_sale(customer_name, company, cancelled_date)
+            return result
 
-    def patched_filter_orders(all_orders, start_date, end_date, customer_term, search_term):
-        number_term = _normalize_order_number_search(
-            st.session_state.get("saved_outbound_number_search", "")
-        )
-        if number_term:
-            # 출고지시서 번호는 날짜 범위와 무관하게 전체 저장 이력에서 찾는다.
-            filtered = original_filter_orders(all_orders, None, None, customer_term, search_term)
-            if number_term.isdigit():
-                return filtered[filtered["id"].astype(int) == int(number_term)]
-            return filtered.iloc[0:0]
-        return original_filter_orders(all_orders, start_date, end_date, customer_term, search_term)
+        def patched_filter_orders(all_orders, start_date, end_date, customer_term, search_term):
+            number_term = _normalize_order_number_search(
+                st.session_state.get("saved_outbound_number_search", "")
+            )
+            if number_term:
+                # 출고지시서 번호는 날짜 범위와 무관하게 전체 저장 이력에서 찾는다.
+                filtered = original_filter_orders(all_orders, None, None, customer_term, search_term)
+                if number_term.isdigit():
+                    return filtered[filtered["id"].astype(int) == int(number_term)]
+                return filtered.iloc[0:0]
+            return original_filter_orders(all_orders, start_date, end_date, customer_term, search_term)
 
-    def patched_columns(spec, *args, **kwargs):
-        # 기본 필터 행의 매출처/제품명 검색 폭을 줄이고 남는 폭을 번호 검색에 자연스럽게 사용한다.
-        if isinstance(spec, (list, tuple)) and list(spec) == [1.5, 1.5, 3, 4]:
-            spec = [1.5, 1.5, 2.1, 4.9]
-        return original_columns(spec, *args, **kwargs)
+        def patched_columns(spec, *args, **kwargs):
+            # 기본 필터 행의 매출처/제품명 검색 폭을 줄이고 남는 폭을 번호 검색에 자연스럽게 사용한다.
+            if isinstance(spec, (list, tuple)) and list(spec) == [1.5, 1.5, 3, 4]:
+                spec = [1.5, 1.5, 2.1, 4.9]
+            return original_columns(spec, *args, **kwargs)
 
-    def patched_text_input(label, *args, **kwargs):
-        label_text = str(label or "").strip()
-        key = str(kwargs.get("key") or "")
+        def patched_text_input(label, *args, **kwargs):
+            label_text = str(label or "").strip()
+            key = str(kwargs.get("key") or "")
 
-        if label_text == "검색" and key == "saved_outbound_search":
-            product_col, number_col = original_columns([1, 1], gap="small")
-            with product_col:
-                product_term = original_text_input("제품명", *args, **kwargs)
-            with number_col:
-                original_text_input(
-                    "출고지시서 번호",
-                    placeholder="212",
-                    key="saved_outbound_number_search",
-                    help="이력조회 메모에 표시되는 출고지시서 번호입니다. 번호로 검색 시 전체 기간에서 검색합니다.",
-                )
-            return product_term
+            if label_text == "검색" and key == "saved_outbound_search":
+                product_col, number_col = original_columns([1, 1], gap="small")
+                with product_col:
+                    product_term = original_text_input("제품명", *args, **kwargs)
+                with number_col:
+                    original_text_input(
+                        "출고지시서 번호",
+                        placeholder="212",
+                        key="saved_outbound_number_search",
+                        help="이력조회 메모에 표시되는 출고지시서 번호입니다. 번호로 검색 시 전체 기간에서 검색합니다.",
+                    )
+                return product_term
 
-        return original_text_input(label, *args, **kwargs)
+            return original_text_input(label, *args, **kwargs)
 
-    def patched_caption(body, *args, **kwargs):
-        if str(body or "").strip() == "날짜, 매출처, 제품 검색으로 출고지시서를 필터링합니다.":
-            body = "날짜, 매출처, 제품명, 출고지시서 번호로 출고지시서를 필터링합니다. 번호 검색은 전체 기간을 대상으로 합니다."
-        return original_caption(body, *args, **kwargs)
+        def patched_caption(body, *args, **kwargs):
+            if str(body or "").strip() == "날짜, 매출처, 제품 검색으로 출고지시서를 필터링합니다.":
+                body = "날짜, 매출처, 제품명, 출고지시서 번호로 출고지시서를 필터링합니다. 번호 검색은 전체 기간을 대상으로 합니다."
+            return original_caption(body, *args, **kwargs)
 
-    saved_v4.saved_v2._cancel_order = patched_cancel_order
-    saved_v4._filter_orders = patched_filter_orders
-    st.text_input = patched_text_input
-    st.columns = patched_columns
-    st.caption = patched_caption
-    try:
-        return saved_v4.page_saved_outbound()
-    finally:
-        saved_v4.saved_v2._cancel_order = original_cancel_order
-        saved_v4._filter_orders = original_filter_orders
-        st.text_input = original_text_input
-        st.columns = original_columns
-        st.caption = original_caption
+        saved_v4.saved_v2._cancel_order = patched_cancel_order
+        saved_v4._filter_orders = patched_filter_orders
+        st.text_input = patched_text_input
+        st.columns = patched_columns
+        st.caption = patched_caption
+        try:
+            return saved_v4.page_saved_outbound()
+        finally:
+            saved_v4.saved_v2._cancel_order = original_cancel_order
+            saved_v4._filter_orders = original_filter_orders
+            st.text_input = original_text_input
+            st.columns = original_columns
+            st.caption = original_caption

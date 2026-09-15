@@ -530,18 +530,24 @@ def _scheduled_outbound_business_log(ds, customers_df):
         if not company and not product_name and qty == 0:
             continue
         title = _safe_text(getattr(r, "title", ""))
+        customer_company = _safe_text(getattr(r, "customer_company", ""))
         partner, manager = _outbound_customer_from_saved_or_title(
             getattr(r, "customer_name", ""),
             title,
             customers_df,
-            getattr(r, "customer_company", ""),
+            customer_company,
         )
         created_at = _safe_text(getattr(r, "created_at", ""))
         time_text = created_at[11:16] if len(created_at) >= 16 else ""
         rows.append({
             "시간": time_text,
             "유형": "출고지시",
-            "사업장": company,
+            # 매출 사업장은 실제로 재고를 뺀 사업장(company)이 아니라, 매출처
+            # 선택 시 정한 사업장(customer_company) 기준이어야 한다 — "사업장
+            # 구분 없이"로 다른 사업장 재고를 골라도 매출은 선택한 매출처의
+            # 사업장으로 잡혀야 하기 때문. customer_company가 없는(직접입력
+            # 매출처 등) 옛 지시서만 실제 재고 사업장으로 되돌아간다.
+            "사업장": customer_company or company,
             "거래처(매출처/입고처)": _safe_text(partner),
             "담당자": _safe_text(manager),
             "제품명": product_name,

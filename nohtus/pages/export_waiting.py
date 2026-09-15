@@ -6,6 +6,7 @@ import streamlit as st
 import nohtus.pages.outbound as outbound_page
 from nohtus.db import connect, q
 from nohtus.pages.outbound_business import page_outbound as _page_outbound
+from nohtus.streamlit_patch_lock import STREAMLIT_PATCH_LOCK as _PATCH_LOCK
 from nohtus.services.export_waiting import (
     STAGING_LOCATIONS,
     TRANSPORT_METHODS,
@@ -264,202 +265,203 @@ def page_export_waiting():
     for key in _ALL_COMPANY_SELECTION_KEYS:
         st.session_state[key] = True
 
-    original_save = outbound_page.save_outbound_order
-    original_update = outbound_page.update_outbound_order
-    original_q = outbound_page.q
-    original_inventory_query = outbound_page._inventory_query_for_outbound
-    original_renderer = outbound_page._render_last_sale_importer
-    original_save_customer = outbound_page._save_outbound_customer
-    original_title, original_caption, original_markdown = st.title, st.caption, st.markdown
-    original_button, original_success, original_rerun = st.button, st.success, st.rerun
-    original_text_input, original_checkbox, original_info = st.text_input, st.checkbox, st.info
+    with _PATCH_LOCK:
+        original_save = outbound_page.save_outbound_order
+        original_update = outbound_page.update_outbound_order
+        original_q = outbound_page.q
+        original_inventory_query = outbound_page._inventory_query_for_outbound
+        original_renderer = outbound_page._render_last_sale_importer
+        original_save_customer = outbound_page._save_outbound_customer
+        original_title, original_caption, original_markdown = st.title, st.caption, st.markdown
+        original_button, original_success, original_rerun = st.button, st.success, st.rerun
+        original_text_input, original_checkbox, original_info = st.text_input, st.checkbox, st.info
 
-    st.session_state.pop("editing_order_id", None)
-    st.session_state.pop("editing_order_title", None)
-    st.session_state["_outbound_screen_mode"] = "export_waiting"
-    completed = {"done": False, "message": ""}
-    fields_rendered = {"done": False}
+        st.session_state.pop("editing_order_id", None)
+        st.session_state.pop("editing_order_title", None)
+        st.session_state["_outbound_screen_mode"] = "export_waiting"
+        completed = {"done": False, "message": ""}
+        fields_rendered = {"done": False}
 
-    def patched_inventory_query(selected_product, selected_company, ignore_company=False):
-        if not selected_product:
-            return pd.DataFrame()
-        return original_q(
-            """
-            SELECT id, company, product_name, warehouse_name, lot, exp_date, location, qty
-            FROM inventory
-            WHERE product_name=? AND COALESCE(qty,0)>0
-            ORDER BY company, location, lot, exp_date
-            """,
-            (selected_product,),
-        )
-
-    def patched_save(cart, title="", memo=""):
-        country = str(st.session_state.get("export_waiting_country") or "").strip()
-        export_no = str(st.session_state.get("export_waiting_number") or "").strip()
-        buyer = str(st.session_state.get("export_waiting_buyer") or "").strip() or "미지정"
-        transport_method = str(st.session_state.get("export_waiting_transport_method") or "").strip() or "미지정"
-        staging_location = str(st.session_state.get("export_waiting_staging_location") or "").strip() or "P"
-        if not country:
-            raise ValueError("국가는 필수 입력값입니다.")
-        if not export_no:
-            raise ValueError("수출번호는 필수 입력값입니다.")
-
-        editing_order_id = st.session_state.get("export_editing_order_id")
-        unmatched = _find_unmatched_p_item(editing_order_id)
-        if unmatched:
-            st.session_state[_P_MATCH_REQUEST_KEY] = unmatched
-            st.session_state[_P_MATCH_SAVE_KEY] = {
-                "cart": [dict(x) for x in (cart or [])],
-                "country": country,
-                "buyer": buyer,
-                "transport_method": transport_method,
-                "export_no": export_no,
-                "editing_order_id": editing_order_id,
-                "staging_location": staging_location,
-            }
-            raise ValueError("제품명이 변경된 P 재고를 직접 연결해 주세요. 아래 검색창이 열렸습니다.")
-        result = save_export_waiting_order(
-            cart,
-            country=country,
-            buyer=buyer,
-            transport_method=transport_method,
-            export_no=export_no,
-            editing_order_id=editing_order_id,
-            staging_location=staging_location,
-        )
-        completed["done"] = True
-        if st.session_state.get("_export_editing_order_status") == "confirmed":
-            completed["message"] = (
-                f"수출확정 출고 리스트 수정 완료: {result['title']} / 총 {result['total_qty']}EA · "
-                "기존 확정 품목은 유지되고 추가 품목은 수출대기로 저장되었습니다."
+        def patched_inventory_query(selected_product, selected_company, ignore_company=False):
+            if not selected_product:
+                return pd.DataFrame()
+            return original_q(
+                """
+                SELECT id, company, product_name, warehouse_name, lot, exp_date, location, qty
+                FROM inventory
+                WHERE product_name=? AND COALESCE(qty,0)>0
+                ORDER BY company, location, lot, exp_date
+                """,
+                (selected_product,),
             )
-        else:
-            completed["message"] = (
-                f"수출대기 등록 완료: {result['title']} / 총 {result['total_qty']}EA → 로케이션 {staging_location}"
+
+        def patched_save(cart, title="", memo=""):
+            country = str(st.session_state.get("export_waiting_country") or "").strip()
+            export_no = str(st.session_state.get("export_waiting_number") or "").strip()
+            buyer = str(st.session_state.get("export_waiting_buyer") or "").strip() or "미지정"
+            transport_method = str(st.session_state.get("export_waiting_transport_method") or "").strip() or "미지정"
+            staging_location = str(st.session_state.get("export_waiting_staging_location") or "").strip() or "P"
+            if not country:
+                raise ValueError("국가는 필수 입력값입니다.")
+            if not export_no:
+                raise ValueError("수출번호는 필수 입력값입니다.")
+
+            editing_order_id = st.session_state.get("export_editing_order_id")
+            unmatched = _find_unmatched_p_item(editing_order_id)
+            if unmatched:
+                st.session_state[_P_MATCH_REQUEST_KEY] = unmatched
+                st.session_state[_P_MATCH_SAVE_KEY] = {
+                    "cart": [dict(x) for x in (cart or [])],
+                    "country": country,
+                    "buyer": buyer,
+                    "transport_method": transport_method,
+                    "export_no": export_no,
+                    "editing_order_id": editing_order_id,
+                    "staging_location": staging_location,
+                }
+                raise ValueError("제품명이 변경된 P 재고를 직접 연결해 주세요. 아래 검색창이 열렸습니다.")
+            result = save_export_waiting_order(
+                cart,
+                country=country,
+                buyer=buyer,
+                transport_method=transport_method,
+                export_no=export_no,
+                editing_order_id=editing_order_id,
+                staging_location=staging_location,
             )
-        return int(result["order_id"])
-
-    def patched_q(sql, params=()):
-        normalized = " ".join(str(sql or "").lower().split())
-        is_export_edit = bool(st.session_state.get("export_editing_order_id"))
-        if " from customers " in f" {normalized} " and not is_export_edit:
-            return pd.DataFrame()
-        return original_q(sql, params)
-
-    def patched_title(body, *args, **kwargs):
-        if isinstance(body, str) and body.strip() == "출고지시":
-            body = "수출대기 수정" if st.session_state.get("export_editing_order_id") else "수출대기 등록"
-        return original_title(body, *args, **kwargs)
-
-    def patched_caption(body, *args, **kwargs):
-        if isinstance(body, str):
-            if "출고지시 저장 시" in body:
-                if st.session_state.get("_export_editing_order_status") == "confirmed":
-                    body = "기존 확정 품목의 사업장·매출처는 그대로 유지됩니다. 추가한 품목만 수출대기로 저장되며, 저장된 수출대기 화면에서 사업장·매출처를 선택해 확정합니다."
-                else:
-                    body = "등록 완료 시 선택 재고는 같은 사업장의 지정한 보관 위치(기본 P)로 이동합니다. 국가는 필수이고 바이어와 운송방식은 미지정으로 둘 수 있습니다."
+            completed["done"] = True
+            if st.session_state.get("_export_editing_order_status") == "confirmed":
+                completed["message"] = (
+                    f"수출확정 출고 리스트 수정 완료: {result['title']} / 총 {result['total_qty']}EA · "
+                    "기존 확정 품목은 유지되고 추가 품목은 수출대기로 저장되었습니다."
+                )
             else:
-                body = body.replace("출고지시", "수출대기")
-        return original_caption(body, *args, **kwargs)
+                completed["message"] = (
+                    f"수출대기 등록 완료: {result['title']} / 총 {result['total_qty']}EA → 로케이션 {staging_location}"
+                )
+            return int(result["order_id"])
 
-    def patched_markdown(body, *args, **kwargs):
-        if isinstance(body, str) and body.strip() == "### 매출처":
-            result = original_markdown("### 주문 정보", *args, **kwargs)
-            if not fields_rendered["done"]:
-                fields_rendered["done"] = True
-                if "export_waiting_buyer" not in st.session_state:
-                    st.session_state["export_waiting_buyer"] = "미지정"
-                if "export_waiting_transport_method" not in st.session_state:
-                    st.session_state["export_waiting_transport_method"] = "미지정"
-                if "export_waiting_staging_location" not in st.session_state:
-                    st.session_state["export_waiting_staging_location"] = "P"
-                c1, c2, c3, c4, c5 = st.columns(5, gap="medium")
-                with c1:
-                    original_text_input("국가 *", placeholder="필수 입력", key="export_waiting_country")
-                with c2:
-                    original_text_input("바이어", placeholder="미지정", key="export_waiting_buyer")
-                with c3:
-                    st.selectbox("운송방식", TRANSPORT_METHODS, key="export_waiting_transport_method")
-                with c4:
-                    original_text_input("수출번호 *", placeholder="필수 입력", key="export_waiting_number")
-                with c5:
-                    st.selectbox(
-                        "보관 위치",
-                        STAGING_LOCATIONS,
-                        key="export_waiting_staging_location",
-                        help="새로 담는 품목이 이동할 수출대기 위치입니다. 기본은 P이고, "
-                        "P가 가득 찼거나 별도 보관이 필요하면 T1~T5 중에서 고를 수 있습니다.",
-                    )
+        def patched_q(sql, params=()):
+            normalized = " ".join(str(sql or "").lower().split())
+            is_export_edit = bool(st.session_state.get("export_editing_order_id"))
+            if " from customers " in f" {normalized} " and not is_export_edit:
+                return pd.DataFrame()
+            return original_q(sql, params)
+
+        def patched_title(body, *args, **kwargs):
+            if isinstance(body, str) and body.strip() == "출고지시":
+                body = "수출대기 수정" if st.session_state.get("export_editing_order_id") else "수출대기 등록"
+            return original_title(body, *args, **kwargs)
+
+        def patched_caption(body, *args, **kwargs):
+            if isinstance(body, str):
+                if "출고지시 저장 시" in body:
+                    if st.session_state.get("_export_editing_order_status") == "confirmed":
+                        body = "기존 확정 품목의 사업장·매출처는 그대로 유지됩니다. 추가한 품목만 수출대기로 저장되며, 저장된 수출대기 화면에서 사업장·매출처를 선택해 확정합니다."
+                    else:
+                        body = "등록 완료 시 선택 재고는 같은 사업장의 지정한 보관 위치(기본 P)로 이동합니다. 국가는 필수이고 바이어와 운송방식은 미지정으로 둘 수 있습니다."
+                else:
+                    body = body.replace("출고지시", "수출대기")
+            return original_caption(body, *args, **kwargs)
+
+        def patched_markdown(body, *args, **kwargs):
+            if isinstance(body, str) and body.strip() == "### 매출처":
+                result = original_markdown("### 주문 정보", *args, **kwargs)
+                if not fields_rendered["done"]:
+                    fields_rendered["done"] = True
+                    if "export_waiting_buyer" not in st.session_state:
+                        st.session_state["export_waiting_buyer"] = "미지정"
+                    if "export_waiting_transport_method" not in st.session_state:
+                        st.session_state["export_waiting_transport_method"] = "미지정"
+                    if "export_waiting_staging_location" not in st.session_state:
+                        st.session_state["export_waiting_staging_location"] = "P"
+                    c1, c2, c3, c4, c5 = st.columns(5, gap="medium")
+                    with c1:
+                        original_text_input("국가 *", placeholder="필수 입력", key="export_waiting_country")
+                    with c2:
+                        original_text_input("바이어", placeholder="미지정", key="export_waiting_buyer")
+                    with c3:
+                        st.selectbox("운송방식", TRANSPORT_METHODS, key="export_waiting_transport_method")
+                    with c4:
+                        original_text_input("수출번호 *", placeholder="필수 입력", key="export_waiting_number")
+                    with c5:
+                        st.selectbox(
+                            "보관 위치",
+                            STAGING_LOCATIONS,
+                            key="export_waiting_staging_location",
+                            help="새로 담는 품목이 이동할 수출대기 위치입니다. 기본은 P이고, "
+                            "P가 가득 찼거나 별도 보관이 필요하면 T1~T5 중에서 고를 수 있습니다.",
+                        )
+                return result
+            if isinstance(body, str):
+                body = body.replace("### 출고지시 장바구니", "### 수출대기 장바구니")
+            return original_markdown(body, *args, **kwargs)
+
+        def patched_text_input(label, *args, **kwargs):
+            key = kwargs.get("key")
+            if key == "out_customer_term":
+                if st.session_state.get("export_editing_order_id"):
+                    return original_text_input(label, *args, **kwargs)
+                return ""
+            if key == "out_customer_manual_name":
+                return ""
+            if label == "출고지시서 제목":
+                st.session_state["export_waiting_auto_title"] = _export_title()
+                return original_text_input("수출대기 제목", disabled=True, key="export_waiting_auto_title")
+            return original_text_input(label, *args, **kwargs)
+
+        def patched_checkbox(label, *args, **kwargs):
+            key = kwargs.get("key")
+            if key == "out_customer_direct":
+                return False
+            if key in _ALL_COMPANY_SELECTION_KEYS or label == "사업장 구분 없이 특정 재고 선택":
+                if key:
+                    st.session_state[key] = True
+                return True
+            return original_checkbox(label, *args, **kwargs)
+
+        def patched_info(body, *args, **kwargs):
+            text = str(body or "")
+            if any(x in text for x in ["거래처를 검색", "매출처를 선택", "직접입력 매출처", "저장된 매출처"]):
+                return None
+            return original_info(body, *args, **kwargs)
+
+        def patched_button(label, *args, **kwargs):
+            label = {
+                "지시완료 저장": "수출대기 수정 완료" if st.session_state.get("export_editing_order_id") else "수출대기 등록 완료",
+                "선택 재고 장바구니에 담기": "선택 재고 수출대기 장바구니에 담기",
+            }.get(label, label)
+            return original_button(label, *args, **kwargs)
+
+        def patched_rerun(*args, **kwargs):
+            if completed["done"]:
+                st.session_state["_outbound_last_success"] = completed["message"]
+                completed["done"] = False
+                for key in ["export_waiting_number", "export_waiting_country", "export_waiting_buyer", "export_waiting_transport_method", "export_waiting_auto_title", "export_editing_order_id", "_export_edit_loaded", "_export_editing_order_status"]:
+                    st.session_state.pop(key, None)
+            return original_rerun(*args, **kwargs)
+
+        outbound_page.save_outbound_order = patched_save
+        outbound_page.update_outbound_order = lambda order_id, title, cart: patched_save(cart, title)
+        outbound_page.q = patched_q
+        outbound_page._inventory_query_for_outbound = patched_inventory_query
+        outbound_page._render_last_sale_importer = lambda: None
+        # 수출대기 저장은 export_waiting_orders.id를 반환하므로, outbound_orders를
+        # 대상으로 하는 매출처 저장을 절대 실행하지 않는다(id 충돌 시 다른 출고지시서를
+        # 덮어쓸 수 있다).
+        outbound_page._save_outbound_customer = lambda *args, **kwargs: None
+        st.title, st.caption, st.markdown = patched_title, patched_caption, patched_markdown
+        st.text_input, st.checkbox, st.info = patched_text_input, patched_checkbox, patched_info
+        st.button, st.success, st.rerun = patched_button, lambda body, *a, **k: original_success(str(body).replace("출고지시", "수출대기"), *a, **k), patched_rerun
+        try:
+            result = _page_outbound()
+            _render_p_match_dialog()
             return result
-        if isinstance(body, str):
-            body = body.replace("### 출고지시 장바구니", "### 수출대기 장바구니")
-        return original_markdown(body, *args, **kwargs)
-
-    def patched_text_input(label, *args, **kwargs):
-        key = kwargs.get("key")
-        if key == "out_customer_term":
-            if st.session_state.get("export_editing_order_id"):
-                return original_text_input(label, *args, **kwargs)
-            return ""
-        if key == "out_customer_manual_name":
-            return ""
-        if label == "출고지시서 제목":
-            st.session_state["export_waiting_auto_title"] = _export_title()
-            return original_text_input("수출대기 제목", disabled=True, key="export_waiting_auto_title")
-        return original_text_input(label, *args, **kwargs)
-
-    def patched_checkbox(label, *args, **kwargs):
-        key = kwargs.get("key")
-        if key == "out_customer_direct":
-            return False
-        if key in _ALL_COMPANY_SELECTION_KEYS or label == "사업장 구분 없이 특정 재고 선택":
-            if key:
-                st.session_state[key] = True
-            return True
-        return original_checkbox(label, *args, **kwargs)
-
-    def patched_info(body, *args, **kwargs):
-        text = str(body or "")
-        if any(x in text for x in ["거래처를 검색", "매출처를 선택", "직접입력 매출처", "저장된 매출처"]):
-            return None
-        return original_info(body, *args, **kwargs)
-
-    def patched_button(label, *args, **kwargs):
-        label = {
-            "지시완료 저장": "수출대기 수정 완료" if st.session_state.get("export_editing_order_id") else "수출대기 등록 완료",
-            "선택 재고 장바구니에 담기": "선택 재고 수출대기 장바구니에 담기",
-        }.get(label, label)
-        return original_button(label, *args, **kwargs)
-
-    def patched_rerun(*args, **kwargs):
-        if completed["done"]:
-            st.session_state["_outbound_last_success"] = completed["message"]
-            completed["done"] = False
-            for key in ["export_waiting_number", "export_waiting_country", "export_waiting_buyer", "export_waiting_transport_method", "export_waiting_auto_title", "export_editing_order_id", "_export_edit_loaded", "_export_editing_order_status"]:
-                st.session_state.pop(key, None)
-        return original_rerun(*args, **kwargs)
-
-    outbound_page.save_outbound_order = patched_save
-    outbound_page.update_outbound_order = lambda order_id, title, cart: patched_save(cart, title)
-    outbound_page.q = patched_q
-    outbound_page._inventory_query_for_outbound = patched_inventory_query
-    outbound_page._render_last_sale_importer = lambda: None
-    # 수출대기 저장은 export_waiting_orders.id를 반환하므로, outbound_orders를
-    # 대상으로 하는 매출처 저장을 절대 실행하지 않는다(id 충돌 시 다른 출고지시서를
-    # 덮어쓸 수 있다).
-    outbound_page._save_outbound_customer = lambda *args, **kwargs: None
-    st.title, st.caption, st.markdown = patched_title, patched_caption, patched_markdown
-    st.text_input, st.checkbox, st.info = patched_text_input, patched_checkbox, patched_info
-    st.button, st.success, st.rerun = patched_button, lambda body, *a, **k: original_success(str(body).replace("출고지시", "수출대기"), *a, **k), patched_rerun
-    try:
-        result = _page_outbound()
-        _render_p_match_dialog()
-        return result
-    finally:
-        outbound_page.save_outbound_order, outbound_page.update_outbound_order, outbound_page.q = original_save, original_update, original_q
-        outbound_page._inventory_query_for_outbound = original_inventory_query
-        outbound_page._render_last_sale_importer = original_renderer
-        outbound_page._save_outbound_customer = original_save_customer
-        st.title, st.caption, st.markdown = original_title, original_caption, original_markdown
-        st.text_input, st.checkbox, st.info = original_text_input, original_checkbox, original_info
-        st.button, st.success, st.rerun = original_button, original_success, original_rerun
+        finally:
+            outbound_page.save_outbound_order, outbound_page.update_outbound_order, outbound_page.q = original_save, original_update, original_q
+            outbound_page._inventory_query_for_outbound = original_inventory_query
+            outbound_page._render_last_sale_importer = original_renderer
+            outbound_page._save_outbound_customer = original_save_customer
+            st.title, st.caption, st.markdown = original_title, original_caption, original_markdown
+            st.text_input, st.checkbox, st.info = original_text_input, original_checkbox, original_info
+            st.button, st.success, st.rerun = original_button, original_success, original_rerun

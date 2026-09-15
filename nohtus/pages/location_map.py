@@ -20,6 +20,9 @@ from nohtus.dates import display_date_only
 from nohtus.locations import location_picking_key, parse_location
 from nohtus.services import stock_rules
 from nohtus.pages.product_shortcuts import add_recent_product_view, is_favorite_product, toggle_favorite_product
+from nohtus.services.product_images import create_thumbnail as _create_thumbnail
+from nohtus.services.product_images import ensure_thumbnail as _ensure_thumbnail
+from nohtus.services.product_images import thumbnail_path_for as _thumbnail_path_for
 from nohtus.services.products import product_options
 
 
@@ -27,8 +30,6 @@ _IMAGE_DIR = Path(__file__).resolve().parents[2] / "data" / "product_images"
 _THUMB_DIR = _IMAGE_DIR / "thumbs"
 _ALLOWED_IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 _MAX_IMAGE_BYTES = 8 * 1024 * 1024
-_THUMB_SIZE = (500, 500)
-_THUMB_QUALITY = 78
 
 
 def _safe_product_image_stem(product_name: str) -> str:
@@ -46,53 +47,6 @@ def _image_data_uri(image_path: str) -> str:
         return ""
     mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
     return f"data:{mime};base64,{encoded}"
-
-
-def _thumbnail_path_for(original_path: str | Path) -> Path:
-    original = Path(str(original_path or ""))
-    return _THUMB_DIR / f"{original.stem}.jpg"
-
-
-def _create_thumbnail(original_path: str | Path) -> str:
-    original = Path(str(original_path or ""))
-    if not original.is_file():
-        return ""
-    target = _thumbnail_path_for(original)
-    try:
-        from PIL import Image, ImageOps
-
-        _THUMB_DIR.mkdir(parents=True, exist_ok=True)
-        with Image.open(original) as image:
-            image = ImageOps.exif_transpose(image)
-            if image.mode not in ("RGB", "L"):
-                background = Image.new("RGB", image.size, "white")
-                alpha = image.getchannel("A") if "A" in image.getbands() else None
-                background.paste(image.convert("RGB"), mask=alpha)
-                image = background
-            else:
-                image = image.convert("RGB")
-            image = ImageOps.fit(image, _THUMB_SIZE, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
-            image.save(target, format="JPEG", quality=_THUMB_QUALITY, optimize=True)
-        return str(target)
-    except Exception:
-        return ""
-
-
-def _ensure_thumbnail(original_path: str | Path) -> str:
-    original = Path(str(original_path or ""))
-    if not original.is_file():
-        return ""
-    target = _thumbnail_path_for(original)
-    try:
-        if target.is_file():
-            from PIL import Image
-            with Image.open(target) as thumb:
-                correct_size = tuple(thumb.size) == _THUMB_SIZE
-            if correct_size and target.stat().st_mtime >= original.stat().st_mtime:
-                return str(target)
-    except Exception:
-        pass
-    return _create_thumbnail(original)
 
 
 def _ensure_existing_product_thumbnails() -> None:
@@ -432,8 +386,9 @@ def page_map_search_results(term, compact: bool = False):
 
 def page_map():
     from nohtus.services.location_map import render_location_map
-    from nohtus.services.move_bridge_runtime import render_move_js_bridge
+    from nohtus.services.move_bridge_runtime import render_move_js_bridge, render_export_edit_js_bridge
     render_move_js_bridge()
+    render_export_edit_js_bridge()
     move_toast = st.session_state.pop("_move_toast", "")
     if move_toast:
         st.toast(move_toast, icon="✅")
