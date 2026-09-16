@@ -67,6 +67,8 @@ def stock_rows(product_name, exclude_material_or_promo=True):
     product_name = (product_name or "").strip()
     if not product_name:
         return pd.DataFrame()
+    if exclude_material_or_promo and product_name in _material_product_names():
+        return pd.DataFrame()
     df = q(
         """
         SELECT company, location, lot, exp_date, qty, location_range_end, location_range_cells
@@ -76,8 +78,6 @@ def stock_rows(product_name, exclude_material_or_promo=True):
         """,
         (product_name,),
     )
-    if exclude_material_or_promo:
-        df = _exclude_material_or_promo_rows(df)
     return df
 
 

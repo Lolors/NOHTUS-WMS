@@ -61,3 +61,4 @@ data/export.db-wal
 /data
 mobile_api.log
 /.tmp.drivedownload/
+streamlit.log

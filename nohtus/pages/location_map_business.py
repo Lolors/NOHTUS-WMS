@@ -8,7 +8,7 @@ import nohtus.pages.location_map as location_map_page
 from nohtus.pages.location_map import page_map as _page_map
 from nohtus.db import q
 from nohtus.services.stock_rules import is_export_waiting_location as _is_export_waiting_location
-from nohtus.streamlit_patch_lock import STREAMLIT_PATCH_LOCK as _PATCH_LOCK
+from nohtus.streamlit_patch_lock import call_or_reuse, current, patched
 
 
 _ORIGINAL_MAP_SEARCH_RESULTS = location_map_page.page_map_search_results
@@ -33,7 +33,7 @@ def _page_map_search_results_with_available_filter(term, compact: bool = False):
     available_only = bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False))
     exclude_materials = bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True))
     material_products = _material_product_names() if exclude_materials else set()
-    original_q = location_map_page.q
+    original_q = current(location_map_page, "q")
 
     def filtered_q(sql, params=()):
         sql_text = str(sql or "")
@@ -64,11 +64,8 @@ def _page_map_search_results_with_available_filter(term, compact: bool = False):
             result = result.loc[keep].copy()
         return result
 
-    location_map_page.q = filtered_q
-    try:
+    with patched({(location_map_page, "q"): filtered_q}):
         return _ORIGINAL_MAP_SEARCH_RESULTS(term, compact=compact)
-    finally:
-        location_map_page.q = original_q
 
 
 def _inject_special_location_button(name):
@@ -140,10 +137,9 @@ def _inject_special_location_button(name):
 
 
 def page_map():
-    original_search_results = location_map_page.page_map_search_results
-    original_product_groups = location_map_page._map_search_product_groups
-    original_text_input = st.text_input
-    original_button = st.button
+    original_product_groups = current(location_map_page, "_map_search_product_groups")
+    original_text_input = current(st, "text_input")
+    original_button = current(st, "button")
     material_products = _material_product_names()
 
     st.markdown(
@@ -207,19 +203,23 @@ def page_map():
                 value = original_text_input(label, *args, **kwargs)
             with p_col:
                 st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-                st.checkbox(
+                call_or_reuse(
+                    st.checkbox,
                     "수출대기(P) 제외",
                     value=bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False)),
                     key=_AVAILABLE_ONLY_KEY,
                     help="수출대기(P) 재고를 총재고와 재고 분포에서 제외합니다.",
+                    session_state=st.session_state,
                 )
             with materials_col:
                 st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-                st.checkbox(
+                call_or_reuse(
+                    st.checkbox,
                     "부자재 제외",
                     value=bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)),
                     key=_EXCLUDE_MATERIALS_KEY,
                     help="부자재 관리 메뉴에 등록된 제품을 총재고와 재고 분포에서 제외합니다.",
+                    session_state=st.session_state,
                 )
             return value
         return original_text_input(label, *args, **kwargs)
@@ -231,17 +231,13 @@ def page_map():
             label = "클릭해서 업로드"
         return original_button(label, *args, **kwargs)
 
-    with _PATCH_LOCK:
-        location_map_page.page_map_search_results = _page_map_search_results_with_available_filter
-        location_map_page._map_search_product_groups = patched_product_groups
-        st.text_input = patched_text_input
-        st.button = patched_button
-        try:
-            _page_map()
-        finally:
-            location_map_page.page_map_search_results = original_search_results
-            location_map_page._map_search_product_groups = original_product_groups
-            st.text_input = original_text_input
-            st.button = original_button
+    overrides = {
+        (location_map_page, "page_map_search_results"): _page_map_search_results_with_available_filter,
+        (location_map_page, "_map_search_product_groups"): patched_product_groups,
+        (st, "text_input"): patched_text_input,
+        (st, "button"): patched_button,
+    }
+    with patched(overrides):
+        _page_map()
     _inject_special_location_button("지엠메딕")
     _inject_special_location_button("거래처 창고")

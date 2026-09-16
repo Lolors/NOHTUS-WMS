@@ -6,6 +6,7 @@ import streamlit as st
 
 import nohtus.pages.location_map as location_map_page
 import nohtus.pages.location_map_business as location_map_business
+from nohtus.streamlit_patch_lock import current
 
 
 class LocationMapPatchRestoreTests(unittest.TestCase):
@@ -31,27 +32,22 @@ class LocationMapPatchRestoreTests(unittest.TestCase):
         self.assertIn('[data-testid="stMain"] input', source)
         self.assertIn("caret-color: auto !important;", source)
 
-    """로케이션맵 화면은 st.text_input/st.button을 전역으로 임시 교체한 뒤
-    _page_map() 실행 후 복원한다. 이 patch가 전역 위젯을 바꾸는 만큼, 새면
-    로케이션맵 이후 화면 전체의 입력/버튼이 깨진다."""
+    """로케이션맵 화면은 st.text_input/st.button 등을 이 스레드(세션)에만 보이는
+    patch로 임시 교체한 뒤 _page_map() 실행 후 복원한다(nohtus.streamlit_patch_lock).
+    `current(owner, attr)`가 "이 스레드 기준으로 지금 유효한 함수"를 돌려주므로,
+    렌더링 전/후에는 patch 이전 값과 같아야 하고 렌더링 중에는 달라야 한다."""
 
     def setUp(self):
-        self._orig_text_input = st.text_input
-        self._orig_button = st.button
-        self._orig_search_results = location_map_page.page_map_search_results
-        self._orig_product_groups = location_map_page._map_search_product_groups
-
-    def tearDown(self):
-        st.text_input = self._orig_text_input
-        st.button = self._orig_button
-        location_map_page.page_map_search_results = self._orig_search_results
-        location_map_page._map_search_product_groups = self._orig_product_groups
+        self._orig_text_input = current(st, "text_input")
+        self._orig_button = current(st, "button")
+        self._orig_search_results = current(location_map_page, "page_map_search_results")
+        self._orig_product_groups = current(location_map_page, "_map_search_product_groups")
 
     def _assert_all_patches_restored(self):
-        self.assertIs(st.text_input, self._orig_text_input)
-        self.assertIs(st.button, self._orig_button)
-        self.assertIs(location_map_page.page_map_search_results, self._orig_search_results)
-        self.assertIs(location_map_page._map_search_product_groups, self._orig_product_groups)
+        self.assertIs(current(st, "text_input"), self._orig_text_input)
+        self.assertIs(current(st, "button"), self._orig_button)
+        self.assertIs(current(location_map_page, "page_map_search_results"), self._orig_search_results)
+        self.assertIs(current(location_map_page, "_map_search_product_groups"), self._orig_product_groups)
 
     def test_restores_global_widgets_after_successful_render(self):
         with patch.object(location_map_business, "_page_map", return_value=None) as mock_render:
@@ -71,8 +67,8 @@ class LocationMapPatchRestoreTests(unittest.TestCase):
         captured = {}
 
         def capture_widgets():
-            captured["text_input_during_render"] = st.text_input
-            captured["button_during_render"] = st.button
+            captured["text_input_during_render"] = current(st, "text_input")
+            captured["button_during_render"] = current(st, "button")
 
         with patch.object(location_map_business, "_page_map", side_effect=capture_widgets):
             location_map_business.page_map()

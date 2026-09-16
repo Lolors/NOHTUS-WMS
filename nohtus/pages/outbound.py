@@ -7,7 +7,7 @@ contains page rendering code.
 from __future__ import annotations
 
 from nohtus.services.outbound_orders import save_outbound_order, update_outbound_order
-from nohtus.services.outbound_cart import _add_rows_to_outbound_cart, _cart_expiry_warnings, _clear_outbound_inputs_before_render, get_cart
+from nohtus.services.outbound_cart import _add_rows_to_outbound_cart, _cart_expiry_warnings, _clear_outbound_inputs_before_render, forget_manual_pick_editor_state, get_cart
 from nohtus.services.outbound import build_outbound_order_title, outbound_excel_bytes, outbound_pdf_bytes, recommend_picks
 from datetime import date, datetime
 
@@ -169,11 +169,12 @@ def _save_outbound_cart_with_customer(cart, title, customer_payload):
     for k in [
         "outbound_cart", "out_customer_term", "out_customer_select", "_out_customer_label",
         "out_selected_customer", "out_customer_direct", "out_customer_manual_name",
-        "out_product_term", "out_req_qty", "out_rec_editor", "out_manual_editor",
+        "out_product_term", "out_req_qty", "out_rec_editor",
         "out_ignore_company", "out_manual_pick", "pending_outbound_save",
         "pending_outbound_expiry_warnings",
     ]:
         st.session_state.pop(k, None)
+    forget_manual_pick_editor_state()
     st.session_state["outbound_cart"] = []
     st.session_state["out_cart_editor_token"] = int(st.session_state.get("out_cart_editor_token", 0) or 0) + 1
     st.session_state["_outbound_reset_inputs_pending"] = True
@@ -744,6 +745,11 @@ def page_outbound():
                 manual["요청수량"] = 0
                 manual = manual.rename(columns={"company":"사업장", "lot":"LOT", "exp_date":"유통기한", "location":"로케이션", "qty":"현재수량"})
                 manual["유통기한"] = manual["유통기한"].apply(display_date_only)
+                # 후보 재고 목록(사업장 필터, "사업장 구분 없이" 토글 등)이 바뀌면
+                # 위젯 key도 함께 바꿔서 이전 렌더에서 체크해둔 "선택" 상태가 위치
+                # 기준으로 엉뚱한 행(다른 사업장)에 재적용되는 걸 막는다. 같은 재고
+                # 행 id 목록이면 같은 key를 써서 사용자가 입력 중인 값이 유지된다.
+                manual_editor_key = "out_manual_editor_" + "_".join(str(x) for x in pick_df["id"].tolist())
                 edited = st.data_editor(
                     manual[["선택", "사업장", "로케이션", "LOT", "유통기한", "현재수량", "요청수량"]],
                     hide_index=True,
@@ -754,7 +760,7 @@ def page_outbound():
                         "선택": st.column_config.CheckboxColumn("선택"),
                         "요청수량": st.column_config.NumberColumn("요청수량", min_value=0, step=1),
                     },
-                    key="out_manual_editor",
+                    key=manual_editor_key,
                 )
                 picked_qty = int(pd.to_numeric(edited.loc[edited["선택"] == True, "요청수량"], errors="coerce").fillna(0).sum())  # noqa: E712
                 if selected_product:

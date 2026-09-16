@@ -91,6 +91,17 @@ def _cart_expiry_warnings(cart):
         })
     return warnings
 
+def forget_manual_pick_editor_state():
+    """'특정 재고 선택' 표(out_manual_editor_<재고id들>)의 남은 위젯 상태를 지운다.
+
+    이 표의 key는 후보 재고 id 목록에 따라 매번 달라지므로(사업장 필터가
+    바뀔 때 이전 선택 상태가 엉뚱한 행에 재적용되는 걸 막기 위해), 장바구니를
+    비우거나 저장을 마친 뒤에는 리터럴 키 하나만 pop해서는 정리되지 않는다.
+    """
+    for key in [k for k in st.session_state.keys() if k.startswith("out_manual_editor")]:
+        st.session_state.pop(key, None)
+
+
 def _clear_outbound_inputs_before_render():
     """출고지시 저장/수정 완료 후 다음 렌더에서 입력 위젯 값을 초기화한다.
     Streamlit widget key를 생성된 뒤 직접 수정하지 않기 위해 page_outbound 시작부에서만 실행한다.
@@ -104,4 +115,5 @@ def _clear_outbound_inputs_before_render():
         "pending_outbound_save", "pending_outbound_expiry_warnings",
     ]:
         st.session_state.pop(k, None)
+    forget_manual_pick_editor_state()
     st.session_state["out_cart_editor_token"] = int(st.session_state.get("out_cart_editor_token", 0) or 0) + 1

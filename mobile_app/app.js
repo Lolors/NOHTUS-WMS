@@ -111,13 +111,24 @@
     else localStorage.removeItem(TOKEN_KEY);
   }
 
+  // iOS 홈화면 앱은 서비스워커가 먹통이 되면 무관한 fetch까지 응답 없이
+  // 영영 걸려버리는 경우가 있다(에러도 안 뜨고 화면이 그냥 굳음). 그 상태를
+  // 사용자가 못 알아채고 무한정 기다리게 두지 않도록, 모든 API 호출에
+  // 타임아웃을 걸어 최소한 에러 메시지는 뜨게 한다.
+  const FETCH_TIMEOUT_MS = 15000;
+  function fetchWithTimeout(url, options = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+  }
+
   async function api(path, options = {}) {
     const token = getToken();
     const headers = Object.assign({}, options.headers || {}, {
       Authorization: token ? `Bearer ${token}` : "",
     });
     if (options.body) headers["Content-Type"] = "application/json";
-    const res = await fetch(API_BASE + path, { ...options, headers });
+    const res = await fetchWithTimeout(API_BASE + path, { ...options, headers });
     if (res.status === 401) {
       setToken("");
       showLogin();
@@ -237,7 +248,7 @@
       return;
     }
     try {
-      const res = await fetch(API_BASE + "/api/login", {
+      const res = await fetchWithTimeout(API_BASE + "/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
@@ -254,7 +265,9 @@
       initTabs();
       loadStock();
     } catch (err) {
-      errorBox.textContent = "네트워크 오류가 발생했습니다.";
+      errorBox.textContent = err && err.name === "AbortError"
+        ? "응답이 너무 오래 걸려 중단했습니다. 다시 시도해주세요."
+        : "네트워크 오류가 발생했습니다.";
     }
   }
 

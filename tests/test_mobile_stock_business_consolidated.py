@@ -95,15 +95,29 @@ class MobileStockBusinessLogicTests(unittest.TestCase):
         badge_html = mb._expiry_badge(rows)
         self.assertIn("mobile-expiry-badge", badge_html)
 
-    def test_stock_rows_excludes_material_location(self):
+    def test_stock_rows_excludes_material_product_regardless_of_location(self):
+        # 부자재 판정은 제품마스터의 is_material 플래그만 본다 — G1/G2 같은
+        # 구역 로케이션 기준으로는 더 이상 걸러내지 않는다(정상 제품이 그
+        # 구역에 임시로 놓이면 재고 조회에서 통째로 사라지던 버그를 고쳤다).
+        self._seed_products([("제품A", "", "", 1)])
         self._seed_inventory([
             ("노투스", "제품A", "ERP-A", "LOT-1", "2027-01-01", "A1-01-01", 10),
             ("노투스", "제품A", "ERP-A", "LOT-2", "2027-01-01", "G1-01", 5),
         ])
         rows = mb._stock_rows("제품A")
-        self.assertEqual(sorted(rows["location"].tolist()), ["A1-01-01"])
+        self.assertTrue(rows.empty)
 
-    def test_has_visible_stock_false_when_only_material_location(self):
+    def test_stock_rows_keeps_non_material_product_even_in_g_zone_location(self):
+        self._seed_products([("제품A", "", "", 0)])
+        self._seed_inventory([
+            ("노투스", "제품A", "ERP-A", "LOT-1", "2027-01-01", "A1-01-01", 10),
+            ("노투스", "제품A", "ERP-A", "LOT-2", "2027-01-01", "G1-01", 5),
+        ])
+        rows = mb._stock_rows("제품A")
+        self.assertEqual(sorted(rows["location"].tolist()), ["A1-01-01", "G1-01"])
+
+    def test_has_visible_stock_false_when_product_marked_material(self):
+        self._seed_products([("제품B", "", "", 1)])
         self._seed_inventory([
             ("노투스", "제품B", "ERP-B", "LOT-1", "2027-01-01", "G1-01", 5),
         ])
@@ -127,11 +141,11 @@ class MobileStockBusinessLogicTests(unittest.TestCase):
     def test_product_candidates_prunes_material_only_matches(self):
         self._seed_products([
             ("제품E", "", "", 0),
-            ("제품F", "", "", 0),
+            ("제품F", "", "", 1),
         ])
         self._seed_inventory([
             ("노투스", "제품E", "ERP-E", "LOT-1", "2027-01-01", "A1-01-01", 10),
-            ("노투스", "제품F", "ERP-F", "LOT-1", "2027-01-01", "G1-01", 10),
+            ("노투스", "제품F", "ERP-F", "LOT-1", "2027-01-01", "A1-01-02", 10),
         ])
         candidates = mb._product_candidates("제품", limit=10)
         self.assertIn("제품E", candidates)

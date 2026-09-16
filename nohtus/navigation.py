@@ -38,7 +38,7 @@ _OUTBOUND_STATE_KEYS = [
     "outbound_cart", "outbound_order_date", "out_customer_term", "out_customer_select",
     "_out_customer_label", "out_selected_customer", "out_customer_direct",
     "out_customer_manual_name", "out_product_term", "out_req_qty", "out_rec_editor",
-    "out_manual_editor", "out_ignore_company", "out_manual_pick", "out_all_company_manual_pick",
+    "out_ignore_company", "out_manual_pick", "out_all_company_manual_pick",
     "out_expiry_short_first", "pending_outbound_save", "pending_outbound_expiry_warnings",
     "pending_outbound_add_rows", "pending_outbound_add_warnings", "editing_order_id",
     "editing_order_title",
@@ -50,8 +50,11 @@ def _is_admin_only_allowed(label):
 
 
 def _reset_outbound_work_state():
+    from nohtus.services.outbound_cart import forget_manual_pick_editor_state
+
     for key in _OUTBOUND_STATE_KEYS:
         st.session_state.pop(key, None)
+    forget_manual_pick_editor_state()
     st.session_state["outbound_cart"] = []
     st.session_state["out_cart_editor_token"] = int(st.session_state.get("out_cart_editor_token", 0) or 0) + 1
     st.session_state["_outbound_reset_inputs_pending"] = True

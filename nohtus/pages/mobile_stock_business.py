@@ -27,6 +27,7 @@ from nohtus.services.location_map import product_thumbnail_uris_for
 from nohtus.services.stock_rules import (
     exclude_material_or_promo_rows,
     is_export_waiting_location,
+    material_product_names,
 )
 
 DETAIL_STATE_KEY = "mobile_search_detail_product"
@@ -425,12 +426,15 @@ def _inject_mobile_search_css():
 # ---------------------------------------------------------------------------
 
 def _stock_rows(product_name, company_filter="전체", expiry_filter="전체"):
-    rows = mobile_stock.mobile_stock_rows(product_name, company_filter, expiry_filter)
-    return exclude_material_or_promo_rows(rows)
+    if str(product_name or "").strip() in material_product_names():
+        return pd.DataFrame()
+    return mobile_stock.mobile_stock_rows(product_name, company_filter, expiry_filter)
 
 
 def _has_visible_stock(product_name):
-    rows = exclude_material_or_promo_rows(mobile_stock.mobile_stock_rows(product_name))
+    if str(product_name or "").strip() in material_product_names():
+        return False
+    rows = mobile_stock.mobile_stock_rows(product_name)
     return isinstance(rows, pd.DataFrame) and not rows.empty
 
 

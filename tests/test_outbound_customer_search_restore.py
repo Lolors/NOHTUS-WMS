@@ -31,23 +31,23 @@ class OutboundCustomerSearchRestoreTests(unittest.TestCase):
 
         self.assertEqual(
             assignments["original_text_input"],
-            "_BASE_TEXT_INPUT if is_export_waiting else previous_text_input",
+            "true_original(st, 'text_input') if is_export_waiting else previous_text_input",
         )
         self.assertEqual(
             assignments["original_checkbox"],
-            "_BASE_CHECKBOX if is_export_waiting else previous_checkbox",
+            "true_original(st, 'checkbox') if is_export_waiting else previous_checkbox",
         )
         self.assertEqual(
             assignments["original_data_editor"],
-            "_BASE_DATA_EDITOR if is_export_waiting else previous_data_editor",
+            "true_original(st, 'data_editor') if is_export_waiting else previous_data_editor",
         )
         self.assertEqual(
             assignments["original_markdown"],
-            "_BASE_MARKDOWN if is_export_waiting else previous_markdown",
+            "true_original(st, 'markdown') if is_export_waiting else previous_markdown",
         )
         self.assertEqual(
             assignments["original_caption"],
-            "_BASE_CAPTION if is_export_waiting else previous_caption",
+            "true_original(st, 'caption') if is_export_waiting else previous_caption",
         )
 
 

@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import nohtus.pages.export_waiting as export_waiting_page
 import nohtus.pages.outbound as outbound_page
+from nohtus.streamlit_patch_lock import current
 
 
 class ExportWaitingSaveCustomerNeutralizedTests(unittest.TestCase):
@@ -46,19 +47,18 @@ class ExportWaitingSaveCustomerNeutralizedTests(unittest.TestCase):
                    )"""
             )
 
-        self._orig_save_customer = outbound_page._save_outbound_customer
+        self._orig_save_customer = current(outbound_page, "_save_outbound_customer")
 
     def tearDown(self):
         for p in self.connect_patchers:
             p.stop()
-        outbound_page._save_outbound_customer = self._orig_save_customer
         self.temp_dir.cleanup()
 
     def test_save_outbound_customer_is_neutralized_during_render_and_restored_after(self):
         captured = {}
 
         def stub_page_outbound():
-            captured["during_render"] = outbound_page._save_outbound_customer
+            captured["during_render"] = current(outbound_page, "_save_outbound_customer")
             return "rendered"
 
         with patch.object(export_waiting_page, "_page_outbound", side_effect=stub_page_outbound):
@@ -68,14 +68,14 @@ class ExportWaitingSaveCustomerNeutralizedTests(unittest.TestCase):
         self.assertIsNot(captured["during_render"], self._orig_save_customer)
         # 어떤 id를 넘겨도 아무 행도 건드리지 않아야 한다.
         self.assertIsNone(captured["during_render"](999999, {"customer_name": "SHOULD_NOT_WRITE"}))
-        self.assertIs(outbound_page._save_outbound_customer, self._orig_save_customer)
+        self.assertIs(current(outbound_page, "_save_outbound_customer"), self._orig_save_customer)
 
     def test_save_outbound_customer_restored_even_when_render_raises(self):
         with patch.object(export_waiting_page, "_page_outbound", side_effect=RuntimeError("boom")):
             with self.assertRaisesRegex(RuntimeError, "boom"):
                 export_waiting_page.page_export_waiting()
 
-        self.assertIs(outbound_page._save_outbound_customer, self._orig_save_customer)
+        self.assertIs(current(outbound_page, "_save_outbound_customer"), self._orig_save_customer)
 
 
 class PatchedSaveReturnsRealOrderIdTests(unittest.TestCase):

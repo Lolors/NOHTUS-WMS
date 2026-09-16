@@ -208,10 +208,6 @@ def _normalized_map_location(value):
     return re.sub(r"[\s\-_]+", "", str(value or "").strip().upper())
 
 
-def _is_material_or_promo_location(value):
-    return stock_rules.is_material_or_promo_location(value)
-
-
 def page_map_search_results(term, compact: bool = False):
     """로케이션맵 > 제품명 검색 결과."""
     try:
@@ -232,10 +228,6 @@ def page_map_search_results(term, compact: bool = False):
     where = ["qty>0"]
     if exclude_p:
         where.append("REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', ''), '-', ''), '_', '') NOT LIKE 'P%'")
-    if exclude_materials:
-        normalized_sql = "REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', ''), '-', ''), '_', '')"
-        where.append(f"{normalized_sql} NOT LIKE 'G1%'")
-        where.append(f"{normalized_sql} NOT LIKE 'G2%'")
 
     inv = q(f"""
         SELECT id, company, product_name, warehouse_name, lot, exp_date, location, qty
@@ -251,7 +243,7 @@ def page_map_search_results(term, compact: bool = False):
         if exclude_p:
             inv = inv.loc[~inv["location"].apply(stock_rules.is_export_waiting_location)].copy()
         if exclude_materials:
-            inv = inv.loc[~inv["location"].apply(_is_material_or_promo_location)].copy()
+            inv = stock_rules.exclude_material_or_promo_rows(inv)
 
     result_groups = []
     for product_name in opts["standard_name"].dropna().astype(str).drop_duplicates().tolist():

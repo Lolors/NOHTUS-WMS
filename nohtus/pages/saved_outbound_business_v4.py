@@ -408,11 +408,12 @@ def page_saved_outbound():
             st.info("이 출고지시서에는 저장된 품목이 없습니다.")
             rows_for_download = []
         else:
-            # 품목별 사업장도 실제 재고 사업장이 아니라 매출처의 사업장으로
-            # 통일해서 보여준다(위 _render_saved_orders와 같은 이유).
-            order_customer_company = str(order_row.iloc[0].get("customer_company") or "").strip()
-            if order_customer_company:
-                item_df["사업장"] = order_customer_company
+            # 품목별 사업장은 실제로 재고가 빠진 사업장을 그대로 보여준다.
+            # "사업장 구분 없이"로 여러 사업장 재고를 섞어 담으면 품목마다
+            # 사업장이 다를 수 있는데, 그걸 매출처 사업장으로 뭉개면 재고를
+            # 어디서 뺐는지 화면에서 확인할 수 없게 된다. 매출처 사업장은
+            # 목록의 "매출처" 칸(_render_saved_orders/_order_customer_summary)에
+            # 이미 따로 표시된다.
             item_df["유통기한"] = item_df["유통기한"].apply(display_date_only)
             view_items = item_df[["사업장", "로케이션", "제품명", "LOT", "유통기한", "요청수량"]]
             st.markdown(_detail_table_html(view_items), unsafe_allow_html=True)
