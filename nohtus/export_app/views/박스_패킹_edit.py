@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 import streamlit as st
 
@@ -144,11 +146,12 @@ def box_preset_management_dialog(case_id: int) -> None:
 
     st.markdown('#### 새 프리셋 추가')
     preset_name = st.text_input('프리셋 이름', key=f'manual_preset_name_{case_id}')
-    add_cols = st.columns(2)
-    preset_length = add_cols[0].number_input('가로(cm)', min_value=0, step=1, format='%d', key=f'manual_preset_length_{case_id}')
-    preset_width = add_cols[1].number_input('세로(cm)', min_value=0, step=1, format='%d', key=f'manual_preset_width_{case_id}')
-    preset_height = add_cols[0].number_input('높이(cm)', min_value=0, step=1, format='%d', key=f'manual_preset_height_{case_id}')
-    preset_weight = add_cols[1].number_input('무게(kg)', min_value=0, step=1, format='%d', key=f'manual_preset_weight_{case_id}')
+    add_cols = st.columns(3)
+    preset_length = add_cols[0].number_input('가로(cm)', min_value=0.0, step=0.01, format='%.2f', key=f'manual_preset_length_{case_id}')
+    preset_width = add_cols[1].number_input('세로(cm)', min_value=0.0, step=0.01, format='%.2f', key=f'manual_preset_width_{case_id}')
+    preset_height = add_cols[2].number_input('높이(cm)', min_value=0.0, step=0.01, format='%.2f', key=f'manual_preset_height_{case_id}')
+    add_weight_cols = st.columns(3)
+    preset_weight = add_weight_cols[0].number_input('무게(kg)', min_value=0.0, step=0.01, format='%.2f', key=f'manual_preset_weight_{case_id}')
     if st.button('새 프리셋 추가', use_container_width=True):
         try:
             packing_service.save_box_preset(
@@ -175,11 +178,12 @@ def box_preset_management_dialog(case_id: int) -> None:
 
     managed = presets[managed_name]
     edited_name = st.text_input('프리셋 이름 수정', value=managed_name, key=f'edit_box_preset_name_{case_id}_{managed_name}')
-    edit_cols = st.columns(2)
-    edit_length = edit_cols[0].number_input('길이(cm)', min_value=0, value=int(managed['length_cm']), step=1, format='%d', key=f'edit_box_preset_length_{case_id}_{managed_name}')
-    edit_width = edit_cols[1].number_input('너비(cm)', min_value=0, value=int(managed['width_cm']), step=1, format='%d', key=f'edit_box_preset_width_{case_id}_{managed_name}')
-    edit_height = edit_cols[0].number_input('높이(cm)', min_value=0, value=int(managed['height_cm']), step=1, format='%d', key=f'edit_box_preset_height_{case_id}_{managed_name}')
-    edit_weight = edit_cols[1].number_input('GW(kg)', min_value=0, value=int(managed['weight_kg']), step=1, format='%d', key=f'edit_box_preset_weight_{case_id}_{managed_name}')
+    edit_cols = st.columns(3)
+    edit_length = edit_cols[0].number_input('길이(cm)', min_value=0.0, value=float(managed['length_cm']), step=0.01, format='%.2f', key=f'edit_box_preset_length_{case_id}_{managed_name}')
+    edit_width = edit_cols[1].number_input('너비(cm)', min_value=0.0, value=float(managed['width_cm']), step=0.01, format='%.2f', key=f'edit_box_preset_width_{case_id}_{managed_name}')
+    edit_height = edit_cols[2].number_input('높이(cm)', min_value=0.0, value=float(managed['height_cm']), step=0.01, format='%.2f', key=f'edit_box_preset_height_{case_id}_{managed_name}')
+    edit_weight_cols = st.columns(3)
+    edit_weight = edit_weight_cols[0].number_input('GW(kg)', min_value=0.0, value=float(managed['weight_kg']), step=0.01, format='%.2f', key=f'edit_box_preset_weight_{case_id}_{managed_name}')
     manage_cols = st.columns(2)
     if manage_cols[0].button('프리셋 수정', type='primary', use_container_width=True, key=f'update_box_preset_{case_id}_{managed_name}'):
         try:
@@ -355,6 +359,11 @@ def render() -> None:
                 pending_values = st.session_state.pop(pending_values_key)
                 for field, key in dimension_keys.items():
                     st.session_state[key] = float(pending_values[field])
+            # Keep the GW draft as text so typing is included in the form submission
+            # without requiring a separate number-input blur/commit first.
+            weight_key = dimension_keys['weight_kg']
+            if weight_key in st.session_state and not isinstance(st.session_state[weight_key], str):
+                st.session_state[weight_key] = str(st.session_state[weight_key])
             with st.form(f'current_ctn_form_{case_id}_{active_box_no}'):
                 dimension_columns = st.columns(4)
                 length = dimension_columns[0].number_input(
@@ -366,28 +375,35 @@ def render() -> None:
                 height = dimension_columns[2].number_input(
                     '높이(cm)', min_value=0.0, value=float(active_box['height_cm'] or 0), key=dimension_keys['height_cm']
                 )
-                weight = dimension_columns[3].number_input(
-                    'GW(kg)', min_value=0.0, value=float(active_box['weight_kg'] or 0), key=dimension_keys['weight_kg']
+                weight_text = dimension_columns[3].text_input(
+                    'GW(kg)', value=f"{float(active_box['weight_kg'] or 0):.2f}", key=weight_key,
                 )
                 save_box = st.form_submit_button('CTN 저장 후 다음 CTN', type='primary', use_container_width=True)
 
             if save_box:
-                packing_service.update_box(int(active_box['id']), length, width, height, weight)
-                packing_service.save_last_box_values(length, width, height, weight)
-                current_values = {
-                    'length_cm': float(length), 'width_cm': float(width),
-                    'height_cm': float(height), 'weight_kg': float(weight),
-                }
-                st.session_state[active_values_key] = current_values
-                history_service.add(case_id, 'CTN 정보 수정', f'CTN {active_box_no}')
-                current_index = box_labels.index(f'CTN {active_box_no}')
-                if current_index + 1 < len(box_labels):
-                    next_label = box_labels[current_index + 1]
+                try:
+                    weight = float(weight_text.strip())
+                    if not math.isfinite(weight) or weight < 0:
+                        raise ValueError
+                except ValueError:
+                    st.error('GW(kg)에 0 이상의 숫자를 입력하세요. 예: 4.76')
                 else:
-                    next_label = new_box_label
-                st.session_state[pending_active_key] = next_label
-                st.success(f'CTN {active_box_no}을 저장했습니다.')
-                st.rerun()
+                    packing_service.update_box(int(active_box['id']), length, width, height, weight)
+                    packing_service.save_last_box_values(length, width, height, weight)
+                    current_values = {
+                        'length_cm': float(length), 'width_cm': float(width),
+                        'height_cm': float(height), 'weight_kg': float(weight),
+                    }
+                    st.session_state[active_values_key] = current_values
+                    history_service.add(case_id, 'CTN 정보 수정', f'CTN {active_box_no}')
+                    current_index = box_labels.index(f'CTN {active_box_no}')
+                    if current_index + 1 < len(box_labels):
+                        next_label = box_labels[current_index + 1]
+                    else:
+                        next_label = new_box_label
+                    st.session_state[pending_active_key] = next_label
+                    st.success(f'CTN {active_box_no}을 저장했습니다.')
+                    st.rerun()
 
         else:
             st.caption('제품을 담으면 규격·GW 입력과 복제 기능이 활성화됩니다.')
@@ -677,30 +693,55 @@ def render() -> None:
                 st.write(f"**{repeat_item['product_name']}**")
                 st.caption(f'남은 수량 {fmt_number(total_quantity)} · 생성 시작 CTN {start_box_no}')
 
+                preview_key = f'repeat_pack_preview_{case_id}'
+                presets = packing_service.list_box_presets()
+                preset_key = f'repeat_box_preset_{case_id}_{repeat_item_id}'
+
+                def clear_preview() -> None:
+                    st.session_state.pop(preview_key, None)
+
+                def apply_repeat_preset() -> None:
+                    clear_preview()
+                    preset = presets.get(st.session_state.get(preset_key))
+                    if preset is None:
+                        return
+                    for field, input_name in (
+                        ('length_cm', 'length'), ('width_cm', 'width'),
+                        ('height_cm', 'height'), ('weight_kg', 'weight'),
+                    ):
+                        st.session_state[f'repeat_{input_name}_{case_id}_{repeat_item_id}'] = float(preset[field])
+
+                st.selectbox(
+                    '박스 프리셋', sorted(presets), index=None,
+                    placeholder='프리셋 선택', disabled=not presets,
+                    key=preset_key, on_change=apply_repeat_preset,
+                )
+                if not presets:
+                    st.caption('박스 프리셋의 프리셋 관리에서 먼저 등록해 주세요.')
+
                 quantity_per_box = st.number_input(
                     'CTN당 수량', min_value=1, max_value=max(total_quantity, 1),
                     value=min(10, max(total_quantity, 1)), step=1,
-                    key=f'repeat_qty_per_box_{case_id}_{repeat_item_id}',
+                    key=f'repeat_qty_per_box_{case_id}_{repeat_item_id}', on_change=clear_preview,
                 )
                 size_cols = st.columns(4)
                 length_cm = size_cols[0].number_input(
-                    '가로(cm)', min_value=0.0, step=0.1,
-                    key=f'repeat_length_{case_id}_{repeat_item_id}',
+                    '가로(cm)', min_value=0.0, step=0.01, format='%.2f',
+                    key=f'repeat_length_{case_id}_{repeat_item_id}', on_change=clear_preview,
                 )
                 width_cm = size_cols[1].number_input(
-                    '세로(cm)', min_value=0.0, step=0.1,
-                    key=f'repeat_width_{case_id}_{repeat_item_id}',
+                    '세로(cm)', min_value=0.0, step=0.01, format='%.2f',
+                    key=f'repeat_width_{case_id}_{repeat_item_id}', on_change=clear_preview,
                 )
                 height_cm = size_cols[2].number_input(
-                    '높이(cm)', min_value=0.0, step=0.1,
-                    key=f'repeat_height_{case_id}_{repeat_item_id}',
+                    '높이(cm)', min_value=0.0, step=0.01, format='%.2f',
+                    key=f'repeat_height_{case_id}_{repeat_item_id}', on_change=clear_preview,
                 )
                 weight_kg = size_cols[3].number_input(
-                    'CTN당 GW(kg)', min_value=0.0, step=0.1,
-                    key=f'repeat_weight_{case_id}_{repeat_item_id}',
+                    'CTN당 GW(kg)', min_value=0.0, step=0.01, format='%.2f',
+                    key=f'repeat_weight_{case_id}_{repeat_item_id}', on_change=clear_preview,
                 )
 
-                preview_key = f'repeat_pack_preview_{case_id}'
                 if st.button('미리보기 생성', type='primary', use_container_width=True):
                     full_count, remainder = divmod(total_quantity, int(quantity_per_box))
                     quantities = [int(quantity_per_box)] * full_count

@@ -10,6 +10,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from ui.month_grid import render_month_grid
+from services.statement_returns import return_info
 
 
 def _to_int(purchase_module, value) -> int:
@@ -64,12 +65,16 @@ def _build_frames(purchase_module, data, year: int, month: int):
 
         item_qty = 0
         product_amount = 0
+        returned_amount = 0
         for _, item in items.iterrows():
             qty = _to_int(purchase_module, item.get("입고수량", 0))
             buy_price = _to_int(purchase_module, item.get("매입단가", 0))
             amount = _to_int(purchase_module, item.get("상품금액", qty * buy_price))
             item_qty += qty
-            product_amount += amount
+            # 상품금액은 이미 반품 차감 후 저장되므로 원금액을 복원해 표시한다.
+            _, _, item_returned_amount = return_info(item.get("가격적용여부", ""))
+            product_amount += amount + item_returned_amount
+            returned_amount += item_returned_amount
             detail_rows.append({
                 "거래처": vendor_name,
                 "발주일자": order_date,
@@ -110,7 +115,8 @@ def _build_frames(purchase_module, data, year: int, month: int):
             "입고수량 합계": item_qty,
             "상품금액": product_amount,
             "배송비": freight,
-            "총 매입금액": product_amount + freight,
+            "반품금액": returned_amount,
+            "총 매입금액": product_amount + freight - returned_amount,
         })
 
     summary = pd.DataFrame(summary_rows)
@@ -121,6 +127,7 @@ def _build_frames(purchase_module, data, year: int, month: int):
             거래명세서수=("거래명세서 번호", "count"),
             상품금액=("상품금액", "sum"),
             배송비=("배송비", "sum"),
+            반품금액=("반품금액", "sum"),
             총매입금액=("총 매입금액", "sum"),
         )
         if not summary.empty
@@ -196,8 +203,8 @@ def _excel_bytes(month_key: str, summary: pd.DataFrame, detail: pd.DataFrame, ve
     summary_ws = add_sheet(
         "월마감 요약",
         summary,
-        {"상품금액", "배송비", "총 매입금액"},
-        {"입고수량 합계", "상품금액", "배송비", "총 매입금액"},
+        {"상품금액", "배송비", "반품금액", "총 매입금액"},
+        {"입고수량 합계", "상품금액", "배송비", "반품금액", "총 매입금액"},
         header_row=3,
     )
     summary_ws["A1"] = f"{month_key}_매입내역"
@@ -214,8 +221,8 @@ def _excel_bytes(month_key: str, summary: pd.DataFrame, detail: pd.DataFrame, ve
     add_sheet(
         "거래처별 합계",
         vendor,
-        {"상품금액", "배송비", "총매입금액"},
-        {"거래명세서수", "상품금액", "배송비", "총매입금액"},
+        {"상품금액", "배송비", "반품금액", "총매입금액"},
+        {"거래명세서수", "상품금액", "배송비", "반품금액", "총매입금액"},
     )
 
     wb.save(output)
@@ -226,7 +233,7 @@ def _excel_bytes(month_key: str, summary: pd.DataFrame, detail: pd.DataFrame, ve
 def render(purchase_module, data) -> None:
     st = purchase_module.st
     st.markdown("## 월별 매입 현황")
-    st.caption("거래명세서 일자 기준으로 월마감 자료를 조회하고 내려받습니다.")
+    st.caption("거래명세서 일자 기준으로 조회합니다. 총 매입금액 = 상품금액(반품 전) + 배송비 − 반품금액입니다.")
 
     today = datetime.now()
     results: dict = {}
@@ -253,13 +260,15 @@ def render(purchase_module, data) -> None:
                 return
             product_amount = int(summary["상품금액"].sum())
             freight = int(summary["배송비"].sum())
+            returned_amount = int(summary["반품금액"].sum())
             total = int(summary["총 매입금액"].sum())
             row1_col1, row1_col2 = st.columns(2)
             row1_col1.metric("거래명세서", f"{len(summary):,}건")
             row1_col2.metric("상품금액", f"{product_amount:,}원")
             row2_col1, row2_col2 = st.columns(2)
             row2_col1.metric("배송비", f"{freight:,}원")
-            row2_col2.metric("총 매입금액", f"{total:,}원")
+            row2_col2.metric("반품금액", f"{returned_amount:,}원")
+            st.metric("총 매입금액", f"{total:,}원")
 
     with st.container(border=True):
         year, month = render_month_grid(
@@ -281,13 +290,13 @@ def render(purchase_module, data) -> None:
 
     st.markdown("### 거래명세서별 월마감 요약")
     display = summary.copy()
-    for col in ["상품금액", "배송비", "총 매입금액"]:
+    for col in ["상품금액", "배송비", "반품금액", "총 매입금액"]:
         display[col] = display[col].apply(_money)
     st.dataframe(display, use_container_width=True, hide_index=True)
 
     st.markdown("### 거래처별 합계")
     vendor_display = vendor.copy()
-    for col in ["상품금액", "배송비", "총매입금액"]:
+    for col in ["상품금액", "배송비", "반품금액", "총매입금액"]:
         vendor_display[col] = vendor_display[col].apply(_money)
     st.dataframe(vendor_display, use_container_width=True, hide_index=True)
 

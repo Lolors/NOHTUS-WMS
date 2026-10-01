@@ -8,7 +8,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from nohtus.db import q
-from nohtus.pages.discrepancy_comic import render_discrepancy_comic_panel
 from nohtus.services.stock_compare import ignored_erp_diffs
 
 COMPANIES = ["노투스팜", "NOH", "노투스"]
@@ -30,7 +29,7 @@ ALL_OWN_PRODUCTS = list(dict.fromkeys(
     for company in COMPANIES
     for product in OWN_PRODUCTS_BY_COMPANY[company]
 ))
-INBOUND_TYPES = {"입고", "출고지시취소"}
+INBOUND_TYPES = {"입고", "반품입고", "반품입고취소", "출고지시취소"}
 OUTBOUND_TYPES = {"출고지시", "출고지시수정", "출고지시 재차감", "출고", "출고확정"}
 MOVE_TYPES = {"사업장이동", "사업장+위치이동", "비자료전환", "이동"}
 
@@ -84,7 +83,13 @@ def _today_delta_map() -> dict[tuple[str, str], int]:
         from_company = str(row.get("from_company") or "").strip()
         to_company = str(row.get("to_company") or "").strip()
         qty = int(row.get("qty") or 0)
-        if tx_type in INBOUND_TYPES and to_company in COMPANIES:
+        if tx_type == "출고지시취소":
+            # Line removal records the restored company in from_company;
+            # full cancellation/export restoration may use to_company instead.
+            key = (to_company or from_company, product)
+            if key in deltas:
+                deltas[key] += qty
+        elif tx_type in INBOUND_TYPES and to_company in COMPANIES:
             key = (to_company, product)
             if key in deltas:
                 deltas[key] += qty
@@ -257,10 +262,6 @@ def page_own_product_status():
         f"기준일자: {_today_text()} · 전일수량 = 현재수량 - 금일 입고/출고/사업장 이동 증감 · "
         "실물vs전산 차이 원인 = 재고실사 데이터비교의 무시목록(사업장+표준제품명 완전일치)에 등록된 ERP 차이"
     )
-    table_col, comic_col = st.columns([2, 1])
-    with table_col:
-        components.html(
-            _report_html(_today_delta_map(), ignored_erp_diffs()), height=960, scrolling=False
-        )
-    with comic_col:
-        render_discrepancy_comic_panel()
+    components.html(
+        _report_html(_today_delta_map(), ignored_erp_diffs()), height=960, scrolling=False
+    )

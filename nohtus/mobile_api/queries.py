@@ -98,12 +98,10 @@ def stock_summary(rows):
 def search_products(term, limit=20, exclude_material=True):
     """검색어에 매칭되고 실제로 노출 가능한 재고가 있는 제품만 반환."""
     candidates = product_candidates(term, limit=max(limit * 5, 100))
-    if exclude_material:
-        material_names = _material_product_names()
-        candidates = [name for name in candidates if name not in material_names]
+    material_names = _material_product_names()
     results = []
     for name in candidates:
-        rows = stock_rows(name)
+        rows = stock_rows(name, exclude_material_or_promo=exclude_material)
         if rows.empty:
             continue
         total_qty, summary = stock_summary(rows)
@@ -112,6 +110,7 @@ def search_products(term, limit=20, exclude_material=True):
                 "name": name,
                 "total_qty": total_qty,
                 "summary": summary,
+                "is_material": name in material_names,
                 "thumbnail": thumbnail_data_uri(name),
             }
         )
@@ -121,7 +120,10 @@ def search_products(term, limit=20, exclude_material=True):
 
 
 def stock_detail(product_name):
-    rows = stock_rows(product_name)
+    """특정 제품을 이미 선택해 들어온 상세 화면이므로 부자재 여부와 상관없이
+    실제 재고를 그대로 보여준다 (목록 검색 단계의 '부자재 제외'와는 별개)."""
+    rows = stock_rows(product_name, exclude_material_or_promo=False)
+    is_material = product_name in _material_product_names()
     total_qty, summary = stock_summary(rows)
     location_rows = []
     if not rows.empty:
@@ -143,12 +145,13 @@ def stock_detail(product_name):
         "name": product_name,
         "total_qty": total_qty,
         "summary": summary,
+        "is_material": is_material,
         "thumbnail": thumbnail_data_uri(product_name),
         "rows": location_rows,
     }
 
 
-def expiry_inventory(period="1y", exclude_bidata=True, warehouse="all"):
+def expiry_inventory(period="1y", bidata_scope="data", warehouse="all"):
     days_limit = EXPIRY_PERIOD_DAYS.get(period, 365)
     df = q(
         """
@@ -166,14 +169,15 @@ def expiry_inventory(period="1y", exclude_bidata=True, warehouse="all"):
     df["days_left"] = (df["_expiry"] - today).dt.days
     df = df[(df["days_left"] >= 0) & (df["days_left"] <= days_limit)]
     df = _exclude_material_or_promo_rows(df)
-    if exclude_bidata and not df.empty:
-        df = df[df["company"].astype(str).str.strip() != BIDATA_COMPANY]
+    if not df.empty:
+        is_bidata = df["company"].astype(str).str.strip() == BIDATA_COMPANY
+        df = df[is_bidata] if bidata_scope == "bidata" else df[~is_bidata]
     df = _apply_warehouse_filter(df, warehouse)
     return df
 
 
-def search_expiry(term, period="1y", exclude_bidata=True, warehouse="all", limit=100):
-    df = expiry_inventory(period=period, exclude_bidata=exclude_bidata, warehouse=warehouse)
+def search_expiry(term, period="1y", bidata_scope="data", warehouse="all", limit=100):
+    df = expiry_inventory(period=period, bidata_scope=bidata_scope, warehouse=warehouse)
     if df.empty:
         return []
     available_names = df["product_name"].dropna().astype(str).drop_duplicates().tolist()
@@ -184,32 +188,43 @@ def search_expiry(term, period="1y", exclude_bidata=True, warehouse="all", limit
         available_set = set(available_names)
         candidates = [name for name in matched if name in available_set]
 
+    # 데스크톱과 같이 로트별 유통기한 구간(빨강/노랑/파랑)으로 나눠서 보여준다.
+    df = df.assign(_level=df["_expiry"].apply(lambda ts: _expiry_badge_for(ts)["level"]))
     results = []
     for name in candidates:
-        rows = df[df["product_name"].astype(str) == str(name)]
-        total_qty, summary = stock_summary(rows)
-        nearest = rows["_expiry"].min()
-        badge = _expiry_badge_for(nearest)
-        export_waiting = bool(rows["location"].apply(is_export_waiting_location).any())
-        results.append(
-            {
-                "name": name,
-                "total_qty": total_qty,
-                "summary": summary,
-                "badge": badge,
-                "export_waiting": export_waiting,
-                "thumbnail": thumbnail_data_uri(name),
-                "_sort_key": nearest,
-            }
-        )
+        name_rows = df[df["product_name"].astype(str) == str(name)]
+        for (level, expiry), rows in name_rows.groupby(["_level", "_expiry"]):
+            total_qty, summary = stock_summary(rows)
+            nearest = rows["_expiry"].min()
+            badge = _expiry_badge_for(nearest)
+            is_waiting = rows["location"].apply(is_export_waiting_location)
+            export_waiting_qty = int(rows.loc[is_waiting, "qty"].sum())
+            results.append(
+                {
+                    "name": name,
+                    "level": level,
+                    "exp_date": expiry.strftime("%Y-%m-%d"),
+                    "total_qty": total_qty,
+                    "summary": summary,
+                    "badge": badge,
+                    "export_waiting": export_waiting_qty > 0,
+                    "export_waiting_qty": export_waiting_qty,
+                    "thumbnail": thumbnail_data_uri(name),
+                    "_sort_key": nearest,
+                }
+            )
     results.sort(key=lambda item: (item["_sort_key"], item["name"]))
     for item in results:
         item.pop("_sort_key", None)
     return results[:limit]
 
 
-def expiry_detail(product_name, period="1y", exclude_bidata=True, warehouse="all"):
-    df = expiry_inventory(period=period, exclude_bidata=exclude_bidata, warehouse=warehouse)
+def expiry_detail(product_name, period="1y", bidata_scope="data", warehouse="all", level="", exp_date=""):
+    df = expiry_inventory(period=period, bidata_scope=bidata_scope, warehouse=warehouse)
+    if level and not df.empty:
+        df = df[df["_expiry"].apply(lambda ts: _expiry_badge_for(ts)["level"]) == level]
+    if exp_date and not df.empty:
+        df = df[df["_expiry"].dt.strftime("%Y-%m-%d") == exp_date]
     rows = df[df["product_name"].astype(str) == str(product_name)] if not df.empty else df
     total_qty, summary = stock_summary(rows) if isinstance(rows, pd.DataFrame) else (0, "")
     location_rows = []

@@ -102,12 +102,11 @@ def _apply_selected_inbound_date(*, company, product, warehouse, lot, exp, locat
             con.commit()
 
 
-def page_inbound():
+def _render_inbound_form():
     from nohtus.ui.location_picker import inbound_location_picker
     from inbound_map import render_inbound_quick_location_map
 
     _apply_inbound_location_pending()
-    st.title("입고 등록")
 
     inbound_date = st.date_input(
         "입고일자",
@@ -150,13 +149,19 @@ def page_inbound():
         if first_product:
             st.markdown("##### 최초 제품 등록")
             product = st.text_input("표준제품명", placeholder="WMS 표준제품명", key="inbound_new_product_name").strip()
-            first_erp_name = st.text_input(
-                "ERP명" if company != "비자료" else "비자료명",
-                placeholder="선택한 사업장의 ERP명/비자료명",
-                key="inbound_new_erp_name",
-            ).strip()
-            first_product_code = st.text_input("제품코드", placeholder="노투스팜/NOH ERP 제품코드", key="inbound_new_product_code").strip()
-            wh = first_erp_name or product
+            if company == "등록대기":
+                first_erp_name = ""
+                first_product_code = ""
+                wh = ""
+                st.caption("표준제품명으로 먼저 보관합니다. ERP명은 매입등록 완료 시 입력하세요.")
+            else:
+                first_erp_name = st.text_input(
+                    "ERP명" if company != "비자료" else "비자료명",
+                    placeholder="선택한 사업장의 ERP명/비자료명",
+                    key="inbound_new_erp_name",
+                ).strip()
+                first_product_code = st.text_input("제품코드", placeholder="노투스팜/NOH ERP 제품코드", key="inbound_new_product_code").strip()
+                wh = first_erp_name or product
         else:
             selected_product = st.selectbox(
                 "제품",
@@ -204,7 +209,7 @@ def page_inbound():
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
         _save_left, save_col, _save_right = st.columns([1, 2, 1])
         with save_col:
-            save_clicked = st.button("입고 저장", type="primary", use_container_width=True)
+            save_clicked = st.button("매입대기 등록" if company == "등록대기" else "매입등록", type="primary", use_container_width=True)
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
         save_msg = st.empty()
         if save_clicked:
@@ -212,7 +217,7 @@ def page_inbound():
                 save_msg.error("제품을 선택하거나 표준제품명을 입력하세요.")
             else:
                 try:
-                    if first_product:
+                    if first_product and company != "등록대기":
                         product, wh = ensure_inbound_first_product_mapping(product, company, first_erp_name, first_product_code)
                     memo_parts = []
                     if inbound_source:
@@ -222,24 +227,61 @@ def page_inbound():
                     inbound_memo = " / ".join(memo_parts) if memo_parts else "입고 등록"
                     normalized_lot = normalize_blank(lot)
                     normalized_exp = normalize_exp_date(exp)
-                    add_inventory(company, product, wh, normalized_lot, normalized_exp, loc, int(qty), inbound_memo,
-                                 location_range_cells=range_cells)
-                    _apply_selected_inbound_date(
-                        company=company,
-                        product=product,
-                        warehouse=wh,
-                        lot=normalized_lot,
-                        exp=normalized_exp,
-                        location=loc,
-                        qty=int(qty),
-                        memo=inbound_memo,
-                        inbound_date=inbound_date,
-                    )
-                    save_msg.success(f"입고 저장 완료: {inbound_date.strftime('%Y-%m-%d')} / {company} / {product} / {wh} / {loc} / {qty}EA")
+                    if company == "등록대기":
+                        from nohtus.services.purchase_pending import register_pending
+                        register_pending(product, normalized_lot, normalized_exp, loc, int(qty),
+                                         inbound_date, inbound_source, memo, range_cells,
+                                         st.session_state['purchase_pending_request_token'])
+                        st.session_state.pop('purchase_pending_request_token', None)
+                        st.session_state['purchase_registration_message'] = f"매입대기 등록 완료: {product} / {loc} / {qty} EA (정상재고 합계 제외)"
+                    else:
+                        add_inventory(company, product, wh, normalized_lot, normalized_exp, loc, int(qty), inbound_memo,
+                                     location_range_cells=range_cells)
+                        _apply_selected_inbound_date(
+                            company=company,
+                            product=product,
+                            warehouse=wh,
+                            lot=normalized_lot,
+                            exp=normalized_exp,
+                            location=loc,
+                            qty=int(qty),
+                            memo=inbound_memo,
+                            inbound_date=inbound_date,
+                        )
+                        save_msg.success(f"입고 저장 완료: {inbound_date.strftime('%Y-%m-%d')} / {company} / {product} / {wh} / {loc} / {qty}EA")
                     st.session_state["_inbound_range_cells"] = []
                     st.session_state.pop("_inbound_range_cells_area", None)
+                    if company == "등록대기":
+                        st.rerun()
                 except Exception as e:
                     save_msg.error(str(e))
 
     with map_col:
         render_inbound_quick_location_map(range_locations=[loc] + list(range_cells))
+
+
+def page_inbound():
+    import uuid
+    from nohtus.services.purchase_pending import pending_rows
+    from nohtus.pages.purchase_pending import render_pending
+
+    st.title("매입(매입대기) 등록")
+    message = st.session_state.pop('purchase_registration_message', None)
+    if message:
+        st.success(message)
+    st.session_state.setdefault('purchase_pending_request_token', str(uuid.uuid4()))
+    pending = pending_rows()
+    count = len(pending)
+    st.markdown("""<style>
+    .st-key-purchase_inbound_tabs [role="tab"] strong {
+        display:inline-flex;align-items:center;justify-content:center;
+        min-width:24px;height:24px;padding:0 5px;border-radius:999px;
+        background:#e5e7eb;color:#374151;font-size:13px;margin-left:5px;
+    }
+    </style>""", unsafe_allow_html=True)
+    with st.container(key="purchase_inbound_tabs"):
+        entry_tab, pending_tab = st.tabs(["등록", f"매입대기 제품 **{count}**" if count else "매입대기 제품"])
+        with entry_tab:
+            _render_inbound_form()
+        with pending_tab:
+            render_pending(pending)

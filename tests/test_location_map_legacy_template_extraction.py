@@ -1,15 +1,8 @@
-"""location_map_legacy.py의 620줄짜리 f-string 중 완전히 정적인 부분
-(<style> 블록, <script> 블록의 `const DATA = ...;` 이후 전체)을
-nohtus/services/location_map_assets/{map.css,map.js} 파일로 분리했다.
-이 테스트는 그 분리가 "동작은 그대로, 코드 구조만 바뀜"이었는지를
-바이트 단위로 고정한다 — render_location_map()의 최종 출력이 파일
-분리 전과 정확히 같은 문자열을 만들어내는지 확인한다(2026-09-13
-기준으로 캡처한 골든 출력과 비교).
+"""외부 CSS/JS를 포함한 도면 HTML이 승인된 스냅샷과 일치하는지 검증한다.
 
-기존 enhanced_html 패치 체인(services/location_map.py)이나
-apply_new_layout(location_map_new_layout.py)은 건드리지 않았다 —
-둘 다 이 함수가 반환하는 최종 HTML 문자열을 대상으로 동작하므로,
-문자열이 바이트 단위로 동일하면 그대로 계속 동작한다."""
+2026-09-30: 매입대기 배지, 정상재고 합계 제외, 이동 버튼 제외를 반영했다.
+기존 enhanced_html 패치 체인의 동작은 별도 관련 테스트로 함께 검증한다.
+"""
 
 import sqlite3
 import tempfile
@@ -68,7 +61,7 @@ class LocationMapLegacyTemplateExtractionTests(unittest.TestCase):
         except PermissionError:
             pass
 
-    def test_output_is_byte_identical_to_pre_extraction_golden(self):
+    def test_output_matches_approved_golden(self):
         legacy.render_location_map()
         rendered = self.captured_html["value"]
         golden = _GOLDEN_HTML_PATH.read_text(encoding="utf-8")

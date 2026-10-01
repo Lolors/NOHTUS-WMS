@@ -647,3 +647,7 @@ html, body {
     --brand-soft: rgba(236, 102, 24, .18);
   }
 }
+
+/* Keep the export product-search hint readable in the two-column filter. */
+#export-product-filter { min-width: 0; padding-inline: 8px; font-size: 14px; }
+#export-product-filter::placeholder { font-size: clamp(11px, 3.2vw, 13px); letter-spacing: -0.2px; }

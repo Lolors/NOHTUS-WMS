@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import os
-import shutil
-from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import streamlit as st
 
 from nohtus.export_app import db
-from nohtus.export_app.services import export_service, folder_service, history_service
+from nohtus.export_app.services import export_service, folder_service, history_service, folder_sync_service
 
 
 RECENT_FOLDER_DAYS = 14
@@ -46,20 +44,8 @@ def check_folder_path(path_text: str) -> tuple[bool, str]:
     return True, message
 
 
-def _case_reference_date(case: object) -> date | None:
-    """폴더 갱신 범위를 정할 때 실제 출고일을 우선하고, 없으면 등록일을 사용한다."""
-    for key in ('actual_ship_date', 'created_at'):
-        try:
-            value = str(case[key] or '').strip()[:10]
-        except (KeyError, TypeError):
-            value = ''
-        if not value:
-            continue
-        try:
-            return date.fromisoformat(value)
-        except ValueError:
-            continue
-    return None
+def _case_reference_date(case):
+    return folder_sync_service.reference_date(case)
 
 
 def render() -> None:
@@ -83,10 +69,10 @@ def render() -> None:
     with management_col:
         st.markdown('#### 수출 폴더 관리')
         st.caption(
-            f'기본 갱신은 최근 {RECENT_FOLDER_DAYS}일 수출 건만 처리합니다. '
-            '최근 3개월 또는 전체 갱신에 동의하면 해당 범위의 취소되지 않은 모든 수출 건의 폴더를 '
+            f'기본 갱신은 최근 {RECENT_FOLDER_DAYS}일 내 등록·수정·출고된 건을 처리합니다. '
+            '선택 범위에서 새로 생성되거나 변경된 수출 건만 모으며, 변경 없는 건은 건너뜁니다. 해당 폴더를 '
             '현재 구조로 맞추고, 수출진행내역.xlsx를 현재 DB의 주문·출고·CTN 정보로 완전히 새로 생성합니다. '
-            '사진·CI·Shipping Mark·기타 파일은 유지합니다.'
+            '사진·CI·Shipping Mark·기타 파일은 유지하며, 국가/연도/월 구조 그대로 하나의 갱신폴더에 복사합니다.'
         )
         scope_recent, scope_quarter, scope_all = (
             f'최근 {RECENT_FOLDER_DAYS}일',
@@ -103,13 +89,13 @@ def render() -> None:
         folder_confirm = True
         if needs_confirm:
             folder_confirm = st.checkbox(
-                f'{sync_scope} 수출 폴더를 이동·이름 변경하고 엑셀을 모두 재생성하는 것에 동의합니다.',
+                f'{sync_scope} 범위의 신규·변경된 수출 폴더와 엑셀을 갱신하는 것에 동의합니다.',
                 key='folder_sync_confirm',
             )
         sync_button_label = {
             scope_recent: f'최근 {RECENT_FOLDER_DAYS}일 폴더 및 엑셀 갱신',
-            scope_quarter: '최근 3개월 폴더 및 엑셀 재생성',
-            scope_all: '수출 폴더 및 엑셀 전체 재생성',
+            scope_quarter: '최근 3개월 신규·변경 폴더 및 엑셀 갱신',
+            scope_all: '전체 범위 신규·변경 폴더 및 엑셀 갱신',
         }[sync_scope]
 
         if st.button(
@@ -120,91 +106,36 @@ def render() -> None:
         ):
             folder_service.hide_existing_internal_items()
             all_cases = export_service.list_cases(include_cancelled=False)
-            if sync_scope == scope_all:
-                target_cases = list(all_cases)
-            else:
-                # RECENT_FOLDER_DAYS counts today itself, so the cutoff is
-                # (days - 1) back to cover exactly that many calendar days,
-                # not one extra.
-                days = RECENT_FOLDER_DAYS if sync_scope == scope_recent else QUARTER_FOLDER_DAYS
-                cutoff = date.today() - timedelta(days=days - 1)
-                target_cases = [
-                    case for case in all_cases
-                    if (reference_date := _case_reference_date(case)) is not None
-                    and reference_date >= cutoff
-                ]
-
-            successes: list[str] = []
-            skipped: list[str] = []
-            failures: list[str] = []
-            gather_errors: list[str] = []
-            gather_root: Path | None = None
-            drive_corruption_detected = False
-            range_text = {
-                scope_recent: f'최근 {RECENT_FOLDER_DAYS}일 수출',
-                scope_quarter: '최근 3개월 수출',
-                scope_all: '전체 수출',
-            }[sync_scope]
-            progress = st.progress(0, text=f'{range_text} 폴더와 엑셀을 갱신하고 있습니다.')
-            total = max(len(target_cases), 1)
-            for index, case in enumerate(target_cases, start=1):
-                try:
-                    folder, changed = folder_service.sync_case_folder_if_changed(int(case['id']))
-                    if changed:
-                        successes.append(f"{case['export_no']} → {folder}")
-                        # Collect every folder that actually changed into one
-                        # top-level folder so it can be swapped into the
-                        # shared drive as a single batch, instead of having
-                        # to hunt each one down inside the 국가/연도/월 tree.
-                        if gather_root is None:
-                            gather_root = folder_service.storage_root() / (
-                                f'갱신폴더_{datetime.now():%Y%m%d_%H%M%S}'
-                            )
-                        try:
-                            shutil.copytree(folder, gather_root / folder.name, dirs_exist_ok=True)
-                        except Exception as copy_exc:
-                            gather_errors.append(f"{case['export_no']}: {copy_exc}")
-                    else:
-                        skipped.append(str(case['export_no']))
-                except Exception as exc:
-                    failures.append(f"{case['export_no']}: {exc}")
-                    if getattr(exc, 'winerror', None) == 1392:
-                        drive_corruption_detected = True
-                        break
-                progress.progress(index / total, text=f'{index}/{len(target_cases)} 처리 중')
+            days = None if sync_scope == scope_all else (RECENT_FOLDER_DAYS if sync_scope == scope_recent else QUARTER_FOLDER_DAYS)
+            target_cases = folder_sync_service.select_cases(all_cases, days)
+            progress = st.progress(0, text='폴더와 엑셀을 재생성하고 하나의 갱신폴더에 모으고 있습니다.')
+            result = folder_sync_service.rebuild_batch(
+                target_cases,
+                progress=lambda index, total: progress.progress(index / total, text=f'{index}/{total} 처리 중'),
+            )
             progress.empty()
-            if successes:
-                history_service.add_history(
-                    None,
-                    f'{sync_button_label}',
-                    f'{range_text} {len(successes)}건 재생성 / {len(skipped)}건 변경 없음 / {len(failures)}건 실패 / 취소 건 제외',
-                )
-                st.success(
-                    f'{range_text} {len(successes)}건의 폴더를 동기화하고 '
-                    f'수출진행내역.xlsx를 새로 생성했습니다. 변경 없음 {len(skipped)}건은 건너뛰었습니다.'
-                )
-                if gather_root is not None:
-                    st.info(
-                        f'이번에 바뀐 폴더 {len(successes)}건을 아래 위치 하나에 모아뒀습니다. '
-                        '공유폴더에는 이 폴더 안의 항목만 바꿔치기하면 됩니다.\n\n'
-                        f'{gather_root}'
-                    )
-                if gather_errors:
-                    st.warning(
-                        '일부 폴더는 모음 폴더로 복사하지 못했습니다 (원래 위치의 폴더는 정상 갱신됨).\n\n'
-                        + '\n'.join(f'- {item}' for item in gather_errors)
-                    )
-            elif skipped and not failures:
-                st.info(f'{range_text} {len(skipped)}건 모두 변경사항이 없어 재생성을 건너뛰었습니다.')
-            elif not failures:
-                st.info(f'갱신할 {range_text} 건이 없습니다.')
-            if drive_corruption_detected:
-                st.error(
-                    '저장장치 파일시스템 손상(WinError 1392)을 감지해 추가 쓰기 작업을 중단했습니다. '
-                    '정상 드라이브로 저장 위치를 변경한 뒤 다시 실행하세요.'
-                )
-            if failures:
-                st.error('일부 폴더 또는 엑셀을 처리하지 못했습니다.\n\n' + '\n'.join(f'- {item}' for item in failures))
+            rebuilt, gathered = len(result['rebuilt']), len(result['gathered'])
+            if rebuilt:
+                history_service.add_history(None, sync_button_label,
+                    f"{rebuilt}건 재생성 / {gathered}건 모음 완료 / {len(result['failures'])}건 재생성 실패 / {len(result['copy_failures'])}건 복사 실패")
+                st.success(f"엑셀 {rebuilt}건 재생성 · 갱신폴더에 {gathered}건 모음 완료 · 변경 없음 {len(result['skipped'])}건 제외")
+            elif result['skipped'] and not result['failures']:
+                st.info(f"{len(result['skipped'])}건 모두 변경이 없어 갱신폴더를 만들지 않았습니다.")
+            elif not result['failures']:
+                st.info('선택한 범위에서 갱신할 수출 건이 없습니다.')
+            if result['root'] is not None:
+                st.info('이번 갱신폴더 위치입니다. 복사 완료된 건을 국가 / 연도 / 월별로 확인하세요.')
+                st.code(str(result['root']))
+                if result['gathered']:
+                    with st.expander('갱신폴더에 포함된 수출 건', expanded=True):
+                        for export_no, relative in result['gathered']:
+                            st.text(f'{export_no} · {relative}')
+            if result['copy_failures']:
+                st.warning('원래 위치는 갱신했지만 갱신폴더로 복사하지 못한 건이 있습니다.\n\n' + '\n'.join(result['copy_failures']))
+            if result['failures']:
+                st.error('일부 폴더 또는 엑셀을 처리하지 못했습니다.\n\n' + '\n'.join(result['failures']))
+            if result['drive_corruption']:
+                st.error('저장장치 파일시스템 손상(WinError 1392)을 감지해 중단했습니다. 정상 저장 위치를 선택한 뒤 다시 실행하세요.')
 
     with example_col:
         st.markdown('#### 자동 생성 예시')

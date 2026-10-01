@@ -7,6 +7,8 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+from nohtus.config import AREA_CONFIG
+from nohtus.locations import expand_row_range, make_location, parse_location
 from nohtus.db import q
 from nohtus.dates import display_date_only
 from nohtus.export_app import db as export_db
@@ -90,28 +92,7 @@ def _outbound_customer_from_saved_or_title(customer_name, title, customers_df, c
 
 
 def _today_outbound_final_stock_map(items):
-    if items.empty:
-        return {}
-    keys = items[["사업장", "표준제품명", "제조번호", "유통기한"]].drop_duplicates()
-    result = {}
-    for r in keys.itertuples(index=False):
-        company = _safe_text(getattr(r, "사업장", ""))
-        product = _safe_text(getattr(r, "표준제품명", ""))
-        lot = _safe_text(getattr(r, "제조번호", "-"), "-")
-        exp = _safe_text(getattr(r, "유통기한", "-"), "-")
-        df = q(
-            """
-            SELECT COALESCE(SUM(qty), 0) AS qty
-            FROM inventory
-            WHERE company=?
-              AND product_name=?
-              AND COALESCE(lot, '-')=?
-              AND COALESCE(exp_date, '-')=?
-            """,
-            (company, product, lot, exp),
-        )
-        result[(company, product, lot, exp)] = _safe_int(df.iloc[0]["qty"]) if not df.empty else 0
-    return result
+    return _location_final_stock_map(items)
 
 
 def _today_outbound_display_df(items):
@@ -126,7 +107,7 @@ def _today_outbound_display_df(items):
         lot = _safe_text(lot, "-")
         exp = _safe_text(exp, "-")
         total_qty = _safe_int(grp["출고수량"].sum())
-        final_qty = final_map.get((company, product, lot, exp), 0)
+        final_qty = final_map.get((company, location, product, lot, exp), 0)
         for i, rr in enumerate(grp.itertuples(index=False)):
             rows.append({
                 "사업장": company if i == 0 else "",
@@ -193,27 +174,56 @@ def _deduplicate_outbound_details(items):
     return result.loc[~(regular_outbound & duplicated_signatures)].reset_index(drop=True)
 
 
+def _closing_rack_cells(location):
+    """Return the physical three-line rack, or the exact special location."""
+    location = _safe_text(location, "-")
+    area, line, level = parse_location(location)
+    config = AREA_CONFIG.get(area, {})
+    lines = list(config.get("lines") or [])
+    levels = list(config.get("levels") or [])
+    if line not in lines or level not in levels:
+        return {location}
+    start = (lines.index(line) // 3) * 3
+    return {
+        make_location(area, rack_line, rack_level)
+        for rack_line in lines[start:start + 3]
+        for rack_level in levels
+    }
+
+
 def _location_final_stock_map(items):
-    """출고·수출대기 후 각 출발 로케이션에 실제로 남은 현재 수량을 계산한다."""
+    """같은 사업장·제품·LOT·유통기한의 랙 현재고. 범위 재고는 행당 한 번 합산."""
     if items is None or items.empty:
         return {}
     key_cols = ["사업장", "로케이션", "표준제품명", "제조번호", "유통기한"]
     result = {}
+    stock_cache = {}
     for row in items[key_cols].drop_duplicates().itertuples(index=False):
-        company, location, product, lot, exp = [str(value or "-") for value in row]
-        stock = q(
-            """
-            SELECT COALESCE(SUM(qty), 0) AS qty
-            FROM inventory
-            WHERE company=?
-              AND location=?
-              AND product_name=?
-              AND COALESCE(lot, '-')=?
-              AND COALESCE(exp_date, '-')=?
-            """,
-            (company, location, product, lot, exp),
+        company, location, product, lot, exp = [_safe_text(value, "-") for value in row]
+        stock_key = (company, product, lot, exp)
+        if stock_key not in stock_cache:
+            stock = q(
+                """
+                SELECT location, location_range_cells, location_range_end, qty
+                FROM inventory
+                WHERE company=?
+                  AND product_name=?
+                  AND COALESCE(lot, '-')=?
+                  AND COALESCE(exp_date, '-')=?
+                """,
+                stock_key,
+            )
+            stock_cache[stock_key] = [
+                (set(expand_row_range(
+                    _safe_text(r.location), _safe_text(r.location_range_cells),
+                    _safe_text(r.location_range_end),
+                )), _safe_int(r.qty))
+                for r in stock.itertuples(index=False)
+            ]
+        rack_cells = _closing_rack_cells(location)
+        result[(company, location, product, lot, exp)] = sum(
+            qty for cells, qty in stock_cache[stock_key] if cells & rack_cells
         )
-        result[(company, location, product, lot, exp)] = int(stock.iloc[0]["qty"] or 0) if not stock.empty else 0
     return result
 
 
@@ -345,7 +355,7 @@ def _today_outbound_html(items, *, include_style=True):
     for key, group in items.groupby(group_cols, sort=False, dropna=False):
         company, location, product, lot, exp = key
         total_qty = int(group["출고수량"].sum())
-        final_qty = final_map.get(tuple(str(value or "-") for value in key), 0)
+        final_qty = final_map.get(tuple(_safe_text(value, "-") for value in key), 0)
         rowspan = len(group)
         for index, row in enumerate(group.itertuples(index=False)):
             html.append("<tr>")
@@ -679,6 +689,7 @@ def page_closing():
                 )
             except Exception:
                 items["매출처"] = items["저장매출처"].apply(_safe_text)
+            st.caption("최종재고는 같은 사업장·제품·제조번호·유통기한의 랙 전체 현재고입니다. 예: A1-01-01~A1-03-03. 범위 재고는 한 번만 합산합니다.")
             _render_today_outbound_html(items)
             btn_left, btn_mid, btn_right = st.columns([3, 2, 3])
             with btn_mid:

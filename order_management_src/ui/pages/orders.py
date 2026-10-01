@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+from services.receipt_units import order_quantity
+from services.statement_links import item_order_id, receipts_for_order
 
 from ui.style_utils import map_cells
 
@@ -279,11 +281,11 @@ def _receipt_status_map(core_app, purchase_module, order_items: pd.DataFrame) ->
         statement_order = statements.set_index("명세서ID")["발주ID"].astype(str).to_dict()
         for _, row in statement_items.iterrows():
             statement_id = str(row.get("명세서ID", "") or "").strip()
-            order_id = str(statement_order.get(statement_id, "") or "").strip()
+            order_id = item_order_id(row, statement_order)
             if not order_id:
                 continue
             key = _item_key(row)
-            received_qty = purchase_module.to_int(row.get("입고수량", 0))
+            received_qty = order_quantity(row)
             order_bucket = received_by_order.setdefault(order_id, {})
             order_bucket[key] = order_bucket.get(key, 0) + received_qty
 
@@ -318,16 +320,11 @@ def _style_status_column(frame: pd.DataFrame):
 def _receipt_review(core_app, purchase_module, order_id: str, order_items: pd.DataFrame) -> None:
     st = core_app.st
     statements, statement_items, _, _ = purchase_module.load_purchase_data()
-    linked = statements[statements["발주ID"].astype(str) == str(order_id)] if not statements.empty else statements
-    linked_ids = linked["명세서ID"].astype(str).tolist() if not linked.empty else []
-    received_rows = (
-        statement_items[statement_items["명세서ID"].astype(str).isin(linked_ids)]
-        if linked_ids else statement_items.iloc[0:0]
-    )
+    received_rows = receipts_for_order(statements, statement_items, order_id)
     received = {}
     for _, row in received_rows.iterrows():
         key = _item_key(row)
-        received[key] = received.get(key, 0) + purchase_module.to_int(row.get("입고수량", 0))
+        received[key] = received.get(key, 0) + order_quantity(row)
 
     review_rows = []
     for _, row in order_items.iterrows():

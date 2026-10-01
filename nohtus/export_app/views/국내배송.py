@@ -5,8 +5,14 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+try:
+    from st_keyup import st_keyup
+except ImportError:
+    st_keyup = None
+
 from nohtus.export_app.components.case_selector import select_export_case
 from nohtus.export_app.components.delivery_method_input import delivery_method_input, is_courier_delivery
+from nohtus.export_app.components.streamlit_compat import dialog
 from nohtus.export_app.services import delivery_service, export_service, folder_service, history_service, packing_service
 from nohtus.export_app.utils.dates import parse_date
 from nohtus.export_app.utils.formatters import fmt_number
@@ -70,6 +76,40 @@ def render_packed_details(case_id: int) -> None:
     )
 
 
+@dialog('주소록에서 선택', width='small')
+def _address_book_dialog(case_id: int) -> None:
+    query_key = f'address_book_query_{case_id}'
+    if st_keyup is not None:
+        query = st_keyup(
+            '수하인명 검색',
+            value=st.session_state.get(query_key, ''),
+            key=query_key,
+            placeholder='이름을 입력하면 실시간으로 검색됩니다',
+            debounce=250,
+        ) or ''
+    else:
+        query = st.text_input(
+            '수하인명 검색',
+            key=query_key,
+            placeholder='이름을 입력하고 Enter를 누르면 검색됩니다',
+        )
+    entries = delivery_service.search_address_book(query)
+
+    if not entries:
+        st.info('일치하는 주소록 항목이 없습니다.' if query.strip() else '아직 저장된 수하인 정보가 없습니다.')
+        return
+
+    for index, entry in enumerate(entries):
+        if st.button(
+            f"{entry['name']} · {entry['address']}",
+            key=f'address_book_pick_{case_id}_{index}',
+            use_container_width=True,
+        ):
+            st.session_state[f'delivery_consignee_name_{case_id}'] = entry['name']
+            st.session_state[f'delivery_consignee_address_{case_id}'] = entry['address']
+            st.rerun()
+
+
 def render() -> None:
     st.title('국내배송')
     st.caption('국내배송 방식, 수하인 정보와 송장 또는 배송기사 정보를 입력합니다.')
@@ -102,6 +142,17 @@ def render() -> None:
         saved_method=saved_method,
         key_prefix=f'delivery_method_{case_id}',
     )
+
+    consignee_name_key = f'delivery_consignee_name_{case_id}'
+    consignee_address_key = f'delivery_consignee_address_{case_id}'
+    if consignee_name_key not in st.session_state:
+        st.session_state[consignee_name_key] = case['consignee_name'] or ''
+    if consignee_address_key not in st.session_state:
+        st.session_state[consignee_address_key] = case['consignee_address'] or ''
+
+    if method != '핸드캐리' and st.button('📇 주소록에서 선택'):
+        _address_book_dialog(case_id)
+
     with st.form(f'delivery_{case_id}_{method}'):
         actual_date = st.date_input('국내배송 일자', value=date_value(case['actual_ship_date']))
 
@@ -113,8 +164,8 @@ def render() -> None:
             phone = ''
         else:
             receiver_cols = st.columns([1, 2])
-            consignee_name = receiver_cols[0].text_input('수하인명', value=case['consignee_name'] or '')
-            consignee_address = receiver_cols[1].text_input('수하인주소', value=case['consignee_address'] or '')
+            consignee_name = receiver_cols[0].text_input('수하인명', key=consignee_name_key)
+            consignee_address = receiver_cols[1].text_input('수하인주소', key=consignee_address_key)
             tracking = st.text_input('송장번호', value=case['tracking_no'] or '') if is_courier_delivery(method) else ''
             if method == '퀵배송':
                 c1, c2 = st.columns(2)

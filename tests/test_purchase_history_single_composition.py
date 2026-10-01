@@ -1,11 +1,4 @@
-"""purchase_history_single.py가 몽키패치 대신 파라미터 합성으로 바뀐 뒤에도
-동일하게 동작하는지 확인하는 특성화 테스트. 원래 이 부분은 st.file_uploader/
-purchase_page._import_purchase_history/_read_purchase_excel을 임시로
-바꿔치기하는 3중 몽키패치였는데, purchase_history.py의 _import_purchase_history/
-_render_import_box에 reader/before_import 파라미터를 추가해 그 자리에서
-바로 원하는 동작을 조합하도록 바꿨다. 이 테스트는 그 리팩토링 전 실제
-동작(노투스 7행 헤더 + 컬럼명 변환, 재업로드 전 기존 데이터 삭제)을
-그대로 고정한다."""
+"""회사별 파일 형식과 기존 이력을 보존하는 누적 업로드 검증."""
 
 import io
 import sqlite3
@@ -20,7 +13,6 @@ import nohtus.db as db
 from nohtus.pages import purchase_history as purchase_page
 from nohtus.pages.purchase_history_single import (
     _read_purchase_excel_for_company,
-    _replace_company_purchase_data,
 )
 
 
@@ -123,7 +115,7 @@ class ImportPurchaseHistoryCompositionTests(unittest.TestCase):
         finally:
             con.close()
 
-    def test_notus_upload_uses_company_reader_and_wipes_existing_rows_first(self):
+    def test_notus_upload_uses_company_reader_and_preserves_existing_rows(self):
         con = sqlite3.connect(self.db_path)
         try:
             con.execute(
@@ -148,12 +140,11 @@ class ImportPurchaseHistoryCompositionTests(unittest.TestCase):
             uploaded,
             "노투스",
             reader=_read_purchase_excel_for_company,
-            before_import=_replace_company_purchase_data,
         )
 
         self.assertEqual(result["inserted"], 1)
         rows = self._purchase_rows("노투스")
-        self.assertEqual(rows, [("2026-02-01", "새거래처")])
+        self.assertEqual(rows, [("2020-01-01", "옛거래처"), ("2026-02-01", "새거래처")])
 
     def test_default_reader_used_when_none_passed(self):
         df = pd.DataFrame({

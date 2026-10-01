@@ -4,12 +4,13 @@ from __future__ import annotations
 import inspect
 
 import pandas as pd
+from services.receipt_units import conversion_factor
 
 from ui.pages import statement_register_substitution as base
 
 
 def item_key(row) -> tuple:
-    """대체입고는 실제 입고품이 아니라 원발주품목 기준으로 집계합니다."""
+    """입고제품이 다른 행도 원발주품목 기준으로 집계합니다."""
     original_code = str(row.get("원발주제품코드", "") or "").strip()
     original_name = str(row.get("원발주제품명", "") or "").strip()
     original_spec = str(row.get("원발주규격", "") or "").strip()
@@ -43,7 +44,7 @@ def _price_text(value) -> str:
     return text
 
 
-def _sync_receipt_rows(st, purchase_module, selected_order, selected_lookup, substitution_state):
+def _sync_receipt_rows(st, purchase_module, selected_order, selected_lookup):
     rows = base._receipt_rows_state(st, selected_order)
     selected_item_nos = set(selected_lookup)
     rows = [dict(row) for row in rows if str(row.get("품목번호", "")) in selected_item_nos]
@@ -54,6 +55,9 @@ def _sync_receipt_rows(st, purchase_module, selected_order, selected_lookup, sub
             rows.append({
                 "행번호": base._next_receipt_row_id(st, selected_order),
                 "품목번호": int(item_no),
+                "입고제품": str(original.get("제품명", "") or ""),
+                "제품코드": "",
+                "규격": str(original.get("규격", "") or ""),
                 "입고수량": base._to_int(purchase_module, original.get("남은수량", 0)),
                 "매입단가": "",
                 "제조번호": "",
@@ -66,9 +70,10 @@ def _sync_receipt_rows(st, purchase_module, selected_order, selected_lookup, sub
         original = selected_lookup.get(item_no)
         if original is None:
             continue
-        actual = base._actual_for_item(original, substitution_state.get(item_no))
-        row["제품명"] = str(actual.get("정식제품명", "") or original.get("제품명", ""))
-        row["규격"] = str(actual.get("규격", "") or original.get("규격", ""))
+        row["주문제품"] = str(original.get("제품명", "") or "")
+        row["입고제품"] = str(row.get("입고제품", "") or original.get("제품명", "") or "")
+        row["제품코드"] = str(row.get("제품코드", "") or "").strip()
+        row["규격"] = str(row.get("규격", "") or original.get("규격", "") or "")
         row["복사/삭제"] = False
         row["입고수량"] = base._to_int(purchase_module, row.get("입고수량", 0))
         row["매입단가"] = _price_text(row.get("매입단가", ""))
@@ -87,6 +92,11 @@ def _store_entered_rows(st, selected_order: str, entered: pd.DataFrame) -> list[
             rows.append({
                 "행번호": int(row.get("행번호", 0)),
                 "품목번호": int(row.get("품목번호", 0)),
+                "단위환산계수": conversion_factor(row),
+                "입고단위": str(row.get("입고단위", "") or ""),
+                "입고제품": str(row.get("입고제품", "") or "").strip(),
+                "제품코드": str(row.get("제품코드", "") or "").strip(),
+                "규격": str(row.get("규격", "") or "").strip(),
                 "입고수량": int(float(row.get("입고수량", 0) or 0)),
                 "매입단가": _price_text(row.get("매입단가", "")),
                 "제조번호": str(row.get("제조번호", "") or "").strip(),

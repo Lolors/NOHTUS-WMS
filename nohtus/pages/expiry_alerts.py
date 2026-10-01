@@ -1,207 +1,236 @@
+"""유통기한 임박 재고를 사업장/로케이션/제조번호별 표로 표시한다."""
 from __future__ import annotations
 
-from datetime import date, timedelta
-from html import escape
+import html
 
-import pandas as pd
 import streamlit as st
+import streamlit.components.v2 as components
 
-from nohtus.db import q
-from nohtus.dates import display_date_only
-from nohtus.services import expiry_rules
+from nohtus.mobile_api import queries as mobile_queries
+from nohtus.pages.product_photo_input import render_photo_input
+from nohtus.services.expiry_rules import expiry_badge_for_date_text
+from nohtus.services.stock_rules import is_export_waiting_location
+from nohtus.services.product_images import get_product_image_path, product_jpeg_preview
 
-COMPANY_GROUPS = {
-    "노투스팜·NOH·노투스": ["노투스팜", "NOH", "노투스"],
-    "비자료": ["비자료"],
-}
-COMPANY_OPTIONS = list(COMPANY_GROUPS)
-
-
-def _companies_for_groups(groups: list[str]) -> list[str]:
-    return [
-        company
-        for group in groups
-        for company in COMPANY_GROUPS.get(group, [])
-    ]
+WAREHOUSE_OPTIONS = [("창고 전체", "all"), ("용인창고", "yongin"), ("화성창고", "hwaseong")]
+PERIOD_OPTIONS = [("3개월 이내", "3m"), ("6개월 이내", "6m"), ("1년 이내", "1y")]
 
 
-def _expiry_alert_rows(companies: list[str]) -> pd.DataFrame:
-    today = date.today().strftime("%Y-%m-%d")
-    until = (date.today() + timedelta(days=365)).strftime("%Y-%m-%d")
-    params: list[str] = [today, until]
-    company_sql = ""
-    if companies:
-        placeholders = ",".join(["?"] * len(companies))
-        company_sql = f" AND company IN ({placeholders})"
-        params.extend(companies)
-
-    df = q(
-        f"""
-        SELECT company AS 사업장,
-               location AS 로케이션,
-               product_name AS 표준제품명,
-               exp_date AS 유통기한,
-               qty AS 수량
-        FROM inventory
-        WHERE qty > 0
-          AND exp_date IS NOT NULL
-          AND exp_date <> '-'
-          AND date(exp_date) BETWEEN date(?) AND date(?)
-          {company_sql}
-        ORDER BY date(exp_date), company, location, product_name
+@st.cache_resource
+def _get_expiry_responsive_layout():
+    return components.component(
+        "expiry_responsive_layout",
+        js="""
+        export default function(component) {
+            const page = component.parentElement.closest('.st-key-expiry_alert_page');
+            if (!page) return;
+            const main = page.closest('[data-testid="stMainBlockContainer"], .block-container') || page.parentElement;
+            const updateWidth = () => {
+                const style = getComputedStyle(main);
+                const available = main.clientWidth - parseFloat(style.paddingLeft || 0) - parseFloat(style.paddingRight || 0);
+                // Restore the space lost by resizing the browser, so 40% is
+                // based on the maximized content width, not the current window.
+                const windowGap = Math.max(0, window.screen.availWidth - window.outerWidth);
+                const target = Math.round((available + windowGap) * 0.4);
+                if (target > 0) page.style.setProperty('--expiry-page-width', `${target}px`);
+            };
+            const observer = new ResizeObserver(updateWidth);
+            observer.observe(main);
+            window.addEventListener('resize', updateWidth);
+            updateWidth();
+            return () => {
+                observer.disconnect();
+                window.removeEventListener('resize', updateWidth);
+            };
+        }
         """,
-        tuple(params),
+        isolate_styles=False,
     )
-    if df.empty:
-        return df
-    df = df.copy()
-    df["유통기한"] = df["유통기한"].apply(display_date_only)
-    df["수량"] = pd.to_numeric(df["수량"], errors="coerce").fillna(0).astype(int)
-    return df[["사업장", "로케이션", "표준제품명", "유통기한", "수량"]]
 
 
-def _expiry_badge(exp_date_text: str) -> tuple[str, str]:
-    badge = expiry_rules.expiry_badge_for_date_text(exp_date_text)
-    if not badge:
-        return "", ""
-    return badge["label"], badge["level"]
+@st.cache_resource
+def _get_expiry_photo_table():
+    return components.component(
+        "expiry_photo_table",
+        html='<div class="expiry-table-content"></div>',
+        js="""
+        export default function(component) {
+            const { data, parentElement, setTriggerValue } = component;
+            const root = parentElement.querySelector('.expiry-table-content');
+            root.innerHTML = data;
+            const onClick = (event) => {
+                const button = event.target.closest('button[data-product]');
+                if (button && root.contains(button)) {
+                    setTriggerValue('photo', button.dataset.product);
+                }
+            };
+            root.addEventListener('click', onClick);
+            return () => root.removeEventListener('click', onClick);
+        }
+        """,
+        isolate_styles=False,
+    )
 
 
-def _render_html_table(rows: pd.DataFrame):
-    body = []
-    for r in rows.itertuples(index=False):
-        company = escape(str(getattr(r, "사업장") or ""))
-        location = escape(str(getattr(r, "로케이션") or ""))
-        product_name = escape(str(getattr(r, "표준제품명") or ""))
-        exp_date_raw = str(getattr(r, "유통기한") or "")
-        exp_date = escape(exp_date_raw)
-        badge_text, badge_class = _expiry_badge(exp_date_raw)
-        badge_html = (
-            f"<span class='expiry-badge {badge_class}'>{escape(badge_text)}</span>"
-            if badge_text
-            else ""
-        )
-        qty = int(getattr(r, "수량") or 0)
-        body.append(
-            "<tr>"
-            f"<td>{company}</td>"
-            f"<td>{location}</td>"
-            f"<td>{product_name}</td>"
-            f"<td><div class='expiry-date-cell'><span>{exp_date}</span>{badge_html}</div></td>"
-            f"<td class='qty'>{qty:,}</td>"
-            "</tr>"
-        )
+@st.dialog("제품 사진 보기 · 변경", width="large")
+def _expiry_photo_dialog(product_name: str):
+    # 기존 제품 사진 저장 경로를 재사용하여 원본과 썸네일을 함께 갱신한다.
+    from nohtus.pages.location_map import _safe_product_image_stem, _save_product_image
 
     st.markdown(
         """
+        <span class="expiry-photo-dialog-marker" style="display:none"></span>
         <style>
-        .expiry-alert-table-wrap{
-            width:40vw;
-            max-width:100%;
-            height:auto!important;
-            max-height:none!important;
-            overflow:visible!important;
-            margin-top:14px;
-        }
-        .expiry-alert-table{
-            width:100%;
-            border-collapse:collapse;
-            table-layout:auto;
-            font-size:14px;
-            background:white;
-        }
-        .expiry-alert-table th{
-            background:#f8fafc;
-            color:#334155;
-            font-weight:800;
-            border-bottom:1px solid #dbe3ee;
-            padding:10px 12px;
-            text-align:left;
-            white-space:nowrap;
-        }
-        .expiry-alert-table td{
-            border-bottom:1px solid #edf2f7;
-            color:#111827;
-            padding:9px 12px;
-            vertical-align:middle;
-        }
-        .expiry-alert-table td:nth-child(1),
-        .expiry-alert-table td:nth-child(2),
-        .expiry-alert-table td:nth-child(4),
-        .expiry-alert-table td:nth-child(5){
-            white-space:nowrap;
-        }
-        .expiry-alert-table td.qty{
-            text-align:right;
-            color:#4f6fff;
-            font-weight:700;
-        }
-        .expiry-date-cell{
-            display:flex;
-            align-items:center;
-            gap:7px;
-            white-space:nowrap;
-        }
-        .expiry-badge{
-            display:inline-flex;
-            align-items:center;
-            justify-content:center;
-            padding:3px 7px;
-            border-radius:999px;
-            font-size:11px;
-            font-weight:750;
-            line-height:1.2;
-            white-space:nowrap;
-        }
-        .expiry-badge.red{background:#fee2e2;color:#b91c1c;}
-        .expiry-badge.yellow{background:#fef3c7;color:#a16207;}
-        .expiry-badge.blue{background:#dbeafe;color:#1d4ed8;}
-        @media (max-width: 768px){
-            .expiry-alert-table-wrap{width:100%;}
+        [role="dialog"]:has(.expiry-photo-dialog-marker) {
+            max-height:90vh !important;
+            max-height:90dvh !important;
+            overflow-y:auto !important;
+            box-sizing:border-box;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    st.markdown(
-        "<div class='expiry-alert-table-wrap'>"
-        "<table class='expiry-alert-table'>"
-        "<thead><tr><th>사업장</th><th>로케이션</th><th>표준제품명</th><th>유통기한</th><th>수량</th></tr></thead>"
-        f"<tbody>{''.join(body)}</tbody>"
-        "</table></div>",
-        unsafe_allow_html=True,
+    st.caption(product_name)
+    photo_col, input_col = st.columns([1, 1], gap="large")
+    with photo_col:
+        image_path = get_product_image_path(product_name)
+        if image_path:
+            from streamlit import runtime
+            try:
+                jpeg = product_jpeg_preview(image_path)
+            except (OSError, ValueError) as exc:
+                st.error(f"사진을 불러오지 못했습니다: {exc}")
+            else:
+                filename = f"{_safe_product_image_stem(product_name)}.jpg"
+                # A real .jpg URL and explicit download filename prevent Windows
+                # MIME registry defaults from naming data-URL downloads .jfif.
+                url = runtime.get_instance().media_file_mgr.add(
+                    jpeg, "image/jpeg", f"product-photo-preview-{product_name}",
+                    file_name=filename, is_for_static_download=True,
+                )
+                url = url.rsplit(".", 1)[0] + ".jpg"
+                st.caption("미리보기 400px · JPG 저장 시 너비 800px")
+                st.markdown(
+                    '<div style="overflow:auto;max-height:55vh;">'
+                    f'<img src="{html.escape(url, quote=True)}" alt="제품 사진" '
+                    'style="display:block;width:400px;max-width:100%;height:auto;margin:0 auto;">'
+                    '</div>', unsafe_allow_html=True,
+                )
+        else:
+            st.info("현재 등록된 제품 사진이 없습니다.")
+    with input_col:
+        uploaded = render_photo_input(
+            key_prefix=f"expiry_photo_{product_name}",
+            upload_key=f"expiry_photo_upload_{product_name}",
+        )
+        with st.container(horizontal=True, horizontal_alignment="center"):
+            if st.button("사진 저장", type="primary", disabled=uploaded is None,
+                         key=f"expiry_photo_save_{product_name}"):
+                try:
+                    _save_product_image(product_name, uploaded)
+                except (ValueError, OSError) as exc:
+                    st.error(str(exc))
+                else:
+                    st.rerun()
+
+
+
+def _inject_css():
+    st.markdown("""
+    <style>
+    .st-key-expiry_alert_page { width: min(100%, var(--expiry-page-width, 40%)); min-width: 0; }
+    .st-key-expiry_responsive_layout { display: none; }
+    .expiry-table-content { width: 100%; min-width: 0; }
+    .expiry-table-wrap { width: 100%; box-sizing: border-box; border: 1px solid #e5e8ee; border-radius: 10px; }
+    .expiry-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
+    .expiry-table th { background: #f8fafc; text-align: left; white-space: normal; }
+    .expiry-table th, .expiry-table td { padding: 8px 4px; border-bottom: 1px solid #e5e8ee; vertical-align: middle; overflow-wrap: anywhere; white-space: normal; }
+    .expiry-table tr:last-child td { border-bottom: 0; }
+    .expiry-table .expiry-name { min-width: 0; overflow-wrap: anywhere; }
+    .expiry-table .expiry-qty { text-align: right; white-space: normal; font-weight: 750; }
+    .expiry-table .expiry-photo { text-align: center; }
+    .expiry-photo-button { border: 0; padding: 0; background: transparent; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 100%; max-width: 40px; min-width: 0; min-height: 32px; }
+    .expiry-photo-button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+    .expiry-date { white-space: normal; }
+    .expiry-thumb { width: 100%; max-width: 40px; height: auto; aspect-ratio: 1; object-fit: contain; border-radius: 6px; }
+    .expiry-badge { display: inline-block; padding: 2px 6px; border-radius: 999px; font-size: 10px; font-weight: 750; white-space: normal; max-width: 100%; box-sizing: border-box; overflow-wrap: anywhere; margin-top: 3px; }
+    .expiry-badge.red { background: #fee2e2; color: #b91c1c; }
+    .expiry-badge.yellow { background: #fef3c7; color: #a16207; }
+    .expiry-badge.blue { background: #dbeafe; color: #1d4ed8; }
+    .expiry-badge.export { background: #e0f2fe; color: #0369a1; }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+def _inventory_table_html(inventory, *, show_photo=True):
+    rows_html = []
+    thumbnails = {}
+    for row in inventory.sort_values(["_expiry", "product_name", "company", "location", "lot"]).itertuples(index=False):
+        name = str(row.product_name or "")
+        photo_cell = ""
+        if show_photo:
+            if name not in thumbnails:
+                thumbnails[name] = mobile_queries.thumbnail_data_uri(name)
+            thumbnail = thumbnails[name]
+            photo = f'<img class="expiry-thumb" src="{html.escape(thumbnail, quote=True)}" alt="">' if thumbnail else '📷'
+            photo_cell = (
+                '<td class="expiry-photo"><button type="button" class="expiry-photo-button" '
+                f'data-product="{html.escape(name, quote=True)}" '
+                f'aria-label="{html.escape(name, quote=True)} 사진 보기 및 변경" '
+                f'title="사진 원본 보기 · 변경">{photo}</button></td>'
+            )
+        badge = expiry_badge_for_date_text(str(row.exp_date or ""))
+        date_text = badge["date"] if badge else str(row.exp_date or "")
+        badge_html = f'<br><span class="expiry-badge {badge["level"]}">{html.escape(badge["label"])}</span>' if badge else ""
+        waiting = '<br><span class="expiry-badge export">수출대기</span>' if is_export_waiting_location(row.location) else ""
+        rows_html.append(
+            f'<tr>{photo_cell}'
+            f'<td>{html.escape(str(row.company or "-"))}</td>'
+            f'<td>{html.escape(str(row.location or "-"))}{waiting}</td>'
+            f'<td class="expiry-name">{html.escape(name)}</td>'
+            f'<td>{html.escape(str(row.lot or "-"))}</td>'
+            f'<td class="expiry-date">{html.escape(date_text)}{badge_html}</td>'
+            f'<td class="expiry-qty">{int(row.qty or 0):,}개</td></tr>'
+        )
+    photo_header = '<th class="expiry-photo">사진</th>' if show_photo else ""
+    # Fixed-layout table columns use percentages only; mixed calc() widths
+    # on <col> can fall back to automatic allocation and widen both columns.
+    widths = [7, 10, 9, 40, 14, 13, 7] if show_photo else [11, 10, 44, 14, 14, 7]
+    columns = '<colgroup>' + ''.join(f'<col style="width:{width}%">' for width in widths) + '</colgroup>'
+    return (
+        f'<div class="expiry-table-wrap"><table class="expiry-table">{columns}<thead><tr>'
+        f'{photo_header}<th>사업장</th><th>로케이션</th><th>제품명</th>'
+        '<th>제조번호</th><th>유효</th><th class="expiry-qty">수량</th>'
+        '</tr></thead><tbody>' + ''.join(rows_html) + '</tbody></table></div>'
     )
 
 
 def page_expiry_alerts():
-    st.title("유통기한 임박")
-    selected_groups = st.multiselect(
-        "사업장 구분",
-        COMPANY_OPTIONS,
-        default=COMPANY_OPTIONS,
-        key="expiry_alert_company_group_filter",
-    )
-    if not selected_groups:
-        st.info("조회할 사업장 구분을 선택하세요.")
-        return
-
-    rows = _expiry_alert_rows(_companies_for_groups(selected_groups))
-    if rows.empty:
-        st.info("선택한 조건에 해당하는 유통기한 1년 이하 재고가 없습니다.")
-        return
-
-    locations = rows["로케이션"].fillna("").astype(str).str.strip()
-    gmmedic_rows = rows[locations == "지엠메딕"]
-    regular_rows = rows[locations != "지엠메딕"]
-
-    st.markdown("### 일반 로케이션")
-    if regular_rows.empty:
-        st.info("선택한 조건에 해당하는 일반 로케이션 재고가 없습니다.")
-    else:
-        _render_html_table(regular_rows)
-
-    st.markdown("### 지엠메딕")
-    if gmmedic_rows.empty:
-        st.info("선택한 조건에 해당하는 지엠메딕 재고가 없습니다.")
-    else:
-        _render_html_table(gmmedic_rows)
+    _inject_css()
+    with st.container(key="expiry_alert_page"):
+        _get_expiry_responsive_layout()(key="expiry_responsive_layout", height=0)
+        st.title("유통기한 임박")
+        f1, f2, f3, f4 = st.columns([1, 1, 1.25, 1.15], gap="small", vertical_alignment="bottom")
+        warehouse_label = f1.selectbox("창고", [label for label, _ in WAREHOUSE_OPTIONS], index=1, key="expiry_alert_warehouse")
+        period_label = f2.selectbox("기간", [label for label, _ in PERIOD_OPTIONS], index=2, key="expiry_alert_period")
+        scope_label = f3.radio("구분", ["자료", "비자료"], horizontal=True, key="expiry_alert_scope")
+        exclude_export_waiting = f4.checkbox("수출대기 제외", value=True, key="expiry_alert_exclude_export_waiting")
+        inventory = mobile_queries.expiry_inventory(
+            period=dict(PERIOD_OPTIONS)[period_label],
+            bidata_scope="bidata" if scope_label == "비자료" else "data",
+            warehouse=dict(WAREHOUSE_OPTIONS)[warehouse_label],
+        )
+        if exclude_export_waiting and not inventory.empty:
+            inventory = inventory.loc[~inventory["location"].apply(is_export_waiting_location)]
+        if inventory.empty:
+            st.info("조건에 맞는 임박재고가 없습니다.")
+            return
+        photo_event = _get_expiry_photo_table()(
+            data=_inventory_table_html(inventory),
+            key="expiry_inventory_photo_table",
+            on_photo_change=lambda: None,
+        )
+        selected_product = photo_event.photo
+        if selected_product and selected_product in set(inventory["product_name"].astype(str)):
+            _expiry_photo_dialog(selected_product)

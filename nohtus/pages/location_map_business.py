@@ -37,16 +37,6 @@ def _page_map_search_results_with_available_filter(term, compact: bool = False):
 
     def filtered_q(sql, params=()):
         sql_text = str(sql or "")
-        normalized_location_sql = (
-            "REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(location,''))), ' ', ''), '-', ''), '_', '')"
-        )
-        if "qty>0" in sql_text and "FROM inventory" in sql_text:
-            sql_text = sql_text.replace(
-                "qty>0",
-                f"(qty>0 OR {normalized_location_sql} LIKE 'G1%' "
-                f"OR {normalized_location_sql} LIKE 'G2%')",
-            )
-
         result = original_q(sql_text, params)
         normalized = " ".join(sql_text.lower().split())
         if (
@@ -55,6 +45,8 @@ def _page_map_search_results_with_available_filter(term, compact: bool = False):
             and "location" in result.columns
         ):
             keep = pd.Series(True, index=result.index)
+            if "qty" in result.columns:
+                keep &= pd.to_numeric(result["qty"], errors="coerce").fillna(0) > 0
             locations = result["location"].fillna("").astype(str)
             if available_only:
                 keep &= ~locations.apply(_is_export_waiting_location)
@@ -178,7 +170,8 @@ def page_map():
             filtered_inv = inv_df.copy()
             locations = filtered_inv["location"].fillna("").astype(str)
             if bool(st.session_state.get(_AVAILABLE_ONLY_KEY, False)):
-                filtered_inv = filtered_inv.loc[~locations.apply(_is_export_waiting_location)].copy()
+                pending_mask = filtered_inv.get("is_purchase_pending", pd.Series(False, index=filtered_inv.index)).eq(True)
+                filtered_inv = filtered_inv.loc[~locations.apply(_is_export_waiting_location) | pending_mask].copy()
                 locations = filtered_inv["location"].fillna("").astype(str)
             if bool(st.session_state.get(_EXCLUDE_MATERIALS_KEY, True)):
                 keep = pd.Series(True, index=filtered_inv.index)
@@ -191,7 +184,8 @@ def page_map():
             groups = [
                 group
                 for group in groups
-                if group.get("rows") is not None and not group.get("rows").empty
+                if (group.get("rows") is not None and not group.get("rows").empty)
+                or (group.get("pending_rows") is not None and not group.get("pending_rows").empty)
             ]
 
         return groups

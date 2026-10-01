@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import sqlite3
 import tempfile
@@ -29,7 +30,7 @@ _BACKUP_TARGETS = (
     (Path(ORDER_MANAGEMENT_DB_PATH), "order_management"),
 )
 LOCAL_SET_STATE_KEY = "last_local_pair"
-DRIVE_SET_STATE_KEY = "last_google_drive_pair"
+DRIVE_SET_STATE_KEY = "last_google_drive_bundle"
 
 
 def _read_state() -> dict:
@@ -47,7 +48,7 @@ def _write_state(state: dict) -> None:
 def _backup_to(source_path: Path, directory: Path, now: datetime, prefix: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     destination = directory / f"{prefix}_{now:%Y%m%d_%H%M%S}.db"
-    with sqlite3.connect(source_path) as source, sqlite3.connect(destination) as target:
+    with closing(sqlite3.connect(source_path)) as source, closing(sqlite3.connect(destination)) as target:
         source.backup(target)
     backups = sorted(directory.glob(f"{prefix}_*.db"), key=lambda path: path.stat().st_mtime, reverse=True)
     for old_backup in backups[MAX_BACKUPS:]:
@@ -63,7 +64,7 @@ def current_wms_db_bytes() -> bytes:
 
     with tempfile.TemporaryDirectory() as temp_dir:
         snapshot_path = Path(temp_dir) / "nohtus_snapshot.db"
-        with sqlite3.connect(source_path) as source, sqlite3.connect(snapshot_path) as target:
+        with closing(sqlite3.connect(source_path)) as source, closing(sqlite3.connect(snapshot_path)) as target:
             source.backup(target)
         return snapshot_path.read_bytes()
 
@@ -99,6 +100,14 @@ def _backup_pair(directory: Path, now: datetime) -> tuple[list[str], list[str]]:
         except (OSError, sqlite3.Error) as exc:
             errors.append(f"백업 실패({prefix}, {directory}): {exc}")
     return paths, errors
+
+
+def _cloud_bundle(directory, now):
+    from nohtus.services.cloud_backup_bundle import create_bundle
+    try:
+        return [create_bundle(PROJECT_ROOT, _BACKUP_TARGETS, directory, now)], []
+    except Exception as exc:
+        return [], [f"Google Drive 백업 실패: {exc}"]
 
 
 def google_drive_root() -> str:
@@ -165,13 +174,13 @@ def run_due_backups() -> dict:
             now,
         )
         if drive_due:
-            paths, errors = _backup_pair(drive_dir, now)
+            paths, errors = _cloud_bundle(drive_dir, now)
             result["google_drive"].extend(paths)
             result["errors"].extend(
                 error.replace("백업 실패", "Google Drive 백업 실패", 1)
                 for error in errors
             )
-            if len(paths) == len(_BACKUP_TARGETS) and not errors:
+            if len(paths) == 1 and not errors:
                 state[DRIVE_SET_STATE_KEY] = now.isoformat(timespec="seconds")
                 state["last_google_drive"] = state[DRIVE_SET_STATE_KEY]
                 state["last_google_drive_export"] = state[DRIVE_SET_STATE_KEY]
@@ -187,10 +196,10 @@ def backup_to_google_drive_now() -> str:
 
     now = datetime.now()
     state = _read_state()
-    paths, errors = _backup_pair(directory, now)
+    paths, errors = _cloud_bundle(directory, now)
     if errors:
         raise ValueError(" / ".join(errors))
-    if len(paths) != len(_BACKUP_TARGETS):
+    if len(paths) != 1:
         raise ValueError("nohtus.db, export.db, 발주관리 db를 모두 백업하지 못했습니다.")
 
     state[DRIVE_SET_STATE_KEY] = now.isoformat(timespec="seconds")

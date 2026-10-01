@@ -13,14 +13,6 @@ _ALL_COMPANY_MANUAL_PICK_KEY = "out_all_company_manual_pick"
 _SHIPPABLE_COL = "is_shippable"
 _DIRECT_CUSTOMER_INLINE_KEY = "out_customer_direct_inline"
 
-# Streamlit 함수가 이전 rerun 과정에서 이미 monkey patch된 상태여도
-# 실제 원본 위젯 함수를 직접 사용할 수 있도록 모듈 로드시 보관한다.
-_BASE_TEXT_INPUT = st.text_input
-_BASE_CHECKBOX = st.checkbox
-_BASE_DATA_EDITOR = st.data_editor
-_BASE_MARKDOWN = st.markdown
-_BASE_CAPTION = st.caption
-
 
 def _hide_last_sale_importer():
     return None

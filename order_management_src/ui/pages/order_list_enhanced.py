@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+from services.receipt_units import order_quantity
+from services.statement_links import receipts_for_order
 
 from ui.month_grid import render_month_grid
 from ui.pages import orders
@@ -201,18 +203,11 @@ def render(core_app, data, purchase_module=None) -> None:
         display_detail = detail
         if purchase_module is not None:
             statements, statement_items, _, _ = purchase_module.load_purchase_data()
-            linked_ids = (
-                statements.loc[statements["발주ID"].astype(str) == selected, "명세서ID"].astype(str).tolist()
-                if not statements.empty else []
-            )
-            received_rows = (
-                statement_items[statement_items["명세서ID"].astype(str).isin(linked_ids)]
-                if linked_ids else statement_items.iloc[0:0]
-            )
+            received_rows = receipts_for_order(statements, statement_items, selected)
             received = {}
             for _, row in received_rows.iterrows():
                 key = orders._item_key(row)
-                received[key] = received.get(key, 0) + purchase_module.to_int(row.get("입고수량", 0))
+                received[key] = received.get(key, 0) + order_quantity(row)
 
             def _receipt_flag(row):
                 ordered_qty = purchase_module.to_int(row.get("수량", 0))

@@ -19,17 +19,14 @@ def _statement_display_table(items: pd.DataFrame, purchase_module):
     display_rows = []
     for _, row in rows.iterrows():
         returned, original_quantity, original_amount = base._return_info(row.get("가격적용여부", ""))
-        quantity = original_quantity if returned else base._to_int(purchase_module, row.get("입고수량", 0))
-        amount = -original_amount if returned else base._to_int(purchase_module, row.get("상품금액", 0))
+        quantity = base._to_int(purchase_module, row.get("입고수량", 0))
+        amount = base._to_int(purchase_module, row.get("상품금액", 0))
         purchase_price = base._to_int(purchase_module, row.get("매입단가", 0))
         sale_price = base._to_int(purchase_module, row.get("출고단가", 0)) or int(round(purchase_price * 1.3))
-        is_substitution = str(row.get("입고유형", "") or "").strip() == "대체입고"
-        actual_name = str(row.get("정식제품명", "") or "")
-        original_name = str(row.get("원발주제품명", "") or "") if is_substitution else ""
-        product_name = f"{actual_name} (대체: {original_name})" if original_name else actual_name
+        product_name = str(row.get("정식제품명", "") or "")
 
         display_rows.append({
-            "상태": "반품" if returned else "입고",
+            "상태": ("부분반품" if quantity else "반품") if returned else "입고",
             "제품명": product_name,
             "수량": quantity,
             "제조번호": str(row.get("제조번호", "")),
@@ -41,11 +38,14 @@ def _statement_display_table(items: pd.DataFrame, purchase_module):
             "포장단위": str(row.get("포장단위", "") or row.get("단위", "")),
         })
 
-    display = pd.DataFrame(display_rows)
+    display = pd.DataFrame(display_rows, columns=[
+        "상태", "제품명", "규격", "수량", "포장단위",
+        "제조번호", "유통기한", "매입단가", "매입총액", "매출단가",
+    ])
     display.insert(0, "No.", range(1, len(display) + 1))
 
     def style_status(value):
-        if str(value) == "반품":
+        if str(value) in {"반품", "부분반품"}:
             return "background-color: #fee2e2; color: #991b1b; font-weight: 700;"
         return ""
 

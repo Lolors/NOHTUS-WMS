@@ -31,3 +31,7 @@ class PurchaseService:
             raise ValueError(f"지원하지 않는 매입 데이터 저장 대상입니다: {filename}")
         writer(self.data_dir, frame)
         self._invalidate()
+
+    def save_statement_bundle(self, statements, items, prices):
+        purchase_repository.save_statement_bundle(self.data_dir, statements, items, prices)
+        self._invalidate()

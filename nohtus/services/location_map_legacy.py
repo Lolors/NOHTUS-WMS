@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pandas as pd
 from functools import lru_cache
 from html import escape
 from pathlib import Path
@@ -56,6 +57,8 @@ def _loc_group_from_df(df):
             "primary_location": loc,
             "occupied_cells": occupied_cells,
         }
+        if getattr(r, "is_purchase_pending", False) is True:
+            entry["is_purchase_pending"] = True
         # 실제 재고는 location 하나만 기준으로 관리하지만, 범위 지정이 있으면 그
         # 칸들 전체를 로케이션맵에서 "채워짐"으로 함께 표시한다.
         for block_loc in occupied_cells:
@@ -68,6 +71,10 @@ def render_location_map():
     Streamlit 버튼/링크 대신 components.html 내부 JavaScript로 오른쪽 상세패널만 갱신한다.
     """
     df = q("SELECT id, company, product_name, warehouse_name, lot, exp_date, location, location_range_end, location_range_cells, qty FROM inventory WHERE qty>0 ORDER BY location, company, product_name")
+    from nohtus.services.purchase_pending import map_pending_rows
+    pending = map_pending_rows()
+    if not pending.empty:
+        df = pd.concat([df, pending], ignore_index=True)
     loc_data = _loc_group_from_df(df)
     tx = q("""SELECT created_at, tx_type, product_name, lot, exp_date, from_location, to_location, qty
               FROM transactions ORDER BY id DESC LIMIT 300""")

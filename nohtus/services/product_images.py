@@ -79,3 +79,19 @@ def ensure_thumbnail(original_path) -> str:
     except Exception:
         pass
     return create_thumbnail(original)
+
+
+def product_jpeg_preview(original_path, width: int = 800) -> bytes:
+    """저장 원본은 유지하고 내려받을 JPEG만 지정 너비로 변환한다."""
+    from io import BytesIO
+    from PIL import Image, ImageOps
+
+    with Image.open(original_path) as source:
+        image = ImageOps.exif_transpose(source).convert("RGBA")
+        background = Image.new("RGBA", image.size, "white")
+        image = Image.alpha_composite(background, image).convert("RGB")
+        height = max(1, round(image.height * width / image.width))
+        image = image.resize((width, height), Image.Resampling.LANCZOS)
+        output = BytesIO()
+        image.save(output, format="JPEG", quality=95, optimize=True)
+        return output.getvalue()

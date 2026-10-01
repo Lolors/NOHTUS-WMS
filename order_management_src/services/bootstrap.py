@@ -35,6 +35,7 @@ def build_application(base_dir: Path):
     import app_order_review as final_app
     purchase = final_app.purchase
     purchase.STATEMENT_ITEM_COLUMNS = purchase_repository.STATEMENT_ITEM_COLUMNS
+    purchase.STATEMENT_COLUMNS = purchase_repository.STATEMENT_COLUMNS
 
     original_text_input = core_app.st.text_input
 
@@ -67,11 +68,11 @@ def build_application(base_dir: Path):
             return data
 
         result = data.copy()
-        widths = [0.72, 2.55, 0.95, 1.0, 1.15, 1.15, 1.2, 0.85]
+        widths = [0.6, 1.55, 1.55, 0.85, 0.8, 0.9, 0.95, 1.0, 1.05, 0.7]
         headers = core_app.st.columns(widths, gap="small")
         for column, title in zip(
             headers,
-            ["복사/삭제", "제품명", "규격", "입고수량", "매입단가", "제조번호", "유통기한", "가격 적용"],
+            ["복사/삭제", "주문제품", "입고제품", "제품코드", "규격", "입고수량", "매입단가", "제조번호", "유통기한", "가격 적용"],
         ):
             column.markdown(
                 f"<div style='font-size:13px;font-weight:700;color:#475569;padding:0 2px 6px;'>{title}</div>",
@@ -90,16 +91,32 @@ def build_application(base_dir: Path):
                 label_visibility="collapsed",
             )
             columns[1].markdown(
-                f"<div style='min-height:38px;display:flex;align-items:center;font-size:14px;padding:0 4px;'>"
-                f"{str(row.get('제품명', '') or '')}</div>",
+                f"<div style='min-height:38px;display:flex;align-items:center;font-size:14px;"
+                f"color:#64748b;padding:0 4px;'>{str(row.get('주문제품', '') or '')}</div>",
                 unsafe_allow_html=True,
             )
-            columns[2].markdown(
-                f"<div style='min-height:38px;display:flex;align-items:center;font-size:13px;padding:0 4px;'>"
-                f"{str(row.get('규격', '') or '')}</div>",
-                unsafe_allow_html=True,
+            if row.get("입고발주ID"):
+                columns[1].caption(str(row["입고발주ID"]))
+            result.at[index, "입고제품"] = columns[2].text_input(
+                "입고제품",
+                value=str(row.get("입고제품", "") or ""),
+                key=f"{key_prefix}_received_name",
+                label_visibility="collapsed",
             )
-            result.at[index, "입고수량"] = columns[3].number_input(
+            result.at[index, "제품코드"] = columns[3].text_input(
+                "제품코드",
+                value=str(row.get("제품코드", "") or ""),
+                placeholder=str(row.get("제품코드_힌트", "") or ""),
+                key=f"{key_prefix}_product_code",
+                label_visibility="collapsed",
+            )
+            result.at[index, "규격"] = columns[4].text_input(
+                "규격",
+                value=str(row.get("규격", "") or ""),
+                key=f"{key_prefix}_received_spec",
+                label_visibility="collapsed",
+            )
+            result.at[index, "입고수량"] = columns[5].number_input(
                 "입고수량",
                 min_value=0,
                 value=max(0, int(float(row.get("입고수량", 0) or 0))),
@@ -107,26 +124,29 @@ def build_application(base_dir: Path):
                 key=f"{key_prefix}_quantity",
                 label_visibility="collapsed",
             )
-            result.at[index, "매입단가"] = columns[4].text_input(
+            if row.get("입고단위"):
+                columns[5].caption(str(row["입고단위"]))
+                columns[6].caption(f"1{row['입고단위']}당 단가")
+            result.at[index, "매입단가"] = columns[6].text_input(
                 "매입단가",
                 value="" if str(row.get("매입단가", "") or "").strip() in {"", "0", "0.0"} else str(row.get("매입단가", "")),
                 key=f"{key_prefix}_price_v2",
                 placeholder="단가 입력",
                 label_visibility="collapsed",
             )
-            result.at[index, "제조번호"] = columns[5].text_input(
+            result.at[index, "제조번호"] = columns[7].text_input(
                 "제조번호",
                 value=str(row.get("제조번호", "") or ""),
                 key=f"{key_prefix}_lot",
                 label_visibility="collapsed",
             )
-            result.at[index, "유통기한"] = columns[6].text_input(
+            result.at[index, "유통기한"] = columns[8].text_input(
                 "유통기한",
                 value=str(row.get("유통기한", "") or ""),
                 key=f"{key_prefix}_expiry",
                 label_visibility="collapsed",
             )
-            result.at[index, "현재 가격 적용"] = columns[7].checkbox(
+            result.at[index, "현재 가격 적용"] = columns[9].checkbox(
                 "현재 가격 적용",
                 value=bool(row.get("현재 가격 적용", True)),
                 key=f"{key_prefix}_apply_price",
@@ -194,6 +214,7 @@ def build_application(base_dir: Path):
         purchase.load_purchase_data = load_purchase_data_cached
 
         purchase.save_table = purchase_service.save_table
+        purchase.save_statement_bundle = purchase_service.save_statement_bundle
         core_app.correction_service = correction_service
 
     return core_app, purchase, db_status, run_pages

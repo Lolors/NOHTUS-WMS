@@ -35,8 +35,17 @@ class ReconcileOrphanWaitingItemsSignatureTests(unittest.TestCase):
         self.backup_patch.start()
         db.init_db()
 
+        class ClosingConnection(sqlite3.Connection):
+            def __exit__(self, exc_type, exc_value, traceback):
+                try:
+                    return super().__exit__(exc_type, exc_value, traceback)
+                finally:
+                    self.close()
+
+        self._closing_connection = ClosingConnection
+
         self.wms_db_path = Path(self.temp_dir.name) / 'wms.db'
-        with sqlite3.connect(self.wms_db_path) as con:
+        with sqlite3.connect(self.wms_db_path, factory=ClosingConnection) as con:
             con.execute(
                 '''CREATE TABLE inventory(
                        id INTEGER PRIMARY KEY AUTOINCREMENT, company TEXT, product_name TEXT,
@@ -57,7 +66,7 @@ class ReconcileOrphanWaitingItemsSignatureTests(unittest.TestCase):
             con.commit()
         self.wms_connect_patcher = patch(
             'nohtus.export_app.services.stale_inventory_cleanup_service.wms_connect',
-            lambda: sqlite3.connect(self.wms_db_path),
+            lambda: sqlite3.connect(self.wms_db_path, factory=ClosingConnection),
         )
         self.wms_connect_patcher.start()
 
@@ -93,7 +102,7 @@ class ReconcileOrphanWaitingItemsSignatureTests(unittest.TestCase):
             (case_id, order_id, 'NOH', 'T4', 999, '오메가 PDT 장비', 'LOT1', '2027-01-01', 5, None, now, now),
         )
 
-        with sqlite3.connect(self.wms_db_path) as con:
+        with sqlite3.connect(self.wms_db_path, factory=self._closing_connection) as con:
             wms_now = now_text()
             cur = con.execute(
                 '''INSERT INTO export_waiting_orders(
@@ -120,7 +129,7 @@ class ReconcileOrphanWaitingItemsSignatureTests(unittest.TestCase):
         # 아무것도 제거되면 안 된다 - 이 값이 5(전량 삭제)가 되면 리포트된
         # 버그가 재현된다.
         self.assertEqual(removed, 0)
-        with sqlite3.connect(self.wms_db_path) as con:
+        with sqlite3.connect(self.wms_db_path, factory=self._closing_connection) as con:
             qty = con.execute(
                 "SELECT qty FROM export_waiting_items WHERE order_id=? AND product_name=?",
                 (wms_order_id, '오메가 PDT 장비'),

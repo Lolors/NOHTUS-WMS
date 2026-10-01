@@ -1,5 +1,6 @@
 import hashlib
 import re
+import unicodedata
 from datetime import date, datetime
 from io import BytesIO
 
@@ -8,6 +9,7 @@ import streamlit as st
 
 from nohtus.config import COMPANIES
 from nohtus.db import connect, q
+from nohtus.services.purchase_import_merge import ExistingRows, source_identity
 
 
 PURCHASE_COMPANIES = [c for c in COMPANIES if c in ["노투스팜", "노투스", "NOH"]]
@@ -66,7 +68,7 @@ def _normalize_date(value):
 
 
 def _ensure_purchase_storage():
-    """업로드 파일 이력 테이블을 만들고 기존 매입가 데이터는 한 번만 초기화한다."""
+    """업로드 이력 및 중복 비교 정보를 준비하고 기존 기록을 보존한다."""
     with connect() as con:
         cur = con.cursor()
         cur.execute(
@@ -96,12 +98,13 @@ def _ensure_purchase_storage():
             (PURCHASE_RESET_MIGRATION,),
         ).fetchone()
         if not applied:
-            cur.execute("DELETE FROM purchase_history")
-            cur.execute("DELETE FROM purchase_uploads")
             cur.execute(
                 "INSERT INTO app_data_migrations(migration_key, applied_at) VALUES (?, ?)",
                 (PURCHASE_RESET_MIGRATION, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             )
+        columns = {row[1] for row in cur.execute("PRAGMA table_info(purchase_history)")}
+        if "source_identity" not in columns:
+            cur.execute("ALTER TABLE purchase_history ADD COLUMN source_identity TEXT NOT NULL DEFAULT ''")
         con.commit()
 
 
@@ -166,21 +169,16 @@ def _standard_name_for(erp_product_name, match_map):
     return match_map.get(name, match_map.get(name.replace(" ", ""), ""))
 
 
-def _import_purchase_history(uploaded_file, company, *, reader=None, before_import=None):
-    """reader(payload, company)는 회사별로 다른 엑셀 형식을 읽어야 할 때(예:
-    purchase_history_single.py의 노투스 7행 헤더) 기본 _read_purchase_excel
-    대신 쓸 수 있다. before_import(company)는 실제 파싱/삽입 전에 실행되는
-    훅(예: 재업로드 전 기존 데이터 삭제)이다."""
+def _import_purchase_history(uploaded_file, company, *, reader=None):
+    """파일 형식을 검증한 뒤 기존 거래와 겹치는 행을 제외하고 누적 저장한다."""
     _ensure_purchase_storage()
-    if before_import is not None:
-        before_import(company)
 
     source = getattr(uploaded_file, "name", "")
     payload = _uploaded_file_payload(uploaded_file)
     file_hash = hashlib.sha256(payload).hexdigest()
     raw = reader(payload, company) if reader is not None else _read_purchase_excel(payload)
     if raw.empty:
-        return {"total": 0, "inserted": 0, "file_duplicate": False, "skipped": 0, "matched": 0, "unmatched": 0}
+        return {"duplicates": 0, "total": 0, "inserted": 0, "file_duplicate": False, "skipped": 0, "matched": 0, "unmatched": 0}
 
     required = ["매입일자", "거래처명", "제품명", "수량", "실단가"]
     missing = [col for col in required if col not in raw.columns]
@@ -188,11 +186,12 @@ def _import_purchase_history(uploaded_file, company, *, reader=None, before_impo
         raise ValueError(f"필수 컬럼이 없습니다: {', '.join(missing)}")
 
     match_map = _load_product_match_map(company)
-    inserted = skipped = matched = unmatched = 0
+    inserted = skipped = matched = unmatched = duplicates = 0
     imported_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     with connect() as con:
         cur = con.cursor()
+        cur.execute("BEGIN IMMEDIATE")
         duplicate_file = cur.execute(
             "SELECT 1 FROM purchase_uploads WHERE business_name=? AND file_hash=?",
             (company, file_hash),
@@ -202,13 +201,14 @@ def _import_purchase_history(uploaded_file, company, *, reader=None, before_impo
                 "total": len(raw),
                 "inserted": 0,
                 "file_duplicate": True,
+                "duplicates": len(raw),
                 "skipped": 0,
                 "matched": 0,
                 "unmatched": 0,
             }
 
-        for source_index, row in enumerate(raw.itertuples(index=False), start=1):
-            item = row._asdict()
+        existing = ExistingRows(cur, company)
+        for source_index, item in enumerate(raw.to_dict("records"), start=1):
 
             purchase_date = _normalize_date(item.get("매입일자"))
             supplier = _clean_text(item.get("거래처명"))
@@ -228,17 +228,25 @@ def _import_purchase_history(uploaded_file, company, *, reader=None, before_impo
             else:
                 unmatched += 1
 
-            # 기존 duplicate_key UNIQUE 제약을 유지하면서도 모든 원본 행을 보존한다.
-            # 키는 거래 내용이 아니라 파일 해시와 원본 행 순서로 만든다.
+            identity = source_identity(item, _clean_text, _normalize_date)
+            match_row = dict(purchase_date=purchase_date, supplier_name=supplier,
+                erp_product_name=erp_product, specification=specification, quantity=float(quantity),
+                unit_price=float(unit_price), note=note)
+            existing_id = existing.take(match_row, identity)
+            if existing_id is not None:
+                duplicates += 1
+                if identity:
+                    cur.execute("UPDATE purchase_history SET source_identity=? WHERE id=? AND source_identity=''", (identity, existing_id))
+                continue
             row_key = f"{company}:{file_hash}:{source_index}"
             cur.execute(
                 """
                 INSERT INTO purchase_history(
                     business_name, purchase_date, supplier_name, erp_product_name,
                     specification, quantity, unit_price, note, standard_product_name,
-                    source_file, imported_at, duplicate_key
+                    source_file, imported_at, duplicate_key, source_identity
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     company,
@@ -253,6 +261,7 @@ def _import_purchase_history(uploaded_file, company, *, reader=None, before_impo
                     source,
                     imported_at,
                     row_key,
+                    identity,
                 ),
             )
             inserted += 1
@@ -271,6 +280,7 @@ def _import_purchase_history(uploaded_file, company, *, reader=None, before_impo
         "total": len(raw),
         "inserted": inserted,
         "file_duplicate": False,
+        "duplicates": duplicates,
         "skipped": skipped,
         "matched": matched,
         "unmatched": unmatched,
@@ -336,16 +346,16 @@ def _query_purchase_rows(item_no, standard_name, start_date, end_date):
     return df
 
 
-def _render_import_box(*, file_types=None, reader=None, before_import=None):
+def _render_import_box(*, file_types=None, reader=None):
     with st.expander("매입가 엑셀 업로드", expanded=False):
         st.caption(
-            "원본 행은 내용이 같아도 모두 저장합니다. 같은 사업장에 완전히 동일한 파일을 다시 올린 경우에만 중복 파일로 차단합니다."
+            "기존 기록을 유지하면서 새 매입내역을 추가합니다. 이전 달부터 겹쳐 올려도 같은 거래는 중복 저장하지 않으며, 원본의 별도 거래 행은 보존합니다."
         )
         company = st.selectbox("업로드 사업장", PURCHASE_COMPANIES, key="purchase_import_company")
         uploaded = st.file_uploader("매입내역 엑셀 업로드", type=file_types or ["xlsx"], key="purchase_history_upload")
         if uploaded is not None and st.button("DB에 업로드", type="primary", use_container_width=True):
             try:
-                result = _import_purchase_history(uploaded, company, reader=reader, before_import=before_import)
+                result = _import_purchase_history(uploaded, company, reader=reader)
                 if result["file_duplicate"]:
                     st.warning("같은 사업장에 이미 업로드한 동일 파일입니다. 기존 데이터는 변경하지 않았습니다.")
                 else:
@@ -353,6 +363,7 @@ def _render_import_box(*, file_types=None, reader=None, before_import=None):
                     st.markdown(f"""
                     - 전체 행 : **{result['total']}건**
                     - 신규 저장 : **{result['inserted']}건**
+                    - 기존 거래 중복 제외 : **{result['duplicates']}건**
                     - 필수값 누락 제외 : **{result['skipped']}건**
                     - 제품매칭 성공 : **{result['matched']}건**
                     - 제품매칭 실패 : **{result['unmatched']}건**
@@ -366,12 +377,18 @@ def _ensure_query_items():
         st.session_state["purchase_query_items"] = [""]
 
 
+def _normalize_search_text(value):
+    """유니코드 정규화(NFC) 후 비교해 자모 분해(NFD)로 저장된 이름과의 비교가
+    실패하지 않게 한다 (예: 엑셀에서 들어온 이름이 다른 정규화 형태인 경우)."""
+    return unicodedata.normalize("NFC", _clean_text(value)).replace(" ", "").lower()
+
+
 def _filter_product_options(options, keyword, current=""):
-    keyword = _clean_text(keyword).replace(" ", "").lower()
+    keyword = _normalize_search_text(keyword)
     if not keyword:
         filtered = list(options)
     else:
-        filtered = [name for name in options if keyword in name.replace(" ", "").lower()]
+        filtered = [name for name in options if keyword in _normalize_search_text(name)]
 
     if current and current not in filtered and current in options:
         filtered.insert(0, current)

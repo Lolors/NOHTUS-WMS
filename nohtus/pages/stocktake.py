@@ -442,6 +442,42 @@ def _propagate_master_edit_to_shipment_items(inv_id, product_name, lot, exp_date
     return ""
 
 
+def _update_selected_inventory_erp_name(inv_id, new_name, expected_name):
+    """Change one inventory row's ERP identity without merging stock or replacing mappings."""
+    from nohtus.services.inbound import _mapping_column_for_company
+    from nohtus.services.inventory import insert_transaction_log
+    new_name=str(new_name or '').strip()
+    if not new_name:raise ValueError('전산상명칭을 입력하세요.')
+    with connect() as con:
+        con.execute('BEGIN IMMEDIATE')
+        cur=con.cursor()
+        row=cur.execute('SELECT company,product_name,warehouse_name,lot,exp_date,location,qty FROM inventory WHERE id=?',(int(inv_id),)).fetchone()
+        if not row:raise ValueError('수정할 재고가 없습니다.')
+        company,product,old_name,lot,expiry,location,qty=row
+        if str(old_name or '')!=str(expected_name or ''):raise ValueError('전산상명칭이 변경됐습니다. 제품마스터를 다시 열어 주세요.')
+        column=_mapping_column_for_company(company)
+        if not column:raise ValueError('선택 재고의 사업장을 확인하세요.')
+        tables={r[0] for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        waiting=[]
+        if 'export_waiting_items' in tables:
+            waiting=cur.execute('SELECT id,source_inventory_id,waiting_inventory_id FROM export_waiting_items WHERE COALESCE(confirmed,0)=0 AND (source_inventory_id=? OR waiting_inventory_id=?)',(inv_id,inv_id)).fetchall()
+            if any(any(value and int(value)!=int(inv_id) for value in record[1:]) for record in waiting):
+                raise ValueError('다른 재고와 연결된 수출대기 건입니다. 수출대기 연결을 해제한 뒤 전산상명칭을 변경하세요.')
+        for name in dict.fromkeys([str(old_name or '').strip(),new_name]):
+            if name and not cur.execute(f'SELECT 1 FROM products WHERE standard_name=? AND {column}=?',(product,name)).fetchone():
+                cur.execute(f'INSERT INTO products(standard_name,warehouse_name,{column}) VALUES(?,?,?)',(product,product,name))
+        if new_name==str(old_name or ''):return
+        now=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        cur.execute('UPDATE inventory SET warehouse_name=?,updated_at=? WHERE id=?',(new_name,now,inv_id))
+        for record in waiting:cur.execute('UPDATE export_waiting_items SET warehouse_name=? WHERE id=?',(new_name,record[0]))
+        if 'customer_return_receipts' in tables:
+            receipts=cur.execute("SELECT id,transaction_id FROM customer_return_receipts WHERE inventory_id=? AND status='received'",(inv_id,)).fetchall()
+            for receipt_id,tx_id in receipts:
+                cur.execute('UPDATE customer_return_receipts SET warehouse_name=? WHERE id=?',(new_name,receipt_id))
+                if tx_id:cur.execute('UPDATE transactions SET warehouse_name=? WHERE id=?',(new_name,tx_id))
+        insert_transaction_log(cur,created_at=now,tx_type='재고정보수정',product_name=product,warehouse_name=new_name,lot=lot,exp_date=expiry,from_company=company,to_company=company,from_location=location,to_location=location,qty=0,memo=f'선택 재고 #{inv_id} 전산상명칭 변경: {old_name or "미지정"} → {new_name} / 수량 {qty} 유지')
+
+
 @st.dialog("제품마스터 수정", width="large")
 def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
     st.caption("선택한 재고 기본정보와 해당 표준제품명의 제품매칭표를 한 번에 수정합니다.")
@@ -476,6 +512,30 @@ def _render_inventory_master_dialog(inv_id, product_name, lot, exp_date):
         },
         disabled=["id"],
     )
+
+    st.markdown("#### 선택 재고의 전산상명칭")
+    current_stock=q('SELECT company,warehouse_name,location,qty FROM inventory WHERE id=?',(int(inv_id),))
+    if not current_stock.empty:
+        current=current_stock.iloc[0]
+        company=str(current['company'])
+        old_name=str(current['warehouse_name'] or '')
+        label={'노투스팜':'노투스팜 ERP명','노투스':'노투스 ERP명','NOH':'NOH ERP명','비자료':'비자료명'}.get(company)
+        names=list(dict.fromkeys([name for name in [old_name,str(product_name or '')]+([_clean_mapping_text(value) for value in edited_mappings[label]] if label else []) if name]))
+        st.caption(f"{company} / {current['location']} / {int(current['qty'])}개 · 현재 전산상명칭: {old_name or '미지정'}")
+        st.markdown("<style>.st-key-stock_master_erp_controls{width:40vw;max-width:100%;}</style>",unsafe_allow_html=True)
+        with st.container(key='stock_master_erp_controls'):
+            name_col, save_col=st.columns([3,2],gap='small',vertical_alignment='bottom')
+            selected_name=name_col.selectbox('적용할 전산상명칭',names+['직접 입력'],key=f'stock_master_erp_select_{inv_id}')
+            if selected_name=='직접 입력':selected_name=name_col.text_input('새 전산상명칭',key=f'stock_master_erp_new_{inv_id}')
+            save_erp=save_col.button('선택 재고 전산상명칭 저장',key=f'stock_master_erp_save_{inv_id}',use_container_width=True)
+        if save_erp:
+            try:
+                _update_selected_inventory_erp_name(int(inv_id),selected_name,old_name)
+            except (ValueError,sqlite3.Error) as exc:st.error(str(exc))
+            else:
+                st.session_state['_stock_master_success_msg']=f'전산상명칭 변경 완료: {old_name} → {selected_name} (수량 유지)'
+                st.session_state['_stock_master_focus_product']=product_name
+                st.rerun()
 
     if st.button(
         "제품 기본정보 + 제품매칭표 저장",
@@ -528,7 +588,7 @@ def _allocate_erp_quantity_by_detail(actual_quantities, erp_quantity):
     return allocated
 
 
-def _build_stocktake_result(ignored_result=None):
+def _build_stocktake_result(ignored_result=None, include_zero=False):
     """기준재고 수량을 채우고 무시 목록 제품은 ERP 비교 수량으로 대체한다."""
     from nohtus.services.stocktake import current_baseline_stock_excel_bytes
 
@@ -557,6 +617,12 @@ def _build_stocktake_result(ignored_result=None):
 
             baseline_company = baseline["사업장"].fillna("").astype(str).str.strip()
             baseline_product = baseline["표준제품명"].fillna("").astype(str).str.strip()
+            from nohtus.services.stock_compare import erp_comparison_groups
+            comparison_groups = erp_comparison_groups()
+            baseline_group = pd.Series([
+                comparison_groups.get((company, product), product)
+                for company, product in zip(baseline_company, baseline_product)
+            ], index=baseline.index)
 
             missing_rows = []
             for _, compared in source.iterrows():
@@ -565,7 +631,7 @@ def _build_stocktake_result(ignored_result=None):
                 company = "" if pd.isna(company_value) else str(company_value).strip()
                 product = "" if pd.isna(product_value) else str(product_value).strip()
                 matched_indexes = baseline.index[
-                    (baseline_company == company) & (baseline_product == product)
+                    (baseline_company == company) & ((baseline_group == product) | (baseline_product == product))
                 ]
                 erp_quantity = int(compared["ERP수량"])
                 wms_quantity = int(compared["WMS수량"])
@@ -607,9 +673,10 @@ def _build_stocktake_result(ignored_result=None):
 
     computerized = pd.to_numeric(baseline["전산수량"], errors="coerce")
     actual = pd.to_numeric(baseline["실제수량"], errors="coerce")
-    baseline = baseline[
-        ~(computerized.eq(0) & actual.eq(0))
-    ].copy()
+    if not include_zero:
+        baseline = baseline[
+            ~(computerized.eq(0) & actual.eq(0))
+        ].copy()
     baseline = baseline.drop(columns=["수량"])
 
     columns = list(baseline.columns)
@@ -643,7 +710,7 @@ def _render_stock_comparison():
     if ignore_message:
         st.success(ignore_message)
     st.caption(
-        "ERP는 사업장·제품별 총수량으로 비교하고, 지엠메딕 실사재고는 "
+        "ERP는 거래처 창고를 포함한 전체 로케이션에서 같은 사업장·ERP제품명의 수량을 합산해 비교합니다. 표준제품명이 여러 개면 함께 표시합니다. 지엠메딕 실사재고는 "
         "노투스팜의 지엠메딕 로케이션 재고를 제품·유통기한별로 비교합니다."
     )
 
@@ -918,9 +985,27 @@ def _render_stock_comparison():
                 },
             )
 
+    from nohtus.pages.material_management import material_inventory_summary
+
+    materials_export = material_inventory_summary().rename(columns={
+        "material_type": "유형", "standard_name": "표준제품명",
+        "company": "사업장", "erp_name": "ERP명", "qty": "수량",
+    })
+    from nohtus.services.stock_compare import erp_comparison_groups
+    export_groups = erp_comparison_groups()
+    erp_quantities = {
+        (row["사업장"], row["표준제품명"]): row["ERP수량"]
+        for _, row in erp_result.iterrows()
+    }
+    materials_export["_ERP수량"] = [
+        erp_quantities.get((company, export_groups.get((company, product), product)), 0)
+        for company, product in zip(materials_export["사업장"], materials_export["표준제품명"])
+    ]
+    # 실제재고가 0이어도 ERP 잔량이 있는 항목은 기준재고 배분에 남긴다.
+    full_inventory_export = _build_stocktake_result(erp_result, include_zero=False)
     st.download_button(
         "비교결과 엑셀 다운로드",
-        data=comparison_excel_bytes(erp_result, gm_result, problems),
+        data=comparison_excel_bytes(problems, ignored_result_source.combine_first(ignored_problems), materials_export, full_inventory_export),
         file_name=f"NOHTUS_재고비교결과_{date.today().strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,

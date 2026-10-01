@@ -34,8 +34,17 @@ class ReturnDomesticToPackingCompleteGuardTests(unittest.TestCase):
         self.backup_patch.start()
         db.init_db()
 
+        class ClosingConnection(sqlite3.Connection):
+            def __exit__(self, exc_type, exc_value, traceback):
+                try:
+                    return super().__exit__(exc_type, exc_value, traceback)
+                finally:
+                    self.close()
+
+        self._closing_connection = ClosingConnection
+
         self.wms_db_path = Path(self.temp_dir.name) / 'wms.db'
-        with sqlite3.connect(self.wms_db_path) as con:
+        with sqlite3.connect(self.wms_db_path, factory=ClosingConnection) as con:
             con.execute(
                 '''CREATE TABLE inventory(
                        id INTEGER PRIMARY KEY AUTOINCREMENT, company TEXT, product_name TEXT,
@@ -55,7 +64,9 @@ class ReturnDomesticToPackingCompleteGuardTests(unittest.TestCase):
             export_waiting_service.ensure_export_waiting_tables(con.cursor())
             con.commit()
         self.wms_connect_patcher = patch.object(
-            export_waiting_service, 'connect', lambda: sqlite3.connect(self.wms_db_path)
+            export_waiting_service,
+            'connect',
+            lambda: sqlite3.connect(self.wms_db_path, factory=self._closing_connection),
         )
         self.wms_connect_patcher.start()
 
@@ -93,7 +104,7 @@ class ReturnDomesticToPackingCompleteGuardTests(unittest.TestCase):
     def test_succeeds_when_wms_has_confirmed_stock_to_restore(self) -> None:
         case_id = self._create_case('EXP-DOM-2')
         now = now_text()
-        with sqlite3.connect(self.wms_db_path) as con:
+        with sqlite3.connect(self.wms_db_path, factory=self._closing_connection) as con:
             cur = con.execute(
                 '''INSERT INTO export_waiting_orders(
                        export_no,country,buyer,transport_method,title,status,created_at,updated_at

@@ -894,7 +894,14 @@ def save_export_waiting_order(
             )
             if not row or row["status"] not in {"waiting", "partial", "confirmed"}:
                 raise ValueError("취소된 수출대기 건은 수정할 수 없습니다.")
-            is_confirmed = row["status"] in {"partial", "confirmed"}
+            # 확정 표시는 과거 품목 삭제 이후 남아 있을 수 있다.
+            # 실제 확정 품목이 있는 경우에만 확정분 보존/수정 경로를 사용한다.
+            is_confirmed = bool(_items(cur, editing_order_id, confirmed=True))
+            if not is_confirmed and row["status"] in {"partial", "confirmed"}:
+                cur.execute(
+                    "UPDATE export_waiting_orders SET status='waiting',updated_at=? WHERE id=?",
+                    (now, int(editing_order_id)),
+                )
             items_changed = _current_item_signature(
                 cur,
                 editing_order_id,

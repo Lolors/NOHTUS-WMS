@@ -4,7 +4,10 @@ from __future__ import annotations
 from datetime import datetime
 
 import pandas as pd
+from services.receipt_units import order_quantity, conversion_factor
 
+from services.statement_links import item_order_id, linked_order_ids, encode_order_ids, save_statement_bundle
+from services.statement_returns import return_values, quantity_value
 from ui.pages import purchases
 from ui.pages.statement_register_substitution import _normalize_expiry
 
@@ -34,12 +37,12 @@ def _open_orders(purchase_module, orders: pd.DataFrame, order_items: pd.DataFram
     if not statements.empty and not statement_items.empty:
         statement_order = statements.set_index("명세서ID")["발주ID"].astype(str).to_dict()
         for _, row in statement_items.iterrows():
-            order_id = statement_order.get(str(row.get("명세서ID", "")), "")
+            order_id = item_order_id(row, statement_order)
             if not order_id:
                 continue
             order_received = received_by_order.setdefault(order_id, {})
             key = _item_key(row)
-            order_received[key] = order_received.get(key, 0) + _to_int(purchase_module, row.get("입고수량", 0))
+            order_received[key] = order_received.get(key, 0) + order_quantity(row)
 
     open_ids: list[str] = []
     for order_id in orders["발주ID"].astype(str).tolist():
@@ -130,6 +133,7 @@ def _save_statement_edit(
     freight: int,
     memo: str,
     edited_items: pd.DataFrame,
+    linked_orders=None,
 ) -> None:
     statement_id = str(statement_id or "").strip()
     mask = statements["명세서ID"].astype(str).str.strip() == statement_id
@@ -152,13 +156,24 @@ def _save_statement_edit(
     updated.loc[mask, "메모"] = str(memo or "")
     updated.loc[mask, "수정일시"] = now_text
 
+    links = list(linked_orders) if linked_orders is not None else linked_order_ids(statements.loc[mask].iloc[0])
+    if not links:
+        raise ValueError("연결할 발주서를 선택하세요.")
+    updated.loc[mask, "발주ID"] = links[0]
+    updated.loc[mask, "연결발주ID"] = encode_order_ids(links)
     item_rows = []
     price_rows = []
     for sequence, (_, row) in enumerate(clean_items.iterrows(), 1):
-        quantity = max(0, _to_int(purchase_module, row.get("입고수량", 0)))
+        quantity = quantity_value(row.get("입고수량", 0), "총 입고수량")
         purchase_price = max(0, _to_int(purchase_module, row.get("매입단가", 0)))
         sale_price = int(round(purchase_price * 1.3))
         product_amount = quantity * purchase_price
+        if row.get("_original_quantity") == quantity and row.get("_original_price") == purchase_price:
+            product_amount = _to_int(purchase_module, row.get("_original_amount", product_amount))
+        quantity, product_amount, return_status = return_values(quantity, product_amount, row.get("반품수량", 0))
+        source_order = str(row.get("입고발주ID", "") or links[0])
+        if source_order not in links:
+            raise ValueError("연결되지 않은 발주서에 배분된 입고 품목이 있습니다.")
         product_code = str(row.get("제품코드", "") or "").strip()
         product_name = str(row.get("정식제품명", "") or "").strip()
         try:
@@ -168,6 +183,8 @@ def _save_statement_edit(
         item_rows.append({
             "명세서ID": statement_id,
             "순번": sequence,
+            "입고발주ID": source_order,
+            "단위환산계수": conversion_factor(row),
             "제품코드": product_code,
             "정식제품명": product_name,
             "규격": str(row.get("규격", "") or ""),
@@ -177,7 +194,7 @@ def _save_statement_edit(
             "매입단가": purchase_price,
             "상품금액": product_amount,
             "출고단가": sale_price,
-            "가격적용여부": "적용",
+            "가격적용여부": return_status,
             "원발주제품코드": str(row.get("원발주제품코드", "") or "").strip(),
             "원발주제품명": str(row.get("원발주제품명", "") or "").strip(),
             "원발주규격": str(row.get("원발주규격", "") or "").strip(),
@@ -207,17 +224,7 @@ def _save_statement_edit(
     ].copy()
     updated_prices = pd.concat([remaining_prices, pd.DataFrame(price_rows)], ignore_index=True)
 
-    purchase_module.save_table(purchase_module.STATEMENTS_FILE, updated, purchase_module.STATEMENT_COLUMNS)
-    purchase_module.save_table(
-        purchase_module.STATEMENT_ITEMS_FILE,
-        updated_items,
-        purchase_module.STATEMENT_ITEM_COLUMNS,
-    )
-    purchase_module.save_table(
-        purchase_module.PRICE_HISTORY_FILE,
-        updated_prices,
-        purchase_module.PRICE_HISTORY_COLUMNS,
-    )
+    save_statement_bundle(purchase_module, updated, updated_items, updated_prices)
 
 
 def statement_list(purchase_module, data) -> None:

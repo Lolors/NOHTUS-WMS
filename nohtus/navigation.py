@@ -6,7 +6,7 @@ from nohtus.auth import is_admin
 MENU_SECTIONS = [
     (None, ["로케이션 맵", "유통기한 임박", "매입가 조회", "자사제품 조회", "전체 조회", "수출 현황"]),
     ("출고", ["출고지시", "저장된 출고지시", "마감"]),
-    ("재고", ["입고 등록", "이동 등록", "이력 조회", "재고 실사"]),
+    ("재고", ["입고 등록", "반품 입고", "이동 등록", "이력 조회", "재고 실사"]),
     ("수출", [
         "주문 입력",
         "주문 검색 및 수정",
@@ -96,7 +96,8 @@ def render_sidebar(allowed_pages=None):
 
     def nav_button(label):
         active = st.session_state.get("page") == label
-        if st.sidebar.button(label, use_container_width=True, type="primary" if active else "secondary"):
+        display_label = "매입(매입대기) 등록" if label == "입고 등록" else label
+        if st.sidebar.button(display_label, use_container_width=True, type="primary" if active else "secondary"):
             _go_to(label)
 
     def submenu_button(label):

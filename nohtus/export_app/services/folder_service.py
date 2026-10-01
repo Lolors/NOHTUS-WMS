@@ -335,13 +335,15 @@ def _marker_fingerprint(marker: Path) -> str:
 def find_case_folder(case_id: int) -> Path | None:
     case = db.row('SELECT folder_path FROM export_cases WHERE id=?', (case_id,))
     saved = resolve_database_path(case['folder_path'] if case else '')
-    if saved and saved.exists():
+    if saved and saved.exists() and not any(part.startswith("갱신폴더_") for part in saved.parts):
         return saved
     root = storage_root()
     if not root.exists():
         return None
     try:
         for marker in root.rglob(CASE_MARKER_NAME):
+            if any(part.startswith("갱신폴더_") for part in marker.relative_to(root).parts):
+                continue
             if _marker_matches(marker, case_id):
                 return marker.parent
     except OSError:

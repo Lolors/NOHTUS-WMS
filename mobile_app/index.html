@@ -10,7 +10,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <link rel="stylesheet" href="styles.css?v=3" />
+  <link rel="stylesheet" href="styles.css?v=5" />
 </head>
 <body>
   <div id="app">
@@ -66,9 +66,9 @@
               <option value="1y" selected>1년 이내</option>
             </select>
           </div>
-          <div class="filter-row">
-            <span></span>
-            <label class="checkbox-row"><input id="expiry-exclude-bidata" type="checkbox" checked /> 비자료 제외</label>
+          <div class="segmented" id="expiry-bidata-scope">
+            <button data-scope="data" class="active">자료</button>
+            <button data-scope="bidata">비자료</button>
           </div>
           <div id="expiry-results"></div>
         </div>
@@ -96,6 +96,12 @@
       <section id="export-screen" class="screen" hidden>
         <div id="export-filters-view">
           <div class="filter-grid-2">
+            <select id="export-month-filter" class="field-input">
+              <option value="">월 전체</option>
+            </select>
+            <input id="export-product-filter" class="field-input" type="text" placeholder="제품명으로 찾아보세요" />
+          </div>
+          <div class="filter-grid-2">
             <select id="export-country-filter" class="field-input">
               <option value="">국가 전체</option>
             </select>
@@ -112,9 +118,11 @@
             <button data-period="monthly">월별</button>
             <button data-period="yearly">연도별</button>
           </div>
-          <div class="section-label">진행 중</div>
+          <div class="section-label" id="export-search-label" hidden>검색 결과</div>
+          <div id="export-search-results" class="result-list" hidden></div>
+          <div class="section-label" id="export-in-progress-label">진행 중</div>
           <div id="export-in-progress-results" class="result-list"></div>
-          <div class="section-label">완료</div>
+          <div class="section-label" id="export-completed-label">완료</div>
           <div id="export-completed-results" class="result-list"></div>
         </div>
         <div id="export-year-view" hidden></div>
@@ -135,6 +143,6 @@
     <div class="a2hs-card" id="a2hs-card"></div>
   </div>
 
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

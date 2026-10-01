@@ -73,14 +73,6 @@ def _read_purchase_excel_for_company(payload, company):
     return pd.concat(frames, ignore_index=True)
 
 
-def _replace_company_purchase_data(company):
-    """새 파일 업로드 전에 선택 사업장의 기존 매입가 데이터와 업로드 이력을 삭제한다."""
-    with connect() as con:
-        con.execute("DELETE FROM purchase_history WHERE business_name=?", (company,))
-        con.execute("DELETE FROM purchase_uploads WHERE business_name=?", (company,))
-        con.commit()
-
-
 def _render_latest_upload_info():
     """사업장별로 현재 조회 데이터의 마지막 파일 업데이트 시각을 표시한다."""
     purchase_page._ensure_purchase_storage()
@@ -143,7 +135,6 @@ def page_purchase_history():
         purchase_page._render_import_box(
             file_types=["xls", "xlsx"],
             reader=_read_purchase_excel_for_company,
-            before_import=_replace_company_purchase_data,
         )
         _render_latest_upload_info()
 

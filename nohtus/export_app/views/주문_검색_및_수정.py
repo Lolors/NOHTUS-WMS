@@ -117,15 +117,17 @@ def render_wms_confirmation_section(
 
     missing_count = wms_link_service.missing_saved_inventory_count(export_no)
     if missing_count:
+        repair_error = ''
         try:
             wms_link_service.repair_missing_saved_inventory(export_no)
-        except ValueError:
-            pass
+        except ValueError as exc:
+            repair_error = str(exc)
         missing_count = wms_link_service.missing_saved_inventory_count(export_no)
         if missing_count:
             st.warning(
                 f'수출대기 저장에는 있지만 수출확정 목록에서 자동으로 연결하지 못한 '
-                f'품목이 {missing_count}개 있습니다. 수출대기 저장에서 해당 품목의 실재고 연결을 다시 확인하세요.'
+                f'품목이 {missing_count}개 있습니다. '
+                + (f'복구하지 못한 이유: {repair_error}' if repair_error else '실재고 연결 상태를 확인하세요.')
             )
         else:
             st.success('수출확정 목록에서 누락됐던 품목 연결을 자동으로 복구했습니다.')

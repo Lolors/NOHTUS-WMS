@@ -10,6 +10,7 @@ from __future__ import annotations
 import streamlit as st
 
 from nohtus.auth import is_admin
+from nohtus.pages.customer_returns import page_customer_returns
 from nohtus.pages.all_inventory import page_all_inventory
 from nohtus.pages.closing import page_closing
 from nohtus.pages.customer_master_business import page_customer_master
@@ -60,6 +61,7 @@ PAGE_REGISTRY = {
     "마감": page_closing,
     "재고 찾기": page_mobile_stock_finder,
     "입고 등록": page_inbound_refactored,
+    "반품 입고": page_customer_returns,
     "이동 등록": page_move,
     "재고 실사": page_stocktake,
     "로케이션맵 편집": _page_location_map_editor_guarded,

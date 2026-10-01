@@ -319,7 +319,6 @@ def compare_stock_files(nohtuspharm_file=None, noh_file=None, nohtus_file=None, 
         "gmmedic": gm_result,
         "problems": problems,
         "all_problems": all_problems,
-        "excel": comparison_excel_bytes(erp_result, gm_result, problems),
     }
 
 
@@ -491,10 +490,32 @@ def _map_gmmedic_products(raw):
     return pd.DataFrame(rows, columns=["표준제품명", "유통기한", "실사수량"]), issues
 
 
+def erp_comparison_groups():
+    """사업장별 ERP명이 같은 표준제품들을 하나의 비교 그룹으로 묶는다."""
+    products = q("SELECT standard_name, erp_nohtuspharm_name, erp_noh_name, erp_nohtus_name FROM products")
+    groups = {}
+    for company, column in (("노투스팜", "erp_nohtuspharm_name"), ("NOH", "erp_noh_name"), ("노투스", "erp_nohtus_name")):
+        by_name = {}
+        for row in products.to_dict("records"):
+            standard = str(row.get("standard_name") or "").strip()
+            raw = row.get(column)
+            name = "" if pd.isna(raw) else str(raw or "").strip()
+            if standard and name and not _is_excluded_product(standard):
+                by_name.setdefault(name, set()).add(standard)
+        for members in by_name.values():
+            label = " / ".join(sorted(members))
+            for standard in members:
+                groups[(company, standard)] = label
+    return groups
+
+
 def _compare_erp(erp_source):
     if erp_source.empty:
         return pd.DataFrame(columns=ERP_COLUMNS)
 
+    groups = erp_comparison_groups()
+    erp_source = erp_source.copy()
+    erp_source["표준제품명"] = [groups.get((company, name), name) for company, name in zip(erp_source["사업장"], erp_source["표준제품명"])]
     erp = erp_source.groupby(["사업장", "표준제품명"], as_index=False).agg(
         ERP제품명=("ERP제품명", lambda s: " / ".join(sorted(set(str(v) for v in s if str(v).strip())))),
         ERP수량=("ERP수량", "sum"),
@@ -509,6 +530,8 @@ def _compare_erp(erp_source):
     companies = erp["사업장"].drop_duplicates().tolist()
     if not wms.empty:
         wms = wms[wms["사업장"].isin(companies)].copy()
+        wms["표준제품명"] = [groups.get((company, name), name) for company, name in zip(wms["사업장"], wms["표준제품명"])]
+        wms = wms.groupby(["사업장", "표준제품명"], as_index=False)["WMS수량"].sum()
     merged = pd.merge(wms, erp, how="outer", on=["사업장", "표준제품명"])
     merged["ERP제품명"] = merged["ERP제품명"].fillna("")
     for col in ["WMS수량", "ERP수량"]:
@@ -557,12 +580,25 @@ def _build_problem_list(erp_result, gm_result, import_issues):
     return pd.DataFrame(rows, columns=ISSUE_COLUMNS)
 
 
-def comparison_excel_bytes(erp_result, gm_result, problems):
+def comparison_excel_bytes(problems, ignored, materials, inventory):
+    """화면의 비교/무시 목록과 부자재/전체재고를 네 시트로 내보낸다."""
+    sheets = {
+        "차이": problems.drop(columns=["무시", "구분", "문제"], errors="ignore"),
+        "기본오차": ignored.reindex(columns=["사업장", "표준제품명", "WMS수량", "ERP수량", "차이", "차이원인"]),
+        "부자재": materials.drop(columns=["사업장", "ERP명", "삭제", "_row_key"], errors="ignore"),
+        "전체재고": inventory,
+    }
     bio = BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-        problems.to_excel(writer, index=False, sheet_name="문제목록")
-        erp_result.to_excel(writer, index=False, sheet_name="ERP비교")
-        gm_result.to_excel(writer, index=False, sheet_name="지엠메딕실사비교")
+        for name, frame in sheets.items():
+            actual_column = next((col for col in ("실제수량", "WMS수량", "수량") if col in frame), None)
+            compare_column = next((col for col in ("ERP수량", "비교수량", "전산수량", "_ERP수량") if col in frame), None)
+            if actual_column:
+                actual = pd.to_numeric(frame[actual_column], errors="coerce")
+                compared = pd.to_numeric(frame[compare_column], errors="coerce") if compare_column else pd.Series(0, index=frame.index)
+                frame = frame[~(actual.eq(0) & compared.fillna(0).eq(0))].copy()
+            frame = frame.drop(columns=["_ERP수량"], errors="ignore")
+            frame.rename(columns={"WMS수량": "실제수량", "WMS 수량": "실제수량"}).to_excel(writer, index=False, sheet_name=name)
         for ws in writer.book.worksheets:
             ws.freeze_panes = "A2"
             ws.auto_filter.ref = ws.dimensions

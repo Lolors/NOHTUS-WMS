@@ -120,66 +120,12 @@ def _product_original_image_dialog(product_name: str, img_path: str) -> None:
         st.info("원본 사진을 불러올 수 없습니다.")
 
 
-@st.dialog("제품 사진 관리", width="small")
 def _product_image_dialog(product_name: str, img_path: str) -> None:
-    st.markdown(
-        """
-        <style>
-        div[data-testid="stDialog"] > div[role="dialog"] {
-            border:1px solid #b8c2cf;
-            border-radius:10px;
-            box-shadow:0 24px 70px rgba(15,23,42,.35);
-        }
-        div[data-testid="stDialog"] div[data-testid="stFileUploader"] {
-            border-radius:8px;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.caption(product_name)
-    if img_path:
-        thumb_path = _ensure_thumbnail(img_path)
-        st.image(thumb_path or img_path, use_container_width=True)
-        if st.button("원본 사진 보기", key=f"view_original_dialog_{product_name}", use_container_width=True):
-            _product_original_image_dialog(product_name, img_path)
-    else:
-        st.info("현재 등록된 제품 사진이 없습니다.")
+    # 두 화면에서 동일한 보기·변경 모달을 사용한다. 순환 import를 피하려고
+    # 클릭 시점에 불러온다.
+    from nohtus.pages.expiry_alerts import _expiry_photo_dialog
 
-    uploaded = st.file_uploader(
-        "JPG, PNG 또는 WEBP 사진 선택",
-        type=["jpg", "jpeg", "png", "webp"],
-        key=f"product_image_upload_dialog_{product_name}",
-    )
-    st.caption("사진은 최대 8MB까지 등록할 수 있습니다.")
-
-    save_col, delete_col = st.columns(2)
-    with save_col:
-        if st.button(
-            "사진 저장",
-            key=f"save_product_image_dialog_{product_name}",
-            use_container_width=True,
-            disabled=uploaded is None,
-            type="primary",
-        ):
-            try:
-                _save_product_image(product_name, uploaded)
-                st.success("제품 사진을 저장했습니다.")
-                st.rerun()
-            except ValueError as exc:
-                st.error(str(exc))
-            except Exception as exc:
-                st.error(f"사진 저장 중 오류가 발생했습니다: {exc}")
-    with delete_col:
-        if st.button(
-            "사진 삭제",
-            key=f"delete_product_image_dialog_{product_name}",
-            use_container_width=True,
-            disabled=not bool(img_path),
-        ):
-            _delete_product_image(product_name)
-            st.success("제품 사진을 삭제했습니다.")
-            st.rerun()
+    _expiry_photo_dialog(product_name)
 
 
 def _map_search_warehouse_name(value):
@@ -191,8 +137,14 @@ def _map_search_product_groups(product_name, inv_df):
     """Return one search card group per standard product name."""
     product_name = str(product_name or "").strip()
     rows = inv_df[inv_df["product_name"] == product_name].copy() if inv_df is not None and not inv_df.empty else pd.DataFrame()
+    if not rows.empty:
+        rows = rows.loc[pd.to_numeric(rows["qty"], errors="coerce").fillna(0) > 0].copy()
+    pending = rows.iloc[0:0].copy()
+    if not rows.empty and "is_purchase_pending" in rows:
+        mask = rows["is_purchase_pending"].eq(True)
+        pending, rows = rows.loc[mask].copy(), rows.loc[~mask].copy()
     if rows.empty:
-        return [{"product_name": product_name, "warehouse_name": "ALL", "rows": rows, "total_qty": 0, "split_by_erp": False}]
+        return [{"product_name": product_name, "warehouse_name": "ALL", "rows": rows, "total_qty": 0, "split_by_erp": False, "pending_rows": pending}]
 
     rows["warehouse_name"] = rows["warehouse_name"].apply(_map_search_warehouse_name)
     return [{
@@ -201,6 +153,7 @@ def _map_search_product_groups(product_name, inv_df):
         "rows": rows,
         "total_qty": int(rows["qty"].sum()),
         "split_by_erp": False,
+        "pending_rows": pending,
     }]
 
 
@@ -245,6 +198,13 @@ def page_map_search_results(term, compact: bool = False):
         if exclude_materials:
             inv = stock_rules.exclude_material_or_promo_rows(inv)
 
+    from nohtus.services.purchase_pending import map_pending_rows
+    pending = map_pending_rows()
+    if not pending.empty:
+        if exclude_materials:
+            pending = stock_rules.exclude_material_or_promo_rows(pending)
+        inv = pd.concat([inv, pending], ignore_index=True)
+
     result_groups = []
     for product_name in opts["standard_name"].dropna().astype(str).drop_duplicates().tolist():
         result_groups.extend(_map_search_product_groups(product_name, inv))
@@ -269,17 +229,13 @@ def page_map_search_results(term, compact: bool = False):
     div[class*="st-key-photo_display_"] > div[data-testid="stVerticalBlock"]{position:relative;width:100%;gap:0;}
     div[class*="st-key-photo_display_"] .product-photo-frame{position:relative;width:100%;aspect-ratio:1/1;overflow:hidden;border-radius:20px;background:#f8fafc;box-shadow:inset 0 0 0 1px rgba(203,213,225,.55);}
     div[class*="st-key-photo_display_"] .product-photo-frame img{width:100%;height:100%;object-fit:cover;object-position:center;display:block;}
-    div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){position:absolute!important;top:8px;width:36px!important;height:36px!important;z-index:20;opacity:0;pointer-events:none;transition:opacity .16s ease,transform .16s ease;transform:translateY(-2px);margin:0!important;}
-    div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(button[kind="secondary"]):nth-of-type(2){right:50px;}
-    div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(button[kind="secondary"]):nth-of-type(3){right:8px;}
-    div[class*="st-key-photo_display_"]:hover div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){opacity:1;pointer-events:auto;transform:translateY(0);}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"],
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{width:36px!important;height:36px!important;min-height:36px!important;}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{padding:0!important;border-radius:999px!important;border:1px solid rgba(255,255,255,.95)!important;background:rgba(15,23,42,.78)!important;color:#fff!important;box-shadow:0 3px 12px rgba(15,23,42,.34)!important;font-size:16px!important;line-height:1!important;display:flex!important;align-items:center!important;justify-content:center!important;text-align:center!important;}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button p,
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button span{display:flex!important;align-items:center!important;justify-content:center!important;width:100%!important;height:100%!important;margin:0!important;padding:0!important;line-height:1!important;text-align:center!important;transform:none!important;}
-    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button:hover{background:rgba(15,23,42,.95)!important;transform:scale(1.05);}
+    div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){position:absolute!important;bottom:12px;right:12px;width:auto!important;z-index:20;opacity:0;pointer-events:none;transition:opacity .16s ease,transform .16s ease;transform:translateY(4px);margin:0!important;}
+    div[class*="st-key-photo_display_"]:hover div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]),
+    div[class*="st-key-photo_display_"]:focus-within div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){opacity:1;pointer-events:auto;transform:translateY(0);}
+    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button{min-height:36px!important;padding:7px 13px!important;border-radius:999px!important;border:1px solid rgba(255,255,255,.65)!important;background:#0f172a!important;color:white!important;box-shadow:0 3px 12px rgba(15,23,42,.18)!important;font-size:13px!important;white-space:nowrap;}
+    div[class*="st-key-photo_display_"] div[data-testid="stButton"] > button:hover{background:#1e293b!important;border-color:white!important;opacity:1!important;}
     @media (hover:none){div[class*="st-key-photo_display_"] div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]){opacity:1;pointer-events:auto;transform:none;}}
+
 
     .total-card-small{width:50%;min-width:180px;border:1.5px solid #e5e7eb;border-radius:20px;padding:12px 17px;margin:4px auto 48px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;background:#fafafa;box-shadow:0 2px 8px rgba(15,23,42,.025);}
     .total-label{font-size:15px;font-weight:500;color:#6b7280;text-align:center;}.total-value{font-size:24px;font-weight:800;color:#111827;text-align:center;}
@@ -320,9 +276,7 @@ def page_map_search_results(term, compact: bool = False):
                             )
                         else:
                             st.markdown("<div class='product-photo-panel'>제품 사진을 불러올 수 없습니다.</div>", unsafe_allow_html=True)
-                        if st.button("🔍", key=f"view_original_{product_name}", help="원본 사진 보기"):
-                            _product_original_image_dialog(product_name, img_path)
-                        if st.button("✎", key=f"open_product_image_dialog_{product_name}", help="사진 변경"):
+                        if st.button("사진 편집", icon=":material/edit:", key=f"open_product_image_dialog_{product_name}", help="사진 보기 · 변경"):
                             _product_image_dialog(product_name, img_path)
                 else:
                     with st.container(key=f"photo_upload_trigger_{photo_key}"):
@@ -374,6 +328,19 @@ def page_map_search_results(term, compact: bool = False):
                             with c_qty:
                                 st.markdown(f"<div class='dist-cell-qty'>{int(rr.qty)} EA</div>", unsafe_allow_html=True)
                         st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+                pending_product = group.get("pending_rows", pd.DataFrame())
+                if not pending_product.empty:
+                    lines = "".join(
+                        f"<div style='margin-top:8px'>{escape(str(r.location))} · 제조번호: {escape(str(r.lot))} · "
+                        f"유통기한: {escape(display_date_only(r.exp_date))} · <b>{int(r.qty):,} EA</b></div>"
+                        for r in pending_product.itertuples()
+                    )
+                    st.markdown(
+                        "<div style='background:#f1f3f5;border:1px solid #e5e7eb;border-radius:14px;padding:16px;color:#4b5563'>"
+                        "<b>매입등록대기(총 수량에 포함되지 않음)</b>" + lines + "</div>",
+                        unsafe_allow_html=True,
+                    )
+
 
 
 def page_map():

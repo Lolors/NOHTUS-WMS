@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import pandas as pd
+from services.statement_links import linked_order_ids
 
 
 ORDER_ITEM_COLUMNS = ["제품코드", "정식제품명", "검색별칭", "규격", "단위", "수량"]
@@ -13,7 +14,7 @@ STATEMENT_COLUMNS = [
 STATEMENT_ITEM_COLUMNS = [
     "명세서ID", "제품코드", "정식제품명", "규격", "단위", "발주수량", "입고수량",
     "매입단가", "상품금액", "출고단가", "가격적용여부", "제조번호", "유통기한", "입고유형",
-    "대체사유", "원발주제품코드", "원발주제품명", "원발주규격", "원발주단위",
+    "단위환산계수", "입고발주ID", "대체사유", "원발주제품코드", "원발주제품명", "원발주규격", "원발주단위",
 ]
 
 
@@ -72,6 +73,9 @@ def render(core_app, data, purchase_module) -> None:
 
     selected_label = st.selectbox("수정할 발주서", options, key="correction_order")
     order_id = lookup[selected_label]
+    if any(order_id in linked_order_ids(row) and len(linked_order_ids(row)) > 1 for _, row in statements.iterrows()):
+        st.info("여러 발주에 연결된 명세서는 거래명세서 내역의 수정 화면에서 변경하세요.")
+        return
     header = orders[orders["발주ID"].astype(str) == order_id].iloc[0]
     selected_order_items = order_items[order_items["발주ID"].astype(str) == order_id]
     linked_statements = statements[statements["발주ID"].astype(str) == order_id]
@@ -141,6 +145,7 @@ def render(core_app, data, purchase_module) -> None:
             hide_index=True,
             num_rows="dynamic",
             key=f"correction_statement_items_{order_id}",
+            disabled=["단위환산계수", "입고발주ID"],
             column_config={
                 "명세서ID": st.column_config.SelectboxColumn(
                     options=linked_statements["명세서ID"].astype(str).tolist()

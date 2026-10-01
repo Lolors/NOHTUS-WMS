@@ -165,6 +165,15 @@ def page_move():
         st.markdown("#### 도착 재고")
         default_idx = COMPANIES.index(src_company) if src_company in COMPANIES else 0
         to_company = st.selectbox("도착 사업장", COMPANIES, index=default_idx, key=f"move_company_{src_id}")
+        selected_export_order = None
+        if to_company != src_company:
+            from nohtus.services.export_waiting_move import linked_move_orders
+            linked_orders = linked_move_orders(src_id)
+            if linked_orders:
+                choices = {f"{o['export_no']} · {o['country']} · {o['buyer'] or '-'} · 연결 {o['qty']}개": int(o['id']) for o in linked_orders}
+                choice = st.selectbox('이동할 수출 주문',list(choices),index=None,placeholder='연결된 수출 주문을 선택하세요',key=f'move_export_order_{src_id}_{to_company}')
+                selected_export_order = choices.get(choice)
+                st.caption('선택한 주문의 이동 수량만 출고처가 변경됩니다. 도착 위치는 P 또는 T1~T5를 선택하세요.')
         if to_company != src_company:
             st.warning("정말로 다른 사업장으로 재고를 이동하시겠습니까?")
 
@@ -212,6 +221,13 @@ def page_move():
         # 별도 체크박스/버튼 없이 move_location_picker가 채운 값을 그대로 쓴다.
         range_cells = st.session_state.get("_move_range_cells") or []
         qty = st.number_input("이동 수량", min_value=1, max_value=max_qty, value=min(1, max_qty), step=1)
+        movement_kind = st.selectbox(
+            "이동 구분", ["일반 이동", "사업장 정정(자사제품 재고 증감 제외)"],
+            disabled=to_company == src_company, key=f"move_kind_{src_id}_{to_company}",
+        )
+        company_correction = to_company != src_company and movement_kind != "일반 이동"
+        if company_correction:
+            st.caption("실제 재고와 이동 이력은 반영하고, 자사제품 조회의 증감에서만 제외합니다. 전일수량도 정정된 소속 기준으로 계산됩니다.")
         memo = st.text_input("메모", value="")
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
@@ -222,7 +238,10 @@ def page_move():
                         st.error(f"{to_company} ERP명을 입력해야 이동할 수 있습니다.")
                         return
                     _save_destination_mapping(to_company, product, dest_mapping_input)
-                move_inventory(src_id, to_company, to_location, int(qty), memo, location_range_cells=range_cells)
+                if to_company != src_company and linked_orders and selected_export_order is None:
+                    st.error('이동할 수출 주문을 선택하세요.')
+                    return
+                move_inventory(src_id, to_company, to_location, int(qty), memo, location_range_cells=range_cells, export_order_id=selected_export_order, company_correction=company_correction)
                 st.session_state["_move_range_cells"] = []
                 st.session_state.pop("_move_range_cells_area", None)
                 st.session_state.pop("_move_prefill", None)

@@ -273,6 +273,11 @@ def render_inbound_quick_location_map(range_locations=None):
             loc = str(row.location or "").strip()
             if loc:
                 inventory.setdefault(loc, []).append({"qty": int(row.qty or 0)})
+        from nohtus.services.purchase_pending import map_pending_rows
+        from nohtus.locations import expand_row_range
+        for row in map_pending_rows().itertuples(index=False):
+            for occupied in expand_row_range(row.location, row.location_range_cells):
+                inventory.setdefault(occupied, []).append({"qty": int(row.qty), "is_purchase_pending": True})
     except Exception:
         inventory = {}
 
@@ -328,6 +333,11 @@ def render_move_quick_location_map(range_locations=None):
             loc = str(row.location or "").strip()
             if loc:
                 inventory.setdefault(loc, []).append({"qty": int(row.qty or 0)})
+        from nohtus.services.purchase_pending import map_pending_rows
+        from nohtus.locations import expand_row_range
+        for row in map_pending_rows().itertuples(index=False):
+            for occupied in expand_row_range(row.location, row.location_range_cells):
+                inventory.setdefault(occupied, []).append({"qty": int(row.qty), "is_purchase_pending": True})
     except Exception:
         inventory = {}
 

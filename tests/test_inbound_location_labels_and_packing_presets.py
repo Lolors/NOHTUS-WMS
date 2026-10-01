@@ -31,7 +31,7 @@ class InboundLocationAndPackingPresetTests(unittest.TestCase):
         self.assertIn("'프리셋 삭제'", source)
         self.assertIn("on_change=apply_selected_preset", source)
         self.assertNotIn("'현재 CTN에 적용'", source)
-        self.assertIn("format='%d'", source)
+        self.assertIn("format='%.2f'", source)
 
     def test_current_ctn_layout_and_management_labels(self) -> None:
         source = Path("nohtus/export_app/views/박스_패킹_edit.py").read_text(encoding="utf-8")

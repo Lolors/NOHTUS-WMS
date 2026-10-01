@@ -88,6 +88,45 @@ def available_countries():
     return sorted(countries)
 
 
+def available_months():
+    cases = order_service.list_editable_cases()
+    months: set[tuple[int, int]] = set()
+    for case in cases:
+        ref_date = _reference_date(case)
+        if ref_date:
+            months.add((ref_date.year, ref_date.month))
+    return [
+        {"value": f"{year:04d}-{month:02d}", "label": f"{year}년 {_MONTH_NAMES_KO[month - 1]}"}
+        for year, month in sorted(months, reverse=True)
+    ]
+
+
+def export_search(country=None, transport=None, month="", product=""):
+    """월 선택과 제품명 검색을 조합해 진행중/완료 구분 없이 건을 찾는다."""
+    cases = _filtered_cases(country, transport)
+
+    month = (month or "").strip()
+    if month:
+        try:
+            year_i, month_i = (int(part) for part in month.split("-", 1))
+        except ValueError:
+            year_i = month_i = None
+        if year_i is not None:
+            cases = [
+                case
+                for case in cases
+                if (_reference_date(case) or date.min).year == year_i
+                and (_reference_date(case) or date.min).month == month_i
+            ]
+
+    product = (product or "").strip().lower()
+    if product:
+        cases = [case for case in cases if product in str(case["product_names"] or "").lower()]
+
+    cases.sort(key=lambda case: _reference_date(case) or date.min, reverse=True)
+    return _serialize_all(cases)
+
+
 def export_dashboard(country=None, transport=None, period="recent"):
     cases = _filtered_cases(country, transport)
     in_progress = [case for case in cases if not _is_completed_stage(case)]

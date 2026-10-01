@@ -280,8 +280,25 @@ def _patched_save_picked_inventory(*, case_id: int, order_item_id: int, kept_row
         if editing_order_id else []
     )
     if editing_order_id and waiting_rows:
+        # Reconstruct missing baseline reservations before applying the edit.
+        # Confirmed rows count as represented; they must never be reserved again.
+        missing_baseline = link_service.missing_canonical_cart_rows(
+            link_service._all_rows_for_order(editing_order_id),
+            linked_other + current_rows,
+            [],
+        )
+        recovered_baseline = [
+            {
+                'source_inventory_id': row['id'], 'company': row['사업장'],
+                'product_name': row['제품명'], 'lot': row['LOT'],
+                'exp_date': row['유통기한'], 'source_location': row['로케이션'],
+                'qty': row['요청수량'],
+            }
+            for row in missing_baseline
+        ]
         cart = link_service.cart_rows_after_selected_order_edit(
-            backed_waiting_rows, current_rows, linked_kept, list(picked_rows or [])
+            backed_waiting_rows + recovered_baseline,
+            current_rows, linked_kept, list(picked_rows or [])
         )
     else:
         # A legacy order can have EXPORT mirrors before its WMS waiting rows

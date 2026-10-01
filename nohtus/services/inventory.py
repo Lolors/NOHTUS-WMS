@@ -65,7 +65,7 @@ def _current_actor():
 
 def _infer_transaction_stock_company(tx_type, from_company, to_company):
     tx_type = str(tx_type or "").strip()
-    if tx_type in ["입고", "출고지시취소", "재고조사불러오기", "기준재고", "전산재고", "재고조정", "재고실사", "재고정보수정"]:
+    if tx_type in ["입고", "반품입고", "반품입고취소", "출고지시취소", "재고조사불러오기", "기준재고", "전산재고", "재고조정", "재고실사", "재고정보수정"]:
         return to_company or from_company
     if tx_type in OUTBOUND_DEDUCT_TYPES:
         return from_company or to_company
@@ -167,13 +167,13 @@ def _transaction_stock_delta(tx_type, qty, from_company=None, to_company=None):
     """사업장+표준제품명+LOT+유통기한 기준의 이력 증감값."""
     tx_type = str(tx_type or "").strip()
     qty = int(qty or 0)
-    if tx_type in ["입고", "출고지시취소", "재고조사불러오기", "기준재고", "전산재고"]:
+    if tx_type in ["입고", "반품입고", "반품입고취소", "출고지시취소", "재고조사불러오기", "기준재고", "전산재고"]:
         return qty
     if tx_type in OUTBOUND_DEDUCT_TYPES:
         return -qty
     if tx_type in ["재고조정", "재고실사", "재고정보수정"]:
         return qty
-    if tx_type in ["사업장이동", "사업장+위치이동", "비자료전환", "이동"]:
+    if tx_type in ["사업장이동", "사업장+위치이동", "사업장정정", "비자료전환", "이동"]:
         return qty if str(from_company or "") != str(to_company or "") else 0
     if tx_type == "위치이동":
         return 0
@@ -324,8 +324,12 @@ def adjust_inventory(inventory_id, actual_qty, reason, memo=""):
         return before_qty, actual_qty, diff
 
 
-def move_inventory(src_id, to_company, to_location, qty, memo="", location_range_cells=None):
+def move_inventory(src_id, to_company, to_location, qty, memo="", location_range_cells=None, export_order_id=None, *, company_correction=False):
     """재고 이동. 사업장 이동 시 전산상명칭은 도착 사업장 기준으로 다시 계산한다."""
+    if export_order_id is not None:
+        from nohtus.services.export_waiting_move import move_linked_stock
+        return move_linked_stock(src_id,to_company,to_location,qty,export_order_id,memo,location_range_cells,company_correction=company_correction)
+
     # 지연 import: export_waiting.py가 이 모듈의 insert_transaction_log를 가져다
     # 쓰므로, 모듈 최상단에서 서로 import하면 순환 참조가 된다.
     from nohtus.services.export_waiting import STAGING_LOCATIONS
@@ -344,6 +348,9 @@ def move_inventory(src_id, to_company, to_location, qty, memo="", location_range
         qty = int(qty)
         if qty <= 0 or qty > int(src["qty"] or 0):
             raise ValueError("이동 수량이 현재 재고보다 많거나 올바르지 않습니다.")
+
+        if company_correction and src["company"] == to_company:
+            raise ValueError("사업장 정정은 서로 다른 사업장 사이에서만 가능합니다.")
 
         # P/T1~T5(수출대기 보관 위치)에 있는 재고는 수출대기 품목이 그 재고
         # 행을 waiting_inventory_id로 직접 참조하고 있을 수 있다. 예약된
@@ -381,7 +388,7 @@ def move_inventory(src_id, to_company, to_location, qty, memo="", location_range
                            VALUES(?,?,?,?,?,?,?,?,?)""", (to_company, product_name, dest_warehouse, src["lot"], src["exp_date"], to_location, qty, now, range_cells))
 
         from_company = src["company"]
-        tx_type = "위치이동" if from_company == to_company else "사업장+위치이동"
+        tx_type = "사업장정정" if company_correction else ("위치이동" if from_company == to_company else "사업장+위치이동")
         insert_transaction_log(cur, created_at=now, tx_type=tx_type, product_name=product_name,
                                warehouse_name=old_warehouse, lot=src["lot"], exp_date=src["exp_date"],
                                from_company=from_company, from_location=src["location"],

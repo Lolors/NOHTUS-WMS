@@ -120,14 +120,14 @@ def api_location_map_layout(user=Depends(current_user)):
 def api_expiry(
     q: str = "",
     period: str = "1y",
-    exclude_bidata: bool = True,
+    bidata_scope: str = "data",
     warehouse: str = "all",
     limit: int = 100,
     user=Depends(current_user),
 ):
     return {
         "results": queries.search_expiry(
-            q, period=period, exclude_bidata=exclude_bidata, warehouse=warehouse, limit=limit
+            q, period=period, bidata_scope=bidata_scope, warehouse=warehouse, limit=limit
         )
     }
 
@@ -136,11 +136,15 @@ def api_expiry(
 def api_expiry_detail(
     name: str,
     period: str = "1y",
-    exclude_bidata: bool = True,
+    bidata_scope: str = "data",
     warehouse: str = "all",
+    level: str = "",
+    exp_date: str = "",
     user=Depends(current_user),
 ):
-    return queries.expiry_detail(name, period=period, exclude_bidata=exclude_bidata, warehouse=warehouse)
+    return queries.expiry_detail(
+        name, period=period, bidata_scope=bidata_scope, warehouse=warehouse, level=level, exp_date=exp_date
+    )
 
 
 @app.get("/api/purchase/search")
@@ -156,6 +160,26 @@ def api_purchase_detail(name: str, period: str = "1y", user=Depends(current_user
 @app.get("/api/export/countries")
 def api_export_countries(user=Depends(current_user)):
     return {"countries": export_queries.available_countries()}
+
+
+@app.get("/api/export/months")
+def api_export_months(user=Depends(current_user)):
+    return {"months": export_queries.available_months()}
+
+
+@app.get("/api/export/search")
+def api_export_search(
+    country: str = "",
+    transport: str = "",
+    month: str = "",
+    product: str = "",
+    user=Depends(current_user),
+):
+    return {
+        "cases": export_queries.export_search(
+            country=country, transport=transport, month=month, product=product
+        )
+    }
 
 
 @app.get("/api/export/dashboard")

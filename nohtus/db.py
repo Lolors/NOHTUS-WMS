@@ -25,10 +25,28 @@ def _ensure_wal_mode(db_path_str: str) -> None:
         conn.close()
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """sqlite3.Connection.__exit__은 커밋/롤백만 하고 연결을 닫지 않는다 —
+    `with connect() as con:`으로 쓰는 모든 호출부(수십 곳)가 매번 연결을
+    새로 열고 한 번도 닫지 않은 채 버려지게 된다. CPython에서는 보통 곧
+    가비지 컬렉션되지만 타이밍이 보장되지 않고, WAL 모드에서는 아직 안
+    닫힌 연결이 남아 있으면 -wal/-shm 파일과 그 디렉터리가 잠긴 채로
+    남는다 — 테스트가 임시 DB 디렉터리를 정리하려 할 때
+    `PermissionError: [WinError 32]`로 실패하고, 그 임시 폴더가
+    AppData\\Local\\Temp에 영구히 쌓이는 원인이었다(GB 단위로 누적).
+    `with` 블록을 빠져나올 때 커밋/롤백에 이어 연결도 닫는다."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 def connect():
     DB_PATH.parent.mkdir(exist_ok=True)
     _ensure_wal_mode(str(DB_PATH))
-    conn = sqlite3.connect(DB_PATH, timeout=5.0)
+    conn = sqlite3.connect(DB_PATH, timeout=5.0, factory=_ClosingConnection)
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 

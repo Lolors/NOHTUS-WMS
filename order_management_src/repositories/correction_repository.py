@@ -9,6 +9,8 @@ import pandas as pd
 
 from app_layers.db_migration import normalize_product_code
 from infrastructure.database import transaction
+from services.receipt_units import conversion_factor
+from repositories.purchase_repository import _ensure_substitution_columns
 
 
 def _int(value) -> int:
@@ -87,6 +89,9 @@ def save_bundle(
 
     _backup_database(data_dir)
     with transaction(data_dir) as conn:
+        from services.statement_links import assert_order_not_shared
+        assert_order_not_shared(conn, order_id)
+        _ensure_substitution_columns(conn)
         existing = conn.execute(
             "SELECT 1 FROM orders WHERE order_id = ?", (order_id,)
         ).fetchone()
@@ -187,7 +192,7 @@ def save_bundle(
                 _text(row.get("원발주제품명")), _text(row.get("원발주규격")),
                 _text(row.get("원발주단위")), _text(row.get("입고유형")),
                 _text(row.get("대체사유")), _text(row.get("제조번호")),
-                _text(row.get("유통기한")),
+                _text(row.get("유통기한")), _text(row.get("입고발주ID")) or order_id, conversion_factor(row),
             ))
             if apply_price.upper() == "Y":
                 price_rows.append((
@@ -201,7 +206,7 @@ def save_bundle(
                 specification,packaging_unit,ordered_quantity,received_quantity,purchase_price,
                 product_amount,sale_price,apply_price,original_product_code,original_product_name,
                 original_specification,original_packaging_unit,receipt_type,substitution_reason,
-                lot_number,expiry_date) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                lot_number,expiry_date,source_order_id,unit_conversion_factor) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 item_rows,
             )
         if price_rows:

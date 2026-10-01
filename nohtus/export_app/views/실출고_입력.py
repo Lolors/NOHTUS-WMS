@@ -168,7 +168,7 @@ def recommended_inventory_search_term(product_name: object) -> str:
 @dialog('입고 수정', width='large')
 def edit_shipment_intake_dialog(
     *, case_id: int, order_item_id: int, product_name: str,
-    order_qty: float, unit: str, current_rows: list[dict],
+    order_qty: float, unit: str, current_rows: list[dict], display_factor: float = 1.0,
 ) -> None:
     """기존 저장분과 추가 가능한 재고를 한 표에서 수정한다."""
     st.markdown(
@@ -226,15 +226,14 @@ def edit_shipment_intake_dialog(
             hide_index=True,
             use_container_width=True,
             num_rows='dynamic',
-            disabled=['사업장', '제품명', '제조번호', '유통기한', '보유수량'],
-            column_order=['사업장', '제품명', '제조번호', '유통기한', '선택수량'],
+            disabled=['사업장', '로케이션', '제품명', '제조번호', '유통기한', '보유수량'],
+            column_order=['사업장', '로케이션', '제품명', '제조번호', '유통기한', '보유수량', '선택수량'],
             column_config={
                 '_inventory_id': None,
                 '_location': None,
                 '_product_name': None,
-                '로케이션': None,
-                '보유수량': None,
                 '선택': None,
+                '보유수량': st.column_config.NumberColumn('보유수량', format='%g'),
                 '선택수량': st.column_config.NumberColumn(
                     '선택수량', min_value=0, step=1, format='%g',
                 ),
@@ -259,9 +258,10 @@ def edit_shipment_intake_dialog(
             if not selected.empty else 0.0
         )
         icon, state = order_state(order_qty, selected_qty)
+        state = '선택 완료 · 저장 전' if state == '입고 완료' else state
         st.info(
-            f'{icon} 선택 합계 {fmt_number(selected_qty)} / '
-            f'주문 {fmt_number(order_qty)} {unit} · {state}'
+            f'{icon} 선택 합계 {fmt_number(selected_qty / display_factor)} / '
+            f'주문 {fmt_number(order_qty / display_factor)} {unit} · {state}'
         )
         save_clicked = st.form_submit_button('입고 수정 저장', type='primary', use_container_width=True)
 
@@ -567,13 +567,14 @@ def render() -> None:
             for order in sorted_orders:
                 order_id = int(order['id'])
                 order_qty = safe_number(order['quantity'])
-                unit = str(order['unit'] or 'EA')
+                unit = str(order.get('document_unit') or order['unit'] or 'EA')
+                display_factor = safe_number(order.get('ea_per_document_unit', 1)) or 1
                 current_rows = linked_rows_by_order.get(order_id, [])
                 linked_qty = sum(safe_number(row['requested_qty']) for row in current_rows)
                 icon, _ = order_state(order_qty, linked_qty)
                 label = (
                     f"{icon} {order['product_name']} · "
-                    f'{fmt_number(linked_qty)} / {fmt_number(order_qty)} {unit}'
+                    f'{fmt_number(linked_qty / display_factor)} / {fmt_number(order_qty / display_factor)} {unit}'
                 )
                 order_options[label] = order_id
 
@@ -589,16 +590,23 @@ def render() -> None:
             )
             selected_order_name = str(selected_order['product_name'] or '').strip()
             order_qty = safe_number(selected_order['quantity'])
-            unit = str(selected_order['unit'] or 'EA')
+            unit = str(selected_order.get('document_unit') or selected_order['unit'] or 'EA')
             current = linked_rows_by_order.get(selected_order_id, [])
 
+            factor = safe_number(selected_order.get('ea_per_document_unit', 1)) or 1
+            if factor < 1:
+                st.caption(
+                    f"주문 {fmt_number(safe_number(selected_order.get('document_quantity')))} "
+                    f"{selected_order.get('document_unit', 'EA')} = 실물 {fmt_number(order_qty)}개 · "
+                    f"실물 1개당 주문 {fmt_number(1 / factor)} {selected_order.get('document_unit', 'EA')}"
+                )
             current_qty = sum(safe_number(row.get('requested_qty')) for row in current)
             current_icon, current_state = order_state(order_qty, current_qty)
             if current_state == '입고 완료':
                 summary_col, edit_col = st.columns([4, 1])
                 summary_col.info(
-                    f'{current_icon} 선택 합계 {fmt_number(current_qty)} / '
-                    f'주문 {fmt_number(order_qty)} {unit} · {current_state}'
+                    f'{current_icon} 선택 합계 {fmt_number(current_qty / factor)} / '
+                    f'주문 {fmt_number(order_qty / factor)} {unit} · {current_state}'
                 )
                 if edit_col.button(
                     '입고 수정',
@@ -613,6 +621,7 @@ def render() -> None:
                         order_qty=order_qty,
                         unit=unit,
                         current_rows=current,
+                        display_factor=factor,
                     )
                 return
 
@@ -760,9 +769,10 @@ def render() -> None:
                 added_qty = float(selected_stock['선택수량'].sum()) if not selected_stock.empty else 0.0
                 preview_qty = saved_qty + added_qty
                 preview_icon, preview_state = order_state(order_qty, preview_qty)
+                preview_state = '선택 완료 · 저장 전' if preview_state == '입고 완료' else preview_state
                 summary_slot.info(
-                    f'{preview_icon} 선택 합계 {fmt_number(preview_qty)} / '
-                    f'주문 {fmt_number(order_qty)} {unit} · {preview_state}'
+                    f'{preview_icon} 선택 합계 {fmt_number(preview_qty / factor)} / '
+                    f'주문 {fmt_number(order_qty / factor)} {unit} · {preview_state}'
                 )
                 packing_impact = shipment_service.packing_impact_for_order(case_id, selected_order_id)
                 if packing_impact['packed_row_count']:
@@ -900,7 +910,7 @@ def render() -> None:
                         history_service.add(
                             case_id,
                             '주문품목별 출고 저장',
-                            f'{selected_order_name} · {fmt_number(preview_qty)} / {fmt_number(order_qty)} {unit}',
+                            f'{selected_order_name} · {fmt_number(preview_qty / factor)} / {fmt_number(order_qty / factor)} {unit}',
                         )
                         st.session_state['actual_packing_case_id'] = case_id
                         st.session_state['shipment_intake_success_message'] = (

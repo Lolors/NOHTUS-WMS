@@ -2,21 +2,23 @@
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import contextmanager
 
 import pandas as pd
 
 from infrastructure.database import connect, transaction
 from app_layers.db_migration import normalize_product_code
+from services.receipt_units import conversion_factor
 
 STATEMENT_COLUMNS = [
     "명세서ID", "발주ID", "거래처명", "명세서번호", "명세서일자",
-    "운송비", "운송비입력여부", "메모", "등록일시", "수정일시",
+    "운송비", "운송비입력여부", "메모", "등록일시", "수정일시", "연결발주ID",
 ]
 STATEMENT_ITEM_COLUMNS = [
     "명세서ID", "순번", "제품코드", "정식제품명", "규격", "단위", "발주수량",
     "입고수량", "매입단가", "상품금액", "출고단가", "가격적용여부",
     "원발주제품코드", "원발주제품명", "원발주규격", "원발주단위", "입고유형", "대체사유",
-    "제조번호", "유통기한",
+    "제조번호", "유통기한", "입고발주ID", "단위환산계수",
 ]
 PRICE_HISTORY_COLUMNS = [
     "가격ID", "명세서ID", "명세서일자", "제품코드", "정식제품명", "매입단가", "출고단가", "등록일시",
@@ -41,11 +43,15 @@ def _ensure_substitution_columns(conn) -> None:
         "substitution_reason": "TEXT",
         "lot_number": "TEXT",
         "expiry_date": "TEXT",
+        "source_order_id": "TEXT",
+        "unit_conversion_factor": "INTEGER DEFAULT 1",
     }
     for column, sql_type in additions.items():
         if column not in existing:
             conn.execute(f"ALTER TABLE statement_items ADD COLUMN {column} {sql_type}")
-    conn.commit()
+    header_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(statements)")}
+    if "linked_order_ids" not in header_columns:
+        conn.execute("ALTER TABLE statements ADD COLUMN linked_order_ids TEXT")
 
 
 def load_all(data_dir: Path):
@@ -53,7 +59,7 @@ def load_all(data_dir: Path):
         _ensure_substitution_columns(conn)
         statements = _frame(conn.execute("""
             SELECT statement_id, order_id, vendor_name, statement_number, statement_date,
-                   freight, freight_entered, memo, created_at, updated_at
+                   freight, freight_entered, memo, created_at, updated_at, linked_order_ids
             FROM statements ORDER BY statement_date DESC, created_at DESC, id DESC
         """).fetchall(), STATEMENT_COLUMNS)
         items = _frame(conn.execute("""
@@ -62,7 +68,7 @@ def load_all(data_dir: Path):
                    product_amount, sale_price, apply_price,
                    original_product_code, original_product_name, original_specification,
                    original_packaging_unit, receipt_type, substitution_reason,
-                   lot_number, expiry_date
+                   lot_number, expiry_date, source_order_id, unit_conversion_factor
             FROM statement_items ORDER BY statement_id, sequence, id
         """).fetchall(), STATEMENT_ITEM_COLUMNS)
         prices = _frame(conn.execute("""
@@ -90,23 +96,41 @@ def _int(value):
         return 0
 
 
-def replace_statements(data_dir: Path, df: pd.DataFrame) -> None:
+@contextmanager
+def _write_transaction(data_dir, connection=None):
+    if connection is not None:
+        yield connection
+    else:
+        with transaction(data_dir) as conn:
+            yield conn
+
+
+def save_statement_bundle(data_dir, statements, items, prices):
+    with transaction(data_dir) as conn:
+        _ensure_substitution_columns(conn)
+        replace_statements(data_dir, statements, _connection=conn)
+        replace_statement_items(data_dir, items, _connection=conn)
+        replace_price_history(data_dir, prices, _connection=conn)
+
+
+def replace_statements(data_dir: Path, df: pd.DataFrame, *, _connection=None) -> None:
     clean = df.copy().fillna("")
     rows = [(
         str(r.get("명세서ID", "")), str(r.get("발주ID", "")), str(r.get("거래처명", "")),
         str(r.get("명세서번호", "")), str(r.get("명세서일자", "")), _int(r.get("운송비", 0)),
         str(r.get("운송비입력여부", "")), str(r.get("메모", "")), str(r.get("등록일시", "")),
-        str(r.get("수정일시", "")),
+        str(r.get("수정일시", "")), str(r.get("연결발주ID", "")),
     ) for _, r in clean.iterrows() if str(r.get("명세서ID", "")).strip()]
-    with transaction(data_dir) as conn:
+    with _write_transaction(data_dir, _connection) as conn:
+        _ensure_substitution_columns(conn)
         conn.execute("DELETE FROM statements")
         conn.executemany("""
             INSERT INTO statements(statement_id,order_id,vendor_name,statement_number,statement_date,
-            freight,freight_entered,memo,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)
+            freight,freight_entered,memo,created_at,updated_at,linked_order_ids) VALUES(?,?,?,?,?,?,?,?,?,?,?)
         """, rows)
 
 
-def replace_statement_items(data_dir: Path, df: pd.DataFrame) -> None:
+def replace_statement_items(data_dir: Path, df: pd.DataFrame, *, _connection=None) -> None:
     clean = df.copy().fillna("")
     rows = [(
         str(r.get("명세서ID", "")), _int(r.get("순번", 0)), normalize_product_code(r.get("제품코드", "")),
@@ -116,28 +140,35 @@ def replace_statement_items(data_dir: Path, df: pd.DataFrame) -> None:
         normalize_product_code(r.get("원발주제품코드", "")), str(r.get("원발주제품명", "")),
         str(r.get("원발주규격", "")), str(r.get("원발주단위", "")),
         str(r.get("입고유형", "")), str(r.get("대체사유", "")),
-        str(r.get("제조번호", "")), str(r.get("유통기한", "")),
+        str(r.get("제조번호", "")), str(r.get("유통기한", "")), str(r.get("입고발주ID", "")), conversion_factor(r),
     ) for _, r in clean.iterrows() if str(r.get("명세서ID", "")).strip()]
-    with transaction(data_dir) as conn:
+    with _write_transaction(data_dir, _connection) as conn:
         _ensure_substitution_columns(conn)
+        try:
+            from nohtus.services.customer_returns import validate_statement_replacement
+        except ModuleNotFoundError as exc:
+            if exc.name != "nohtus":
+                raise
+        else:
+            validate_statement_replacement(data_dir, clean)
         conn.execute("DELETE FROM statement_items")
         conn.executemany("""
             INSERT INTO statement_items(statement_id,sequence,product_code,product_name,specification,
             packaging_unit,ordered_quantity,received_quantity,purchase_price,product_amount,sale_price,
             apply_price,original_product_code,original_product_name,original_specification,
-            original_packaging_unit,receipt_type,substitution_reason,lot_number,expiry_date)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            original_packaging_unit,receipt_type,substitution_reason,lot_number,expiry_date,source_order_id,unit_conversion_factor)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, rows)
 
 
-def replace_price_history(data_dir: Path, df: pd.DataFrame) -> None:
+def replace_price_history(data_dir: Path, df: pd.DataFrame, *, _connection=None) -> None:
     clean = df.copy().fillna("")
     rows = [(
         str(r.get("가격ID", "")), str(r.get("명세서ID", "")), str(r.get("명세서일자", "")),
         normalize_product_code(r.get("제품코드", "")), str(r.get("정식제품명", "")),
         _int(r.get("매입단가", 0)), _int(r.get("출고단가", 0)), str(r.get("등록일시", "")),
     ) for _, r in clean.iterrows()]
-    with transaction(data_dir) as conn:
+    with _write_transaction(data_dir, _connection) as conn:
         conn.execute("DELETE FROM price_history")
         conn.executemany("""
             INSERT INTO price_history(price_id,statement_id,statement_date,product_code,product_name,

@@ -5,6 +5,31 @@ from nohtus.export_app.services import order_service
 from nohtus.export_app.utils.dates import now_text
 
 
+def search_address_book(query: str = '', limit: int = 30) -> list[dict]:
+    """과거 국내배송에 실제로 쓰인 수하인명/주소를 최근 사용순으로 검색한다.
+
+    별도 주소록 테이블이 없어서 export_cases에 이미 저장된 수하인 정보를
+    (이름, 주소) 쌍으로 중복 제거해 재사용한다."""
+    rows = db.rows(
+        """
+        SELECT TRIM(consignee_name) AS name, TRIM(consignee_address) AS address,
+               MAX(updated_at) AS last_used
+        FROM export_cases
+        WHERE TRIM(COALESCE(consignee_name, '')) != ''
+          AND TRIM(COALESCE(consignee_address, '')) != ''
+        GROUP BY TRIM(consignee_name), TRIM(consignee_address)
+        ORDER BY last_used DESC
+        """
+    )
+    entries = [{'name': row['name'], 'address': row['address']} for row in rows]
+
+    needle = query.strip().casefold()
+    if needle:
+        entries = [entry for entry in entries if needle in entry['name'].casefold()]
+
+    return entries[:limit]
+
+
 def save_delivery_draft(
     case_id: int,
     *,

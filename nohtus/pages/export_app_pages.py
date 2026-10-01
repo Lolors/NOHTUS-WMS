@@ -302,11 +302,12 @@ def page_export_packing():
         st.markdown('##### 새 프리셋 추가')
         with st.form('box_preset_manager_add_form'):
             preset_name = st.text_input('프리셋 이름', placeholder='예: 덱스레보')
-            size_cols = st.columns(4)
-            length = size_cols[0].number_input('가로', min_value=0.0, step=0.1)
-            width = size_cols[1].number_input('세로', min_value=0.0, step=0.1)
-            height = size_cols[2].number_input('높이', min_value=0.0, step=0.1)
-            weight = size_cols[3].number_input('무게(kg)', min_value=0.0, step=0.1)
+            size_cols = st.columns(3)
+            length = size_cols[0].number_input('가로', min_value=0.0, step=0.01, format='%.2f')
+            width = size_cols[1].number_input('세로', min_value=0.0, step=0.01, format='%.2f')
+            height = size_cols[2].number_input('높이', min_value=0.0, step=0.01, format='%.2f')
+            weight_cols = st.columns(3)
+            weight = weight_cols[0].number_input('무게(kg)', min_value=0.0, step=0.01, format='%.2f')
             save_preset = original_form_submit_button('프리셋 추가', type='primary', use_container_width=True)
 
         if save_preset:
@@ -339,24 +340,25 @@ def page_export_packing():
                     value=current_name,
                     key=f'preset_edit_name_{index}',
                 )
-                value_cols = st.columns(4)
+                value_cols = st.columns(3)
                 edit_length = value_cols[0].number_input(
-                    '가로', min_value=0.0, step=0.1,
+                    '가로', min_value=0.0, step=0.01, format='%.2f',
                     value=float(values.get('length_cm', 0)),
                     key=f'preset_edit_length_{index}',
                 )
                 edit_width = value_cols[1].number_input(
-                    '세로', min_value=0.0, step=0.1,
+                    '세로', min_value=0.0, step=0.01, format='%.2f',
                     value=float(values.get('width_cm', 0)),
                     key=f'preset_edit_width_{index}',
                 )
                 edit_height = value_cols[2].number_input(
-                    '높이', min_value=0.0, step=0.1,
+                    '높이', min_value=0.0, step=0.01, format='%.2f',
                     value=float(values.get('height_cm', 0)),
                     key=f'preset_edit_height_{index}',
                 )
-                edit_weight = value_cols[3].number_input(
-                    '무게(kg)', min_value=0.0, step=0.1,
+                weight_cols = st.columns(3)
+                edit_weight = weight_cols[0].number_input(
+                    '무게(kg)', min_value=0.0, step=0.01, format='%.2f',
                     value=float(values.get('weight_kg', 0)),
                     key=f'preset_edit_weight_{index}',
                 )

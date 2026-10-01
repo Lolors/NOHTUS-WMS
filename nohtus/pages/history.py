@@ -188,7 +188,7 @@ def _reverse_transaction(cur, tx):
     lot = _norm(tx["lot"])
     exp_date = _norm(tx["exp_date"])
 
-    if tx_type == "입고":
+    if tx_type in ["입고", "반품입고", "반품입고취소"]:
         _adjust_inventory_qty(
             cur,
             company=tx["to_company"],
@@ -221,7 +221,7 @@ def _reverse_transaction(cur, tx):
             location=tx["to_location"] or tx["from_location"],
             delta=-qty,
         )
-    elif tx_type in ["위치이동", "사업장이동", "사업장+위치이동", "비자료전환", "이동"]:
+    elif tx_type in ["위치이동", "사업장이동", "사업장+위치이동", "사업장정정", "비자료전환", "이동"]:
         _adjust_inventory_qty(
             cur,
             company=tx["to_company"],
@@ -290,6 +290,9 @@ def _delete_transaction_ids(tx_ids):
     with connect() as con:
         con.row_factory = None
         cur = con.cursor()
+        from nohtus.services.customer_returns import assert_history_editable, update_return_for_history_delete
+        cur.execute("BEGIN IMMEDIATE")
+        assert_history_editable(cur, tx_ids)
         rows = cur.execute(
             f"""
             SELECT id, tx_type, product_name, warehouse_name, lot, exp_date,
@@ -308,6 +311,7 @@ def _delete_transaction_ids(tx_ids):
             match = re.search(r"출고지시서\s*#(\d+)", memo)
             if match and str(tx.get("tx_type") or "") in {"출고지시", "출고", "출고지시수정"}:
                 deleted_order_ids.add(int(match.group(1)))
+            update_return_for_history_delete(cur, tx["id"], reverse=True)
             _reverse_transaction(cur, tx)
         cur.execute(f"DELETE FROM transactions WHERE id IN ({placeholders})", tuple(tx_ids))
         for order_id in deleted_order_ids:
@@ -334,10 +338,15 @@ def _delete_transaction_ids_without_reversal(tx_ids):
     placeholders = ",".join(["?"] * len(tx_ids))
     with connect() as con:
         cur = con.cursor()
+        from nohtus.services.customer_returns import assert_history_editable, update_return_for_history_delete
+        cur.execute("BEGIN IMMEDIATE")
+        assert_history_editable(cur, tx_ids)
         existing = cur.execute(
             f"SELECT COUNT(*) FROM transactions WHERE id IN ({placeholders})",
             tuple(tx_ids),
         ).fetchone()[0]
+        for tx_id in tx_ids:
+            update_return_for_history_delete(cur, tx_id, reverse=False)
         cur.execute(
             f"DELETE FROM transactions WHERE id IN ({placeholders})",
             tuple(tx_ids),
@@ -542,7 +551,7 @@ def _history_type_background(tx_type, memo="", shade=0):
         return "#E7F5E9" if shade == 0 else "#CFEAD6"
     if tx_type == "입고":
         return "#FFF3C4" if shade == 0 else "#FCE9A0"
-    if tx_type in {"위치이동", "사업장이동", "사업장+위치이동", "비자료전환", "이동"}:
+    if tx_type in {"위치이동", "사업장이동", "사업장+위치이동", "사업장정정", "비자료전환", "이동"}:
         return "#F2F2F2" if shade == 0 else "#E4E4E4"
     return ""
 
@@ -617,6 +626,40 @@ def _display_row_to_tx_id(cur, row, used_ids):
             used_ids.add(tx_id)
             return tx_id
     return None
+
+
+def _inbound_supplier(memo):
+    match = re.match(r"^(?:매입처|입고처)\s*:\s*(.*?)(?: / |$)", str(memo or ""))
+    return match.group(1).strip() if match else ""
+
+
+def _update_inbound_supplier(tx_id, supplier, expected_memo):
+    supplier = str(supplier or "").strip()
+    if not supplier or " / " in supplier or "\n" in supplier or "\r" in supplier:
+        raise ValueError("매입처를 한 줄로 입력하세요. ' / '는 사용할 수 없습니다.")
+    if not (is_admin() or current_role() == "user"):
+        raise ValueError("매입처 수정 권한이 없습니다.")
+    with connect() as con:
+        row = con.execute("SELECT tx_type, actor, memo FROM transactions WHERE id=?", (int(tx_id),)).fetchone()
+        if not row or row[0] != "입고":
+            raise ValueError("입고 이력만 매입처를 수정할 수 있습니다.")
+        if not is_admin() and str(row[1] or "").strip().lower() not in _current_own_actor_names():
+            raise ValueError("본인이 등록한 입고 이력만 수정할 수 있습니다.")
+        memo = str(row[2] or "")
+        if memo != expected_memo:
+            raise ValueError("이력이 변경되었습니다. 새로고침 후 다시 수정하세요.")
+        match = re.match(r"^(?:매입처|입고처)\s*:[^\r\n]*?( / |$)", memo)
+        tail = memo[match.end():] if match else memo
+        if tail == "입고 등록":
+            tail = ""
+        updated = f"매입처: {supplier}" + (f" / {tail}" if tail else "")
+        result = con.execute(
+            "UPDATE transactions SET memo=? WHERE id=? AND COALESCE(memo,'')=?",
+            (updated, int(tx_id), expected_memo),
+        )
+        if result.rowcount != 1:
+            raise ValueError("이력이 변경되었습니다. 새로고침 후 다시 수정하세요.")
+        con.commit()
 
 
 def _update_history_dates(original_df, edited_df):
@@ -783,7 +826,7 @@ def page_history():
     with filter_col1:
         company = st.selectbox("사업장", ["전체"] + COMPANIES, index=0, key="history_company")
     with filter_col2:
-        tx_label = st.selectbox("이력유형", ["전체", "입고", "출고지시", "출고지시취소", "패키지 생산", "이동", "재고조정", "재고정보수정", "전산재고"], index=0, key="history_tx_label")
+        tx_label = st.selectbox("이력유형", ["전체", "입고", "반품입고", "반품입고취소", "출고지시", "출고지시취소", "패키지 생산", "이동", "재고조정", "재고정보수정", "전산재고"], index=0, key="history_tx_label")
     with filter_col3:
         start_date = st.date_input("시작일", value=default_start, key="history_start_date")
     with filter_col4:
@@ -821,7 +864,7 @@ def page_history():
         params.extend([company, company])
     if tx_label != "전체":
         if tx_label == "이동":
-            conditions.append("tx_type IN ('위치이동','사업장이동','사업장+위치이동','비자료전환','이동')")
+            conditions.append("tx_type IN ('위치이동','사업장이동','사업장+위치이동','사업장정정','비자료전환','이동')")
         elif tx_label == "출고지시":
             conditions.append("(tx_type='출고지시' OR (tx_type='출고' AND IFNULL(memo, '') LIKE ?))")
             params.append(f"{EXPORT_CONFIRM_MEMO_PREFIX}%")
@@ -919,6 +962,8 @@ def page_history():
             help="현재 페이지와 관계없이 지정 기간 및 검색 조건에 맞는 전체 이력을 내려받습니다.",
         )
 
+    if st.session_state.pop("history_supplier_saved", False):
+        st.success("입고 이력의 매입처를 수정했습니다.")
     can_manage_history = is_admin() or current_role() == "user"
     if can_manage_history:
         admin_show = show.copy()
@@ -959,6 +1004,23 @@ def page_history():
                 st.warning(f"본인이 입력한 이력만 삭제할 수 있어요. 다른 사용자의 이력 {skipped}건은 선택에서 제외했습니다.")
             checked_indexes = owned_indexes
         selected_ids = [tx_ids[i] for i in checked_indexes]
+        inbound_indexes = [i for i in checked_indexes if str(df.iloc[i].get("tx_type") or "") == "입고"]
+        if len(selected_ids) == 1 and len(inbound_indexes) == 1:
+            inbound_row = df.iloc[inbound_indexes[0]]
+            inbound_id = selected_ids[0]
+            original_memo = str(inbound_row.get("memo") or "")
+            with st.form(f"history_supplier_{inbound_id}_{original_memo}"):
+                st.markdown("**입고 매입처 수정**")
+                supplier = st.text_input("매입처", value=_inbound_supplier(original_memo))
+                if st.form_submit_button("매입처 저장"):
+                    try:
+                        _update_inbound_supplier(inbound_id, supplier, original_memo)
+                        st.session_state["history_supplier_saved"] = True
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+        elif inbound_indexes:
+            st.caption("매입처를 수정하려면 입고 이력을 한 건만 선택하세요.")
         if selected_ids:
             st.warning(f"선택한 이력 {len(selected_ids)}건의 삭제 방식을 선택하세요.")
             if is_admin():

@@ -293,6 +293,8 @@ def cancel_outbound_order(order_id):
     order_id = int(order_id)
     with connect() as con:
         cur = con.cursor()
+        from nohtus.services.customer_returns import assert_order_editable
+        assert_order_editable(cur, order_id)
         order = cur.execute("SELECT id, status FROM outbound_orders WHERE id=?", (order_id,)).fetchone()
         if not order:
             raise ValueError("취소할 출고지시서를 찾을 수 없습니다.")

@@ -119,6 +119,13 @@ _TRUE_MATERIAL_VALUES = ("1", "true", "yes", "y", "o", "v", "체크", "부자재
 
 
 def _inventory_survey_excel_bytes(df, sheet_name):
+    if not df.empty:
+        from nohtus.services.stocktake_route import stocktake_route_key
+
+        df = df.assign(_walking_order=df["location"].map(stocktake_route_key)).sort_values(
+            ["_walking_order", "location", "company", "product_name", "exp_date"],
+            ascending=True, kind="stable", na_position="last",
+        ).drop(columns="_walking_order").reset_index(drop=True)
     out = pd.DataFrame()
     out["사업장"] = df["company"] if not df.empty else []
     out["로케이션"] = df["location"] if not df.empty else []
@@ -131,7 +138,9 @@ def _inventory_survey_excel_bytes(df, sheet_name):
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
         out.to_excel(writer, index=False, sheet_name=sheet_name)
         ws = writer.book[sheet_name]
-        widths = {"A": 14, "B": 16, "C": 34, "D": 16, "E": 12, "F": 12}
+        # 예시: 노투스팜 / A1-01-01 / 긴 제품명 / 2029-03-20 / 500000.
+        # 수량 열은 6자리 숫자와 네 글자 헤더가 모두 들어가도록 맞춘다.
+        widths = {"A": 9.5, "B": 9.5, "C": 41.5, "D": 11.5, "E": 9.5, "F": 9.5}
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
 
@@ -147,6 +156,111 @@ def _inventory_survey_excel_bytes(df, sheet_name):
                 if cell.row == 1:
                     cell.font = Font(bold=True)
                     cell.fill = header_fill
+
+        # 화면에 저장된 랙 묶음을 사용해 단/칸이 달라도 같은 랙은 함께 둔다.
+        from nohtus.services.location_map_layout import load_location_map_layout
+
+        rack_by_code = {}
+        for item in load_location_map_layout().get("items", []):
+            if item.get("kind") == "shape":
+                continue
+            code = _normalize_stocktake_location(item.get("code"))
+            if code:
+                rack_by_code[code] = str(item.get("group_id") or code)
+        rack_codes = sorted(rack_by_code, key=len, reverse=True)
+        from openpyxl.worksheet.pagebreak import Break
+        from openpyxl.worksheet.page import PageMargins
+        import math
+        import unicodedata
+
+        separator = Side(style="medium", color="000000")
+        subtle = Side(style="hair", color="D1D5DB")
+        white = PatternFill("solid", fgColor="FFFFFF")
+        alternate = PatternFill("solid", fgColor="F3F4F6")
+        blocks = []
+        for values in out.itertuples(index=False, name=None):
+            location = str(values[1] or "").strip().upper()
+            alphabet = ""
+            for character in location:
+                if not ("A" <= character <= "Z"):
+                    break
+                alphabet += character
+            normalized = _normalize_stocktake_location(location)
+            code = next((code for code in rack_codes if normalized == code or (
+                normalized.startswith(code) and normalized[len(code):].isdigit()
+            )), None)
+            rack = ("rack", rack_by_code[code]) if code else ("alphabet", alphabet)
+            line = code or normalized
+            key = (alphabet, rack)
+            name_width = sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in str(values[2]))
+            height = max(30, 15 * math.ceil(name_width / 39) + 6)
+            if not blocks or blocks[-1][0] != key:
+                blocks.append((key, []))
+            blocks[-1][1].append((values, line, height))
+
+        if ws.max_row > 1:
+            ws.delete_rows(2, ws.max_row - 1)
+        ws.row_dimensions[1].height = 26
+        previous_alphabet = None
+        page_height = 0
+        # A4 세로 인쇄의 여유 있는 높이 안에서 랙 단위로 페이지를 나눈다.
+        page_capacity = 660
+        for block_index, ((alphabet, _rack), entries) in enumerate(blocks):
+            new_area = alphabet != previous_alphabet
+            block_height = sum(entry[2] for entry in entries) + (24 if new_area else 0)
+            if page_height and page_height + block_height > page_capacity:
+                ws.row_breaks.append(Break(id=ws.max_row))
+                page_height = 0
+            if new_area:
+                ws.append([f"{alphabet}구역" if alphabet else "기타 구역"])
+                row_number = ws.max_row
+                ws.merge_cells(start_row=row_number, start_column=1, end_row=row_number, end_column=6)
+                for cell in ws[row_number]:
+                    cell.fill = header_fill
+                    cell.border = Border(top=separator, bottom=thin)
+                ws.cell(row_number, 1).font = Font(bold=True, size=12)
+                ws.cell(row_number, 1).alignment = Alignment(vertical="center")
+                ws.row_dimensions[row_number].height = 24
+                page_height += 24
+            previous_line = None
+            for entry_index, (values, line, height) in enumerate(entries):
+                # 한 페이지보다 큰 랙은 불가피한 경우에만 나눈다.
+                if page_height + height > page_capacity and entry_index:
+                    ws.row_breaks.append(Break(id=ws.max_row))
+                    page_height = 0
+                ws.append(list(values))
+                row_number = ws.max_row
+                top = separator if entry_index == 0 else (thin if line != previous_line else subtle)
+                for cell in ws[row_number]:
+                    cell.border = Border(left=thin, right=thin, top=top, bottom=subtle)
+                    cell.fill = white if cell.column == 6 or block_index % 2 == 0 else alternate
+                    cell.alignment = Alignment(vertical="center", wrap_text=True)
+                ws.row_dimensions[row_number].height = height
+                page_height += height
+                previous_line = line
+            previous_alphabet = alphabet
+
+        ws.freeze_panes = "C2"
+        ws.print_title_rows = "1:1"
+        ws.print_options.horizontalCentered = True
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.page_setup.orientation = "portrait"
+        ws.page_setup.paperSize = ws.PAPERSIZE_A4
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
+        ws.page_margins = PageMargins(left=0.25, right=0.25, top=0.4, bottom=0.4)
+        ws.print_area = f"A1:F{ws.max_row}"
+        # 다운로드한 날짜를 고정해 나중에 인쇄해도 실사 기준일을 유지한다.
+        from datetime import timedelta, timezone
+
+        survey_date = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+        ws.oddHeader.right.text = f"재고실사일: {survey_date}"
+        ws.oddHeader.right.size = 9
+        ws.oddHeader.right.font = "맑은 고딕,Regular"
+        ws.oddHeader.right.color = "595959"
+        ws.HeaderFooter.differentOddEven = False
+        ws.HeaderFooter.differentFirst = False
+        ws.oddFooter.center.text = "&P / &N"
     bio.seek(0)
     return bio.getvalue()
 

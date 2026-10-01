@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
+from nohtus.export_app.services.order_unit_direction import FORWARD, REVERSE
 
 
 UNIT_OPTIONS = ['BOX', 'PK', 'EA']
@@ -11,6 +12,8 @@ def order_editor(dataframe, *, key: str, dynamic: bool = True):
     dataframe = dataframe.copy()
     if '1단위당 EA' not in dataframe.columns:
         dataframe['1단위당 EA'] = 1.0
+    if '환산 방향' not in dataframe.columns:
+        dataframe['환산 방향'] = FORWARD
     if '제품명' in dataframe.columns:
         dataframe['제품명'] = dataframe['제품명'].fillna('').astype('string')
     return st.data_editor(
@@ -19,7 +22,7 @@ def order_editor(dataframe, *, key: str, dynamic: bool = True):
         hide_index=True,
         use_container_width=True,
         key=key,
-        column_order=['행번호', '제품명', '수량', '단위', '1단위당 EA', '매입가'],
+        column_order=['행번호', '제품명', '수량', '단위', '환산 방향', '1단위당 EA', '매입가'],
         disabled=['행번호'],
         column_config={
             '_id': None,
@@ -36,12 +39,13 @@ def order_editor(dataframe, *, key: str, dynamic: bool = True):
                 required=True,
                 width=30,
             ),
+            '환산 방향': st.column_config.SelectboxColumn('환산 방향',options=[FORWARD,REVERSE],default=FORWARD,required=True),
             '1단위당 EA': st.column_config.NumberColumn(
-                '1단위당 EA',
+                '환산수량',
                 min_value=0.000001,
                 step=1.0,
                 default=1.0,
-                help='예: 1 BOX가 50 EA이면 50을 입력하세요. EA 단위는 1입니다.',
+                help='주문 1BOX에 실물 10개이면 첫 방향에 10. 실물 1BOX로 주문 10EA를 충족하면 두 번째 방향에 10. 같은 단위는 1입니다.',
             ),
             '매입가': st.column_config.NumberColumn(
                 '매입가',

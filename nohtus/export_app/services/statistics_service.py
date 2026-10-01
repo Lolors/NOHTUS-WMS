@@ -14,6 +14,8 @@ STATISTICS_COLUMNS = [
     '수출번호',
     '국가',
     '바이어',
+    '운송방식',
+    '출고처',
     '제품명',
     '제조번호',
     '유통기한',
@@ -38,6 +40,8 @@ def _cached_shipment_rows(
             c.export_no,
             COALESCE(c.country, '') AS country,
             COALESCE(c.buyer, '') AS buyer,
+            COALESCE(c.transport_mode, '') AS transport_mode,
+            COALESCE(NULLIF(TRIM(s.business_unit), ''), '') AS business_unit,
             COALESCE(NULLIF(TRIM(s.product_name), ''), '') AS product_name,
             COALESCE(s.lot_no, '') AS lot_no,
             COALESCE(s.expiry_date, '') AS expiry_date,
@@ -70,6 +74,8 @@ def _cached_shipment_rows(
                 '수출번호': str(row['export_no'] or ''),
                 '국가': str(row['country'] or '').strip() or '미입력',
                 '바이어': str(row['buyer'] or '').strip(),
+                '운송방식': str(row['transport_mode'] or '').strip() or '미지정',
+                '출고처': str(row['business_unit'] or '').strip(),
                 '제품명': str(row['product_name'] or '').strip() or '미입력',
                 '제조번호': str(row['lot_no'] or '').strip(),
                 '유통기한': str(row['expiry_date'] or '').strip(),
@@ -83,8 +89,41 @@ def _cached_shipment_rows(
     return frame[STATISTICS_COLUMNS]
 
 
+def canonicalize_product_names(frame, products):
+    """Resolve whitespace variants and unambiguous registered aliases without editing history."""
+    import re
+    candidates = {}
+    for row in products.to_dict('records'):
+        name = str(row.get('standard_name') or '').strip()
+        if not name:
+            continue
+        aliases = str(row.get('aliases') or '')
+        for value in [name, *re.split(r'[,/\n;|]+', aliases)]:
+            key = normalize_text(value)
+            if key:
+                candidates.setdefault(key, set()).add(name)
+    resolved = {key: next(iter(names)) for key, names in candidates.items() if len(names) == 1}
+    result = frame.copy()
+    fallback = {}
+    def canonical(value):
+        key = normalize_text(value)
+        if key in resolved:
+            return resolved[key]
+        if key in candidates:  # Ambiguous master matches must not merge products.
+            return value
+        return fallback.setdefault(key, value)
+    result['제품명'] = result['제품명'].map(canonical)
+    return result
+
+
 def shipment_rows(start_date: date, end_date: date) -> pd.DataFrame:
-    return _cached_shipment_rows(start_date, end_date, db.read_cache_token()).copy()
+    from nohtus.db import q
+    frame = _cached_shipment_rows(start_date, end_date, db.read_cache_token()).copy()
+    if frame.empty:
+        return frame
+    # Read current master outside the export cache so renames apply immediately.
+    products = q('SELECT standard_name, aliases FROM products')
+    return canonicalize_product_names(frame, products)
 
 
 def normalize_text(value: object) -> str:
@@ -95,6 +134,7 @@ def filter_rows(
     frame: pd.DataFrame,
     countries: list[str] | None = None,
     product_query: str = '',
+    include_case_rows: bool = False,
 ) -> pd.DataFrame:
     filtered = frame.copy()
 
@@ -103,9 +143,12 @@ def filter_rows(
 
     normalized_query = normalize_text(product_query)
     if normalized_query:
-        filtered = filtered[
-            filtered['제품명'].map(normalize_text).str.contains(normalized_query, regex=False)
-        ]
+        matches = filtered['제품명'].map(normalize_text).str.contains(normalized_query, regex=False)
+        if include_case_rows:
+            case_ids = filtered.loc[matches, 'case_id'].dropna().unique()
+            filtered = filtered[filtered['case_id'].isin(case_ids)]
+        else:
+            filtered = filtered[matches]
 
     return filtered.reset_index(drop=True)
 

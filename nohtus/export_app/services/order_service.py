@@ -64,7 +64,7 @@ def _cached_orders_for_case(
                     WHEN COALESCE(ea_per_document_unit, 0) > 0 THEN ea_per_document_unit
                     ELSE 1
                   END AS quantity,
-                  'EA' AS unit,
+                  CASE WHEN ea_per_document_unit > 0 AND ea_per_document_unit < 1 THEN '실물' ELSE 'EA' END AS unit,
                   COALESCE(NULLIF(TRIM(document_unit), ''), NULLIF(TRIM(unit), ''), 'EA') AS document_unit,
                   CASE
                     WHEN COALESCE(ea_per_document_unit, 0) > 0 THEN ea_per_document_unit
@@ -85,6 +85,7 @@ def list_for_case(case_id: int):
 
 def get_order_items_dataframe(case_id: int):
     import pandas as pd
+    from nohtus.export_app.services.order_unit_direction import editor_values
 
     rows = list_for_case(case_id)
     return pd.DataFrame([
@@ -93,7 +94,8 @@ def get_order_items_dataframe(case_id: int):
             '제품명': row['product_name'],
             '수량': row['document_quantity'],
             '단위': row['document_unit'],
-            '1단위당 EA': row['ea_per_document_unit'],
+            '1단위당 EA': editor_values(row['ea_per_document_unit'])[1],
+            '환산 방향': editor_values(row['ea_per_document_unit'])[0],
             '매입가': row['purchase_price'],
         }
         for row in rows
@@ -340,6 +342,10 @@ def _clean_optional_row_id(raw_id) -> int | None:
 def save_order_items(case_id: int, edited) -> None:
     now = now_text()
     with db.connect() as conn:
+        export_no = conn.execute(
+            'SELECT export_no FROM export_cases WHERE id=?', (case_id,)
+        ).fetchone()
+        export_no = str((export_no or [''])[0] or '').strip()
         existing_rows = conn.execute(
             '''SELECT o.id, o.product_name, o.quantity, o.unit, o.purchase_price
                FROM order_items o
@@ -356,7 +362,11 @@ def save_order_items(case_id: int, edited) -> None:
             quantity = float(row.get('수량', 0) or 0)
             unit = str(row.get('단위', 'EA') or 'EA').strip() or 'EA'
             purchase_price = float(row.get('매입가', 0) or 0)
-            ea_per_document_unit = float(row.get('1단위당 EA', 1) or 1)
+            from nohtus.export_app.services.order_unit_direction import stored_factor, FORWARD
+            direction = row.get('환산 방향', FORWARD)
+            if not isinstance(direction, str) or not direction.strip():
+                direction = FORWARD
+            ea_per_document_unit = stored_factor(row.get('1단위당 EA', 1), direction)
             if not math.isfinite(ea_per_document_unit) or ea_per_document_unit <= 0:
                 raise ValueError('1단위당 EA는 0보다 커야 합니다.')
 
@@ -432,3 +442,15 @@ def save_order_items(case_id: int, edited) -> None:
 
     db.backup_to_usb()
     clear_editable_cases_cache()
+
+    # 주문목록이 바뀌면(제품 교체/삭제 등) 더 이상 필요 없어진 WMS 수출대기(P)
+    # 예약이 남을 수 있다. 저장 직후 바로 정리해서, 다른 수출건이 그 재고를
+    # 다시 쓸 수 있게 한다. 실패해도 주문목록 저장 자체는 이미 끝난 뒤이므로
+    # 조용히 무시한다.
+    if export_no:
+        try:
+            from nohtus.export_app.services import stale_inventory_cleanup_service
+
+            stale_inventory_cleanup_service.reconcile_orphan_waiting_items(export_no)
+        except Exception:
+            pass

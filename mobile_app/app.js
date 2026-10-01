@@ -302,6 +302,7 @@
         if (tab === "export" && !exportLoadedOnce) {
           exportLoadedOnce = true;
           loadExportCountries();
+          loadExportMonths();
           loadExport();
         }
       });
@@ -314,19 +315,20 @@
       ? `${opts.hideBadgeLevel ? "" : `<span class="badge ${item.badge.level}">${escapeHtml(item.badge.label)}</span>`}<span class="badge-date">${escapeHtml(item.badge.date)}</span>`
       : "";
     const exportHtml = item.export_waiting
-      ? `<span class="badge export">✈️ 수출대기중</span>`
+      ? `<span class="badge export">✈️ 수출대기 ${fmtQty(item.export_waiting_qty)}</span>`
       : "";
-    const hasBadgeRow = badgeHtml || exportHtml;
+    const materialHtml = item.is_material ? `<span class="badge gray">📦 부자재</span>` : "";
+    const hasBadgeRow = badgeHtml || exportHtml || materialHtml;
     const thumbHtml = item.thumbnail
       ? `<img src="${item.thumbnail}" alt="" />`
       : "📷";
     return `
-      <div class="result-card" data-name="${escapeHtml(item.name)}" role="button" tabindex="0">
+      <div class="result-card" data-name="${escapeHtml(item.name)}" data-level="${escapeHtml(item.level || "")}" data-exp-date="${escapeHtml(item.exp_date || "")}" role="button" tabindex="0">
         <div class="result-thumb">${thumbHtml}</div>
         <div class="result-info">
           <div class="result-name">${escapeHtml(item.name)}</div>
           <div class="result-company">${escapeHtml(item.summary || "재고 없음")}</div>
-          ${hasBadgeRow ? `<div class="result-badges">${exportHtml}${badgeHtml}</div>` : ""}
+          ${hasBadgeRow ? `<div class="result-badges">${exportHtml}${materialHtml}${badgeHtml}</div>` : ""}
         </div>
         <div class="result-qty">${fmtQty(item.total_qty)}</div>
       </div>
@@ -335,7 +337,7 @@
 
   function bindResultCards(container, onOpen) {
     container.querySelectorAll(".result-card").forEach((card) => {
-      card.addEventListener("click", () => onOpen(card.dataset.name));
+      card.addEventListener("click", () => onOpen(card.dataset.name, card.dataset.level, card.dataset.expDate));
     });
   }
 
@@ -393,11 +395,12 @@
     const photo = detail.thumbnail
       ? `<img src="${detail.thumbnail}" alt="" />`
       : "";
+    const materialHtml = detail.is_material ? `<span class="badge gray">📦 부자재</span>` : "";
     return `
       <div class="detail-header">
         <div class="detail-photo">${photo}</div>
         <div>
-          <div class="detail-name">${escapeHtml(detail.name)}</div>
+          <div class="detail-name">${escapeHtml(detail.name)}${materialHtml}</div>
           <div class="detail-company">${escapeHtml(detail.summary || "재고 없음")}</div>
         </div>
         <div class="detail-total">${fmtQty(detail.total_qty)}</div>
@@ -664,11 +667,11 @@
   const expiryResults = el("expiry-results");
   const expiryListView = el("expiry-list-view");
   const expiryDetailView = el("expiry-detail-view");
-  const expiryExcludeBidata = el("expiry-exclude-bidata");
   const expiryPeriodSelect = el("expiry-period");
   const expiryWarehouseSelect = el("expiry-warehouse");
   let expiryPeriod = expiryPeriodSelect.value;
   let expiryWarehouse = expiryWarehouseSelect.value;
+  let expiryBidataScope = "data";
 
   expiryPeriodSelect.addEventListener("change", () => {
     expiryPeriod = expiryPeriodSelect.value;
@@ -678,7 +681,14 @@
     expiryWarehouse = expiryWarehouseSelect.value;
     loadExpiry();
   });
-  expiryExcludeBidata.addEventListener("change", loadExpiry);
+  el("expiry-bidata-scope").querySelectorAll("button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      el("expiry-bidata-scope").querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      expiryBidataScope = btn.dataset.scope;
+      loadExpiry();
+    });
+  });
 
   function groupResultsByExpiryLevel(results) {
     const order = ["red", "yellow", "blue"];
@@ -711,7 +721,7 @@
     expiryResults.innerHTML = skeletonCardsHtml(3);
     const params = new URLSearchParams({
       period: expiryPeriod,
-      exclude_bidata: expiryExcludeBidata.checked ? "true" : "false",
+      bidata_scope: expiryBidataScope,
       warehouse: expiryWarehouse,
       limit: "300",
     });
@@ -730,7 +740,7 @@
     }
   }
 
-  async function openExpiryDetail(name) {
+  async function openExpiryDetail(name, level, expDate) {
     expiryListView.hidden = true;
     expiryDetailView.hidden = false;
     expiryDetailView.innerHTML = `<button class="back-button">‹ 목록</button>${skeletonCardsHtml(1)}`;
@@ -738,8 +748,10 @@
     try {
       const params = new URLSearchParams({
         period: expiryPeriod,
-        exclude_bidata: expiryExcludeBidata.checked ? "true" : "false",
+        bidata_scope: expiryBidataScope,
         warehouse: expiryWarehouse,
+        level: level || "",
+        exp_date: expDate || "",
       });
       const detail = await api(`/api/expiry/${encodeURIComponent(name)}?${params.toString()}`);
       expiryDetailView.innerHTML =
@@ -885,11 +897,21 @@
   const exportCompletedResults = el("export-completed-results");
   const exportCountryFilter = el("export-country-filter");
   const exportTransportFilter = el("export-transport-filter");
+  const exportMonthFilter = el("export-month-filter");
+  const exportProductFilter = el("export-product-filter");
+  const exportPeriodSegmented = el("export-period");
+  const exportSearchLabel = el("export-search-label");
+  const exportSearchResults = el("export-search-results");
+  const exportInProgressLabel = el("export-in-progress-label");
+  const exportCompletedLabel = el("export-completed-label");
   let exportCountry = "";
   let exportTransport = "";
+  let exportMonth = "";
+  let exportProduct = "";
   let exportPeriod = "recent";
   let exportDetailReturnTo = "filters"; // "filters" | "year"
   let exportDetailReturnYear = null;
+  let exportProductDebounce = null;
 
   exportCountryFilter.addEventListener("change", () => {
     exportCountry = exportCountryFilter.value;
@@ -898,6 +920,17 @@
   exportTransportFilter.addEventListener("change", () => {
     exportTransport = exportTransportFilter.value;
     loadExport();
+  });
+  exportMonthFilter.addEventListener("change", () => {
+    exportMonth = exportMonthFilter.value;
+    loadExport();
+  });
+  exportProductFilter.addEventListener("input", () => {
+    clearTimeout(exportProductDebounce);
+    exportProductDebounce = setTimeout(() => {
+      exportProduct = exportProductFilter.value.trim();
+      loadExport();
+    }, 300);
   });
   el("export-period").querySelectorAll("button").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -918,6 +951,19 @@
       exportCountryFilter.value = exportCountry;
     } catch (err) {
       /* 국가 목록을 못 불러와도 대시보드는 그대로 보여준다 */
+    }
+  }
+
+  async function loadExportMonths() {
+    try {
+      const data = await api("/api/export/months");
+      const options = data.months
+        .map((m) => `<option value="${escapeHtml(m.value)}">${escapeHtml(m.label)}</option>`)
+        .join("");
+      exportMonthFilter.innerHTML = `<option value="">월 전체</option>${options}`;
+      exportMonthFilter.value = exportMonth;
+    } catch (err) {
+      /* 월 목록을 못 불러와도 대시보드는 그대로 보여준다 */
     }
   }
 
@@ -1015,7 +1061,22 @@
     `;
   }
 
+  function isExportSearchActive() {
+    return Boolean(exportMonth || exportProduct);
+  }
+
   async function loadExport() {
+    if (isExportSearchActive()) {
+      return loadExportSearch();
+    }
+    exportSearchLabel.hidden = true;
+    exportSearchResults.hidden = true;
+    exportPeriodSegmented.hidden = false;
+    exportInProgressLabel.hidden = false;
+    exportCompletedLabel.hidden = false;
+    exportInProgressResults.hidden = false;
+    exportCompletedResults.hidden = false;
+
     exportInProgressResults.innerHTML = skeletonCardsHtml(2);
     exportCompletedResults.innerHTML = "";
     try {
@@ -1054,6 +1115,34 @@
       if (err.message !== "unauthorized") {
         exportInProgressResults.innerHTML = emptyStateHtml("⚠️", "불러오지 못했어요", "네트워크 상태를 확인하고 다시 시도해주세요");
         exportCompletedResults.innerHTML = "";
+      }
+    }
+  }
+
+  async function loadExportSearch() {
+    exportPeriodSegmented.hidden = true;
+    exportInProgressLabel.hidden = true;
+    exportCompletedLabel.hidden = true;
+    exportInProgressResults.hidden = true;
+    exportCompletedResults.hidden = true;
+    exportSearchLabel.hidden = false;
+    exportSearchResults.hidden = false;
+
+    exportSearchResults.innerHTML = skeletonCardsHtml(2);
+    try {
+      const params = new URLSearchParams();
+      if (exportCountry) params.set("country", exportCountry);
+      if (exportTransport) params.set("transport", exportTransport);
+      if (exportMonth) params.set("month", exportMonth);
+      if (exportProduct) params.set("product", exportProduct);
+      const data = await api(`/api/export/search?${params.toString()}`);
+      exportSearchResults.innerHTML = data.cases.length
+        ? renderGroupedCases(data.cases)
+        : emptyStateHtml("🔍", "조건에 맞는 수출 건이 없어요");
+      bindExportCaseRows(exportSearchResults, "filters", null);
+    } catch (err) {
+      if (err.message !== "unauthorized") {
+        exportSearchResults.innerHTML = emptyStateHtml("⚠️", "불러오지 못했어요", "네트워크 상태를 확인하고 다시 시도해주세요");
       }
     }
   }
@@ -1145,11 +1234,30 @@
     }
   }
 
+  // ---------- 앱 업데이트 ----------
+  function setupAppUpdates() {
+    if (!("serviceWorker" in navigator)) return;
+    let reloading = false;
+    let hadController = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (hadController && !reloading) {
+        reloading = true;
+        window.location.reload();
+      }
+      hadController = true;
+    });
+    const registration = navigator.serviceWorker.register("sw.js", { updateViaCache: "none" });
+    const checkUpdate = () => registration.then((reg) => reg.update()).catch(() => {});
+    checkUpdate();
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") checkUpdate();
+    });
+    window.addEventListener("online", checkUpdate);
+  }
+
   // ---------- 부팅 ----------
   async function boot() {
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js").catch(() => {});
-    }
+    setupAppUpdates();
     const token = getToken();
     if (!token) {
       showLogin();

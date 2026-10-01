@@ -318,7 +318,9 @@ def delete_order(data_dir: Path, order_id: str) -> None:
         raise ValueError("삭제할 발주ID가 없습니다.")
 
     with _connect(data_dir) as conn:
+        from services.statement_links import assert_order_not_shared
         conn.execute("BEGIN IMMEDIATE")
+        assert_order_not_shared(conn, order_id)
         statement_ids = [
             row[0] for row in conn.execute(
                 "SELECT statement_id FROM statements WHERE order_id = ?",

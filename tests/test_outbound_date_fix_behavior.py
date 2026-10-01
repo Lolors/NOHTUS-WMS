@@ -1,6 +1,6 @@
 """outbound_date_fix.py를 outbound.py/outbound_entry.py에 인라인하기 전,
 실제로 활성화돼 있던 동작(매출처 최근거래일 폴백, 수출대기 재고 숨김,
-outbound_business._BASE_* 오염 방어)을 고정하는 특성화 테스트."""
+outbound_entry의 화면 모드 정리)을 고정하는 특성화 테스트."""
 
 import sqlite3
 import tempfile
@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 import nohtus.db as db
 import nohtus.pages.outbound as outbound_page
-import nohtus.pages.outbound_business as outbound_business
 import nohtus.pages.outbound_entry as outbound_entry
 
 
@@ -154,41 +153,35 @@ class InventoryQueryExportWaitingFilterTests(unittest.TestCase):
         self.assertEqual(sorted(rows["location"].tolist()), ["A1-01-01"])
 
 
-class OutboundBusinessBaseWidgetResetTests(unittest.TestCase):
-    """outbound_business._BASE_*가 (다른 패치로) 오염돼 있어도, 일반 출고지시
-    진입점을 통과하는 동안에는 항상 진짜 네이티브 위젯으로 강제 리셋되고,
-    끝나면 원래 값으로 복원되는지 확인한다."""
+class OutboundEntryDelegatesWithoutTouchingWidgetSlotsTests(unittest.TestCase):
+    """2026-09-16 회귀 재현: outbound_entry.page_outbound()가 st.* 슬롯을 직접
+    강제로 되돌리면, nohtus.streamlit_patch_lock이 outbound_business.page_outbound()
+    안에서 설치해 둔 디스패처를 지워버려서 재고 선택 옵션 숨김/출고 추천 표시가
+    먹통이 된다. 이제 이 진입점은 화면 모드 플래그만 정리하고 그대로 위임해야
+    한다."""
 
-    def test_base_attrs_are_reset_during_render_and_restored_after(self):
-        def fake_widget(*args, **kwargs):
-            return None
+    def setUp(self):
+        import streamlit as st
 
-        outbound_business._BASE_TEXT_INPUT = fake_widget
-        outbound_business._BASE_CHECKBOX = fake_widget
-        outbound_business._BASE_DATA_EDITOR = fake_widget
-        outbound_business._BASE_MARKDOWN = fake_widget
-        outbound_business._BASE_CAPTION = fake_widget
+        self._st = st
+        self._orig_markdown = st.markdown
 
-        seen_during_render = {}
+    def tearDown(self):
+        self._st.markdown = self._orig_markdown
 
-        def stub_page_outbound():
-            seen_during_render["text_input"] = outbound_business._BASE_TEXT_INPUT
-            seen_during_render["checkbox"] = outbound_business._BASE_CHECKBOX
+    def test_delegates_to_outbound_business_without_reassigning_streamlit_slots(self):
+        import streamlit as st
 
-        with patch.object(outbound_entry, "_page_outbound", stub_page_outbound):
-            outbound_entry.page_outbound()
+        st.session_state["_outbound_screen_mode"] = "export_waiting"
 
-        self.assertIs(
-            seen_during_render["text_input"],
-            outbound_entry._OUTBOUND_NATIVE_WIDGETS["text_input"],
-        )
-        self.assertIs(
-            seen_during_render["checkbox"],
-            outbound_entry._OUTBOUND_NATIVE_WIDGETS["checkbox"],
-        )
-        # 렌더링이 끝난 뒤에는 오염됐던(하지만 호출 전 값이었던) fake_widget로 복원된다.
-        self.assertIs(outbound_business._BASE_TEXT_INPUT, fake_widget)
-        self.assertIs(outbound_business._BASE_CHECKBOX, fake_widget)
+        with patch.object(outbound_entry, "_page_outbound", return_value="rendered") as mock_render:
+            result = outbound_entry.page_outbound()
+
+        mock_render.assert_called_once_with()
+        self.assertEqual(result, "rendered")
+        self.assertNotIn("_outbound_screen_mode", st.session_state)
+        # 진입점 자체가 st.markdown 슬롯을 건드리지 않았어야 한다(디스패처 보존).
+        self.assertIs(st.markdown, self._orig_markdown)
 
 
 if __name__ == "__main__":

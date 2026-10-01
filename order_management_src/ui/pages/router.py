@@ -40,8 +40,8 @@ def run(core_app, purchase_module) -> None:
         "발주 작성": lambda: order_write.render(core_app, data),
         "임시저장 목록": lambda: orders.drafts(core_app, data),
         "발주서 목록": lambda: order_list_enhanced.render(core_app, data, purchase_module),
-        "거래명세서 등록": lambda: statement_register_lot_ui.render(purchase_module, data),
-        "거래명세서 내역": lambda: statement_history_lot_ui.render(purchase_module, data),
+        "거래명세서 등록": lambda: statement_register_lot_ui.render(core_app, purchase_module, data),
+        "거래명세서 내역": lambda: statement_history_lot_ui.render(core_app, purchase_module, data),
         "월별 매입 현황": lambda: accounting_export.render(purchase_module, data),
         "통합 수정": lambda: integrated_correction.render(core_app, data, purchase_module),
     }

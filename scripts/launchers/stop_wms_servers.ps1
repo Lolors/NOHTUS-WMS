@@ -1,4 +1,4 @@
-# Stops all NOHTUS WMS related servers (desktop Streamlit app, mobile API).
+﻿# Stops all NOHTUS WMS related servers (desktop Streamlit app, mobile API).
 # Finds processes by command line (not just image name) so it never touches
 # unrelated python.exe processes on this machine.
 # start_mobile_api.bat auto-restarts itself in a loop, so killing only the
@@ -9,6 +9,9 @@ $patterns = @(
     'streamlit run app\.py',
     'uvicorn nohtus\.mobile_api\.main',
     'run_wms\.bat',
+    'start_PC용 WMS\.bat',
+    'start_모바일 WMS 서버\.bat',
+    'start_streamlit\.bat',
     'start_mobile_api\.bat'
 )
 

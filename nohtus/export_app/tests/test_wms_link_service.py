@@ -42,6 +42,8 @@ class WmsLinkServiceTests(unittest.TestCase):
             return sqlite3.connect(self.wms_db_path, factory=ClosingConnection)
 
         self.wms_connect_patchers = [
+            patch.object(wms_link_service, "wms_connect", connect_wms_test_db),
+            patch.object(wms_link_edit_patch, "connect", connect_wms_test_db),
             patch("nohtus.db.connect", connect_wms_test_db),
             patch("nohtus.services.export_waiting.connect", connect_wms_test_db),
             patch.object(stale_inventory_cleanup_service, "wms_connect", connect_wms_test_db),
@@ -739,6 +741,30 @@ class WmsLinkServiceTests(unittest.TestCase):
         ]
         self.assertEqual(len(waiting_b), 1)
         self.assertEqual(int(waiting_b[0]["qty"]), 3)
+
+    def test_partial_missing_reservation_repair_is_idempotent(self):
+        case_id, order_a, order_b = self._create_case("EXP-MISSING-TEST")
+        for order_id, inventory_id, name, lot, expiry, location, qty in [
+            (order_a, 1, "제품A", "LOT-1", "2027-01-01", "A1-01", 5),
+            (order_b, 2, "제품B", "LOT-2", "2027-02-01", "A1-02", 3),
+        ]:
+            wms_link_service.save_picked_inventory(
+                case_id=case_id, order_item_id=order_id, kept_rows=[],
+                picked_rows=[dict(inventory_id=inventory_id, company="NOH",
+                    product_name=name, lot=lot, exp_date=expiry, location=location, qty=qty)],
+            )
+        # Simulate a legacy save returning A to stock but leaving its EXPORT mirror.
+        with export_waiting_service.connect() as con:
+            con.execute("DELETE FROM export_waiting_items WHERE product_name='제품A'")
+            con.execute("UPDATE inventory SET qty=20 WHERE id=1")
+            con.execute("UPDATE inventory SET qty=0 WHERE product_name='제품A' AND location='P'")
+        export_no = db.rows("SELECT export_no FROM export_cases WHERE id=?", (case_id,))[0]["export_no"]
+        self.assertEqual(wms_link_service.missing_saved_inventory_count(export_no), 1)
+        self.assertEqual(wms_link_service.repair_missing_saved_inventory(export_no), 1)
+        self.assertEqual(wms_link_service.repair_missing_saved_inventory(export_no), 0)
+        self.assertEqual(self._wms_p_qty("제품A"), 5)
+        self.assertEqual(self._wms_p_qty("제품B"), 3)
+        self.assertEqual(self._wms_inventory_row("제품A")["qty"], 15)
 
     def test_missing_wms_product_is_restored_from_canonical_case_rows(self) -> None:
         wms_rows = [{

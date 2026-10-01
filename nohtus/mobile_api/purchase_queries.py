@@ -8,6 +8,7 @@ nohtus/services/purchase_history_lookup.py(현재 제품마스터 + 과거 매�
 
 from __future__ import annotations
 
+import unicodedata
 from datetime import date, timedelta
 
 from nohtus.services.expiry_rules import PERIOD_DAYS
@@ -27,13 +28,19 @@ def period_range(period="1y"):
     return _EARLIEST_DATE, end.isoformat()
 
 
+def _normalize_search_text(value):
+    """유니코드 정규화(NFC) + 공백 제거 후 비교해 자모 분해나 띄어쓰기 차이로
+    검색이 실패하지 않게 한다 (예: 엑셀에서 들어온 이름이 NFD로 저장된 경우)."""
+    return unicodedata.normalize("NFC", str(value or "")).replace(" ", "").lower()
+
+
 def product_candidates(term, limit=20):
-    term = (term or "").strip().lower()
+    term = _normalize_search_text(term).strip()
     if not term:
         return []
     options = all_purchase_product_options()
-    matched = [name for name in options if term in name.lower()]
-    matched.sort(key=lambda name: (not name.lower().startswith(term), name))
+    matched = [name for name in options if term in _normalize_search_text(name)]
+    matched.sort(key=lambda name: (not _normalize_search_text(name).startswith(term), name))
     return matched[:limit]
 
 

@@ -88,7 +88,7 @@ function productDetail(name){
   const rowsById={};
   Object.values(inventory).forEach(arr=>arr.forEach(x=>{ if(x.product_name===name) rowsById[x.id]=x; }));
   const rows=Object.values(rowsById);
-  const total=rows.reduce((a,b)=>a+(b.qty||0),0);
+  const total=rows.filter(x=>!x.is_purchase_pending).reduce((a,b)=>a+(b.qty||0),0);
   const locRows=rows
     .slice()
     .sort((a,b)=>(a.primary_location||'').localeCompare(b.primary_location||''))
@@ -96,10 +96,10 @@ function productDetail(name){
       const cells=(x.occupied_cells && x.occupied_cells.length) ? x.occupied_cells : [x.primary_location];
       const jumpLoc=x.primary_location || cells[0] || '';
       const label = cells.length>1 ? rangeSummaryLabel(cells) : (jumpLoc || '-');
-      return `<button class="loc-link" type="button" data-jump-loc="${esc(jumpLoc)}"><span>${esc(label)} <em style="font-style:normal;color:#64748b;font-size:12px;">${esc(x.company||'-')}</em></span><span>${Number(x.qty)||0} EA</span></button>`;
+      return `<button class="loc-link" type="button" data-jump-loc="${esc(jumpLoc)}"><span>${esc(label)} <em style="font-style:normal;color:#64748b;font-size:12px;">${esc(x.company||'-')}${x.is_purchase_pending ? ' <span class="purchase-pending-badge">(매입대기)</span>' : ''}</em></span><span>${Number(x.qty)||0} EA</span></button>`;
     }).join('');
   const tx=txData.filter(t=>t.product_name===name).slice(0,5);
-  return `<div class="prod-box"><div class="photo-box">📷</div><form class="prod-search-form" method="get" target="_top" action="" data-search-form="1"><input type="hidden" name="map_search_product" value="${esc(name)}"><button type="submit" class="prod-name-large prod-search-title" data-search-product="${esc(name)}">${esc(name)}</button></form><div class="detail-total-text"><span>창고 총재고</span><strong>${total} EA</strong></div><div class="metric loc-metric"><div class="caption">분산 로케이션</div>${locRows||'<div class="muted">재고 위치가 없습니다.</div>'}</div><h4 class="recent-title">최근 이력 5건</h4><div class="recent-list">${formatRecentHistory(tx,total)}</div></div>`;
+  return `<div class="prod-box"><div class="photo-box">📷</div><form class="prod-search-form" method="get" target="_top" action="" data-search-form="1"><input type="hidden" name="map_search_product" value="${esc(name)}"><button type="submit" class="prod-name-large prod-search-title" data-search-product="${esc(name)}">${esc(name)}</button></form><div class="detail-total-text"><span>창고 총재고 (매입대기 제외)</span><strong>${total} EA</strong></div><div class="metric loc-metric"><div class="caption">분산 로케이션</div>${locRows||'<div class="muted">재고 위치가 없습니다.</div>'}</div><h4 class="recent-title">최근 이력 5건</h4><div class="recent-list">${formatRecentHistory(tx,total)}</div></div>`;
 }
 function occupiedKey(cells){ return (cells||[]).slice().sort().join(','); }
 function lineCode(loc){
@@ -151,7 +151,7 @@ function miniRackHtml(occupiedCells){
 function productCardsHtml(rows){
   const groups={};
   rows.forEach(r=>{
-    const key=(r.product_name||'-') + '::' + occupiedKey(r.occupied_cells);
+    const key=(r.product_name||'-') + '::' + occupiedKey(r.occupied_cells) + '::' + Boolean(r.is_purchase_pending);
     if(!groups[key]) groups[key]={name:r.product_name||'-', occupied_cells:r.occupied_cells||[], itemsById:{}};
     // 한 재고 행이 여러 칸에 걸쳐 있으면(location_range_cells) rowsFor()가 그 칸
     // 수만큼 같은 id를 중복해서 넘긴다. id로 한 번만 세야 수량이 곱절로 잡히지 않는다.
@@ -160,6 +160,7 @@ function productCardsHtml(rows){
   return Object.values(groups).map(group=>{
     const {name, occupied_cells}=group;
     const items=Object.values(group.itemsById);
+    const pendingGroup=items.some(x=>x.is_purchase_pending);
     const total=items.reduce((a,b)=>a+(Number(b.qty)||0),0);
     const companies=Array.from(new Set(items.map(x=>x.company||'-'))).sort().join(', ');
     const lines=items
@@ -167,10 +168,10 @@ function productCardsHtml(rows){
       .sort((a,b)=>String(a.exp_date||'').localeCompare(String(b.exp_date||'')) || String(a.lot||'').localeCompare(String(b.lot||'')) || String(a.company||'').localeCompare(String(b.company||'')))
       .map(x=>{
         const companyInfo = companies.includes(',') ? `<span class="company-badge">${esc(x.company||'-')}</span> ` : '';
-        return `<div class="lot-exp">${companyInfo}${Number(x.qty)||0}EA&nbsp;&nbsp;${esc(x.lot||'-')} | ${esc(cleanDate(x.exp_date||'-'))}<button class="lot-move-btn" type="button" data-move-id="${esc(x.id)}" style="margin-left:8px;padding:1px 8px;font-size:11px;border-radius:6px;border:1px solid #2563eb;color:#2563eb;background:#eff6ff;cursor:pointer;">이동</button></div>`;
+        return `<div class="lot-exp">${companyInfo}${x.is_purchase_pending ? '<span class="purchase-pending-badge">(매입대기)</span> ' : ''}${Number(x.qty)||0}EA&nbsp;&nbsp;${esc(x.lot||'-')} | ${esc(cleanDate(x.exp_date||'-'))}${x.is_purchase_pending ? '' : `<button class="lot-move-btn" type="button" data-move-id="${esc(x.id)}" style="margin-left:8px;padding:1px 8px;font-size:11px;border-radius:6px;border:1px solid #2563eb;color:#2563eb;background:#eff6ff;cursor:pointer;">이동</button>`}</div>`;
       }).join('');
     const rack=miniRackHtml(occupied_cells);
-    return `<div class="detail-card" data-occupied-lines="${esc(rack.lines.join(','))}"><div class="card-top"><span class="product-title">${esc(name)}</span><span class="qty-text">${total} EA</span></div><div class="muted">사업장: ${esc(companies||'-')}</div>${rack.html}${lines}<button class="prod-btn" type="button" data-product="${esc(name)}">제품 상세 보기</button></div>`;
+    return `<div class="detail-card" data-occupied-lines="${esc(rack.lines.join(','))}"><div class="card-top"><span class="product-title">${esc(name)}${pendingGroup ? ' <span class="purchase-pending-badge">(매입대기)</span>' : ''}</span><span class="qty-text">${total} EA</span></div><div class="muted">사업장: ${esc(companies||'-')}</div>${rack.html}${lines}<button class="prod-btn" type="button" data-product="${esc(name)}">제품 상세 보기</button></div>`;
   }).join('');
 }
 function cleanDate(v){
